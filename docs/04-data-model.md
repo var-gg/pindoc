@@ -1,368 +1,224 @@
 # 04. Data Model
 
-Varn의 데이터 모델. Tier A/B Artifact 스키마, Area, Pin/Related Resource, Graph 엣지를 정의합니다.
+Varn의 데이터 모델. Project · Artifact 스키마(Tier A + Tier B) · Area · Permission · Event · Graph 엣지.
 
-> 이 문서는 V1 기준 논리 모델입니다. 물리 스키마(테이블 DDL)는 구현 단계에서 별도 정의.
+> V1 기준 논리 모델입니다. 물리 스키마(DDL)는 구현 단계에서 별도 정의.
 
-## 공통 필드 (모든 Artifact 공통)
+## Project
+
+**모든 것의 최상위.** Artifact/Area/Session/Member는 반드시 하나의 Project에 속한다.
+
+```
+Project {
+  id: string                         // "proj_xxx"
+  name: string                       // "shop-fe"
+  slug: string                       // URL-safe
+  description: markdown?
+  icon: string?                      // emoji 또는 URL
+  
+  repos: RepoRef[]                   // 연결된 Git repo들 (보통 1개)
+  active_domain_packs: DomainPack[]  // install 시 선택한 pack들
+  
+  settings: {
+    varn_md_mode: "auto" | "manual" | "off"
+    sensitive_ops: "auto" | "confirm"        // Review Queue 사용 여부
+    dashboard_slots: DashboardSlotConfig
+  }
+  
+  owner: AgentRef | UserRef
+  created_at: timestamp
+  created_by: AgentRef | UserRef    // Project 생성은 사람도 가능 (에이전트 경유 예외)
+}
+
+RepoRef {
+  provider: "github" | "gitlab" | "local"
+  identifier: string                 // "org/repo" 또는 local path
+  default_branch: string
+}
+
+DomainPack {
+  name: "web-saas" | "game" | "ml" | "mobile" | "cs-desktop" | "library" | "embedded"
+  version: string
+  status: "stable" | "skeleton"
+}
+```
+
+**Project 생성 예외**: Project **생성 자체**는 사람 CLI(`varn init` → 새 Project)로도 가능 — 에이전트 경유 원칙의 유일한 예외. Project **내부** artifact 쓰기는 agent-only 엄수.
+
+## Project Membership / Permission
+
+```
+ProjectMembership {
+  id: string
+  project_id: ProjectRef
+  principal: AgentRef | UserRef
+  role: "admin" | "writer" | "approver" | "reader"
+  granted_at: timestamp
+  granted_by: UserRef
+  revoked_at: timestamp?
+}
+```
+
+**Role 의미**:
+- `admin`: Project 설정 변경, 멤버/Domain Pack 관리, agent token 발급/회수
+- `writer`: Artifact write 권한 (주로 Agent)
+- `approver`: Review Queue 처리 (사람 전용)
+- `reader`: 읽기만 (사람/에이전트)
+
+한 사람/에이전트가 여러 Project에 서로 다른 role.
+
+**매핑 예시**:
+```
+Alice (User):    shop-fe = admin+approver, shop-be = approver, side-game = admin
+Bob (User):      shop-fe = reader,         shop-be = admin+approver
+Alice's Claude (Agent): shop-fe = writer,  shop-be = writer (매니지먼트라 양쪽)
+Bob's Cursor (Agent):   shop-be = writer
+```
+
+---
+
+## Artifact — 공통 필드
 
 ```
 Artifact {
-  id: string                      // "doc_a3f5e2c" / "task_b1c2d3" 등
-  type: ArtifactType              // Tier A core 또는 Tier B pack 중
-  tier: "core" | "domain"         // Tier 구분
+  id: string
+  project_id: ProjectRef             // 필수, 최상위 스코프
+  type: ArtifactType                 // Tier A 또는 활성 Tier B
+  tier: "core" | "domain"
   title: string
   slug: string
   
   created_at: timestamp
   updated_at: timestamp
   
-  // Agent-only write의 스키마 수준 보증
-  created_by: AgentRef            // 반드시 agent (user 타입 거부)
-  last_modified_via: AgentRef     // 모든 수정은 agent 경유
-  source_session: SessionRef      // 세션 없이 write 금지 = agent-only 강제
+  // Agent-only write 스키마 보증
+  created_by: AgentRef               // User 타입 거부
+  last_modified_via: AgentRef        // 모든 수정은 agent 경유
+  source_session: SessionRef         // 필수 (agent-only 강제)
   
   version: int
-  body: TypedBody                 // 타입별 스키마
+  body: TypedBody
   
   // 고정 & 리소스
-  pins: Pin[]                     // hard pin (stale 감지 대상)
-  related_resources: ResourceRef[] // soft link (navigation, M7 주기 검증)
+  pins: Pin[]
+  related_resources: ResourceRef[]
   
   // 분류
-  area: AreaRef                   // 필수 (미지정 시 /Misc)
-  labels: string[]                // 자유 태그 (scope은 area가 담당)
+  area: AreaRef                      // 필수 (없으면 /Misc)
+  labels: string[]
   
   // 관계
   references: ArtifactRef[]
   referenced_by: ArtifactRef[]
   
   // 상태
-  completeness: "draft" | "partial" | "settled"   // 성숙도 (기본 partial)
+  completeness: "draft" | "partial" | "settled"   // 기본 "partial"
   status: "published" | "stale" | "superseded" | "archived"
   stale_reason: string?
   superseded_by: ArtifactRef?
   
-  // 승인
+  // 발행·Review
   promote_intent: Intent?
-  approved_at: timestamp?
-  approved_by: UserRef?           // 사람은 승인만 (write는 에이전트)
+  review_state: "auto_published" | "pending_review" | "approved" | "rejected"
+  reviewed_at: timestamp?
+  reviewed_by: UserRef?              // Review Queue 거친 경우만
 }
 ```
 
-**Agent-only write의 스키마 강제 포인트**:
-- `created_by`와 `last_modified_via`는 `AgentRef` 타입만 허용. User 타입은 스키마 수준 거부.
-- `source_session` 필수 — 세션 컨텍스트 없이 write 경로 자체가 막힘.
-- `approved_by`만 `UserRef`. 사람의 역할은 승인, 쓰기가 아님.
-
-**completeness 규칙**:
-- `draft`: 구조만 있음. UI 링크·Related Resource 전부 disabled.
-- `partial`: 의미 있는 내용. 기본값. 링크 활성.
-- `settled`: 사람이 "완결" 승인. 편집·supersede 제한.
+**publish 경로 2가지**:
+- **일반 propose** → Pre-flight → Conflict → Schema 통과 → `review_state: "auto_published"`
+- **Sensitive ops** (`sensitive_ops: confirm` 설정 + 해당 작업) → `review_state: "pending_review"` → 사람 OK 후 `approved`
 
 ---
 
 ## Artifact Types — Tier A (Core, 강제)
 
-모든 install에 자동 장착. V1에서 완성 제공. 도메인 무관.
+Decision(ADR), Analysis, Debug, Flow, Task, TC, Glossary.
 
-### Decision (ADR) — Architecture Decision Record
-
-```
-body: {
-  decision_status: "proposed" | "accepted" | "deprecated" | "superseded"
-  context: markdown              // 왜 이 결정이 필요한가 (필수)
-  decision: markdown             // 무엇을 결정했는가 (필수)
-  consequences: markdown         // 긍·부 결과 (필수)
-  alternatives: Alternative[]    // 고려했던 대안 (Pre-flight: 최소 2개)
-  date_decided: date
-}
-
-Alternative { name, summary, why_rejected }
-```
-
-### Analysis — 분석
-
-```
-body: {
-  problem: markdown              // 필수
-  context: markdown              // 필수
-  findings: markdown             // 필수
-  diagrams: Mermaid[]
-  recommendations: markdown?
-  open_questions: string[]
-}
-```
-
-### Debug — 디버깅
-
-```
-body: {
-  symptom: markdown              // 필수
-  reproduction: markdown         // 필수
-  hypotheses_tried: Hypothesis[] // 최소 1개
-  root_cause: markdown?          // resolved 시 필수
-  resolution: markdown?          // resolved 시 필수
-  status: "open" | "resolved" | "workaround"
-  related_errors: string[]
-}
-
-Hypothesis {
-  statement, tested, result: "confirmed" | "rejected" | "inconclusive",
-  evidence: markdown
-}
-```
-
-### Flow — 플로우
-
-```
-body: {
-  overview: markdown             // 필수
-  diagram: Mermaid               // 필수, 1개 이상
-  steps: Step[]?
-  actors: string[]
-  triggers: string[]
-  edge_cases: markdown?
-}
-```
-
-### Task
-
-```
-body: {
-  description: markdown
-  acceptance_criteria: string[]?
-  assignee: AgentRef | UserRef?  // 사람 또는 에이전트 할당 가능
-  estimated_hours: number?
-  priority: "low" | "medium" | "high" | "urgent"
-  status: "todo" | "in_progress" | "blocked" | "done" | "cancelled"
-  blocked_reason: string?
-  
-  agent_attempts: AgentAttempt[]  // 1급 필드
-}
-
-AgentAttempt {
-  id, started_at, ended_at, agent_id, approach, session_ref,
-  outcome: "success" | "partial" | "failure" | "abandoned",
-  notes
-}
-```
-
-### TC (TestCase)
-
-```
-body: {
-  title, description,
-  executable_by: "agent" | "human_e2e" | "hybrid",
-  
-  automation: {                  // executable_by !== "human_e2e"
-    type: "unit" | "integration" | "e2e_automated",
-    script_path: string?,
-    runner: "jest" | "pytest" | "playwright" | ...
-  }?,
-  
-  manual_steps: Step[]?,         // executable_by !== "agent"
-  expected_result: markdown?,
-  
-  runs: TCRun[],
-  required_for_close: bool,
-  last_status: "pending" | "passing" | "failing" | "blocked" | "stale"
-}
-
-TCRun {
-  run_at, executed_by, result: "pass" | "fail" | "error" | "skip",
-  duration_ms?, output?, commit?
-}
-```
-
-**TC Gating** ([05 M5](05-mechanisms.md)): Feature close 조건으로 강제 (V1.1).
-
-### Glossary — 용어 정의
-
-```
-body: {
-  term: string                   // 필수
-  definition: markdown           // 필수
-  context: markdown?             // 어느 맥락에서 쓰이는지
-  aliases: string[]?             // 동의어
-  see_also: ArtifactRef[]?
-}
-```
-
-용어 혼동 방지. 에이전트가 생소 용어 만나면 lookup → 없으면 Glossary artifact 신규 propose.
-
----
+스키마는 [이전 04 data-model]과 동일 (여기서 중복 생략, 구현 시 재사용).
 
 ## Artifact Types — Tier B (Domain Pack)
 
-Install 시 1개 이상 선택. V1에서 **Web SaaS/SI만 완성**, 나머지는 **skeleton** (기본 필드만 존재, 스키마 성숙은 V1.x+ 커뮤니티 기여).
-
-### Web SaaS/SI Pack (V1 stable)
-
-**Feature**
-```
-body: {
-  overview: markdown             // 필수
-  scope: markdown                // 필수
-  acceptance_criteria: string[]  // 필수
-  dependencies: ArtifactRef[]
-  status: "planned" | "in_progress" | "shipped" | "deprecated"
-}
-```
-
-**API Endpoint**
-```
-body: {
-  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
-  path: string                   // 필수
-  description: markdown          // 필수
-  request_schema: json?
-  response_schema: json?
-  auth_required: bool
-  rate_limit: string?
-  deprecation: { since, replacement }?
-}
-```
-
-**Screen/Page**
-```
-body: {
-  route: string?
-  description: markdown          // 필수
-  wireframe: Mermaid?
-  components: string[]
-  states: string[]               // loading, error, empty, success
-  linked_endpoints: ArtifactRef[]
-}
-```
-
-**DataModel**
-```
-body: {
-  entity: string                 // 필수
-  fields: Field[]                // 필수
-  relations: Relation[]
-  storage: "postgres" | "redis" | "..."
-  migrations: string[]
-}
-```
-
-### Game Pack (V1.x+ skeleton)
-
-필드 이름만 고정, 스키마 상세는 커뮤니티 성숙:
-- `Feature`, `Mechanic`, `Level`, `Character`, `Asset`
-
-### ML/AI Pack (V1.x+ skeleton)
-
-- `Feature`, `Dataset`, `Model`, `Experiment`
-- Hugging Face Model Card 포맷 호환 고려
-
-### Mobile Pack (V1.x+ skeleton)
-
-- `Feature`, `Screen`, `Service`, `NativeModule`
-
-### CS Desktop / Library / Embedded Pack (V2+)
-
-스켈레톤 정의만. 활성 기여자 등장 시 stable.
+V1: Web SaaS/SI만 stable (Feature/APIEndpoint/Screen/DataModel).
+V1.x+: Game/ML/Mobile skeleton 성숙.
+V2+: CS Desktop/Library/Embedded, Tier C Custom.
 
 ---
 
-## Area (Project Tree Node)
+## Area (Project 하위 수직 구분)
 
 ```
 Area {
   id: string
-  name: string                   // "Payment", "Cart", "Auth"
+  project_id: ProjectRef             // 필수, Project 하위
+  name: string                       // "Payment"
   slug: string
-  parent: AreaRef?               // sub-area 가능
+  parent: AreaRef?                   // sub-area
   description: markdown?
   owner: AgentRef | UserRef?
   
   created_at: timestamp
-  created_by: AgentRef           // Area도 에이전트가 만듬
+  created_by: AgentRef               // Area 생성도 agent-only
   last_modified_via: AgentRef
 }
 ```
 
-- **모든 Artifact는 하나의 Area에 속함**. 미지정 시 시스템이 `/Misc`로 분류.
-- Area 자체도 agent-only write. 신규 Area 생성은 Write-Intent Router 통과 (중복 이름 거부).
-- UI 네비게이션 2축:
-  - Type 축: `/Decision`, `/Debug`, `/Feature` 등
-  - Area 축: `/Payment`, `/Cart` 아래에 모든 타입 노출
-- Scope 거버넌스는 Area로 해결됨 — 기존 자유 `scope: string[]`가 Area 경로로 승격.
+- 모든 Artifact는 하나의 Area에 속함 (미지정 시 `/Misc`)
+- Area는 Project 하위 스코프 (Project A의 `/Cart`와 Project B의 `/Cart`는 별개)
+- 신규 Area 생성은 Write-Intent Router 통과 + `sensitive_ops: confirm` 이면 Review Queue
+
+---
 
 ## Project Tree
 
 ```
 ProjectTree {
-  tier_a_types: ArtifactType[]   // 항상 고정
-  active_domain_packs: DomainPack[]
+  project_id: ProjectRef
+  tier_a_types: ArtifactType[]       // 고정
+  active_domain_packs: DomainPack[]  // Project.active_domain_packs 참조
   areas: Area[]
-  layout: "type_first" | "area_first"   // UI 기본
-}
-
-DomainPack {
-  name: "web-saas" | "game" | "ml" | "mobile" | "cs-desktop" | "library" | "embedded"
-  version: string
-  types: ArtifactType[]
-  status: "stable" | "skeleton"
+  layout_preference: "type_first" | "area_first"
 }
 ```
-
-V1: Web SaaS Pack `stable`, 나머지 `skeleton`.
 
 ---
 
-## Pin — Hard (stale 감지 대상)
+## Pin (Hard)
 
 ```
 Pin {
-  repo: string                   // "company/main-app"
+  repo: string
   ref_type: "commit" | "branch" | "pr" | "path_only"
   commit_sha: string?
   branch: string?
   pr_number: int?
-  paths: string[]                // glob 가능
+  paths: string[]
   pinned_at: timestamp
   pinned_by: AgentRef
 }
 ```
 
-- 해당 repo push 감지 → paths diff 확인 → 의미 변경이면 `stale` 플래그
-- stale 판정 기준: [05 M3](05-mechanisms.md)
+Stale 감지 대상.
 
 ---
 
-## Related Resource — Soft Link (NEW)
+## Related Resource (Soft)
 
 ```
 ResourceRef {
   type: "code" | "asset" | "api" | "doc" | "link"
-  ref: string                    // path 또는 URL
-  purpose: string                // 왜 관련인지 한 줄
+  ref: string
+  purpose: string
   added_at: timestamp
   added_by: AgentRef
-  
-  // M7 Freshness Re-Check 결과
   last_verified_at: timestamp?
   verified_status: "valid" | "broken" | "stale" | "unverified"
 }
 ```
 
-**Pin과의 차이**:
+Stale 감지 아님. Fast Landing + 사이드 패널. **M7 Freshness Re-Check**로 주기 검증.
 
-| | Pin | ResourceRef |
-|---|-----|-------------|
-| 의미 | Hard pin (정합 필수) | Soft link (맥락 navigation) |
-| Stale 감지 | ✅ 자동 | ❌ (M7으로 주기 검증) |
-| 주 용도 | 문서-코드 정합 보증 | Fast Landing, UI 패널 |
-| UI 표현 | 본문 헤더 메타 | 사이드 패널 "Related Resources" |
-
-**GitHub Outbound 링크**: `type: "code"` + repo/commit/path → UI 클릭 시 `https://github.com/.../blob/COMMIT/PATH#L10-L30`.
-
-**Disabled 규칙**: `completeness == "draft"` artifact의 ResourceRef 링크는 UI에서 disabled (아직 신뢰 불가).
-
-**본문 vs 메타 분리**: ResourceRef는 markdown 본문에 섞지 않고 별도 필드. UI에서도 별도 섹션 렌더.
+`completeness == "draft"` artifact의 링크는 UI disabled.
 
 ---
 
@@ -372,17 +228,16 @@ ResourceRef {
 Intent {
   kind: "new" | "modification" | "split" | "supersede"
   target_type: ArtifactType
-  target_scope: string[]         // Area 경로 (필수)
-  target_id: string?             // modification/supersede 시
-  source_ids: string[]?          // split 시
-  reason: string                 // 자연어 설명
+  project_id: ProjectRef             // 필수
+  target_scope: string[]             // Area 경로
+  target_id: string?
+  source_ids: string[]?
+  reason: string
   related_session: SessionRef?
   declared_by: AgentRef
   declared_at: timestamp
 }
 ```
-
-심사: [05 M1](05-mechanisms.md).
 
 ---
 
@@ -390,22 +245,96 @@ Intent {
 
 ```
 EdgeType:
-  - references              // 이 artifact가 저 것을 인용
-  - derives_from            // 파생 (artifact or session)
-  - validates               // TC가 Feature 검증
-  - implements              // Task가 Feature의 일부
-  - supersedes              // 대체
-  - pinned_to               // Hard pin
-  - related_resource        // Soft link (NEW)
-  - blocked_by              // Task-level
-  - relates_to              // 약한 관련성
-  - continuation_of         // 이 세션이 저 artifact에서 이어짐
+  - references
+  - derives_from
+  - validates
+  - implements
+  - supersedes
+  - pinned_to
+  - related_resource
+  - blocked_by
+  - relates_to
+  - continuation_of
 ```
 
-**질의 예시**:
-- "이 Feature의 모든 구현 Task": `Feature -implements-reverse-> Tasks`
-- "이 파일 경로와 연결된 최신 artifact 5개": `File -pinned_to|related_resource-reverse-> Artifacts`
-- "이 artifact의 continuation 세션들": `Artifact -continuation_of-reverse-> Sessions`
+**Cross-project edges 허용** — FE Feature가 BE API를 `references` 하는 경우. 단 에이전트는 token이 양쪽 Project에 read 권한 있어야 선언 가능.
+
+---
+
+## Event / Notification 모델
+
+Event Bus가 발행하는 시스템 이벤트.
+
+```
+Event {
+  id: string
+  timestamp: timestamp
+  type: EventType
+  project_id: ProjectRef
+  source_ref: ArtifactRef | PinRef | SessionRef | ResourceRef
+  payload: object                    // type별 상세
+  severity: "info" | "low" | "medium" | "high"
+  subscribers_notified: SubscriberRef[]
+}
+
+EventType (V1):
+  # Artifact 라이프사이클
+  - artifact.published            # auto_published 완료
+  - artifact.stale_detected       # pin된 코드 변경 감지
+  - artifact.superseded
+  - artifact.archived
+  
+  # Pin / Git
+  - pin.changed                   # 의미 변경 판정 통과
+  - git.push_received             # webhook 수신
+  
+  # TC
+  - tc.failed
+  - tc.run_completed
+  
+  # Resource
+  - resource.verified             # M7 결과
+  - resource.broken               # ref 파일 없음 감지
+  
+  # Review
+  - review.required               # sensitive op이 Review Queue로
+  - review.approved
+  - review.rejected
+  
+  # Project / Area
+  - project.area_created
+  - project.member_added
+  
+  # Session
+  - session.started
+  - session.ended
+  - session.promoted_artifact
+}
+```
+
+**Subscriber 모델** (V1 기본, V1.1에서 UI 확장):
+
+```
+EventSubscription {
+  id: string
+  project_id: ProjectRef
+  principal: UserRef | AgentRef | WebhookRef
+  event_types: EventType[]           // 구독할 타입들
+  filter: JsonLogic?                 // 예: severity="high"
+  channel: "ui_inbox" | "webhook" | "email"
+  created_at: timestamp
+}
+```
+
+**V1 구현 범위**:
+- Event Bus 인프라 (Postgres LISTEN/NOTIFY 또는 outbox 패턴)
+- UI Inbox 채널 (Stale Dashboard, Review Queue가 구독)
+- Webhook 채널 (간단한 HTTP POST)
+
+**V1.1**:
+- Email 채널
+- Slack/Discord 봇 채널
+- Smart filter UI
 
 ---
 
@@ -414,7 +343,8 @@ EdgeType:
 ```
 Session {
   id: string
-  agent_id: string               // "claude-code@alice" 등
+  project_id: ProjectRef             // 필수
+  agent_id: string
   started_at: timestamp
   ended_at: timestamp?
   user: UserRef
@@ -424,22 +354,14 @@ Session {
   working_directory: string?
   git_context: { repo, branch, commit }?
   
-  // Promote 결과
   promoted_artifacts: ArtifactRef[]
   
-  // 검색 강화 (F6)
-  auto_tags: string[]            // 자동 추출 태그
-  topics: string[]               // 의미 클러스터링 결과
-  embeddings: VectorRef?         // 의미 검색용
+  // F6 검색 강화
+  auto_tags: string[]
+  topics: string[]
+  embeddings: VectorRef?
   
-  retention_days: int            // 기본 90
-}
-
-Turn {
-  role: "user" | "agent" | "tool"
-  content: markdown
-  timestamp: timestamp
-  tool_calls: ToolCall[]?
+  retention_days: int                // 기본 90
 }
 ```
 
@@ -450,9 +372,10 @@ Turn {
 ```
 ContinuationContext {
   artifact: Artifact
-  neighbors: Artifact[]          // graph 직접 이웃 N개
-  recent_changes: Event[]
-  open_questions: string[]       // body.open_questions 종합
+  project: Project                   // 소속 Project 정보
+  neighbors: Artifact[]
+  recent_changes: Event[]            // 최근 관련 이벤트
+  open_questions: string[]
   source_session: SessionRef?
   related_resources: ResourceRef[]   // Fast Landing 번들
   area_context: {
@@ -462,37 +385,32 @@ ContinuationContext {
 }
 ```
 
-사용자가 URL을 에이전트 채팅에 던지면 에이전트가 `varn.wiki.read(url)` → 이 번들 수령 → 대화 재개. 딥링크 불필요.
-
 ---
 
-## 예시: Feature 전체 그림
+## 예시: Multi-project 시나리오
 
-"결제 재시도 로직 개선" Feature 완성 후:
+**shop-fe** Project와 **shop-be** Project가 공존, Alice/Bob 팀:
 
 ```
-Feature: "Payment Retry Logic"     [completeness: settled, status: shipped]
-├── tier: domain (web-saas)
-├── area: /Payment
-├── references: ADR-042 (Retry policy)
-├── pins:                           # hard (stale 감지)
-│   └── commit a3f5e2c : src/payment/retry.ts
-├── related_resources:              # soft (Fast Landing, M7 주기 검증)
-│   ├── code: src/payment/gateway.ts (purpose: "PG API wrapper")
-│   ├── code: src/api/payment.ts (purpose: "public endpoint")
-│   ├── asset: docs/img/retry-flow.png
-│   └── doc: https://pg-provider.example/docs/retry
-├── implements 관계의 Tasks:
-│   ├── Task: "Exponential backoff 구현" [done]
-│   ├── Task: "Idempotency key 도입"    [done]
-│   └── Task: "Dead letter queue 연결"  [done]
-├── validates 관계의 TCs:
-│   ├── TC: "Retry 3회 후 실패" [required, passing]
-│   ├── TC: "네트워크 타임아웃 재시도" [required, passing]
-│   └── TC: "중복 결제 방지 E2E" [required, human_e2e, passing]
-└── derives_from:
-    ├── Analysis: "결제 실패율 분석"
-    └── Debug: "PG사 타임아웃 디버깅"
+Project: shop-fe
+├─ active_domain_packs: [web-saas]
+├─ Areas: /Cart, /Payment, /Auth, /Misc
+├─ Members: Alice(admin+approver), Bob(reader),
+│           Alice-claude(writer), Bob-cursor(reader)
+└─ Artifacts:
+    └─ Feature "장바구니 재시도 UI" [Area: /Cart]
+        └─ references → shop-be:API "POST /cart/retry"  (cross-project)
+
+Project: shop-be
+├─ active_domain_packs: [web-saas]
+├─ Areas: /Cart, /Payment, /Auth
+├─ Members: Alice(approver), Bob(admin+approver+writer(Bob-cursor))
+└─ Artifacts:
+    └─ APIEndpoint "POST /cart/retry" [Area: /Cart]
+        └─ referenced_by ← shop-fe:Feature "장바구니 재시도 UI"
 ```
 
-이 그래프가 곧 **"이 팀(또는 이 사용자)이 결제 재시도에 대해 축적한 기억 전체"** 이며, 새 에이전트 세션은 이 번들을 Continuation Context로 자동 수령합니다.
+Event 흐름 예:
+- Bob이 shop-be `POST /cart/retry`의 스키마 변경 → `pin.changed` 이벤트
+- Propagation Ledger가 cross-project edge 따라 shop-fe의 관련 Feature에 `artifact.stale_detected` 전파
+- Alice의 UI Inbox에 알림 → "FE쪽 확인 필요"

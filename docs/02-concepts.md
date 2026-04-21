@@ -2,291 +2,284 @@
 
 Varn의 핵심 개념들을 정의합니다. 이 개념들은 이후 모든 설계 문서의 공통 어휘입니다.
 
-## 6대 Primitive
+## 7대 Primitive
 
 ```
+Project
+   │
+   ▼
 Harness (VARN.md)
    │
    ▼
 Session ─ checkpoint? ─▶ Promote ─▶ Artifact ─▶ Graph ─▶ (다음 Session 컨텍스트 재주입)
-                           ▲
-                      (사람 OK/NO만)
+                           │
+                    (auto-publish,
+                     엣지 케이스만
+                     Review Queue)
 ```
 
-### 1. Harness (하네싱 역주입)
+### 1. Project (최상위 컨테이너)
 
-> MCP가 연결되는 순간 Varn이 에이전트의 base 행동 규약을 주입하는 장치.
+> 한 Varn 인스턴스에 복수의 Project가 공존한다. 권한·Area·설정의 단위.
 
-**정의**: Varn MCP를 install하면 리포지토리의 `CLAUDE.md` / `AGENTS.md` / `.cursorrules` 등에 `VARN.md` 참조가 자동 추가되고, 에이전트는 매 세션 시작 시 이 규약을 읽는다.
+**정의**: Varn의 최상위 스코프. 모든 Artifact/Area/Session/Member은 반드시 하나의 Project에 속한다.
 
-**담긴 것**:
-- 언제 체크포인트 제안을 할지 (휴리스틱 mode: `auto` / `manual` / `off`)
-- 어떤 타입의 artifact를 써야 할지 판단 기준
-- Propose → Pre-flight → Commit 순서 강제
-- URL 받으면 `varn.wiki.read`로 fetch하라는 규약
-- 사람에게는 edit 권한이 없다는 사실의 상기
+**구조**:
+```
+Varn Instance
+ ├─ Project "shop-fe"     (FE repo, Web SaaS pack)
+ │    ├─ Areas: /Cart, /Payment, /Auth
+ │    └─ Members: Alice(writer-agent, approver-user), Bob(reader)
+ ├─ Project "shop-be"     (BE repo, Web SaaS pack)
+ └─ Project "side-game"   (사이드 프로젝트, Game pack skeleton)
+```
 
-**왜 1번인가**: Varn이 제공하는 MCP tool들은 **"에이전트가 알아서 쓸 때"가 아니라 "harness가 에이전트에게 쓰라고 지시할 때"만 의미 있음**. 하네싱 없이는 제품의 나머지가 작동하지 않는다.
+**실전 시나리오**:
+- **FE/BE 분리 팀**: Project 두 개, 각 팀은 자기 Project에 writer, 매니지먼트는 양쪽 모두 접근
+- **Solo + 사이드 프로젝트**: 개인이 여러 Project 보유, 모두 같은 인스턴스
+- **영세 사업장 2~3명이 2개 프로젝트**: 한 인스턴스 공유, Project 단위 권한 분리
+
+**V1 기본값**: `1 repo = 1 project`. 한 repo가 multi-project가 되는 케이스는 드물므로 이를 기본으로.
+
+**Project 간 관계**:
+- Graph edge는 **Project 경계 넘어 가능** (FE Feature ↔ BE API 링크)
+- Search / Fast Landing은 **기본 현재 Project 범위**, 명시 시 cross-project
+- Agent token은 **project-scoped**
 
 ---
 
-### 2. Session
+### 2. Harness
+
+> MCP가 연결되는 순간 Varn이 에이전트의 base 행동 규약을 주입하는 장치. Project 단위로 1개.
+
+**정의**: Varn MCP를 install하면 각 Project 루트에 `VARN.md`가 생성되고, `CLAUDE.md` / `AGENTS.md` / `.cursorrules`에 참조가 추가된다. 에이전트는 매 세션 시작 시 이 규약을 읽는다.
+
+**담긴 것**:
+- 언제 체크포인트 제안을 할지 (mode: `auto` / `manual` / `off`)
+- Propose → Pre-flight → Auto-publish 순서 강제
+- Referenced Confirmation 프로토콜
+- Sensitive ops(`sensitive_ops: auto|confirm`) 설정에 따라 Review Queue 활용 여부
+- Area 규율, URL 처리 규약
+
+**왜 1번인가**: Varn MCP tool들은 **"에이전트가 알아서 쓸 때"가 아니라 "Harness가 에이전트에게 쓰라고 지시할 때"만** 의미 있음. 하네싱이 없으면 제품의 나머지가 작동하지 않는다.
+
+자세한 스펙: `docs/09-varn-md-spec.md` (배치 B에서 작성 예정).
+
+---
+
+### 3. Session
 
 > 에이전트와의 raw 작업 로그. 너저분함. 휘발성.
 
-**정의**: 코딩 에이전트(Claude Code, Cursor, Cline, Codex 등)와 사용자 간의 한 번의 작업 대화. 시행착오, 뒤엎은 시도, 잘못된 가설, 맞는 결론이 혼재.
+**정의**: 코딩 에이전트(Claude Code / Cursor / Cline / Codex 등)와 사용자 간의 한 번의 작업 대화.
 
 **특징**:
-- 길다 (수천 줄~수만 줄 가능)
-- 노이즈/시그널 비율이 나쁨
-- 원본 가치는 낮지만 **맥락 가치**는 있음
-- 세션이 닫히면 에이전트 컨텍스트에서 증발 (→ F6 실패 모드)
+- 길다 (수천 줄~수만 줄)
+- 노이즈/시그널 비율 나쁨
+- 원본 가치는 낮지만 **맥락 가치** 있음
+- 닫히면 에이전트 컨텍스트에서 증발 (→ F6)
 
-**Varn에서의 처리**: MCP를 통해 제품에 stream 또는 bulk upload. 검색 가능한 형태로 저장하되, **1급 자산은 아님**. Session은 artifact의 원료.
+**Varn 처리**: MCP로 stream 또는 bulk upload. 검색 가능한 형태로 저장하되 **1급 자산은 아님**.
 
 ---
 
-### 3. Checkpoint
+### 4. Checkpoint
 
 > Session 진행 중 "이 부분은 남길 가치가 있다"고 판단되는 지점.
 
-**정의**: 에이전트 또는 사용자가 "지금 정리 시점"이라고 판단하는 트리거. Checkpoint는 곧 Promote의 입구.
-
 **트리거 종류**:
 
-1. **사용자 명시 요청** — "정리해줘", "위키에 남겨", "체크포인트"
-2. **에이전트 자율 판단** — `VARN.md`의 휴리스틱 따라:
-   - 한 주제에 N턴 이상 지속 + 결론 도달 신호 ("그럼 이렇게 가자", "결정됨")
-   - 디버깅 세션에서 resolution 도달
-   - 새 파일·모듈·스키마를 만들어냈음
-   - ADR 유발 키워드 감지 ("우리 이걸로 가자")
-3. **거절 반복 시 자동 off** — 같은 세션에서 3회 거절 → 세션 동안 자율 제안 중지
+1. **사용자 명시 요청** — "정리해줘", "위키에", "체크포인트"
+2. **에이전트 자율 판단** (VARN.md 휴리스틱):
+   - 한 주제 N턴 이상 + 결론 도달 신호
+   - 디버깅에서 resolution 도달
+   - 새 파일·모듈·스키마 생성
+   - ADR 유발 키워드
+3. **거절 반복 자동 off** — 세션 내 3회 거절 시 자율 제안 중지
 
-**중요**: **완결된 정보만 체크포인트 대상이 아니다.** 유의미하게 정리된 사안이면 `partial` 상태로 일단 기록. "아직 미완이라 나중에"가 아니라 "일단 기록하고 성숙시킨다".
+**중요**: **완결된 정보만 대상이 아니다.** 유의미하면 `partial` 상태로 일단 기록. "나중에"가 아니라 **"일단 기록하고 성숙시킨다"**.
 
 ---
 
-### 4. Artifact
+### 5. Artifact
 
-> Checkpoint에서 사람이 "가치 있다"고 승인한 것. 영속적. 자산.
+> Checkpoint에서 에이전트가 publish한 것. 영속적. 자산.
 
-**정의**: 타입이 정해진 구조화된 문서. Wiki 페이지이거나 태스크이거나 TC. 공유·참조의 단위.
+**정의**: 타입이 정해진 구조화된 문서. Wiki 페이지 / 태스크 / TC.
 
-**하위 종류** (V1 기준):
-
-| 종류 | 타입 | 역할 |
-|------|------|------|
-| **Document** | Analysis | 코드/시스템/이슈 분석 리포트 |
-| | ADR | 아키텍처 결정 기록 |
-| | Flow | 플로우 다이어그램 중심 문서 |
-| | Debug | 디버깅 세션 요약 (symptom/hypothesis/resolution) |
-| | Feature | 피쳐 개요 + scope + 참조 |
-| **Task** | Task | 할일 단위. Document에 연결 가능 |
-| **TestCase** | TC | 검증 단위. Task/Feature의 하위 |
+**Tier 구조**:
+- **Tier A (Core, 강제)**: Decision, Analysis, Debug, Flow, Task, TC, Glossary
+- **Tier B (Domain Pack, 선택)**: Web SaaS (V1 stable), Game/ML/Mobile (V1.x+), 기타 (V2+)
+- **Tier C (Custom, V2+)**: YAML 스키마로 팀 정의
 
 **특징**:
-- 타입별로 **필수 스키마**가 있음 (포맷 드리프트 방지)
-- 생성 시 **intent 선언** 필요 (중복 방지)
-- **agent-only write**: 모든 수정은 에이전트 경유, `last_modified_via: agent_id` 필수
-- **git-pinned**: 커밋/PR/파일경로에 고정
-- **completeness 단계** 존재: `draft` → `partial` → `settled`
-- 다른 artifact와 **양방향 링크**
-- 변경 시 **dependents에 전파**
+- 타입별 **필수 스키마** (포맷 드리프트 방지)
+- **Agent-only write**: `created_by`·`last_modified_via` 모두 `AgentRef` 필수
+- **Project 소속 필수**: `project_id`
+- **Git-pinned**: commit/PR/파일경로 고정
+- **Completeness 단계**: `draft` → `partial` → `settled`
 
 ---
 
-### 5. Graph
+### 6. Graph
 
 > Artifact들 간의 관계망. 이것이 기억(Memory)의 실체.
 
-**정의**: Artifact들이 서로 참조·의존하는 그래프 구조.
-
 **노드와 엣지**:
-
 - 노드: Artifact (Document / Task / TC)
-- 엣지 타입:
-  - `references` — 이 문서가 저 문서를 인용
-  - `derives_from` — 이 태스크가 저 문서/세션에서 파생
-  - `validates` — 이 TC가 저 Feature를 검증
-  - `pinned_to` — 이 artifact가 저 commit/file에 고정
-  - `supersedes` — 이 문서가 저 문서를 대체
-  - `continuation_of` — 이 세션이 저 artifact에서 이어짐
+- 엣지: `references`, `derives_from`, `validates`, `pinned_to`, `related_resource`, `supersedes`, `continuation_of`, `implements`, `blocked_by`, `relates_to`
 
-**왜 중요한가**:
-- 신입 에이전트가 "결제 플로우 버그" 작업 시작 → graph 조회 → 관련 artifact 10개 자동 컨텍스트 주입
-- 코드 변경 시 pinned 엣지 따라 stale 대상 자동 산출
-- "이 결정이 어떻게 내려졌지?" 추적은 supersedes 엣지 역탐색
-- URL 던지면 해당 artifact의 graph 이웃까지 함께 컨텍스트로 (Continuation Context)
+**Project 경계**: edge는 Project를 넘어 연결 가능 (FE Feature ↔ BE API).
 
 ---
 
-### 6. Promote
+### 7. Promote
 
 > 제품의 중심 동사. Session의 일부를 Artifact로 승격시키는 행위.
-> **에이전트가 제안하고 사람이 OK 한다** (역방향).
+> **에이전트가 제안·실행하고, publish는 자동.** 사람은 방향 제시자 — **승인자가 아님**.
 
-**정의**: 세션 진행 중 Checkpoint가 트리거되면, 에이전트가 intent를 선언하고 Varn이 심사를 걸고 에이전트가 작업을 보완한 뒤, 사람이 최종 OK/NO만 하는 과정.
+### Promote 6단계 (경량화)
 
-**기존 툴과의 대비**:
-- Notion의 `Create`: 빈 페이지를 사람이 어떻게 채울까의 세계관
-- Varn의 `Promote`: 쌓인 출력 중 무엇을 건질까의 세계관
-- **사람은 타이핑하지 않는다**. 승인만 한다.
+```
+1. Trigger                 ─ 사용자 요청 or 에이전트 체크포인트 자율 판단
+2. Intent Declaration      ─ 에이전트가 kind/target_type/scope/reason 선언
+3. Pre-flight Check        ─ Varn이 에이전트에 "더 일하고 와" 체크리스트 역지시
+4. Conflict Check          ─ 기존 artifact와 중복/충돌 검사
+5. Schema Validation       ─ 타입별 필수 필드 검증
+6. Publish (auto)          ─ 바로 commit. 사람 승인 없음.
+```
 
-**Promote 8단계**:
+**이전 설계의 "Human Approve" 단계는 삭제**되었습니다. 이유:
+- 매 artifact에 사람 승인을 거는 건 원칙 1("사람은 방향 제시자")과 어긋남
+- Solo 사용자·자율 에이전트 환경에 마찰 과잉
+- 잘못 발행된 artifact는 사용자가 **"이거 지워/고쳐"** 하면 에이전트가 후속 propose로 처리
+- Completeness(`draft`/`partial`/`settled`)가 이미 "아직 미완"을 표현
 
-1. **Trigger** — 사용자 요청 or 에이전트 체크포인트 자율 판단
-2. **Intent Declaration** — 에이전트가 kind/target_type/scope/reason 선언
-3. **Pre-flight Check** (★) — Varn이 에이전트에게 **되묻는다**: "관련 artifact 검색했냐, 영향 경로 탐색했냐, scope 일치하냐". 체크 미통과 시 에이전트가 추가 작업 후 재제출
-4. **Conflict Check** — 기존 artifact와 중복/충돌 검사 (유사도, scope 겹침)
-5. **Schema Validation** — 타입별 필수 필드 검증
-6. **Draft Generation** — 에이전트가 스키마 맞춘 초안 생성
-7. **Human Approve** — 사람이 diff 검토 후 OK/NO. **편집은 불가**, 수정이 필요하면 "이거 고쳐줘" 피드백 → 에이전트가 다시 제출
-8. **Publish** — Artifact로 영속화, Graph 업데이트, 전파 이벤트 발행
+### Review Queue (엣지 케이스만 — 선택적)
+
+기본은 auto-publish. 단 아래 **되돌리기 힘든/민감한 작업**은 `sensitive_ops: confirm` 설정 시 Review Queue에 올라 사람 OK를 기다림:
+
+- **삭제 / archive**
+- **`settled` 승격** (완결 선언)
+- **`supersede`** (기존 문서를 대체)
+- **신규 Area 생성** (중복 방지 목적)
+- **`--force` 요청** (conflict HARD BLOCK 뚫기)
+
+기본값은 `sensitive_ops: auto` (모든 걸 auto-publish). 팀이 "중요 변경은 한 번 더 보자" 하면 `confirm`으로 전환. 어느 쪽이든 **일반 publish는 항상 auto**.
 
 ---
 
 ## 보조 개념들
 
-### Pin (고정)
-
-Artifact를 코드베이스의 특정 지점(commit/PR/file path)에 고정.
+### Pin (Hard)
 
 ```
-Artifact {
-  id: "doc_payment_flow_v3"
-  pinned_to: {
-    repo: "company/main-app",
-    commit: "a3f5e2c",
-    paths: ["src/payment/*.ts", "src/checkout/flow.ts"]
-  }
+Pin {
+  repo, ref_type: "commit"|"branch"|"pr"|"path_only",
+  commit_sha?, branch?, pr_number?, paths[],
+  pinned_at, pinned_by
 }
 ```
 
-**효과**: pin된 경로가 변경되면 → artifact에 `potentially_stale` 플래그.
+Pin된 경로 변경 → `stale` 플래그 + Propagation Ledger 이벤트.
 
-### Stale (낡음)
+### Related Resource (Soft)
 
-Artifact가 현실(코드)과 어긋났을 가능성이 있는 상태.
-
-판정: pinned 경로의 코드가 변경됐거나, 참조 artifact가 supersede됐거나, TC의 마지막 run 이후 관련 코드 변경.
-
-### Intent
-
-Write 요청에 수반되는 메타데이터. 에이전트가 "내가 무엇을 왜 쓰는지"를 선언.
-
-```json
-{
-  "kind": "modification",
-  "target_type": "Document/Analysis",
-  "target_id": "doc_payment_flow_v3",
-  "target_scope": ["payment", "retry"],
-  "reason": "결제 retry 로직 변경 반영",
-  "related_session": "sess_2026-04-21-xxx"
+```
+ResourceRef {
+  type: "code"|"asset"|"api"|"doc"|"link",
+  ref, purpose,
+  added_at, added_by,
+  last_verified_at?, verified_status
 }
 ```
 
-Intent 없이는 write 불가.
-
-### Pre-flight Check (tool-driven prompting)
-
-Varn이 에이전트의 `propose` 호출에 대해 **즉답하지 않고** 체크리스트를 응답으로 돌려주는 패턴.
-
-```
-Agent:  varn.artifact.propose(type=ADR, ...)
-Varn:   { status: "NOT_READY", checklist: [
-          "✗ 대안(alternatives) 최소 2개 탐색?",
-          "✗ 관련 ADR을 varn.artifact.search로 확인?",
-          "✓ scope 선언 OK",
-          "✗ 영향 파일 경로 확인?"
-        ] }
-Agent:  (누락분 수행) → 재제출
-Varn:   { status: "READY", draft_id: "..." }
-```
-
-**이게 왜 신선한가**: 기존 MCP는 "요청 → 응답" 단방향. Varn은 "요청 → 서버가 에이전트에게 더 시킴 → 재요청". MCP tool이 **능동적**이라는 원칙의 구현.
-
-### Promotion Draft
-
-Promote 과정에서 에이전트가 생성하는 artifact의 예비 버전.
-- 스키마 검증을 통과한 상태
-- 사람 승인 전
-- 승인 시 영속화, 거부 시 폐기
-- **사람이 직접 편집하지 않는다** — 수정 필요 시 에이전트에게 재지시
-
-### Continuation Context
-
-사용자가 위키 URL을 에이전트 채팅에 던질 때, 에이전트가 `varn.wiki.read(url)`로 fetch하면 받는 번들.
-
-```
-ContinuationContext {
-  artifact: Artifact         // 본문 전체
-  neighbors: Artifact[]      // graph 상 직접 이웃 N개
-  recent_changes: Event[]    // 최근 이 artifact와 이웃의 변경 이력
-  open_questions: string[]   // 본문에 남겨진 질문들
-  source_session: SessionRef?  // 이 artifact가 파생된 세션
-}
-```
-
-**효과**: 사용자는 그냥 URL만 던지면 되고, 에이전트는 이 번들로 대화 재개. 딥링크·IDE 통합 없이 동작.
+Stale 감지 대상 아님. Navigation + Context bundle 용도. **M7 Freshness Re-Check**로 주기 검증.
 
 ### Completeness
 
-Artifact의 성숙도.
+- `draft`: 구조만. UI 링크 disabled.
+- `partial`: 기본값. 의미 있는 내용.
+- `settled`: 완결. 사람 승인 필요 (Review Queue).
 
-- `draft` — Promote 직후, 구조만 잡힌 상태
-- `partial` — 의미 있는 내용 있으나 미완결 (기본값)
-- `settled` — 사람이 "이건 완결"로 승인
+### Intent
 
-"완결된 것만 남기지 않는다"는 원칙의 데이터 표현.
+```json
+{
+  "kind": "new" | "modification" | "split" | "supersede",
+  "target_type": "...",
+  "target_scope": ["Payment"],
+  "target_id": "...",
+  "reason": "...",
+  "related_session": "..."
+}
+```
+
+### Pre-flight Check (Tool-driven Prompting)
+
+MCP 응답이 즉답 대신 체크리스트로 에이전트에 작업 역지시하는 패턴. [05 M0.5](05-mechanisms.md).
+
+### Continuation Context
+
+URL → `varn.wiki.read()` fetch 시 받는 번들: `{ artifact, neighbors, recent_changes, open_questions, source_session, related_resources, area_context }`.
+
+### Project Permission (Role)
+
+- `admin` — 프로젝트 설정, 멤버, Domain Pack 관리
+- `writer` (주로 에이전트 토큰) — Artifact write 권한
+- `approver` (사람) — Review Queue 처리
+- `reader` — 읽기만
+
+한 사람/에이전트가 여러 Project에 서로 다른 role을 가질 수 있음.
+
+### Review Queue
+
+**엣지 케이스만** 올라오는 대기열. 일반 publish는 auto. [06 Flow 3](06-ui-flows.md) 참조.
 
 ---
 
 ## 개념 간 관계도
 
 ```
-┌────────────────────────────────┐
-│  Harness (VARN.md)             │
-│  - 에이전트 규약 주입           │
-│  - 체크포인트 휴리스틱 mode     │
-└───────────────┬────────────────┘
-                │ 규약
-                ▼
+┌────────────────────────────┐
+│  Project (최상위)          │
+│  - 권한 스코프              │
+│  - Areas 보유              │
+│  - Harness (VARN.md)       │
+└──────────────┬─────────────┘
+               │
+               ▼
 ┌─────────────┐
-│   Session   │  (에이전트 대화 로그, 휘발성 → F6)
+│   Session   │  (에이전트 대화, 휘발성 → F6)
 └──────┬──────┘
-       │
        │ Checkpoint trigger
-       │  (사용자 요청 or 에이전트 자율)
-       ↓
+       ▼
 ┌─────────────────────────────────┐
-│   Promote (에이전트 주도)        │
-│   ├── Intent Declaration         │
-│   ├── Pre-flight Check (tool-  │
-│   │    driven prompting) ★     │
-│   ├── Conflict Check             │
-│   ├── Schema Validation          │
-│   ├── Draft Generation           │
-│   └── Human Approve (OK/NO)    │
+│   Promote (에이전트 주도, 6단계) │
+│   1. Trigger                    │
+│   2. Intent                     │
+│   3. Pre-flight Check ★         │
+│   4. Conflict Check             │
+│   5. Schema Validation          │
+│   6. Publish (auto)             │
 └────────┬────────────────────────┘
          │
-         ↓
+         │ (Sensitive ops 만
+         │  → Review Queue → 사람 OK)
+         ▼
 ┌─────────────┐
-│  Artifact   │  (typed, pinned, completeness단계)
-│  ├─Document │       ↕ pin
-│  ├─Task     │       ↕ reference
-│  └─TestCase │       ↕ derive
+│  Artifact   │
+│  Tier A+B   │
+│  project_id │
 └──────┬──────┘
-       │
        │ Graph 구성
-       ↓
+       ▼
 ┌─────────────┐
-│   Memory    │  (검색·참조·컨텍스트 주입 대상)
+│   Memory    │
 └──────┬──────┘
-       │
-       │ Continuation Context
-       │   (URL → agent fetch)
-       ↓
+       │ Continuation (URL fetch)
+       ▼
   [ 다음 Session ]
 ```
 
-이 루프가 **Varn의 핵심**입니다.
+이 루프가 Varn의 핵심입니다. 사람은 **대화 파트너**이자 **방향 제시자** — 타이핑하지 않고 승인 버튼도 거의 누르지 않습니다.

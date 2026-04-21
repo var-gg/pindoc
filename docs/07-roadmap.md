@@ -1,186 +1,271 @@
 # 07. Roadmap
 
-Varn의 단계별 계획. V1을 최대한 좁고 선명하게, 확장은 사용자 시그널 따라.
-
 ## 원칙
 
-1. **V1 = Flagship 완성도 100%**. 범위 넓히기보다 하나를 깊게.
-2. **사용자 시그널 없이 확장하지 않는다.** 시그널 = 실사용 30일+, 이슈 3건+.
-3. **OSS first**. BM 논의는 V2 이후. V1은 GitHub star + 실사용자 확보에 집중.
-4. **Web SaaS/SI Domain Pack만 V1에서 완성**. 나머지는 skeleton — 각 도메인 기여자 등장 시 성숙.
+1. **V1 = Flagship 완성도 100%**. 범위 넓히기보다 깊이.
+2. **사용자 시그널 없이 확장 X** (실사용 30일+, 이슈 3건+).
+3. **OSS first**. BM 본격 논의는 V2. V1은 GitHub star + 실사용자 확보.
+4. **Web SaaS/SI Domain Pack만 V1 완성**. 나머지 skeleton.
+5. **Meta-dogfooding**: Varn 기획·운영 문서 자체를 Varn으로 관리.
 
 ## Scope Matrix
 
 | 기능 | V1 | V1.1 | V1.x | V2+ |
 |------|----|----|------|-----|
-| **Harness Reversal (VARN.md 주입)** | ✅ | | | |
-| MCP Layer | ✅ | | | |
+| **Project primitive + Multi-project** | ✅ | | | |
+| **GitHub OAuth (self-host)** | ✅ | | | |
+| **Zero-friction `varn init` CLI** | ✅ | | | |
+| **Custom Dashboard Slot** | ✅ | | | |
+| **Harness Reversal (VARN.md)** | ✅ | | | |
 | **Tool-driven Pre-flight Check** | ✅ | | | |
 | **Referenced Confirmation** | ✅ | | | |
-| Write-Intent Router (M1) | ✅ | | | |
-| **Typed Documents Tier A (Core)** | ✅ | | | |
-| **Tier B Web SaaS pack (stable)** | ✅ | | | |
-| Tier B 다른 pack (skeleton) | ✅ (껍데기) | Game, ML 성숙 | Mobile 성숙 | 전체 |
-| **Tier C Custom 타입** | | | | ✅ |
-| Git Pinning (M3) | ✅ (단순) | ✅ (정교 AST/LLM) | | |
+| Write-Intent Router | ✅ | | | |
+| **Auto-publish + Review Queue (opt)** | ✅ | | | |
+| Typed Documents Tier A | ✅ | | | |
+| Tier B Web SaaS (stable) | ✅ | | | |
+| Tier B Game/ML/Mobile (skeleton) | ✅ 껍데기 | 성숙 | | |
+| Tier B CS/Library/Embedded | | | skeleton | stable |
+| Tier C Custom 타입 | | | | ✅ |
+| Git Pinning | ✅ (단순) | ✅ (정교 AST/LLM) | | |
 | **Fast Landing (M6)** | ✅ | | | |
-| **Resource Freshness Re-Check (M7)** | ✅ (명시 트리거) | ✅ (자동 N회에 1회) | | |
-| **Wiki Reader UI (1차)** | ✅ | | | |
-| **Approve Inbox (편집 없음)** | ✅ | | | |
-| Session 저장/의미검색 (F6) | ✅ | | | |
-| Continuation Context (URL fetch) | ✅ | | | |
-| Task 관리 (기본) | ✅ | | | |
-| TC 기본 (required_for_close gate) | ✅ | TC Runner 자동 | | |
-| Propagation Ledger (M4) | 이벤트 | ✅ Dashboard 3-tier | | |
-| Smart Assign | | ✅ | | |
+| **Resource Freshness M7** | ✅ (명시 트리거) | ✅ (자동) | | |
+| Wiki Reader UI + Cmd+K | ✅ | | | |
+| Project Switcher | ✅ | | | |
+| Session F6 의미 검색 | ✅ | | | |
+| Continuation Context | ✅ | | | |
+| Task 기본 | ✅ | | | |
+| TC gate (required_for_close) | ✅ | TC Runner 자동 | | |
+| Event Bus / Propagation | 이벤트 + 간단 리스트 | 3-tier Dashboard | | |
 | Slack/Discord 봇 | | ✅ | | |
-| Graph Explorer 시각화 | 간단 리스트 | ✅ 인터랙티브 | | |
-| 멀티 에이전트 동시 작업 | | | ✅ | |
-| 플러그인 시스템 | | | | ✅ |
-| 클라우드 hosted (선택적 BM) | | | | ✅ |
-| SSO / RBAC | | | | ✅ |
-| 모바일 뷰어 | | | | ✅ |
+| Smart Assign | | ✅ | | |
+| Graph Explorer 시각화 | 간단 | d3 인터랙티브 | | |
+| Hosted SaaS | | | | ✅ |
 
 ---
 
 ## V1 — "Agent-only Wiki가 작동하는 순간"
 
-**목표**: 솔로 개발자 1명이 세팅하고 30일 매일 쓸 수 있는 제품. 팀은 그 위에 자연스럽게 얹힘.
+**목표**: Solo 1명이 세팅 후 30일 매일 쓸 수 있고, 2~3명 팀이 Multi-project로 운용 가능.
 
 **기간 목표**: 설계 확정 후 **3~4개월** 내 첫 공개.
 
 ### V1 Feature Checklist
 
 #### MCP & Harness
-- [ ] MCP 서버 구현 (핵심 13개 tools, [03 참조](03-architecture.md))
-- [ ] **VARN.md 템플릿** + `varn install` CLI
+- [ ] MCP 서버 (핵심 tools, [10-mcp-tools-spec](10-mcp-tools-spec.md) 참조 — 배치 B에서 작성)
+- [ ] **`varn init` CLI** — 7단계 zero-friction onboarding
+- [ ] VARN.md 템플릿 ([09-varn-md-spec](09-varn-md-spec.md) — 배치 B)
 - [ ] CLAUDE.md / AGENTS.md / .cursorrules 자동 주입
-- [ ] **Pre-flight Check responder** (타입별 체크리스트)
-- [ ] **Referenced Confirmation 프로토콜** VARN.md에 박음
-- [ ] Write-Intent Router (유사도 기반 conflict check)
-- [ ] Session stream/upload/search
+- [ ] MCP 클라이언트 config 자동 주입 (Claude Code / Cursor / Cline / Codex)
+- [ ] Pre-flight Check responder
+- [ ] Referenced Confirmation 규약
+- [ ] Write-Intent Router + auto-publish
+- [ ] Review Queue (sensitive_ops=confirm 모드)
 
-#### Data & Logic
-- [ ] Tier A 7개 타입 (Decision/Analysis/Debug/Flow/Task/TC/Glossary) 스키마 + validator
-- [ ] Tier B Web SaaS 4개 타입 (Feature/API/Screen/DataModel) stable
-- [ ] Tier B Game/ML/Mobile 스켈레톤 등록
-- [ ] Area 스키마 + Write-Intent Router 통과한 신규 Area 생성
-- [ ] Related Resource edge + Pin edge 분리
-- [ ] Git Pin (GitHub App, 단순 stale 판정)
-- [ ] **Git Outbound URL 생성** (artifact → github.com/.../blob/...)
-- [ ] Fast Landing (varn.context.for_task)
-- [ ] Resource Freshness verify (명시 트리거 V1, 자동 V1.1)
-- [ ] Session 의미 검색 (pgvector)
+#### Multi-project & Auth
+- [ ] Project primitive + settings
+- [ ] Permission (admin/writer/approver/reader, per-project)
+- [ ] Agent token per-project scope + rotation + revoke
+- [ ] **GitHub OAuth** (self-host)
+- [ ] Local single-user 시나리오 (auto token)
+
+#### Data
+- [ ] Tier A 7 타입 (Decision/Analysis/Debug/Flow/Task/TC/Glossary)
+- [ ] Tier B Web SaaS 4 타입 stable
+- [ ] Tier B Game/ML/Mobile skeleton 등록
+- [ ] Area (Project 하위) + 신규 Area Router
+- [ ] Pin (hard) + Related Resource (soft) 분리
+- [ ] Event Bus + 기본 이벤트 타입
+- [ ] Session F6 의미 검색 (pgvector)
+- [ ] Continuation Context API
+
+#### Git 연동
+- [ ] GitHub App 기반 webhook
+- [ ] 단순 stale 판정 (path change)
+- [ ] **Git Outbound URL 생성** (artifact → github.com/.../blob)
+
+#### Fast Landing & Freshness
+- [ ] `varn.context.for_task` (M6)
+- [ ] `varn.resource.verify` (M7, V1은 명시 트리거)
 
 #### Web UI
-- [ ] Wiki Reader (2축 트리, 본문 렌더, Related Resources 사이드 패널, Graph 사이드)
-- [ ] Approve Inbox (Preview + OK/NO + 피드백 요청; 편집 버튼 없음)
-- [ ] Sessions (F6 의미 검색)
+- [ ] **Wiki Reader** (2축 트리, Related Resources 사이드, Graph 사이드, 편집 버튼 없음)
+- [ ] **Cmd+K Palette** (모든 액션)
+- [ ] **Project Switcher** (Topbar)
+- [ ] Review Queue (sensitive_ops=confirm 시)
+- [ ] Sessions + F6 검색
 - [ ] 간단 Stale 리스트
-- [ ] Settings (Git repo, Domain Pack on/off, 멤버, VARN.md mode)
+- [ ] **Dashboard + Custom Slot 메커니즘**
+- [ ] Settings (OAuth, Domain Pack, 멤버, VARN.md mode, sensitive_ops, dashboard_slots)
 
 #### 배포 & 운영
-- [ ] Docker Compose 설치 (1분 내 기동)
-- [ ] 기본 인증 (Agent token + User session)
+- [ ] Docker Compose 설치
+- [ ] 1분 내 로컬 기동
 - [ ] Self-host 운영 가이드
 
 #### 문서 & 마케팅
-- [ ] Quickstart (5분 내 harness install + 첫 promote 체험)
-- [ ] MCP 연동 가이드 (Claude Code, Cursor, Cline, Codex)
+- [ ] Quickstart (5분 내 `varn init` + 첫 promote)
+- [ ] MCP 연동 가이드 (Claude Code / Cursor / Cline / Codex)
 - [ ] 30초 Promote 데모 gif
 - [ ] 라이선스 확정 (AGPL-3.0 유력)
 
-### V1 Non-goals (명시적 제외)
+### V1 Non-goals
 
 - ❌ 사람 직접 편집 (원칙 1, 영원히)
+- ❌ OSS core에 광고 embed (중립성 유지)
+- ❌ 매 artifact 사람 승인 강제 (Review Queue는 sensitive ops + confirm에만)
 - ❌ 메신저 기능 (Slack 봇도 V1.1)
-- ❌ 멀티 팀/멀티 테넌트
-- ❌ SSO, RBAC
-- ❌ TC Runner (수동 기록 + `required_for_close` gate만)
-- ❌ Propagation Dashboard 풍부 UX (간단 리스트)
-- ❌ Graph Explorer 시각화 (인접 리스트)
-- ❌ 클라우드 hosted
+- ❌ 멀티 테넌트 (1 인스턴스 내 Project 여럿은 지원하지만, 인스턴스 간 분리는 아님)
+- ❌ SSO, RBAC 세분화 (per-project role만)
+- ❌ TC Runner
+- ❌ Propagation Dashboard 3-tier
+- ❌ Graph 시각화
+- ❌ Hosted SaaS
 - ❌ 모바일
 - ❌ Tier C Custom 타입
 
-상세 이유: [08 Non-Goals](08-non-goals.md).
-
 ### V1 Launch Criteria
 
-1. **Solo dogfooding 30일**: 저자 본인이 매일 사용 (팀 확보 대기하지 않음 — Solo 1급이므로 이게 성립)
-2. **Meta-dogfooding**: **이 설계 문서들을 Varn으로 관리**. 지금 이 대화의 산출물이 Varn에 들어있는 상태로 V1 공개.
-3. **External 2+ 인스턴스**: Solo 2명 또는 팀 1개 + Solo 1명 — 30일 이상 설치+사용
-4. **문서 완비**: README, Quickstart, MCP 연동 가이드 4종(Claude Code/Cursor/Cline/Codex), Self-host 가이드
-5. **데모 gif**: 30초 "사용자 요청 → 에이전트 제안 → 링크 동반 확인 → 승인 → 위키 반영" 전 과정
-6. **깨끗한 VM에 10분 내 세팅 가능** 검증
-7. **라이선스 확정**
+1. **Solo dogfooding 30일**: 저자 본인 Solo 인스턴스 + 최소 2개 Project로 30일 운용
+2. **Meta-dogfooding**: **Varn 기획·운영 문서들을 Varn으로 관리**. GitHub repo의 이 docs/ 가 Varn artifact로 마이그레이션됨.
+3. **External 2+ 인스턴스**: Solo 2명 or Solo 1 + 팀 1 (Multi-project 포함), 30일 이상 사용
+4. **`varn.var.gg` 공개 인스턴스 오픈** (아래 섹션)
+5. **문서 완비**: README, Quickstart, MCP 연동 가이드 4종, Self-host 가이드
+6. **데모 gif**: 30초 "`varn init` → 에이전트 체크포인트 제안 → Referenced Confirmation → auto-publish" 전체
+7. **깨끗한 VM 10분 내 세팅** 검증
+8. **라이선스 확정**
 
 ---
 
-## V1.1 — "사용 중 발견된 것들"
+## `varn.var.gg` 공개 인스턴스 운영 계획
 
-**목표**: V1을 써본 사용자 피드백 중 자주 나온 것부터. 현재 예측이지 약속 아님.
+V1 공개와 **동시에** 가동. Varn의 첫 공개 사례 + meta-dogfooding + 데모 + 운영비 투명 테스트.
 
-### V1.1 예상 우선순위
+### 목적
 
-- ✅ **Slack/Discord 봇**: 슬래시 커맨드로 artifact 공유, 새 artifact 알림
-- ✅ **M7 자동 트리거**: 읽기 시점 N회에 1회 Resource Freshness 재검증
-- ✅ **Propagation Dashboard 3-tier**: High/Medium/Low + bulk 액션
-- ✅ **TC Runner**: AI-가능 TC 자동 실행
-- ✅ **Smart Assign**: 에이전트가 Task에 assignee 추천 (도메인 기반)
-- ✅ **Git Pin 정교화**: AST/LLM 기반 의미 변경 판정 (오탐 감소)
-- ✅ **Graph Explorer 인터랙티브**: d3/Cytoscape
-- ✅ **Tier B Game/ML pack 성숙** (커뮤니티 기여)
+1. **데모**: 방문자가 Varn 실물 체험 (read-only)
+2. **Meta-dogfooding**: Varn 프로젝트 자체가 이 인스턴스에서 관리됨 (docs/ → artifact로)
+3. **공개 로그**: 이슈·의사결정이 공개 Graph로 보임
+4. **운영비 투명**: "이 서버 월 $XX로 돌아감" 공개
+5. **광고 1슬롯 실험** (EthicalAds)
 
-**기간 목표**: V1 공개 후 2~3개월.
+### 기술 스펙 (잠정)
+
+- 서버: 1 vCPU / 2GB RAM 수준의 VPS (월 $10~30)
+- DB: PostgreSQL + pgvector 동일 박스 (소규모 초기엔 충분)
+- 도메인: `varn.var.gg` (var.gg wildcard)
+- TLS: Let's Encrypt
+- 백업: 일 1회 → R2/S3
+
+### Custom Slot 구성
+
+```yaml
+dashboard_slots:
+  hero:
+    type: markdown
+    source: ./public/hero.md        # "Welcome to Varn. This is meta-dogfooding..."
+  sidebar:
+    type: html
+    source: ./public/sponsors.html  # GitHub Sponsors 링크
+  ads:
+    type: ethicalads
+    publisher_id: varn-public       # 승인 후 활성
+  footer:
+    type: html
+    source: ./public/footer.html    # OSS 링크, AGPL 언급
+```
+
+### 권한 모델
+
+- 기본 **reader** 공개 (no login)
+- OAuth 로그인 시 본인 Project 생성 가능? → **V1에서는 안 함**. 공개 인스턴스는 **데모+Varn 자체 관리 전용**, 사용자가 자기 Project 만들려면 `varn init` 로 본인 self-host 권장
+- V2에서 hosted SaaS 정식 오픈 검토
+
+### 모니터링
+
+- 단순 uptime (UptimeRobot 등 외부 무료)
+- monthly hosting cost 자체 공개 (Dashboard sidebar)
 
 ---
 
-## V1.x — 성숙화 (Feedback-Driven)
+## BM Roadmap — OSS first, 3 Phase
 
-V1.x는 기능 예측보다 **이슈 트래커 기반**:
+### Phase 1 — V1 공개 시점
 
-- **멀티 에이전트 동시 작업** — Task 하나에 에이전트 3개 병렬 할당
-- **Tier B 다른 pack 완성** — Mobile, CS Desktop 각 도메인 유저 등장 시
-- **타입별 뷰 최적화** — ADR 전용 뷰, TC 매트릭스
-- **검색 품질 향상** — 하이브리드 검색, re-ranking
-- **세션 자동 분석** — 자동 Checkpoint 감지 고도화
+- **EthicalAds 1슬롯** (Dashboard ads slot, 공개 인스턴스만)
+- **GitHub Sponsors** 링크 (sidebar slot)
+- **운영비 투명 공개** ("이 서버 $XX/월")
+- 목표: 서버비 커버 (월 $30 내외)
+
+### Phase 2 — V1.1 이후 (GitHub star 1,000+ 도달)
+
+- **Carbon Ads** 승인 시도 (premium advertiser)
+- Sponsor wall (ID/로고) 섹션 추가
+- Open Collective 등록 고려
+
+### Phase 3 — V2 (star 5,000+ 도달 시점 예상)
+
+- **Managed hosted tier** — Varn Cloud
+  - Solo 무료 (기본 Project 1개)
+  - 팀 유료 (Multi-project, member 수 제한 해제)
+  - Sentry / Supabase / n8n 모델
+- 광고는 공개 데모에만 유지, 유료 tier는 광고 없음
+
+### 원칙
+
+- **Core OSS는 영원히 무료**
+- Tier 분할·광고 embed는 Custom Slot 메커니즘으로만
+- AGPL-3.0 의 네트워크 카피레프트로 hosted 경쟁 방어
 
 ---
 
-## V2 — OSS 성장과 선택적 hosted
+## V1.1 — 사용 피드백 반영
 
-**V2에서 처음으로 BM 본격 논의.**
+예상 우선순위 (실 피드백 기반 조정):
+- Slack/Discord 봇
+- Propagation Dashboard 3-tier
+- M7 자동 트리거
+- TC Runner
+- Smart Assign
+- Git Pin AST/LLM 정교화
+- Graph d3/Cytoscape
+- Tier B Game/ML pack 성숙
 
-### V2 Feature 후보
+기간: V1 공개 후 2~3개월.
 
-- **Tier C Custom 타입** — YAML 스키마로 팀·도메인 정의
-- **플러그인 시스템** — 커스텀 전파 규칙, 커스텀 UI 위젯
-- **공식 에이전트 integrations** — Claude Code/Cursor/Cline/Codex 공식 파트너십
-- **클라우드 hosted** — 자체 호스팅 원치 않는 사용자 대상
+---
 
-### BM Stance (단순)
+## V1.x — 성숙화
 
-현재 단순 입장: **OSS first, 잘 되면 hosted 추가**.
+이슈 트래커 주도:
+- 멀티 에이전트 동시 작업
+- Tier B Mobile/CS Desktop 성숙
+- 타입별 뷰 최적화
+- 검색 품질 (re-ranking)
+- 세션 자동 분석 고도화
 
-이미 검증된 선례들 (Sentry, PostHog, Supabase, Plausible, n8n):
-- Core는 OSS (AGPL 유력)
-- Managed cloud는 선택적 subscription
-- 엔터프라이즈 기능(SSO, 감사로그)은 필요 시 상용 tier 고려
+---
 
-결정은 V1 공개 + 6개월 실사용 데이터를 본 후. **지금은 아무 것도 약속하지 않음**.
+## V2 — Hosted SaaS + Tier C Custom
+
+- Tier C Custom 타입 (YAML 스키마)
+- 플러그인 시스템
+- 공식 에이전트 partnerships
+- **Managed hosted tier** (BM 본격)
+
+BM 결정은 V2 진입 시점. 현재 선호: **Sentry/Supabase 스타일**.
 
 ---
 
 ## 유즈케이스별 V1 가치
 
 | 사용자 | V1에서 얻는 것 |
-|--------|-------------|
-| **Solo 개발자** | 세션 검색 지옥(F6) 해결 + 반-자동 아카이브. Tier B Web SaaS 사용 시 프로젝트 구조화. |
-| **신규 프로젝트 부트스트랩** | "설계 정리해줘" → Tier A 스켈레톤 자동 생성. (이 리포가 1호 사례) |
-| **레거시 프로젝트 역공학** | 기존 repo 스캔 → Feature/Flow 스켈레톤 자동 생성 → 사람 OK |
-| **소규모 팀 협업** | 여러 에이전트 사용자가 같은 인스턴스에 붙어 중복·충돌 자동 감지 |
-| **자율 에이전트 환경 (OpenClaw 등)** | VARN.md mode=auto로 설정, 에이전트 자체 체크포인트 기록. 관리자는 Wiki만 확인 |
+|---|---|
+| **Solo 개발자** | F6 해결 + 반-자동 아카이브. Web SaaS 시 프로젝트 구조화. |
+| **신규 프로젝트 부트스트랩** | "설계 정리해줘" → Tier A 스켈레톤 자동 생성. (이 리포가 1호) |
+| **레거시 역공학** | 기존 repo 스캔 → Feature/Flow 자동 생성 → 사용자 OK |
+| **2~10인 팀 (Multi-project)** | FE/BE 분리 + 매니지먼트 양쪽 접근, 여러 repo 한 인스턴스 |
+| **자율 에이전트 (OpenClaw 등)** | mode=auto, human-out-of-the-loop 완전 지원 |
 
 ---
 
@@ -188,53 +273,47 @@ V1.x는 기능 예측보다 **이슈 트래커 기반**:
 
 | 시점 | 마일스톤 |
 |------|---------|
-| M0 | 설계 문서 확정 (지금 여기) |
-| M0–1 | 데이터 모델 + MCP 스켈레톤 + Harness install |
-| M1–2 | Pre-flight Check + Write-Intent Router + Tier A 타입 |
-| M2–3 | Wiki Reader + Approve Inbox + Fast Landing |
-| M3 | V1 내부 alpha, Solo dogfooding 시작 |
-| M3–4 | External alpha → V1.1 준비 |
-| M4 | V1 공개 릴리스 (lazy target) |
-| M4–6 | External 30일 이상 사용 데이터 수집 |
+| M0 | 설계 확정 (지금) |
+| M0–1 | 데이터 모델 + MCP 스켈레톤 + Project primitive + `varn init` |
+| M1–2 | Harness / Pre-flight / Write-Intent Router / Tier A |
+| M2–3 | Wiki Reader + Cmd+K + Fast Landing + Dashboard Slot |
+| M3 | Solo dogfooding 시작 (2 Project 운용) |
+| M3–4 | External alpha (2+ 인스턴스), `varn.var.gg` staging |
+| M4 | **V1 공개 + `varn.var.gg` 오픈** |
+| M4–6 | 피드백 수집 → V1.1 준비 |
 | M6 | V1.1 공개 |
-| M6–12 | V1.x 성숙 |
-| Year 2 | V2 BM 결정 |
-
-일정은 엄격한 약속이 아닙니다. 품질 + Agent-only write의 선명함이 우선.
+| M6–12 | V1.x |
+| Year 2 | V2 / Hosted 결정 |
 
 ---
 
 ## 위험 요소
 
-### 기술적 위험
+### 기술적
+- MCP 스펙 변경 — 빠른 적응
+- Pre-flight Check 과도 튜닝 — per-type 세밀 조정
+- 벡터 검색 품질 — threshold + 피드백 루프
+- Git 연동 복잡도 — V1 작은 repo
 
-- **MCP 스펙 변경**: Anthropic 스펙 변동. 대응: 빠른 적응이 오히려 경쟁력.
-- **Pre-flight Check 오버엔지니어링**: 체크리스트 너무 타이트하면 에이전트 생산성 저하. 대응: 체크리스트 per-type 세밀 튜닝 + 사용자 feedback으로 조정.
-- **벡터 검색 품질**: 중복 감지 오탐/미탐. 대응: threshold 튜닝, 사용자 피드백 루프.
-- **Git 연동 복잡도**: Webhook, rate limit. 대응: V1 작은 repo 타겟.
+### 제품
+- Checkpoint 제안 피로 — VARN.md mode + 3회 거절 시 off
+- "편집 금지가 답답" 피드백 — **원칙 방어, 타협 없음**
+- Typed 경직성 — Tier C (V2+)로 유연성
+- "Notion 있는데 왜?" — Agent-only + Fast Landing + Cmd+K 3개 데모 gif 30초
 
-### 제품 위험
-
-- **Checkpoint 제안 피로**: 에이전트가 너무 자주 제안 → 거절 남발. 대응: VARN.md mode 설정 (manual/auto/off) + 3회 거절 시 자동 off.
-- **Typed documents 경직성**: 팀이 스키마를 답답해함. 대응: V1 Tier A/B 유지, V1.x부터 Tier B 확장, V2에서 Tier C.
-- **"Notion 있는데 왜?" 저항**: 기존 툴 관성. 대응: **Agent-only write** + **Fast Landing** + **Pre-flight Check** 3개를 데모 gif 30초에 압축.
-- **편집 금지가 답답하다** 피드백: 초기에 반드시 나올 것. 대응: **이게 제품 정체성**임을 문서·FAQ에 명시, 타협 없음.
-
-### 비즈니스 위험
-
-- **경쟁자**: Cursor Rules, Cline Memory Bank, Mem0, Continue.dev 등 유사 각도. 대응: **Agent-only write + Harness Reversal**이라는 선명한 철학적 차별화.
-- **메인테이너 번아웃**: 1인 OSS 고질. 대응: 커뮤니티 조기 형성, Tier B 도메인 pack은 커뮤니티 기여로.
+### 비즈니스
+- 경쟁자 (Cursor Rules, Cline Memory, Mem0, Continue.dev) — Agent-only write + Harness Reversal 선명한 철학 차별화
+- 메인테이너 번아웃 — 조기 커뮤니티, Tier B skeleton 기여 개방
+- 광고 수익 미미 — Phase 1은 커버 목표일 뿐, Phase 3 SaaS 가 진짜 BM
 
 ---
 
-## 성공/피벗 판단 기준
+## 성공/피벗 판단 (6개월 시점)
 
-**6개월 시점 점검**:
+- GitHub star < 500 → 포지셔닝 재검토
+- 실사용 인스턴스 < 5 → 온보딩 대수술
+- 이탈 사유 "편집 금지 답답" → **방어**, 이건 타협 아님
+- 이탈 사유 "Checkpoint 피곤" → VARN.md 기본값 재조정
+- "Notion/Linear 충분" > 50% → 차별화 전달 재정의 (원칙 유지)
 
-- GitHub star < 500 → 마케팅/포지셔닝 재검토
-- 실사용 인스턴스 < 5 (Solo+팀 합쳐) → 온보딩/Quickstart 대수술
-- 핵심 이탈 사유가 "편집 금지가 답답하다" → **원칙 방어**. 이건 타협 아님.
-- 핵심 이탈 사유가 "Checkpoint 제안이 피곤하다" → VARN.md mode 기본값 + 휴리스틱 재조정
-- "Notion/Linear로 충분한데?" 피드백 > 50% → 차별화 전달 방식 재정의 (원칙은 유지)
-
-위 중 2+ 해당 시 **피벗 검토**. 단, **Agent-only write는 피벗 대상이 아니다** — 이걸 풀면 Varn 존재 이유 소실.
+위 중 2+ 시 피벗 검토. 단 **Agent-only write는 피벗 대상 아님**.
