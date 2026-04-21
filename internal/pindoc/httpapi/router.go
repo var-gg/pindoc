@@ -5,6 +5,11 @@
 // deliberate design choice: it means a deployment can ship the web UI
 // behind read-only auth (GitHub OAuth, for instance) without the web
 // layer needing to mint agent tokens.
+//
+// URL convention: every project-scoped read lives under /api/p/{project}/…
+// so a URL is shareable without ambiguity. Unscoped reads (config, health,
+// projects list) stay at /api/… The web UI mirrors this: /p/{project}/wiki
+// etc. See docs/03-architecture.md for the full URL convention.
 package httpapi
 
 import (
@@ -18,9 +23,19 @@ import (
 )
 
 type Deps struct {
-	DB          *db.Pool
-	Logger      *slog.Logger
-	ProjectSlug string
+	DB     *db.Pool
+	Logger *slog.Logger
+
+	// DefaultProjectSlug is the project the root URL redirects to when
+	// the URL has no /p/{project} prefix (legacy shares, cold open).
+	// Resolved once at startup from PINDOC_PROJECT.
+	DefaultProjectSlug string
+
+	// MultiProject toggles UI switcher visibility. Read: does this
+	// instance expect to host >1 project? False keeps the switcher
+	// hidden even if extra rows exist in the projects table.
+	MultiProject bool
+
 	Embedder    embed.Provider
 	Version     string
 	BuildCommit string
@@ -28,14 +43,23 @@ type Deps struct {
 
 func New(cfg *config.Config, d Deps) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/projects/current", d.handleProjectCurrent)
-	mux.HandleFunc("GET /api/areas", d.handleAreas)
-	mux.HandleFunc("GET /api/artifacts", d.handleArtifactList)
-	mux.HandleFunc("GET /api/artifacts/{idOrSlug}", d.handleArtifactGet)
-	mux.HandleFunc("GET /api/artifacts/{idOrSlug}/revisions", d.handleArtifactRevisions)
-	mux.HandleFunc("GET /api/artifacts/{idOrSlug}/diff", d.handleArtifactDiff)
-	mux.HandleFunc("GET /api/search", d.handleSearch)
+
+	// Unscoped reads — apply to the whole instance.
 	mux.HandleFunc("GET /api/health", d.handleHealth)
+	mux.HandleFunc("GET /api/config", d.handleConfig)
+	mux.HandleFunc("GET /api/projects", d.handleProjectList)
+
+	// Project-scoped reads. The {project} path segment resolves a row in
+	// projects.slug; 404 if missing so URL shares fail loudly rather than
+	// silently leaking to the caller's current project.
+	mux.HandleFunc("GET /api/p/{project}", d.handleProjectCurrent)
+	mux.HandleFunc("GET /api/p/{project}/areas", d.handleAreas)
+	mux.HandleFunc("GET /api/p/{project}/artifacts", d.handleArtifactList)
+	mux.HandleFunc("GET /api/p/{project}/artifacts/{idOrSlug}", d.handleArtifactGet)
+	mux.HandleFunc("GET /api/p/{project}/artifacts/{idOrSlug}/revisions", d.handleArtifactRevisions)
+	mux.HandleFunc("GET /api/p/{project}/artifacts/{idOrSlug}/diff", d.handleArtifactDiff)
+	mux.HandleFunc("GET /api/p/{project}/search", d.handleSearch)
+
 	return withCORS(withRecover(mux, d.Logger))
 }
 
@@ -76,4 +100,11 @@ func withRecover(h http.Handler, logger *slog.Logger) http.Handler {
 		}()
 		h.ServeHTTP(w, r)
 	})
+}
+
+// projectSlugFrom extracts the {project} path value. Returns empty string
+// if the route had no project segment (shouldn't happen for scoped routes
+// but keeps the helper crash-safe).
+func projectSlugFrom(r *http.Request) string {
+	return r.PathValue("project")
 }

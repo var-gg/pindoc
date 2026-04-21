@@ -6,10 +6,11 @@ import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
 
 type Props = {
+  projectSlug: string;
   detail: Artifact | null;
 };
 
-export function Sidecar({ detail }: Props) {
+export function Sidecar({ projectSlug, detail }: Props) {
   const { t } = useI18n();
   if (!detail) {
     return (
@@ -91,7 +92,7 @@ export function Sidecar({ detail }: Props) {
         )}
       </div>
 
-      <RecentChanges slug={detail.slug} />
+      <RecentChanges projectSlug={projectSlug} slug={detail.slug} />
 
       <div className="provenance">
         <div className="provenance__row">
@@ -127,7 +128,7 @@ export function Sidecar({ detail }: Props) {
   );
 }
 
-function RecentChanges({ slug }: { slug: string }) {
+function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: string }) {
   const { t } = useI18n();
   const [revs, setRevs] = useState<RevisionRow[] | null>(null);
 
@@ -135,7 +136,7 @@ function RecentChanges({ slug }: { slug: string }) {
     let cancelled = false;
     (async () => {
       try {
-        const resp = await api.revisions(slug);
+        const resp = await api.revisions(projectSlug, slug);
         if (!cancelled) setRevs(resp.revisions);
       } catch {
         if (!cancelled) setRevs([]);
@@ -144,7 +145,7 @@ function RecentChanges({ slug }: { slug: string }) {
     return () => {
       cancelled = true;
     };
-  }, [slug]);
+  }, [projectSlug, slug]);
 
   if (!revs || revs.length === 0) return null;
   const shown = revs.slice(0, 3);
@@ -162,7 +163,7 @@ function RecentChanges({ slug }: { slug: string }) {
           </span>
         </div>
         <Link
-          to={`/wiki/${slug}/history`}
+          to={`/p/${projectSlug}/wiki/${slug}/history`}
           style={{ color: "var(--fg-2)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontFamily: "var(--font-mono)" }}
         >
           <HistoryIcon className="lucide" style={{ width: 11, height: 11 }} />
@@ -192,7 +193,7 @@ function RecentChanges({ slug }: { slug: string }) {
       })}
       {remainder > 0 && (
         <Link
-          to={`/wiki/${slug}/history`}
+          to={`/p/${projectSlug}/wiki/${slug}/history`}
           style={{ fontSize: 11, color: "var(--fg-3)", fontFamily: "var(--font-mono)", textDecoration: "none" }}
         >
           {t("history.more_revisions", remainder)}

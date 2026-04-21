@@ -2,6 +2,60 @@
 
 Pindoc의 시스템 구조. Multi-project · Harness · MCP · UI · 배포 시나리오.
 
+## URL convention (canonical)
+
+모든 사용자-facing 경로는 **프로젝트 스코프 접두사**를 갖는다. 공유된 URL이
+받는 쪽의 "현재 프로젝트"에 따라 다른 문서를 열지 않도록 하는 장치.
+
+### UI 경로
+
+| 형태 | 의미 |
+|------|------|
+| `/p/:project/wiki` | 프로젝트의 Wiki Reader (artifact 목록) |
+| `/p/:project/wiki/:slug` | 단일 artifact |
+| `/p/:project/wiki/:slug/history` | 수정 이력 |
+| `/p/:project/wiki/:slug/diff?from=&to=` | 리비전 비교 |
+| `/p/:project/tasks` · `/tasks/:slug` | Task 뷰 (Reader를 type=Task로 필터) |
+| `/p/:project/graph` | Graph (M1에선 stub) |
+| `/p/:project/inbox` | Review Queue |
+| `/design`, `/design/preview/:slug`, `/ui/:slug` | 개발 scaffold, 프로젝트 무관 |
+
+### 레거시 redirect
+
+`/wiki/...`, `/tasks/...`, `/graph`, `/inbox`, 그리고 루트 `/` 는 모두
+**`/p/:default/...` 로 302 redirect** 된다 (`:default` = `PINDOC_MULTI_PROJECT`
+환경의 `PINDOC_PROJECT` 값, 기본 `pindoc`).
+`/api/config.default_project_slug` 가 참조 source of truth.
+
+### HTTP API
+
+UI mirror. 프로젝트 스코프 = URL 접두사.
+
+| Method · Path | 용도 |
+|---------------|------|
+| `GET /api/config` | `{ default_project_slug, multi_project, version }` |
+| `GET /api/projects` | 인스턴스 내 프로젝트 전부 (switcher 용) |
+| `GET /api/p/:project` | 단일 프로젝트 detail (이전 `/api/projects/current`) |
+| `GET /api/p/:project/areas` | |
+| `GET /api/p/:project/artifacts` · `/:idOrSlug` · `/:idOrSlug/revisions` · `/:idOrSlug/diff` | |
+| `GET /api/p/:project/search?q=` | 프로젝트 스코프 의미 검색 |
+| `GET /api/health` | 인스턴스 헬스 |
+
+### 프로젝트 생성
+
+- **최초 프로젝트**: 서버 기동 시 seed 마이그레이션이 생성 (V1.5에서 `pindoc init`
+  CLI 로 대체 예정).
+- **이후 프로젝트**: `pindoc.project.create(slug, name, primary_language[, color, description])`
+  MCP tool. UI에는 "+ 새 프로젝트" 버튼 없음 (원칙 1: agent-only write surface) —
+  Project Switcher 드롭다운에 안내 문구만.
+
+### 멀티프로젝트 토글
+
+`PINDOC_MULTI_PROJECT=true|false` (기본 false). Switcher 드롭다운은 토글과
+무관하게 현재 프로젝트 + 목록을 보여주지만, false 인스턴스에선 UI 카피에
+"프로젝트는 하나" 뉘앙스가 담긴다. V1.5에서 본격적인 멀티프로젝트 권한 모델이
+들어올 때 이 플래그가 확장 지점이다.
+
 ## 설계 철학
 
 ### 원칙 1. Agent-only Write Surface

@@ -143,6 +143,26 @@ When you ask the user for approval, review, or a decision, always include:
 This protocol is how Pindoc helps the human stay in command without
 reading every token you produced. Follow it.
 
+## URL convention
+
+Every sharable Pindoc URL carries the project slug:
+
+    /p/%s/wiki                      — Wiki Reader (this project)
+    /p/%s/wiki/<slug>               — single artifact
+    /p/%s/wiki/<slug>/history       — revisions
+    /p/%s/wiki/<slug>/diff?from=&to=  — diff viewer
+    /p/%s/tasks                     — Task filter view
+    /p/%s/graph                     — graph (stub in M1)
+    /p/%s/inbox                     — review queue
+
+When you give the user a link, always include the project prefix. Legacy
+bare /wiki/... paths redirect to the default project today but may stop
+working once multi-project is fully enabled.
+
+To start a new project, call pindoc.project.create with a kebab-case slug,
+a display name, and primary_language=en|ko. It returns the canonical
+/p/<new-slug>/wiki URL for the user to bookmark.
+
 ## Artifact hygiene
 
 - Body language: %s.
@@ -229,6 +249,7 @@ the update_of value you should pass on retry — follow it.
 `,
 		projectName, serverVersion, language,
 		projectSlug, language,
+		projectSlug, projectSlug, projectSlug, projectSlug, projectSlug, projectSlug, projectSlug,
 		languageLabel(language),
 	)
 }

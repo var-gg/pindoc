@@ -23,6 +23,7 @@ type revisionRow struct {
 }
 
 func (d Deps) handleArtifactRevisions(w http.ResponseWriter, r *http.Request) {
+	projectSlug := projectSlugFrom(r)
 	ref := r.PathValue("idOrSlug")
 	if ref == "" {
 		writeError(w, http.StatusBadRequest, "missing id or slug")
@@ -34,7 +35,7 @@ func (d Deps) handleArtifactRevisions(w http.ResponseWriter, r *http.Request) {
 		FROM artifacts a
 		JOIN projects p ON p.id = a.project_id
 		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
-	`, d.ProjectSlug, ref).Scan(&artifactID, &slug, &title)
+	`, projectSlug, ref).Scan(&artifactID, &slug, &title)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "artifact not found")
 		return
@@ -93,6 +94,7 @@ type diffRevOut struct {
 }
 
 func (d Deps) handleArtifactDiff(w http.ResponseWriter, r *http.Request) {
+	projectSlug := projectSlugFrom(r)
 	ref := r.PathValue("idOrSlug")
 	if ref == "" {
 		writeError(w, http.StatusBadRequest, "missing id or slug")
@@ -109,7 +111,7 @@ func (d Deps) handleArtifactDiff(w http.ResponseWriter, r *http.Request) {
 		FROM artifacts a
 		JOIN projects p ON p.id = a.project_id
 		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
-	`, d.ProjectSlug, ref).Scan(&artifactID, &slug, &latest)
+	`, projectSlug, ref).Scan(&artifactID, &slug, &latest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "artifact not found")
 		return

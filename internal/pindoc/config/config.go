@@ -27,10 +27,16 @@ type Config struct {
 	// the real value from PINDOC.md. Default "en".
 	UserLanguage string
 
-	// ProjectSlug is which seeded project the MCP server treats as current.
-	// Multi-project selection lands in Phase 4; for now one instance = one
-	// project per `pindoc init` invocation.
+	// ProjectSlug is the MCP server's active scope and the HTTP API's default
+	// project. URL shares without /p/{project}/ prefix redirect here; MCP
+	// write tools operate on this project unless a future session overrides
+	// via PINDOC_PROJECT.
 	ProjectSlug string
+
+	// MultiProject toggles the Web UI's project switcher. Default false so
+	// single-project installs stay chromeless; flip to true once pindoc.project.create
+	// is run to introduce a second project.
+	MultiProject bool
 
 	// Embed controls which embedding provider is built at startup.
 	Embed embed.Config
@@ -45,6 +51,7 @@ func Load() (*Config, error) {
 		LogLevel:     env("PINDOC_LOG_LEVEL", "info"),
 		UserLanguage: strings.ToLower(env("PINDOC_USER_LANGUAGE", "en")),
 		ProjectSlug:  env("PINDOC_PROJECT", "pindoc"),
+		MultiProject: envBool("PINDOC_MULTI_PROJECT", false),
 		Embed: embed.Config{
 			Provider:     env("PINDOC_EMBED_PROVIDER", "stub"),
 			Endpoint:     env("PINDOC_EMBED_ENDPOINT", ""),

@@ -47,7 +47,69 @@ var pindocRenderingCaps = RenderingCaps{
 	Notes:         "Headings H1–H6, ordered/unordered lists, blockquotes, inline code, fenced code, links. Mermaid via ```mermaid fence. Math/KaTeX not supported (M1.x).",
 }
 
+func (d Deps) handleConfig(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"default_project_slug": d.DefaultProjectSlug,
+		"multi_project":        d.MultiProject,
+		"version":              d.Version,
+	})
+}
+
+type projectListRow struct {
+	ID              string    `json:"id"`
+	Slug            string    `json:"slug"`
+	Name            string    `json:"name"`
+	Description     string    `json:"description,omitempty"`
+	Color           string    `json:"color,omitempty"`
+	PrimaryLanguage string    `json:"primary_language"`
+	ArtifactsCount  int       `json:"artifacts_count"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
+	rows, err := d.DB.Query(r.Context(), `
+		SELECT
+			p.id::text, p.slug, p.name, p.description, p.color,
+			p.primary_language, p.created_at,
+			(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
+		FROM projects p
+		ORDER BY p.created_at
+	`)
+	if err != nil {
+		d.Logger.Error("project list", "err", err)
+		writeError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+	defer rows.Close()
+
+	out := []projectListRow{}
+	for rows.Next() {
+		var p projectListRow
+		var desc, color *string
+		if err := rows.Scan(
+			&p.ID, &p.Slug, &p.Name, &desc, &color,
+			&p.PrimaryLanguage, &p.CreatedAt, &p.ArtifactsCount,
+		); err != nil {
+			writeError(w, http.StatusInternalServerError, "scan failed")
+			return
+		}
+		if desc != nil {
+			p.Description = *desc
+		}
+		if color != nil {
+			p.Color = *color
+		}
+		out = append(out, p)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"projects":             out,
+		"default_project_slug": d.DefaultProjectSlug,
+		"multi_project":        d.MultiProject,
+	})
+}
+
 func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
+	slug := projectSlugFrom(r)
 	var out projectInfo
 	var desc, color *string
 	err := d.DB.QueryRow(r.Context(), `
@@ -57,7 +119,7 @@ func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
 			(SELECT count(*) FROM areas     WHERE project_id = p.id),
 			(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
 		FROM projects p WHERE p.slug = $1
-	`, d.ProjectSlug).Scan(
+	`, slug).Scan(
 		&out.ID, &out.Slug, &out.Name, &desc, &color,
 		&out.PrimaryLanguage, &out.CreatedAt,
 		&out.AreasCount, &out.ArtifactsCount,
@@ -93,6 +155,7 @@ type areaRow struct {
 }
 
 func (d Deps) handleAreas(w http.ResponseWriter, r *http.Request) {
+	slug := projectSlugFrom(r)
 	rows, err := d.DB.Query(r.Context(), `
 		WITH p AS (SELECT id FROM projects WHERE slug = $1)
 		SELECT
@@ -109,7 +172,7 @@ func (d Deps) handleAreas(w http.ResponseWriter, r *http.Request) {
 		JOIN p ON a.project_id = p.id
 		LEFT JOIN areas parent ON parent.id = a.parent_id
 		ORDER BY a.is_cross_cutting, a.slug
-	`, d.ProjectSlug)
+	`, slug)
 	if err != nil {
 		d.Logger.Error("areas query", "err", err)
 		writeError(w, http.StatusInternalServerError, "query failed")
@@ -138,26 +201,27 @@ func (d Deps) handleAreas(w http.ResponseWriter, r *http.Request) {
 		out = append(out, a)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"project_slug": d.ProjectSlug,
+		"project_slug": slug,
 		"areas":        out,
 	})
 }
 
 type artifactRow struct {
-	ID             string    `json:"id"`
-	Slug           string    `json:"slug"`
-	Type           string    `json:"type"`
-	Title          string    `json:"title"`
-	AreaSlug       string    `json:"area_slug"`
-	Completeness   string    `json:"completeness"`
-	Status         string    `json:"status"`
-	ReviewState    string    `json:"review_state"`
-	AuthorID       string    `json:"author_id"`
-	PublishedAt    time.Time `json:"published_at,omitzero"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID           string    `json:"id"`
+	Slug         string    `json:"slug"`
+	Type         string    `json:"type"`
+	Title        string    `json:"title"`
+	AreaSlug     string    `json:"area_slug"`
+	Completeness string    `json:"completeness"`
+	Status       string    `json:"status"`
+	ReviewState  string    `json:"review_state"`
+	AuthorID     string    `json:"author_id"`
+	PublishedAt  time.Time `json:"published_at,omitzero"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
+	slug := projectSlugFrom(r)
 	areaSlug := r.URL.Query().Get("area")
 	typeFilter := r.URL.Query().Get("type")
 
@@ -175,7 +239,7 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 		  AND ($3 = '' OR a.type  = $3)
 		ORDER BY a.updated_at DESC
 		LIMIT 200
-	`, d.ProjectSlug, areaSlug, typeFilter)
+	`, slug, areaSlug, typeFilter)
 	if err != nil {
 		d.Logger.Error("artifact list", "err", err)
 		writeError(w, http.StatusInternalServerError, "query failed")
@@ -201,20 +265,21 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 		out = append(out, a)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"project_slug": d.ProjectSlug,
+		"project_slug": slug,
 		"artifacts":    out,
 	})
 }
 
 type artifactDetail struct {
 	artifactRow
-	BodyMarkdown  string   `json:"body_markdown"`
-	Tags          []string `json:"tags"`
-	AuthorVersion string   `json:"author_version,omitempty"`
+	BodyMarkdown  string    `json:"body_markdown"`
+	Tags          []string  `json:"tags"`
+	AuthorVersion string    `json:"author_version,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 }
 
 func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
+	slug := projectSlugFrom(r)
 	ref := r.PathValue("idOrSlug")
 	if ref == "" {
 		writeError(w, http.StatusBadRequest, "missing id or slug")
@@ -235,7 +300,7 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		JOIN areas    ar ON ar.id = a.area_id
 		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 		LIMIT 1
-	`, d.ProjectSlug, ref).Scan(
+	`, slug, ref).Scan(
 		&a.ID, &a.Slug, &a.Type, &a.Title, &a.AreaSlug,
 		&a.Completeness, &a.Status, &a.ReviewState,
 		&a.AuthorID, &publishedAt, &a.UpdatedAt,
@@ -260,6 +325,7 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
+	slug := projectSlugFrom(r)
 	q := r.URL.Query().Get("q")
 	if q == "" {
 		writeError(w, http.StatusBadRequest, "q is required")
@@ -296,7 +362,7 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 		JOIN areas     ar ON ar.id = a.area_id
 		ORDER BY s.distance
 		LIMIT 10
-	`, qVec, d.ProjectSlug)
+	`, qVec, slug)
 	if err != nil {
 		d.Logger.Error("search", "err", err)
 		writeError(w, http.StatusInternalServerError, "search failed")
@@ -327,8 +393,9 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 		out = append(out, h)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"query": q,
-		"hits":  out,
+		"query":        q,
+		"project_slug": slug,
+		"hits":         out,
 	})
 }
 
@@ -338,9 +405,10 @@ func (d Deps) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info := map[string]any{
-		"ok":      true,
-		"version": d.Version,
-		"project": d.ProjectSlug,
+		"ok":                   true,
+		"version":              d.Version,
+		"default_project_slug": d.DefaultProjectSlug,
+		"multi_project":        d.MultiProject,
 	}
 	if d.Embedder != nil {
 		ei := d.Embedder.Info()

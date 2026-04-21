@@ -10,7 +10,7 @@ type Load =
   | { kind: "ready"; data: DiffResp };
 
 export function Diff() {
-  const { slug = "" } = useParams<{ slug: string }>();
+  const { project = "", slug = "" } = useParams<{ project: string; slug: string }>();
   const [search] = useSearchParams();
   const fromRev = Number(search.get("from")) || undefined;
   const toRev = Number(search.get("to")) || undefined;
@@ -21,7 +21,7 @@ export function Diff() {
     let cancelled = false;
     (async () => {
       try {
-        const data = await api.diff(slug, fromRev, toRev);
+        const data = await api.diff(project, slug, fromRev, toRev);
         if (!cancelled) setState({ kind: "ready", data });
       } catch (err) {
         if (!cancelled) setState({ kind: "error", message: String(err) });
@@ -30,7 +30,7 @@ export function Diff() {
     return () => {
       cancelled = true;
     };
-  }, [slug, fromRev, toRev]);
+  }, [project, slug, fromRev, toRev]);
 
   if (state.kind === "loading") return <div className="reader-state">{t("wiki.loading")}</div>;
   if (state.kind === "error") {
@@ -47,9 +47,9 @@ export function Diff() {
     <main className="content">
       <article className="reader-article" style={{ maxWidth: 980 }}>
         <div className="crumbs">
-          <Link to={`/wiki/${slug}`}>{data.to.title}</Link>
+          <Link to={`/p/${project}/wiki/${slug}`}>{data.to.title}</Link>
           <ChevronRight className="lucide" />
-          <Link to={`/wiki/${slug}/history`}>{t("history.title")}</Link>
+          <Link to={`/p/${project}/wiki/${slug}/history`}>{t("history.title")}</Link>
           <ChevronRight className="lucide" />
           <span className="current">
             rev {data.from.revision_number} → rev {data.to.revision_number}

@@ -11,7 +11,7 @@ type Load =
   | { kind: "ready"; data: RevisionsResp };
 
 export function History() {
-  const { slug = "" } = useParams<{ slug: string }>();
+  const { project = "", slug = "" } = useParams<{ project: string; slug: string }>();
   const { t } = useI18n();
   const [state, setState] = useState<Load>({ kind: "loading" });
 
@@ -19,7 +19,7 @@ export function History() {
     let cancelled = false;
     (async () => {
       try {
-        const data = await api.revisions(slug);
+        const data = await api.revisions(project, slug);
         if (!cancelled) setState({ kind: "ready", data });
       } catch (err) {
         if (!cancelled) setState({ kind: "error", message: String(err) });
@@ -28,7 +28,7 @@ export function History() {
     return () => {
       cancelled = true;
     };
-  }, [slug]);
+  }, [project, slug]);
 
   if (state.kind === "loading") {
     return <div className="reader-state">{t("wiki.loading")}</div>;
@@ -47,7 +47,7 @@ export function History() {
     <main className="content">
       <article className="reader-article">
         <div className="crumbs">
-          <Link to={`/wiki/${slug}`}>{data.title}</Link>
+          <Link to={`/p/${project}/wiki/${slug}`}>{data.title}</Link>
           <ChevronRight className="lucide" />
           <span className="current">{t("history.title")}</span>
         </div>
@@ -61,7 +61,7 @@ export function History() {
             const av = agentAvatar(r.author_id);
             const previous = data.revisions[i + 1];
             const diffHref = previous
-              ? `/wiki/${slug}/diff?from=${previous.revision_number}&to=${r.revision_number}`
+              ? `/p/${project}/wiki/${slug}/diff?from=${previous.revision_number}&to=${r.revision_number}`
               : null;
             return (
               <li key={r.revision_number} style={{

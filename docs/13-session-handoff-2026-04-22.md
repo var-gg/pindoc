@@ -20,20 +20,43 @@
 ### M1.5 — Reader shell 풀 포팅
 - **[6195fa3]** GFM+Mermaid markdown, filter visibility, avatar placeholder, rendering contract
 
-### Phase 7 — Revision system (가장 최근)
+### Phase 7 — Revision system
 - `artifact_revisions` 테이블 + migration 0004
 - `propose.update_of` + `commit_msg` 업데이트 경로
 - Diff 엔진 (`internal/pindoc/diff/`) — unified + section_deltas
 - MCP tools: `pindoc.artifact.revisions`, `.diff`, `.summary_since`
-- HTTP: `GET /api/artifacts/:slug/revisions`, `GET /api/artifacts/:slug/diff`
-- UI: `/wiki/:slug/history`, `/wiki/:slug/diff?from=&to=`, Sidecar "최근 변경" 위젯
+- HTTP: `GET /api/artifacts/:slug/revisions`, `GET /api/artifacts/:slug/diff` (이후 Phase 8에서 `/api/p/:project/...` 로 이동)
+- UI: `/wiki/:slug/history`, `/wiki/:slug/diff?from=&to=` (이후 Phase 8에서 `/p/:project/wiki/...`)
 - PINDOC.md 템플릿에 update flow 문서화
+
+### Phase 8 — URL 멀티프로젝트 재구조화 (이번 세션, 2026-04-22)
+- **UI canonical**: `/p/:project/{wiki,tasks,graph,inbox}/...`. 모든 라우트 전환 완료.
+- **HTTP canonical**: `/api/p/:project/...` — 단일 프로젝트 detail은 `/api/p/:project` 로 단순화.
+- **인스턴스 레벨 엔드포인트**: `/api/config`, `/api/projects`, `/api/health`.
+- **레거시 redirect**: `/`, `/wiki/*`, `/tasks/*`, `/graph`, `/inbox` 모두 `/p/{default}/...` 로 302 (LegacyRedirect 컴포넌트가 `/api/config` 로 default 결정).
+- **MCP tool 신규**: `pindoc.project.create(slug, name, primary_language[, color, description])` — 프로젝트 row + `misc` area seed + canonical URL 반환.
+- **TopNav**: Project Switcher 드롭다운 실제로 열리게 구현. 현재 프로젝트 + 기타 프로젝트 목록 + "새 프로젝트는 에이전트에게 요청" 안내. inert placeholder 제거.
+- **env 토글**: `PINDOC_MULTI_PROJECT=true|false` — V1.5 권한 모델 확장 지점.
+- **Home 이동**: 기존 `/` Home 페이지는 `/design` 로 이동 (design-system preview scaffold 접근성 유지).
+- **PINDOC.md 템플릿**: URL 규약 섹션 추가, `pindoc.project.create` 호출 방법 명시.
+- **docs/03-architecture.md**: "URL convention" 섹션 신규.
+- **docs/12-m1-implementation-plan.md**: Phase 8 + V1.5 블록 기록.
+- **dead code 제거**: `web/src/routes/Wiki.tsx` (App.tsx가 ReaderShell로 대체한 뒤 고아 상태였음) 삭제.
 
 **git log oneline 확인**: `git log --oneline -20` 으로 전체 체인 보기.
 
 ---
 
-## 2. 다음 작업 — URL 멀티프로젝트 재구조화 (착수 승인됨)
+## 2. 다음 작업 — 실제 embedding 붙이기 (Phase 8 완료 후 다음)
+
+Phase 8 (URL 멀티프로젝트 재구조화)은 완료됨 — 하단 §5 참고. 다음 큰 블록:
+
+### 실제 embedding 붙이기
+- `services/embed-sidecar/` Python FastAPI 기동 + `PINDOC_EMBED_PROVIDER=http` 로 스위치.
+- 기존 artifact_chunks 재-embed 배치 (작은 스크립트 하나).
+- 스모크: `/api/p/pindoc/search?q=…` 한국어 쿼리에 의미 있는 답.
+
+### 아래는 Phase 8 계획 (완료됨 — 참고용 스냅샷)
 
 **배경**: 현재 URL `/wiki/:slug` 는 프로젝트 스코프가 없어서 동료 공유 시
 "받는 쪽의 현재 프로젝트"에 따라 다른 문서 열릴 수 있음. 다중 프로젝트는

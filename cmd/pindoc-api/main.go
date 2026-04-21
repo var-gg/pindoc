@@ -62,12 +62,13 @@ func main() {
 	}
 
 	handler := httpapi.New(cfg, httpapi.Deps{
-		DB:          pool,
-		Logger:      logger,
-		ProjectSlug: cfg.ProjectSlug,
-		Embedder:    embedder,
-		Version:     version,
-		BuildCommit: commit,
+		DB:                 pool,
+		Logger:             logger,
+		DefaultProjectSlug: cfg.ProjectSlug,
+		MultiProject:       cfg.MultiProject,
+		Embedder:           embedder,
+		Version:            version,
+		BuildCommit:        commit,
 	})
 
 	srv := &http.Server{

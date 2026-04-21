@@ -18,10 +18,10 @@ type Props = {
 };
 
 export function ReaderShell({ view }: Props) {
-  const { slug } = useParams<{ slug?: string }>();
+  const { project = "", slug } = useParams<{ project: string; slug?: string }>();
   const { t } = useI18n();
   const navigate = useNavigate();
-  const state = useReaderData(slug);
+  const state = useReaderData(project, slug);
   const [theme, setThemeState] = useState<Theme>(() => initTheme());
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -35,7 +35,7 @@ export function ReaderShell({ view }: Props) {
     setSelectedTypeState(view === "tasks" ? "Task" : null);
   }, [view]);
 
-  const baseRoute = view === "tasks" ? "/tasks" : "/wiki";
+  const baseRoute = `/p/${project}/${view === "tasks" ? "tasks" : "wiki"}`;
 
   // When the user filters via the sidebar we drop the currently-selected
   // artifact so the filter effect is visible (otherwise the reader body
@@ -99,12 +99,12 @@ export function ReaderShell({ view }: Props) {
     );
   }
 
-  const { project, areas, detail, types, agents } = state.data;
+  const { project: projectData, areas, detail, types, agents } = state.data;
 
   return (
     <div className="app-shell">
       <TopNav
-        project={project}
+        project={projectData}
         theme={theme}
         onToggleTheme={toggleTheme}
         onOpenPalette={() => setPaletteOpen(true)}
@@ -124,26 +124,29 @@ export function ReaderShell({ view }: Props) {
         />
         <Body
           view={view}
+          projectSlug={project}
           detail={detail}
           list={filteredArtifacts}
           currentSlug={slug}
           selectedType={selectedType}
         />
-        <Sidecar detail={view === "reader" || view === "tasks" ? detail : null} />
+        <Sidecar projectSlug={project} detail={view === "reader" || view === "tasks" ? detail : null} />
       </div>
-      <CmdK open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <CmdK projectSlug={project} open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   );
 }
 
 function Body({
   view,
+  projectSlug,
   detail,
   list,
   currentSlug,
   selectedType,
 }: {
   view: ReaderView;
+  projectSlug: string;
   detail: Artifact | null;
   list: ArtifactRef[];
   currentSlug: string | undefined;
@@ -207,7 +210,7 @@ function Body({
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {list.map((a) => {
-              const linkBase = view === "tasks" ? "/tasks" : "/wiki";
+              const linkBase = `/p/${projectSlug}/${view === "tasks" ? "tasks" : "wiki"}`;
               const isActive = currentSlug === a.slug;
               return (
                 <Link

@@ -54,6 +54,7 @@ func NewServer(opts Options) *Server {
 		Embedder:     opts.Embedder,
 	}
 	tools.RegisterProjectCurrent(s, deps)
+	tools.RegisterProjectCreate(s, deps)
 	tools.RegisterAreaList(s, deps)
 	tools.RegisterArtifactRead(s, deps)
 
@@ -81,6 +82,7 @@ func (s *Server) Run(ctx context.Context, transport sdk.Transport) error {
 		"tools", []string{
 			"pindoc.ping",
 			"pindoc.project.current",
+			"pindoc.project.create",
 			"pindoc.area.list",
 			"pindoc.artifact.read",
 			"pindoc.artifact.propose",

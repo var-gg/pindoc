@@ -5,11 +5,12 @@ import { api, type SearchHit } from "../api/client";
 import { useI18n } from "../i18n";
 
 type Props = {
+  projectSlug: string;
   open: boolean;
   onClose: () => void;
 };
 
-export function CmdK({ open, onClose }: Props) {
+export function CmdK({ projectSlug, open, onClose }: Props) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -27,7 +28,7 @@ export function CmdK({ open, onClose }: Props) {
     return;
   }, [open]);
 
-  // Debounced search against /api/search.
+  // Debounced search against the project-scoped search endpoint.
   useEffect(() => {
     if (!open) return;
     const q = query.trim();
@@ -38,7 +39,7 @@ export function CmdK({ open, onClose }: Props) {
     }
     const id = window.setTimeout(async () => {
       try {
-        const res = await api.search(q);
+        const res = await api.search(projectSlug, q);
         setHits(res.hits);
         setNotice(res.notice);
         setSelected(0);
@@ -48,7 +49,7 @@ export function CmdK({ open, onClose }: Props) {
       }
     }, 150);
     return () => window.clearTimeout(id);
-  }, [open, query]);
+  }, [open, query, projectSlug]);
 
   useEffect(() => {
     if (!open) return;
@@ -72,14 +73,14 @@ export function CmdK({ open, onClose }: Props) {
         e.preventDefault();
         const hit = hits[selected];
         if (hit) {
-          navigate(`/wiki/${hit.slug}`);
+          navigate(`/p/${projectSlug}/wiki/${hit.slug}`);
           onClose();
         }
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, hits, selected, navigate, onClose]);
+  }, [open, hits, selected, navigate, onClose, projectSlug]);
 
   if (!open) return null;
 
@@ -108,7 +109,7 @@ export function CmdK({ open, onClose }: Props) {
               key={hit.artifact_id}
               className={`palette__item${i === selected ? " selected" : ""}`}
               onClick={() => {
-                navigate(`/wiki/${hit.slug}`);
+                navigate(`/p/${projectSlug}/wiki/${hit.slug}`);
                 onClose();
               }}
               onMouseEnter={() => setSelected(i)}

@@ -30,7 +30,7 @@ export type LoadState =
   | { kind: "error"; message: string }
   | { kind: "ready"; data: ReaderData };
 
-export function useReaderData(slug?: string): LoadState {
+export function useReaderData(projectSlug: string, slug?: string): LoadState {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
 
   useEffect(() => {
@@ -38,9 +38,9 @@ export function useReaderData(slug?: string): LoadState {
     (async () => {
       try {
         const [project, areasResp, listResp] = await Promise.all([
-          api.currentProject(),
-          api.areas(),
-          api.artifacts(),
+          api.project(projectSlug),
+          api.areas(projectSlug),
+          api.artifacts(projectSlug),
         ]);
         // Only load detail when a slug is explicitly requested. The
         // handoff's intended navigation is ⌘K-first; auto-loading the
@@ -49,7 +49,7 @@ export function useReaderData(slug?: string): LoadState {
         // type filter entirely.
         let detail: Artifact | null = null;
         if (slug) {
-          detail = await api.artifact(slug);
+          detail = await api.artifact(projectSlug, slug);
         }
         if (cancelled) return;
 
@@ -72,7 +72,7 @@ export function useReaderData(slug?: string): LoadState {
     return () => {
       cancelled = true;
     };
-  }, [slug]);
+  }, [projectSlug, slug]);
 
   return state;
 }

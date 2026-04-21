@@ -147,3 +147,34 @@ claude mcp list           # pindoc 있음
 
 이 문서는 **진행하면서 계속 업데이트**. 각 Phase 끝날 때마다 "exit 조건 달성
 여부 + 다음 Phase 조정 사항" 기록.
+
+## Phase 8 — URL multi-project restructure (완료 · 2026-04-22)
+
+멀티 프로젝트를 공식 V1.5로 미루되 **URL 구조만** 지금 박아서 나중에 URL 깨지지
+않게 하는 중간 단계.
+
+- 모든 UI 경로에 `/p/:project/` 접두사 (`/p/pindoc/wiki/...` 같은 형태)
+- 모든 HTTP API를 `/api/p/:project/...` 로 이동 — 추가로 `/api/config`,
+  `/api/projects` 인스턴스 레벨 엔드포인트
+- `pindoc.project.create(slug, name, primary_language[, color, description])`
+  MCP tool — 새 프로젝트 DB 생성 + `misc` area seed
+- `/wiki/...`, `/tasks/...`, `/graph`, `/inbox`, `/` 모두 기본 프로젝트로 302
+- TopNav Project Switcher 드롭다운 활성화 (현재 프로젝트 목록 + "새 프로젝트는
+  에이전트에게" 안내)
+- `PINDOC_MULTI_PROJECT=true|false` env — V1.5 권한 모델 확장 지점
+- Home / design-system 스캐폴드는 `/design`, `/design/preview/:slug` 로 이동
+
+## V1.5 — 인증 + 멀티프로젝트 권한 (다음 큰 블록)
+
+URL 구조는 이미 준비됨. V1.5에서 그 위에:
+
+- **GitHub OAuth 로그인** — self-host 인스턴스 기준 (03-architecture.md §배포 B)
+- **Agent token** — per-project, 사용자가 Settings에서 발급 / rotate / revoke
+- **초대 플로우** — project admin이 email/username 초대 → role 부여
+- **권한 모델**: `admin | writer | approver | reader` per (user, project)
+- **진짜 `pindoc init` CLI** — 지금 seed migration이 하는 역할을 proper CLI 로
+  분리 (언어 선택 + 에이전트 클라이언트 자동 감지 + .mcp.json 패치)
+- **Project Switcher UI 확장**: V1.5에선 삭제/아카이브 + 멤버 목록
+
+이 블록들은 URL 구조를 재설계하지 않는다. 기존 `/p/:project/...` 위에 auth
+middleware만 얹는 형태.

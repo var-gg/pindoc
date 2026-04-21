@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Link, NavLink, Outlet, Route, Routes, useParams } from "react-router";
+import { useEffect, useState } from "react";
+import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation, useParams } from "react-router";
+import { api } from "./api/client";
 import { useI18n } from "./i18n";
 import { Diff } from "./reader/Diff";
 import { History } from "./reader/History";
@@ -9,29 +10,41 @@ import { findSurface, previews, uiKits } from "./surfaces";
 export function App() {
   return (
     <Routes>
-      <Route element={<ShellLayout />}>
+      {/* Design-system scaffold. Lives at /design so the bare root can
+          canonical-redirect to a project-scoped URL. */}
+      <Route path="/design" element={<ShellLayout />}>
         <Route index element={<Home />} />
-        <Route path="/preview/:slug" element={<EmbeddedPreview />} />
+        <Route path="preview/:slug" element={<EmbeddedPreview />} />
       </Route>
       <Route path="/ui/:slug" element={<UiKitViewport />} />
 
-      {/* Phase 4 React-ified surfaces. ReaderShell owns top nav + sidebar
-          + sidecar so every live surface shares the design-system chrome. */}
-      <Route path="/wiki" element={<ReaderShell view="reader" />} />
-      <Route path="/wiki/:slug" element={<ReaderShell view="reader" />} />
-      <Route path="/wiki/:slug/history" element={<History />} />
-      <Route path="/wiki/:slug/diff" element={<Diff />} />
-      <Route path="/tasks" element={<ReaderShell view="tasks" />} />
-      <Route path="/tasks/:slug" element={<ReaderShell view="tasks" />} />
-      <Route path="/graph" element={<ReaderShell view="graph" />} />
-      <Route path="/inbox" element={<ReaderShell view="inbox" />} />
+      {/* Canonical project-scoped surfaces. Every live path carries /p/:project
+          so URLs are shareable without ambient project context. */}
+      <Route path="/p/:project/wiki" element={<ReaderShell view="reader" />} />
+      <Route path="/p/:project/wiki/:slug" element={<ReaderShell view="reader" />} />
+      <Route path="/p/:project/wiki/:slug/history" element={<History />} />
+      <Route path="/p/:project/wiki/:slug/diff" element={<Diff />} />
+      <Route path="/p/:project/tasks" element={<ReaderShell view="tasks" />} />
+      <Route path="/p/:project/tasks/:slug" element={<ReaderShell view="tasks" />} />
+      <Route path="/p/:project/graph" element={<ReaderShell view="graph" />} />
+      <Route path="/p/:project/inbox" element={<ReaderShell view="inbox" />} />
+
+      {/* Legacy paths redirect to the default project's equivalent URL. Keeps
+          old shares, old bookmarks, and the seed PINDOC.md pointer working. */}
+      <Route path="/wiki/*" element={<LegacyRedirect base="wiki" />} />
+      <Route path="/tasks/*" element={<LegacyRedirect base="tasks" />} />
+      <Route path="/graph" element={<LegacyRedirect base="graph" />} />
+      <Route path="/inbox" element={<LegacyRedirect base="inbox" />} />
+
+      {/* Bare root. / redirects to /p/:default/wiki. */}
+      <Route path="/" element={<LegacyRedirect base="wiki" />} />
     </Routes>
   );
 }
 
 function ShellLayout() {
-  // Wraps Home + design-system preview cards. Live surfaces use their own
-  // reader shell (ReaderShell) which mounts directly under the top-level
+  // Wraps /design Home + design-system preview cards. Live surfaces use their
+  // own Reader shell (ReaderShell) which mounts directly under the top-level
   // Routes, not under this scaffold.
   const { t, lang, setLang } = useI18n();
   return (
@@ -43,10 +56,7 @@ function ShellLayout() {
         </header>
         <nav>
           <p className="m1-shell__group">{t("nav.live_data")}</p>
-          <NavLink to="/wiki" className="m1-shell__link">{t("nav.wiki_reader")}</NavLink>
-          <NavLink to="/tasks" className="m1-shell__link">{t("nav.tasks")}</NavLink>
-          <NavLink to="/graph" className="m1-shell__link">{t("nav.graph")}</NavLink>
-          <NavLink to="/inbox" className="m1-shell__link">{t("nav.inbox")}</NavLink>
+          <Link to="/" className="m1-shell__link">{t("nav.wiki_reader")}</Link>
           <p className="m1-shell__group">{t("nav.ui_kits")}</p>
           {uiKits.map((s) => (
             <Link key={s.slug} to={`/ui/${s.slug}`} className="m1-shell__link">
@@ -56,7 +66,7 @@ function ShellLayout() {
           ))}
           <p className="m1-shell__group">{t("nav.design_refs")}</p>
           {previews.map((s) => (
-            <NavLink key={s.slug} to={`/preview/${s.slug}`} className="m1-shell__link">
+            <NavLink key={s.slug} to={`/design/preview/${s.slug}`} className="m1-shell__link">
               {s.label}
             </NavLink>
           ))}
@@ -108,7 +118,7 @@ function Home() {
         </li>
         <li>
           <strong>Design-system references</strong> open here in this shell
-          (<code>/preview/*</code>) because they are small swatches —
+          (<code>/design/preview/*</code>) because they are small swatches —
           Typography, Neutral ramp, Components, etc.
         </li>
       </ul>
@@ -117,6 +127,67 @@ function Home() {
       </p>
     </article>
   );
+}
+
+// LegacyRedirect resolves the server's default project slug once and rewrites
+// /wiki/foo → /p/:default/wiki/foo. It fires on:
+//   - /            (bare root)
+//   - /wiki/...    (legacy pointer in PINDOC.md + old shares)
+//   - /tasks/...   (same)
+//   - /graph, /inbox
+// Purpose: keep URL shares from the pre-multiproject era working while every
+// canonical link migrates to the /p/:project/… shape.
+function LegacyRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "inbox" }) {
+  const location = useLocation();
+  const [target, setTarget] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const { t } = useI18n();
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const cfg = await api.config();
+        if (cancelled) return;
+        const tail = trimLegacyPrefix(location.pathname, base);
+        const suffix = tail ? `/${tail}` : "";
+        const search = location.search || "";
+        setTarget(`/p/${cfg.default_project_slug}/${base}${suffix}${search}`);
+      } catch (e) {
+        if (!cancelled) setErr(String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [base, location.pathname, location.search]);
+
+  if (err) {
+    return (
+      <div className="reader-state reader-state--error">
+        <strong>{t("wiki.error_title")}</strong>
+        <p>{err}</p>
+        <p>
+          {t("wiki.error_hint_prefix")} <code>{t("wiki.error_hint_cmd")}</code>{" "}
+          {t("wiki.error_hint_suffix")}
+        </p>
+      </div>
+    );
+  }
+  if (!target) {
+    return <div className="reader-state">{t("wiki.loading")}</div>;
+  }
+  return <Navigate to={target} replace />;
+}
+
+function trimLegacyPrefix(pathname: string, base: string): string {
+  // Strip leading "/" + base + optional "/" so the suffix is the artifact
+  // slug / sub-path the new route expects.
+  const p = pathname.replace(/^\/+/, "");
+  if (p === base) return "";
+  if (p.startsWith(`${base}/`)) return p.slice(base.length + 1);
+  // Bare root ("/") falls through here — "p" is "" after the strip.
+  return "";
 }
 
 function EmbeddedPreview() {
@@ -156,7 +227,7 @@ function UiKitViewport() {
   return (
     <div className="uikit">
       <header className="uikit__bar">
-        <Link to="/" className="uikit__back">◀ M1 home</Link>
+        <Link to="/design" className="uikit__back">◀ M1 home</Link>
         <div className="uikit__title">
           <span>{surface.label}</span>
           {surface.sublabel && <span className="uikit__sub">{surface.sublabel}</span>}
@@ -204,7 +275,7 @@ function NotFound({ slug }: { slug: string | undefined }) {
         <code>{slug}</code> is not a known surface. Check <code>src/surfaces.ts</code>.
       </p>
       <p>
-        <Link to="/">Back to M1 home</Link>
+        <Link to="/design">Back to M1 home</Link>
       </p>
     </article>
   );
