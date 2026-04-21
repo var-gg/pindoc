@@ -19,6 +19,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/var-gg/pindoc/internal/pindoc/config"
+	"github.com/var-gg/pindoc/internal/pindoc/db"
 	pmcp "github.com/var-gg/pindoc/internal/pindoc/mcp"
 )
 
@@ -53,11 +54,25 @@ func main() {
 		os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		logger.Error("db open failed", "err", err, "dsn_hint", "is docker compose up -d db running?")
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	if err := db.Migrate(ctx, pool.Pool); err != nil {
+		logger.Error("db migrate failed", "err", err)
+		os.Exit(1)
+	}
+	logger.Info("db ready", "migrations", "applied")
+
 	server := pmcp.NewServer(pmcp.Options{
 		Name:    "pindoc",
 		Version: version,
 		Logger:  logger,
 		Config:  cfg,
+		DB:      pool,
 	})
 
 	err = server.Run(ctx, &sdk.StdioTransport{})

@@ -12,6 +12,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/var-gg/pindoc/internal/pindoc/config"
+	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/mcp/tools"
 )
 
@@ -20,6 +21,7 @@ type Options struct {
 	Version string
 	Logger  *slog.Logger
 	Config  *config.Config
+	DB      *db.Pool
 }
 
 type Server struct {
