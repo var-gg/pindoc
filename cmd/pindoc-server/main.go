@@ -9,9 +9,11 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -58,9 +60,26 @@ func main() {
 		Config:  cfg,
 	})
 
-	if err := server.Run(ctx, &sdk.StdioTransport{}); err != nil && !errors.Is(err, context.Canceled) {
+	err = server.Run(ctx, &sdk.StdioTransport{})
+	switch {
+	case err == nil,
+		errors.Is(err, context.Canceled),
+		errors.Is(err, io.EOF),
+		// The SDK wraps its close signal as a non-typed error on Windows;
+		// fall back to a substring check so clean disconnects don't log
+		// at ERROR and trip on-disconnect alerting when we wire that up.
+		err != nil && strings.Contains(err.Error(), "server is closing"):
+		logger.Info("pindoc-server stopped cleanly", "reason", errReason(err))
+		return
+	default:
 		logger.Error("server exited with error", "err", err)
 		os.Exit(1)
 	}
-	logger.Info("pindoc-server stopped cleanly")
+}
+
+func errReason(err error) string {
+	if err == nil {
+		return "context done"
+	}
+	return err.Error()
 }
