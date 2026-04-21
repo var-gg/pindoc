@@ -144,10 +144,72 @@ sensitive_ops 판정
 
 Decision(ADR), Analysis, Debug, Flow, Task, TC, Glossary.
 
-각 타입의 body 스키마는 지면 절약을 위해 생략 (구현 시 재사용). 주요 원칙:
+주요 원칙:
 - 각 타입별 **필수 필드** 존재 (포맷 드리프트 방지)
 - `Hypothesis` (Debug), `Alternative` (ADR) 등 중첩 구조 허용
 - Mermaid 다이어그램은 `Flow` 타입에 **필수**
+
+대부분 타입의 body 스키마는 지면 절약을 위해 생략 (구현 시 재사용). **Task는 운영 축이 얽혀있어 명시**:
+
+### Task body 스키마
+
+```
+Task.body {
+  title: string,                      // 필수, ≤120 chars
+  description: string,                // 필수, markdown
+  acceptance_criteria: string[],       // 완료 조건 체크리스트
+
+  status: "todo" | "in_progress" | "done" | "archived",
+  priority: "p0" | "p1" | "p2" | "p3",   // p0=blocker, p3=nice-to-have
+  assignee: AgentRef | UserRef | null,    // 에이전트도 assignee 가능 (자율 에이전트 환경)
+
+  implements: ArtifactRef[],          // Feature/Debug/ADR 등을 구현 (graph edge)
+  blocked_by: ArtifactRef[],          // 다른 Task 또는 Debug에 블록 (graph edge)
+
+  estimated_effort: "xs" | "s" | "m" | "l" | "xl" | null,  // T-shirt size, optional
+  due_date: date | null,              // ISO date, optional
+
+  // 에이전트 수행 맥락
+  agent_attempts: AgentAttempt[],     // 에이전트가 이 Task를 잡았다가 놓은 이력
+  resolution_artifact: ArtifactRef?,  // 완료 시 생성된 산출물 (예: 이 Task로 만든 Feature)
+}
+
+AgentAttempt {
+  agent: AgentRef,                    // claude-code-xxx 등
+  started_at, ended_at,
+  outcome: "done" | "blocked" | "abandoned",
+  note?: string                       // Harness 주도 자동 기록
+}
+```
+
+### Task 상태 머신
+
+```
+todo ─▶ in_progress ─▶ done
+  │         │            │
+  └─────────┴──▶ archived ◀──┘
+```
+
+전이 규칙:
+- `todo → in_progress`: 에이전트가 assignee로 잡을 때 자동
+- `in_progress → done`: `acceptance_criteria` 전부 체크 + (선택) `resolution_artifact` 연결
+- `* → archived`: 명시적 요청 (sensitive_op, Review Queue)
+- `done → archived`: 허용 (히스토리 정리)
+- `archived → *`: 금지 (새 Task로 재생성)
+
+### Task 전용 Pre-flight
+
+`varn.artifact.propose(type=Task, ...)` 호출 시 서버 체크:
+- `acceptance_criteria.length ≥ 1` (모호한 Task 방지)
+- `implements[]` 또는 `area` 중 최소 하나 존재 (고아 Task 방지)
+- `priority` 명시 (p0~p3, default=p2)
+- `assignee` 미지정 허용 (백로그 성격)
+
+### V1 Scope 제약
+
+- **칸반 보드는 V1 out-of-scope** ([08-non-goals.md](08-non-goals.md)). V1 UI는 리스트 + 필터(status/priority/assignee/area)로만.
+- Sprint / burndown / velocity 없음. Jira/Linear 대체 아님.
+- Task는 **Artifact로서의 1급 시민** — 모든 edge / Fast Landing / Search가 동일하게 작동.
 
 ## Artifact Types — Tier B (Domain Pack)
 

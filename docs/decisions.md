@@ -27,6 +27,11 @@
 | 2026-04-21 | **AGENTS.md (복수) 통일** | OpenAI Codex 공식 컨벤션 준수. | [03 §MCP Layer](03-architecture.md) |
 | 2026-04-21 | **UI 영감원: Linear + Obsidian + GitHub PR + Cmd+K** | 현대 Wiki UX 표준 반영. | [06 §영감원](06-ui-flows.md) |
 | 2026-04-21 | **상태 UI 뱃지 4단계 단순화** | 내부 3축(completeness/status/review_state)은 유지하되 UI는 draft/live/stale/archived 로 축약. | [06 §상태뱃지](06-ui-flows.md), [04 §3축](04-data-model.md) |
+| 2026-04-21 | **Embedding: BGE-M3 default + pluggable provider** | Pluggable 추상화 + BGE-M3 self-host 기본. Cohere/OpenAI/Voyage는 선택지. 근거: MIRACL 70.0 (동급 중 multilingual 최고), dense+sparse+multi-vector 단일 모델, Apache 2.0, 한/영/코드 혼합 환경 fit, OSS 철학 일치. Managed(V2 Hosted)는 Cohere embed-multilingual-v3 default. | [03 §Resource Index](03-architecture.md), [04 §Embedding](04-data-model.md) |
+| 2026-04-21 | **Task body schema 확정** | Tier A 중 운영 축 얽힌 타입이라 body/상태머신/pre-flight 명시. 칸반은 V1 out, 리스트+필터만. | [04 §Task](04-data-model.md), [08 §Jira대체](08-non-goals.md) |
+| 2026-04-21 | **MCP 클라 범위 2단계** | Dogfooding(M1~M3) = Claude Code only. V1 공개(M4) = Claude Code / Cursor / Codex / Cline 4개 자동 감지. 나머지 manual guide. | [03 §Harness Install](03-architecture.md), [07 §V1 Milestones](07-roadmap.md) |
+| 2026-04-21 | **Conflict threshold V1 하드코딩** | HARD 0.85 / SOFT 0.70. V1.1에 Project Settings tunable. 판정 이력은 Event 로 기록. | [05 §Conflict](05-mechanisms.md), [07 §V1.1](07-roadmap.md) |
+| 2026-04-21 | **Meta-dogfooding V1 M1 즉시 착수** | Pindoc MCP 로컬 → Pindoc 자체 repo(A:\vargg-workspace\pindoc) 에 Harness 붙여 dogfooding. 외부 공개 전 개선 사이클의 동력. | [07 §Launch Criteria](07-roadmap.md) |
 
 ---
 
@@ -36,23 +41,14 @@
 
 ### P0 — V1 착수 전
 
-#### Q1. pgvector 임베딩 모델 선택
-한국어↔영어 혼용 환경에서 충분히 성능 내는 오픈/무료 모델은? 후보: `bge-m3`, `multilingual-e5-large`, OpenAI `text-embedding-3-small` (유료).
-- **영향**: F6 해결의 품질 결정
-- **결정 시점**: M1 (데이터 모델 + MCP 스켈레톤) 중
-- **담당**: 구현자 + 저자 테스트
+#### Q1. ~~pgvector 임베딩 모델 선택~~ ✅ **Resolved 2026-04-21**
+→ BGE-M3 default + pluggable provider. Resolved Decisions 섹션 참조.
 
-#### Q2. `pindoc init` 의 MCP 클라이언트 자동 감지 범위
-Claude Code / Cursor / Cline / Codex 4개 외에 V1에 더 포함? (Zed, Windsurf, Aider 등)
-- **영향**: Onboarding 마찰, 문서화 범위
-- **결정 시점**: M2 (Harness install 구현) 전
-- **현 추천**: V1 4개 + "나머지는 manual config copy-paste 가이드"
+#### Q2. ~~`pindoc init` 의 MCP 클라이언트 자동 감지 범위~~ ✅ **Resolved 2026-04-21**
+→ **Dogfooding (V1 M1~M3)**: Claude Code only. **V1 공개 (M4)**: Claude Code / Cursor / Codex / Cline 4개 자동 감지 + AGENTS.md / CLAUDE.md / .cursorrules 자동 주입. 나머지(Zed/Windsurf/Aider)는 manual guide.
 
-#### Q3. Conflict Check threshold (0.85 / 0.7) 기본값 적절성
-현재 하드코딩. 팀·도메인·언어별 민감도 다를 것.
-- **영향**: False positive → 에이전트 루프 증가, False negative → 중복 artifact
-- **결정 시점**: Solo dogfooding 후 조정
-- **현 추천**: V1 하드코딩으로 시작, V1.1 Settings 에 tunable 추가
+#### Q3. ~~Conflict Check threshold (0.85 / 0.7) 기본값 적절성~~ ✅ **Resolved 2026-04-21**
+→ V1 하드코딩(HARD 0.85 / SOFT 0.70)으로 시작, dogfooding 중 관찰. V1.1에 Project-level Settings tunable 추가. Threshold 판정 이력은 Event 로 기록해 사후 튜닝 근거 수집.
 
 ### P1 — V1 구현 중
 
