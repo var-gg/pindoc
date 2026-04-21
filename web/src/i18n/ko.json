@@ -17,6 +17,7 @@
   "wiki.error_hint_suffix": "(127.0.0.1:5831 에서 대기).",
   "wiki.section_areas": "Area",
   "wiki.section_artifacts": "Artifact",
+  "wiki.area_all": "전체",
   "wiki.empty_list": "아직 artifact가 없습니다. pindoc.artifact.propose 로 하나 작성하세요.",
   "wiki.empty_detail": "artifact를 선택하세요.",
   "wiki.meta_artifacts": "artifact %s개 · %s",

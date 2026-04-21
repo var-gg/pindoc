@@ -17,6 +17,7 @@
   "wiki.error_hint_suffix": "(listens on 127.0.0.1:5831).",
   "wiki.section_areas": "Areas",
   "wiki.section_artifacts": "Artifacts",
+  "wiki.area_all": "All",
   "wiki.empty_list": "No artifacts yet. Write one via pindoc.artifact.propose.",
   "wiki.empty_detail": "Pick an artifact.",
   "wiki.meta_artifacts": "%s artifacts · %s",

@@ -11,6 +11,7 @@ type LoadState =
 export function WikiRoute() {
   const params = useParams<{ slug?: string }>();
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [selectedArea, setSelectedArea] = useState<string | null>(null);
   const { t } = useI18n();
 
   useEffect(() => {
@@ -63,6 +64,9 @@ export function WikiRoute() {
   }
 
   const { project, areas, list, detail } = state;
+  const filteredList = selectedArea
+    ? list.filter((a) => a.area_slug === selectedArea)
+    : list;
   return (
     <div className="wiki">
       <aside className="wiki__nav">
@@ -78,10 +82,28 @@ export function WikiRoute() {
         <section>
           <h3>{t("wiki.section_areas")}</h3>
           <ul className="wiki__areas">
+            <li>
+              <button
+                type="button"
+                className={`wiki__area-btn ${selectedArea === null ? "is-active" : ""}`}
+                onClick={() => setSelectedArea(null)}
+              >
+                <span className="wiki__area-name">{t("wiki.area_all")}</span>
+                <span className="wiki__area-count">{list.length}</span>
+              </button>
+            </li>
             {areas.map((a) => (
               <li key={a.id} className={a.is_cross_cutting ? "is-cross" : undefined}>
-                <span className="wiki__area-name">{a.name}</span>
-                <span className="wiki__area-count">{a.artifact_count}</span>
+                <button
+                  type="button"
+                  className={`wiki__area-btn ${selectedArea === a.slug ? "is-active" : ""}`}
+                  onClick={() =>
+                    setSelectedArea((prev) => (prev === a.slug ? null : a.slug))
+                  }
+                >
+                  <span className="wiki__area-name">{a.name}</span>
+                  <span className="wiki__area-count">{a.artifact_count}</span>
+                </button>
               </li>
             ))}
           </ul>
@@ -89,8 +111,8 @@ export function WikiRoute() {
         <section>
           <h3>{t("wiki.section_artifacts")}</h3>
           <ul className="wiki__list">
-            {list.length === 0 && <li className="wiki__empty">{t("wiki.empty_list")}</li>}
-            {list.map((a) => (
+            {filteredList.length === 0 && <li className="wiki__empty">{t("wiki.empty_list")}</li>}
+            {filteredList.map((a) => (
               <li key={a.id} className={detail?.id === a.id ? "is-active" : undefined}>
                 <Link to={`/wiki/${a.slug}`}>
                   <span className="wiki__chip">{a.type}</span>
