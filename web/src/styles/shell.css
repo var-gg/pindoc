@@ -361,6 +361,59 @@ body {
   color: var(--fg-3);
 }
 
+.wiki__surface-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+}
+
+.wiki__tab {
+  flex: 1 1 auto;
+  text-align: center;
+  padding: 4px 6px;
+  border-radius: var(--r-2);
+  color: var(--fg-2);
+  text-decoration: none;
+  font-size: var(--fs-sm);
+  font-family: var(--font-mono);
+}
+
+.wiki__tab:hover {
+  color: var(--fg-0);
+  background: var(--bg-3);
+}
+
+.wiki__tab.active {
+  background: var(--bg-0);
+  color: var(--fg-0);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.wiki__tab-count {
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+  margin-left: 4px;
+}
+
+.wiki__stub {
+  padding: var(--sp-6);
+  max-width: 66ch;
+  line-height: var(--lh-reader);
+}
+
+.wiki__stub h1 {
+  font-size: var(--fs-2xl);
+  margin: 0 0 var(--sp-3);
+}
+
+.wiki__stub a {
+  color: var(--accent);
+}
+
 .wiki__nav h3 {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);

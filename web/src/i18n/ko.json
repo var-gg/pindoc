@@ -4,6 +4,9 @@
   "nav.design_refs": "디자인 시스템 참조",
   "nav.bundle_docs": "번들 문서",
   "nav.wiki_reader": "Wiki Reader",
+  "nav.tasks": "Task",
+  "nav.graph": "Graph",
+  "nav.inbox": "Inbox",
   "nav.design_readme": "디자인 README",
   "nav.design_skill": "디자인 SKILL",
 
@@ -23,6 +26,11 @@
   "wiki.meta_artifacts": "artifact %s개 · %s",
   "wiki.written_by": "%s 작성",
   "wiki.published": "%s 발행",
+  "wiki.empty_tasks": "아직 Task가 없습니다. 에이전트에게 \"~~를 Task로 만들어줘\"라고 요청하세요.",
+  "wiki.empty_tasks_detail": "왼쪽 목록에서 Task를 선택하거나 에이전트에게 새로 만들라고 요청하세요.",
+  "wiki.stub_graph": "Graph 화면은 아직 Claude Design의 HTML prototype 상태입니다. M1.5에서 @xyflow/react로 React화 예정.",
+  "wiki.stub_graph_preview": "Graph prototype 열기 →",
+  "wiki.stub_inbox": "처리 대기 중인 sensitive-op 리뷰가 없습니다. review_state=pending_review 일 때만 여기 나타납니다 (auto-publish는 거치지 않음).",
 
   "lang.switch": "언어",
   "lang.en": "English",

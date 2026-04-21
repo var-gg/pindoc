@@ -12,8 +12,12 @@ export function App() {
         <Route path="/preview/:slug" element={<EmbeddedPreview />} />
       </Route>
       <Route path="/ui/:slug" element={<UiKitViewport />} />
-      <Route path="/wiki" element={<WikiRoute />} />
-      <Route path="/wiki/:slug" element={<WikiRoute />} />
+      <Route path="/wiki" element={<WikiRoute view="reader" />} />
+      <Route path="/wiki/:slug" element={<WikiRoute view="reader" />} />
+      <Route path="/tasks" element={<WikiRoute view="tasks" />} />
+      <Route path="/tasks/:slug" element={<WikiRoute view="tasks" />} />
+      <Route path="/graph" element={<WikiRoute view="graph" />} />
+      <Route path="/inbox" element={<WikiRoute view="inbox" />} />
     </Routes>
   );
 }
@@ -32,6 +36,9 @@ function ShellLayout() {
         <nav>
           <p className="m1-shell__group">{t("nav.live_data")}</p>
           <NavLink to="/wiki" className="m1-shell__link">{t("nav.wiki_reader")}</NavLink>
+          <NavLink to="/tasks" className="m1-shell__link">{t("nav.tasks")}</NavLink>
+          <NavLink to="/graph" className="m1-shell__link">{t("nav.graph")}</NavLink>
+          <NavLink to="/inbox" className="m1-shell__link">{t("nav.inbox")}</NavLink>
           <p className="m1-shell__group">{t("nav.ui_kits")}</p>
           {uiKits.map((s) => (
             <Link key={s.slug} to={`/ui/${s.slug}`} className="m1-shell__link">

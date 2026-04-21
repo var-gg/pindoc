@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, NavLink, useParams } from "react-router";
 import { api, type Area, type Artifact, type ArtifactRef, type Project } from "../api/client";
 import { useI18n } from "../i18n";
+
+type View = "reader" | "tasks" | "graph" | "inbox";
 
 type LoadState =
   | { kind: "loading" }
   | { kind: "error"; message: string }
   | { kind: "ready"; project: Project; areas: Area[]; list: ArtifactRef[]; detail: Artifact | null };
 
-export function WikiRoute() {
+export function WikiRoute({ view }: { view: View }) {
   const params = useParams<{ slug?: string }>();
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [selectedArea, setSelectedArea] = useState<string | null>(null);
@@ -24,10 +26,14 @@ export function WikiRoute() {
           api.artifacts(),
         ]);
         let detail: Artifact | null = null;
+        const typeFilter = view === "tasks" ? "Task" : null;
+        const scoped = typeFilter
+          ? listResp.artifacts.filter((a) => a.type === typeFilter)
+          : listResp.artifacts;
         if (params.slug) {
           detail = await api.artifact(params.slug);
-        } else if (listResp.artifacts.length > 0) {
-          detail = await api.artifact(listResp.artifacts[0]!.slug);
+        } else if (scoped.length > 0 && view !== "graph" && view !== "inbox") {
+          detail = await api.artifact(scoped[0]!.slug);
         }
         if (cancelled) return;
         setState({
@@ -45,7 +51,7 @@ export function WikiRoute() {
     return () => {
       cancelled = true;
     };
-  }, [params.slug]);
+  }, [params.slug, view]);
 
   if (state.kind === "loading") {
     return <div className="wiki__state">{t("wiki.loading")}</div>;
@@ -64,9 +70,12 @@ export function WikiRoute() {
   }
 
   const { project, areas, list, detail } = state;
+  const typeFilter = view === "tasks" ? "Task" : null;
+  const scopedList = typeFilter ? list.filter((a) => a.type === typeFilter) : list;
   const filteredList = selectedArea
-    ? list.filter((a) => a.area_slug === selectedArea)
-    : list;
+    ? scopedList.filter((a) => a.area_slug === selectedArea)
+    : scopedList;
+
   return (
     <div className="wiki">
       <aside className="wiki__nav">
@@ -79,6 +88,14 @@ export function WikiRoute() {
             </div>
           </div>
         </header>
+        <nav className="wiki__surface-tabs">
+          <NavLink to="/wiki" className="wiki__tab">{t("nav.wiki_reader")}</NavLink>
+          <NavLink to="/tasks" className="wiki__tab">
+            {t("nav.tasks")} <span className="wiki__tab-count">{list.filter((a) => a.type === "Task").length}</span>
+          </NavLink>
+          <NavLink to="/graph" className="wiki__tab">{t("nav.graph")}</NavLink>
+          <NavLink to="/inbox" className="wiki__tab">{t("nav.inbox")}</NavLink>
+        </nav>
         <section>
           <h3>{t("wiki.section_areas")}</h3>
           <ul className="wiki__areas">
@@ -89,43 +106,64 @@ export function WikiRoute() {
                 onClick={() => setSelectedArea(null)}
               >
                 <span className="wiki__area-name">{t("wiki.area_all")}</span>
-                <span className="wiki__area-count">{list.length}</span>
+                <span className="wiki__area-count">{scopedList.length}</span>
               </button>
             </li>
-            {areas.map((a) => (
-              <li key={a.id} className={a.is_cross_cutting ? "is-cross" : undefined}>
-                <button
-                  type="button"
-                  className={`wiki__area-btn ${selectedArea === a.slug ? "is-active" : ""}`}
-                  onClick={() =>
-                    setSelectedArea((prev) => (prev === a.slug ? null : a.slug))
-                  }
-                >
-                  <span className="wiki__area-name">{a.name}</span>
-                  <span className="wiki__area-count">{a.artifact_count}</span>
-                </button>
-              </li>
-            ))}
+            {areas.map((a) => {
+              const areaCount = typeFilter
+                ? list.filter((x) => x.area_slug === a.slug && x.type === typeFilter).length
+                : a.artifact_count;
+              return (
+                <li key={a.id} className={a.is_cross_cutting ? "is-cross" : undefined}>
+                  <button
+                    type="button"
+                    className={`wiki__area-btn ${selectedArea === a.slug ? "is-active" : ""}`}
+                    onClick={() =>
+                      setSelectedArea((prev) => (prev === a.slug ? null : a.slug))
+                    }
+                  >
+                    <span className="wiki__area-name">{a.name}</span>
+                    <span className="wiki__area-count">{areaCount}</span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </section>
-        <section>
-          <h3>{t("wiki.section_artifacts")}</h3>
-          <ul className="wiki__list">
-            {filteredList.length === 0 && <li className="wiki__empty">{t("wiki.empty_list")}</li>}
-            {filteredList.map((a) => (
-              <li key={a.id} className={detail?.id === a.id ? "is-active" : undefined}>
-                <Link to={`/wiki/${a.slug}`}>
-                  <span className="wiki__chip">{a.type}</span>
-                  <span className="wiki__title">{a.title}</span>
-                  <span className="wiki__row-meta">{a.area_slug}</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
+        {view !== "graph" && view !== "inbox" && (
+          <section>
+            <h3>
+              {view === "tasks" ? t("nav.tasks") : t("wiki.section_artifacts")}
+            </h3>
+            <ul className="wiki__list">
+              {filteredList.length === 0 && (
+                <li className="wiki__empty">
+                  {view === "tasks" ? t("wiki.empty_tasks") : t("wiki.empty_list")}
+                </li>
+              )}
+              {filteredList.map((a) => (
+                <li key={a.id} className={detail?.id === a.id ? "is-active" : undefined}>
+                  <Link to={`${view === "tasks" ? "/tasks" : "/wiki"}/${a.slug}`}>
+                    <span className="wiki__chip">{a.type}</span>
+                    <span className="wiki__title">{a.title}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </aside>
       <main className="wiki__main">
-        {detail ? <ArtifactView detail={detail} /> : <div className="wiki__empty">{t("wiki.empty_detail")}</div>}
+        {view === "graph" && <GraphStub />}
+        {view === "inbox" && <InboxStub />}
+        {(view === "reader" || view === "tasks") &&
+          (detail ? (
+            <ArtifactView detail={detail} />
+          ) : (
+            <div className="wiki__empty">
+              {view === "tasks" ? t("wiki.empty_tasks_detail") : t("wiki.empty_detail")}
+            </div>
+          ))}
       </main>
     </div>
   );
@@ -153,5 +191,28 @@ function ArtifactView({ detail }: { detail: Artifact }) {
       </header>
       <pre className="reader__body">{detail.body_markdown}</pre>
     </article>
+  );
+}
+
+function GraphStub() {
+  const { t } = useI18n();
+  return (
+    <div className="wiki__stub">
+      <h1>{t("nav.graph")}</h1>
+      <p>{t("wiki.stub_graph")}</p>
+      <p>
+        <Link to="/ui/reader">{t("wiki.stub_graph_preview")}</Link>
+      </p>
+    </div>
+  );
+}
+
+function InboxStub() {
+  const { t } = useI18n();
+  return (
+    <div className="wiki__stub">
+      <h1>{t("nav.inbox")}</h1>
+      <p>{t("wiki.stub_inbox")}</p>
+    </div>
   );
 }

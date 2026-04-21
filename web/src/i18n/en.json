@@ -4,6 +4,9 @@
   "nav.design_refs": "Design-system references",
   "nav.bundle_docs": "Bundle docs",
   "nav.wiki_reader": "Wiki Reader",
+  "nav.tasks": "Tasks",
+  "nav.graph": "Graph",
+  "nav.inbox": "Inbox",
   "nav.design_readme": "Design README",
   "nav.design_skill": "Design SKILL",
 
@@ -23,6 +26,11 @@
   "wiki.meta_artifacts": "%s artifacts · %s",
   "wiki.written_by": "written by %s",
   "wiki.published": "published %s",
+  "wiki.empty_tasks": "No Task artifacts yet. Ask the agent: “create a Task for …”.",
+  "wiki.empty_tasks_detail": "Pick a Task from the list, or ask the agent to create one.",
+  "wiki.stub_graph": "The Graph surface is still the HTML prototype from Claude Design. React-ification lands in M1.5 (@xyflow/react).",
+  "wiki.stub_graph_preview": "Open the Graph prototype →",
+  "wiki.stub_inbox": "No sensitive-op reviews pending. Inbox only fires when review_state=pending_review (not used by auto-publish).",
 
   "lang.switch": "Language",
   "lang.en": "English",
