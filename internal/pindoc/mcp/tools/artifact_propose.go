@@ -59,12 +59,19 @@ type artifactProposeOutput struct {
 	SuggestedActions []string `json:"suggested_actions,omitempty"`
 
 	// Only set on Status == "accepted".
-	ArtifactID     string    `json:"artifact_id,omitempty"`
-	Slug           string    `json:"slug,omitempty"`
-	URL            string    `json:"url,omitempty"`
+	ArtifactID string `json:"artifact_id,omitempty"`
+	Slug       string `json:"slug,omitempty"`
+	// AgentRef is the pindoc://<slug> URL an agent re-feeds to
+	// artifact.read or embeds in other artifact bodies. Stable across UI
+	// route changes.
+	AgentRef string `json:"agent_ref,omitempty"`
+	// HumanURL is the /p/:project/wiki/:slug path an agent pastes into
+	// chat so the user can open the Reader in a browser. Relative because
+	// the external origin belongs to the user's deployment.
+	HumanURL       string    `json:"human_url,omitempty"`
 	PublishedAt    time.Time `json:"published_at,omitzero"`
-	Created        bool      `json:"created"`           // false on updates
-	RevisionNumber int       `json:"revision_number"`   // 1 on create, N+1 on update
+	Created        bool      `json:"created"`         // false on updates
+	RevisionNumber int       `json:"revision_number"` // 1 on create, N+1 on update
 }
 
 // RegisterArtifactPropose wires pindoc.artifact.propose — the only write
@@ -254,7 +261,8 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				Status:         "accepted",
 				ArtifactID:     newID,
 				Slug:           finalSlug,
-				URL:            fmt.Sprintf("pindoc://%s", finalSlug),
+				AgentRef:       "pindoc://" + finalSlug,
+				HumanURL:       HumanURL(deps.ProjectSlug, finalSlug),
 				PublishedAt:    publishedAt,
 				Created:        true,
 				RevisionNumber: 1,
@@ -416,7 +424,8 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		Status:         "accepted",
 		ArtifactID:     artifactID,
 		Slug:           slug,
-		URL:            fmt.Sprintf("pindoc://%s", slug),
+		AgentRef:       "pindoc://" + slug,
+		HumanURL:       HumanURL(deps.ProjectSlug, slug),
 		PublishedAt:    publishedAt,
 		Created:        false,
 		RevisionNumber: newRev,

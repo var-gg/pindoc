@@ -29,7 +29,14 @@
 - UI: `/wiki/:slug/history`, `/wiki/:slug/diff?from=&to=` (이후 Phase 8에서 `/p/:project/wiki/...`)
 - PINDOC.md 템플릿에 update flow 문서화
 
-### Phase 8 — URL 멀티프로젝트 재구조화 (이번 세션, 2026-04-22)
+### Phase 9 — Referenced Confirmation hardening (2026-04-22 완료)
+- `artifact.{propose,read,search}` + `context.for_task` 응답에 `agent_ref` (`pindoc://<slug>`) + `human_url` (`/p/:project/wiki/<slug>`) 분리.
+- `project.current` 응답에 `capabilities` 블록 (`multi_project`, `retrieval_quality`, `auth_mode`, `update_via`, `review_queue_supported`). bootstrap 1 call.
+- `docs/10-mcp-tools-spec.md`에 "Implementation Status" 테이블 + tool별 ✅/🟡/📋 뱃지 추가 — 외부 리뷰 P0 "spec↔runtime drift" 해소.
+- `docs/14-peer-review-response.md` 신설 — 두 고급추론 리포트 수용/변형수용/반려 판단 구조화.
+- `docs/12-m1-implementation-plan.md`에 Phase 9~13 체인 기록 (Phase 10 real embedder → Phase 11 write contract + semantic conflict → Phase 12 envelope/view/actor → Phase 13 template artifact seed).
+
+### Phase 8 — URL 멀티프로젝트 재구조화 (2026-04-22 완료)
 - **UI canonical**: `/p/:project/{wiki,tasks,graph,inbox}/...`. 모든 라우트 전환 완료.
 - **HTTP canonical**: `/api/p/:project/...` — 단일 프로젝트 detail은 `/api/p/:project` 로 단순화.
 - **인스턴스 레벨 엔드포인트**: `/api/config`, `/api/projects`, `/api/health`.
@@ -47,14 +54,18 @@
 
 ---
 
-## 2. 다음 작업 — 실제 embedding 붙이기 (Phase 8 완료 후 다음)
+## 2. 다음 작업 — Phase 10 real embedder (Phase 9 완료 후 다음)
 
-Phase 8 (URL 멀티프로젝트 재구조화)은 완료됨 — 하단 §5 참고. 다음 큰 블록:
+Phase 8 (URL) + Phase 9 (human_url/capabilities/spec drift) 완료. 다음 큰 블록:
 
-### 실제 embedding 붙이기
+### Phase 10 — Real embedder dogfood
 - `services/embed-sidecar/` Python FastAPI 기동 + `PINDOC_EMBED_PROVIDER=http` 로 스위치.
 - 기존 artifact_chunks 재-embed 배치 (작은 스크립트 하나).
 - 스모크: `/api/p/pindoc/search?q=…` 한국어 쿼리에 의미 있는 답.
+- 이후 Phase 11 semantic conflict의 전제조건.
+
+상세: [docs/12-m1-implementation-plan.md](./12-m1-implementation-plan.md) Phase 10~13 섹션.
+리뷰 판단 근거: [docs/14-peer-review-response.md](./14-peer-review-response.md).
 
 ### 아래는 Phase 8 계획 (완료됨 — 참고용 스냅샷)
 

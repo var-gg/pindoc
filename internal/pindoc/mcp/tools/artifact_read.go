@@ -20,24 +20,28 @@ type artifactReadInput struct {
 }
 
 type artifactReadOutput struct {
-	ID              string    `json:"id"`
-	ProjectSlug     string    `json:"project_slug"`
-	AreaSlug        string    `json:"area_slug"`
-	Slug            string    `json:"slug"`
-	Type            string    `json:"type"`
-	Title           string    `json:"title"`
-	BodyMarkdown    string    `json:"body_markdown"`
-	Tags            []string  `json:"tags"`
-	Completeness    string    `json:"completeness"`
-	Status          string    `json:"status"`
-	ReviewState     string    `json:"review_state"`
-	AuthorKind      string    `json:"author_kind"`
-	AuthorID        string    `json:"author_id"`
-	AuthorVersion   string    `json:"author_version,omitempty"`
-	SupersededBy    string    `json:"superseded_by,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
-	PublishedAt     time.Time `json:"published_at,omitzero"`
+	ID            string `json:"id"`
+	ProjectSlug   string `json:"project_slug"`
+	AreaSlug      string `json:"area_slug"`
+	Slug          string `json:"slug"`
+	Type          string `json:"type"`
+	Title         string `json:"title"`
+	BodyMarkdown  string `json:"body_markdown"`
+	Tags          []string `json:"tags"`
+	Completeness  string `json:"completeness"`
+	Status        string `json:"status"`
+	ReviewState   string `json:"review_state"`
+	AuthorKind    string `json:"author_kind"`
+	AuthorID      string `json:"author_id"`
+	AuthorVersion string `json:"author_version,omitempty"`
+	SupersededBy  string `json:"superseded_by,omitempty"`
+	// AgentRef is the pindoc://<slug> form for embedding in other artifact
+	// bodies. HumanURL is the /p/:project/wiki/:slug path for chat shares.
+	AgentRef    string    `json:"agent_ref"`
+	HumanURL    string    `json:"human_url"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	PublishedAt time.Time `json:"published_at,omitzero"`
 }
 
 // RegisterArtifactRead wires pindoc.artifact.read.
@@ -105,6 +109,8 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			if publishedAt != nil {
 				out.PublishedAt = *publishedAt
 			}
+			out.AgentRef = "pindoc://" + out.Slug
+			out.HumanURL = HumanURL(out.ProjectSlug, out.Slug)
 			return nil, out, nil
 		},
 	)

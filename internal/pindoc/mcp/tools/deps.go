@@ -27,4 +27,18 @@ type Deps struct {
 	// Embedder generates vectors for chunking on write and for query-side
 	// search / context.for_task. Phase 3+.
 	Embedder embed.Provider
+
+	// MultiProject mirrors config.MultiProject so tools can advertise
+	// whether the instance expects a Project Switcher UI. Independent of
+	// the URL scope model.
+	MultiProject bool
+}
+
+// HumanURL returns the canonical /p/:project/wiki/:slug relative URL used
+// in all agent-to-human share links. Agents paste this into chat so the
+// user can click through to the reader. Relative on purpose — the hosting
+// origin is the user's deployment (self-host first), the agent does not
+// know the external base URL.
+func HumanURL(projectSlug, artifactSlug string) string {
+	return "/p/" + projectSlug + "/wiki/" + artifactSlug
 }

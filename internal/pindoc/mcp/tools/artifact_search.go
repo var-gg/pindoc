@@ -27,6 +27,10 @@ type SearchHit struct {
 	ChunkHeading string  `json:"chunk_heading,omitempty"`
 	Snippet      string  `json:"snippet"`
 	Distance     float64 `json:"distance"`
+	// AgentRef + HumanURL: agent feeds AgentRef into artifact.read, shares
+	// HumanURL in chat. Both always populated on a hit.
+	AgentRef string `json:"agent_ref"`
+	HumanURL string `json:"human_url"`
 }
 
 type artifactSearchOutput struct {
@@ -142,6 +146,8 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 				// Trim long snippets for transport efficiency. Agent can
 				// fetch full body via artifact.read if needed.
 				h.Snippet = trimSnippet(h.Snippet, 400)
+				h.AgentRef = "pindoc://" + h.Slug
+				h.HumanURL = HumanURL(deps.ProjectSlug, h.Slug)
 				out.Hits = append(out.Hits, h)
 			}
 

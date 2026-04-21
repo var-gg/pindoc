@@ -21,6 +21,29 @@ type projectCurrentOutput struct {
 	ArtifactsCount  int           `json:"artifacts_count"`
 	CreatedAt       time.Time     `json:"created_at"`
 	Rendering       RenderingCaps `json:"rendering"`
+	Capabilities    Capabilities  `json:"capabilities"`
+}
+
+// Capabilities tells the agent which optional features the server
+// currently honours. Lets a prompt branch without probing each tool. Fields
+// are intentionally flat — every string value is a stable enum, not prose.
+type Capabilities struct {
+	// MultiProject: does this instance expect >1 project in the UI
+	// switcher? MCP tool calls are still scoped per-subprocess to the
+	// PINDOC_PROJECT env; this flag is advisory for chat UX only.
+	MultiProject bool `json:"multi_project"`
+	// RetrievalQuality: "stub" → hash-based (dev only), "http" → real
+	// embedder backing pindoc.artifact.search / context.for_task.
+	RetrievalQuality string `json:"retrieval_quality"`
+	// AuthMode: "none" in M1 self-host local. "github_oauth" lands in V1.5.
+	AuthMode string `json:"auth_mode"`
+	// UpdateVia: name of the propose field that triggers a revision append.
+	// Agents can grep for this token so a future rename doesn't silently
+	// reroute update flows to "create a new artifact".
+	UpdateVia string `json:"update_via"`
+	// ReviewQueueSupported: sensitive-op confirm mode with pending_review
+	// state routing. False in M1; comes with auth in V1.5.
+	ReviewQueueSupported bool `json:"review_queue_supported"`
 }
 
 // RenderingCaps mirrors the HTTP API shape so MCP callers get the same
@@ -87,7 +110,24 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 				out.Color = *color
 			}
 			out.Rendering = pindocRenderingCaps
+			out.Capabilities = buildCapabilities(deps)
 			return nil, out, nil
 		},
 	)
+}
+
+func buildCapabilities(deps Deps) Capabilities {
+	quality := "stub"
+	if deps.Embedder != nil {
+		if name := deps.Embedder.Info().Name; name != "" && name != "stub" {
+			quality = name
+		}
+	}
+	return Capabilities{
+		MultiProject:         deps.MultiProject,
+		RetrievalQuality:     quality,
+		AuthMode:             "none",
+		UpdateVia:            "update_of",
+		ReviewQueueSupported: false,
+	}
 }

@@ -164,6 +164,54 @@ claude mcp list           # pindoc 있음
 - `PINDOC_MULTI_PROJECT=true|false` env — V1.5 권한 모델 확장 지점
 - Home / design-system 스캐폴드는 `/design`, `/design/preview/:slug` 로 이동
 
+## Phase 9 — Referenced Confirmation hardening (완료 · 2026-04-22)
+
+외부 피어리뷰 (docs/14) 에서 P0로 지적된 "share URL이 `pindoc://slug` 한 가지뿐이라 사용자가 브라우저에서 못 열어본다"를 해소. Phase 8로 canonical URL 구조가 박혔으므로 필드 추가만으로 해결.
+
+- `pindoc.artifact.{propose,read,search}` + `context.for_task` 응답에 **`agent_ref`** (에이전트 재호출용 `pindoc://<slug>`) + **`human_url`** (사용자가 채팅에 붙여넣는 `/p/:project/wiki/<slug>`) 두 URL을 분리 반환.
+- `pindoc.project.current` 응답에 **`capabilities` 블록** 추가: `multi_project`, `retrieval_quality` (`stub`|`http`), `auth_mode` (`none`), `update_via` (`update_of`), `review_queue_supported` (`false`). 에이전트가 bootstrap 1회로 서버가 지원하는 플래그 파악.
+- PINDOC.md 템플릿에 "agent가 사용자에게 링크 공유 시 `human_url` 값을 그대로 붙여넣어라" 규약 명시.
+
+## Phase 10 — Real embedder dogfood (다음 작업)
+
+`PINDOC_EMBED_PROVIDER=stub` 기본값이 `pindoc.artifact.search` / `context.for_task`의 품질을 hash 기반으로 고정함. 외부 리포트 공통 P1.
+
+- `services/embed-sidecar/` Python FastAPI 기동 (EmbeddingGemma-300M 기본)
+- `PINDOC_EMBED_PROVIDER=http`, `PINDOC_EMBED_ENDPOINT=http://127.0.0.1:5860/v1/embeddings` 로 전환
+- 기존 `artifact_chunks` 전체 재-embed 배치 스크립트 (15개 artifact 한 번에)
+- 스모크: `/api/p/pindoc/search?q=…` 한국어 쿼리 5개로 의미 검색 품질 확인
+
+## Phase 11 — Write contract 강화 + semantic conflict (핵심 블록)
+
+피어리뷰 공통 P0 + 저자 확정 범위. "typed section schema 확정은 out-of-scope" — 스키마 최소 필드 + 진화형 template artifact 구조만.
+
+- `artifact.propose` 입력 확장:
+  - `basis.source_session` (optional) — 감사 추적용 세션 ID
+  - `basis.search_refs[]` (optional) — "봤다" 주장. 서버는 이벤트 로그만 남김, hard-enforce 안 함
+  - `pins[]: [{repo, commit, path, lines?}]` — code-linked 증거
+  - `expected_version` — `update_of` 경로에서 optimistic lock (`max(revision_number)` 비교)
+  - `supersede_of` — 기존 artifact를 `status=superseded`로 전환하면서 새 artifact 생성
+  - `relates_to[]: [{target_id, relation}]` — `implements | references | blocks` 등
+- 신규 테이블 `artifact_edges(source_id, target_id, relation, created_at)` — `relates_to[]`의 persistence.
+- `body_json` 활용 시작 — Debug/Decision/Analysis/Task 4 타입에 최소 필드만 (Debug=`symptom/resolution`, Decision=`decision/rationale` 수준). 나머지 섹션 구조는 **template artifact**로 풀어서 별도 artifact로 관리 (Phase 13).
+- **Semantic conflict block** — `artifact.propose(new)` 시 `artifact.search`로 top-K 유사도 distance가 임계치 이하면 `not_ready` + `next_tools: [artifact.read]` + `related: [...]`. exact-title만 막는 현재 guard 상향.
+
+## Phase 12 — Agent ergonomics (envelope + view + actor)
+
+피어리뷰 P1 블록 통합.
+
+- **Machine-readable `not_ready`**: `{status, draft_id?, failed:[stable_code], next_tools:[...], related:[{id,url}]}`. stable code 테이블은 docs/에 별도.
+- **`artifact.read(view=brief|full|continuation)`**: brief=title/summary/pins/stale, continuation=brief + 최근 revision delta + relates_to neighbors. 기존 default는 `full` 유지.
+- **Actor hardening (stdio)**: `author_id`는 표시용 metadata로 재정의. 서버가 session 단위 `agent_id` (UUID) 를 ping 첫 호출 시 발급, propose 감사에 기록. `author_id` spoof 공격 surface 축소.
+
+## Phase 13 — Template artifact seed
+
+Phase 11에서 body_json 최소 필드로 검증을 좁히는 대신, **각 타입의 "현재 best practice" 구조는 artifact 자체로 관리**. 이것이 "포맷도 evolving artifact"라는 저자 원칙의 코드화.
+
+- Seed migration 신규 — `_template_debug`, `_template_decision`, `_template_analysis`, `_template_task` 4개 artifact 생성 (slug prefix `_template_`은 검색/목록에서 기본 숨김).
+- 각 template body는 현 시점 권장 섹션 구조 + 작성 예시. PINDOC.md 템플릿에 "신규 artifact propose 전에 `artifact.read(_template_<type>)` 를 호출해서 구조 참고" 규약 추가.
+- Template 자체도 일반 artifact니까 `update_of`로 계속 revision. 외부 리서치 + 실 dogfood로 포맷 best practice가 쌓이면 template이 진화.
+
 ## V1.5 — 인증 + 멀티프로젝트 권한 (다음 큰 블록)
 
 URL 구조는 이미 준비됨. V1.5에서 그 위에:

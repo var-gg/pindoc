@@ -2,6 +2,45 @@
 
 Pindoc V1 MCP Tool 전체 스펙. Input/Output 스키마 + 예시 + 에러 케이스.
 
+> **⚠️ 스펙과 런타임 구현의 관계**: 이 문서는 V1 완성 시점의 **aspirational 계약**이다.
+> 현 시점 (2026-04-22, M1 + Phase 7-9 완료) 실제 구현 여부는 아래 §Implementation Status 표 참조.
+> Tool별 섹션 제목 옆 뱃지로도 표시한다:
+> - ✅ **implemented** — 런타임에 등록되어 바로 호출 가능
+> - 🟡 **partial** — 일부 동작하나 스펙과 drift 있음 (섹션 하단에 drift 주석)
+> - 📋 **planned** — 런타임 미등록. V1.x+에서 도입 예정
+
+## Implementation Status (2026-04-22)
+
+| Tool | 상태 | 비고 |
+|---|---|---|
+| `pindoc.ping` | ✅ implemented | Phase 1 핸드쉐이크용. §Tool Catalog 외 (handshake-only). |
+| `pindoc.harness.install` | ✅ implemented | `pindoc init` CLI 없이 MCP 호출만으로 PINDOC.md body 반환. 파일 쓰기는 에이전트 책임. |
+| `pindoc.project.current` | ✅ implemented | **스펙의 `project.switch/list`는 미구현.** 현재 한 서버 프로세스 = 한 프로젝트 (env `PINDOC_PROJECT`). Phase 9부터 응답에 `capabilities` 블록 포함 (multi_project, retrieval_quality, auth_mode, update_via, review_queue_supported). |
+| `pindoc.project.create` | ✅ implemented | Phase 8 신규. 프로젝트 row 삽입 + `misc` area seed. 외부 리포트의 "multi-project hidden state" 우려는 URL 스코프 (`/p/:project/…`) + project_ref가 URL로 고정되는 Phase 8 구조로 해소. |
+| `pindoc.project.list` | 📋 planned | V1.5 멀티프로젝트 권한 모델과 함께. 지금은 `GET /api/projects` HTTP 엔드포인트로 대체. |
+| `pindoc.project.switch` | 📋 planned | MCP 세션당 단일 프로젝트 원칙 재검토 후 결정. 현재는 새 subprocess 띄우기로 대체. |
+| `pindoc.area.list` | ✅ implemented | 현재 프로젝트의 area 트리 반환. |
+| `pindoc.area.propose` | 📋 planned | M1 영역 아님. `misc` fallback + agent 수동 area 생성으로 버티는 중. |
+| `pindoc.artifact.read` | 🟡 partial | 현재는 단일 artifact 본문 반환. **스펙의 `include=neighbors\|recent_changes\|…`는 미구현**. Phase 12에서 `view=brief\|full\|continuation` 도입 예정. Phase 9부터 응답에 `agent_ref` (`pindoc://<slug>`) + `human_url` (`/p/:project/wiki/<slug>`) 두 URL을 분리 반환. |
+| `pindoc.artifact.propose` | 🟡 partial | `update_of` + `commit_msg`로 revision 경로 열림 (Phase 7). **스펙의 `intent.kind=new\|modification\|split\|supersede`, `target_id`, `source_ids`, `body: TypedBody`, `pins[]`, `related_resources[]`는 미구현**. Phase 11에서 `body_json` + semantic conflict + `pins[]` + `expected_version` + `supersede_of` 도입 예정. 공통 envelope은 `ok\|error\|not_ready`가 아니라 `accepted\|not_ready` — Phase 12에서 machine-readable `not_ready` 리포맷 예정. |
+| `pindoc.artifact.search` | ✅ implemented | **Default embedder는 `stub` (hash 기반)** — Phase 10에서 real embedder로 전환 예정. 응답 notice에 `stub` 경고. Phase 9부터 hit마다 `agent_ref` + `human_url`. |
+| `pindoc.artifact.revisions` | ✅ implemented | Phase 7 신규. artifact의 모든 revision 메타 + 최신 순. |
+| `pindoc.artifact.diff` | ✅ implemented | Phase 7 신규. unified diff + section_deltas (heading 단위 added/removed/modified). |
+| `pindoc.artifact.summary_since` | ✅ implemented | Phase 7 신규. `since_rev` 또는 `since_time` 기준 누적 변화 요약. |
+| `pindoc.context.for_task` | 🟡 partial | 현재는 top 1-3 landings + rationale만. **스펙의 `resources[]`, `related_areas`, stale 힌트는 미구현**. Phase 9부터 `agent_ref` + `human_url`. |
+| `pindoc.graph.neighbors` | 📋 planned | `artifact_edges` 테이블 + `relates_to[]` propose 필드와 함께 (Phase 11). |
+| `pindoc.resource.verify` | 📋 planned | M7 Freshness. pins 모델 도입 후. V1.x. |
+| `pindoc.tc.register` / `.run_result` | 📋 planned | V1.1. |
+
+### 공통 drift 주석
+
+- **공통 응답 envelope**: 스펙은 `ok | error | not_ready`를 말하지만 현재 `artifact.propose`는 `accepted | not_ready`. 나머지 tool은 구조체 필드 직접 반환 (status 필드 없음). Phase 12에서 envelope 통일 예정.
+- **인증**: 스펙은 `Authorization: Bearer pindoc_{token}`을 말하지만 현재 stdio transport + `author_id`를 agent가 자유 입력. V1.5 GitHub OAuth + agent token 도입 시 맞춰짐.
+- **`request_id` / `warnings[]`**: 스펙 공통 필드지만 현재 미구현. Phase 12에서 envelope 통일하면서 도입.
+- **`draft_id`**: `not_ready` 응답에 포함된다고 스펙에 있으나 현재 미구현 (실패 시 agent가 동일 input으로 재호출). Phase 12에서 도입 검토.
+
+---
+
 ## 공통 규약
 
 ### 인증

@@ -17,14 +17,16 @@ type contextForTaskInput struct {
 }
 
 type ContextLanding struct {
-	ArtifactID   string `json:"artifact_id"`
-	Slug         string `json:"slug"`
-	Type         string `json:"type"`
-	Title        string `json:"title"`
-	AreaSlug     string `json:"area_slug"`
-	Rationale    string `json:"rationale"` // why this is relevant — picked from best chunk heading/text
-	URL          string `json:"url"`
-	Distance     float64 `json:"distance"`
+	ArtifactID string `json:"artifact_id"`
+	Slug       string `json:"slug"`
+	Type       string `json:"type"`
+	Title      string `json:"title"`
+	AreaSlug   string `json:"area_slug"`
+	Rationale  string `json:"rationale"` // why this is relevant — picked from best chunk heading/text
+	// AgentRef for re-feeding into artifact.read; HumanURL for chat share.
+	AgentRef string  `json:"agent_ref"`
+	HumanURL string  `json:"human_url"`
+	Distance float64 `json:"distance"`
 }
 
 type contextForTaskOutput struct {
@@ -113,7 +115,8 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 				); err != nil {
 					return nil, contextForTaskOutput{}, fmt.Errorf("scan: %w", err)
 				}
-				l.URL = "pindoc://" + l.Slug
+				l.AgentRef = "pindoc://" + l.Slug
+				l.HumanURL = HumanURL(deps.ProjectSlug, l.Slug)
 				if bestHeading != "" {
 					l.Rationale = "Best-matching section: " + bestHeading
 				} else {

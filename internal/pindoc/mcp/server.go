@@ -52,6 +52,7 @@ func NewServer(opts Options) *Server {
 		ProjectSlug:  opts.Config.ProjectSlug,
 		UserLanguage: opts.Config.UserLanguage,
 		Embedder:     opts.Embedder,
+		MultiProject: opts.Config.MultiProject,
 	}
 	tools.RegisterProjectCurrent(s, deps)
 	tools.RegisterProjectCreate(s, deps)

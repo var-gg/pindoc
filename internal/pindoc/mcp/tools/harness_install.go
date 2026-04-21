@@ -140,6 +140,18 @@ When you ask the user for approval, review, or a decision, always include:
 - If multiple candidates: list each with its own link. 3+ candidates
   should be packaged as one artifact and linked once.
 
+**URL field rule (Phase 9)**: every artifact.propose/read/search response
+returns two URLs. Use them differently:
+
+- human_url — paste this into chat when asking the user to confirm or
+  review. It opens the Reader in a browser ( /p/<project>/wiki/<slug> ).
+- agent_ref — embed this in another artifact's body_markdown or feed it
+  back into pindoc.artifact.read ( pindoc://<slug> ). It stays stable
+  across UI route changes.
+
+Never give the user agent_ref directly. It is not a clickable URL in
+their browser.
+
 This protocol is how Pindoc helps the human stay in command without
 reading every token you produced. Follow it.
 
