@@ -13,8 +13,7 @@ import (
 )
 
 type Config struct {
-	// DatabaseURL is a Postgres connection string. Unused in Phase 1;
-	// Phase 2 brings the schema online.
+	// DatabaseURL is a Postgres connection string.
 	DatabaseURL string
 
 	// LogLevel is "debug" | "info" | "warn" | "error".
@@ -23,6 +22,11 @@ type Config struct {
 	// UserLanguage hints NOT_READY template selection until Phase 5 loads
 	// the real value from PINDOC.md. Default "en".
 	UserLanguage string
+
+	// ProjectSlug is which seeded project the MCP server treats as current.
+	// Multi-project selection lands in Phase 4; for now one instance = one
+	// project per `pindoc init` invocation.
+	ProjectSlug string
 }
 
 // Load builds a Config from process env vars. It never fails for Phase 1
@@ -33,6 +37,7 @@ func Load() (*Config, error) {
 		DatabaseURL:  env("PINDOC_DATABASE_URL", "postgres://pindoc:pindoc_dev@localhost:5432/pindoc?sslmode=disable"),
 		LogLevel:     env("PINDOC_LOG_LEVEL", "info"),
 		UserLanguage: strings.ToLower(env("PINDOC_USER_LANGUAGE", "en")),
+		ProjectSlug:  env("PINDOC_PROJECT", "pindoc"),
 	}, nil
 }
 

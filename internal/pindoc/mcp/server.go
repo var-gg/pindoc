@@ -36,11 +36,23 @@ func NewServer(opts Options) *Server {
 	}
 	s := sdk.NewServer(impl, nil)
 
-	// Phase 1: handshake only. Subsequent phases register more tools here.
+	// Phase 1: handshake.
 	tools.RegisterPing(s, tools.PingDeps{
 		Version:      opts.Version,
 		UserLanguage: opts.Config.UserLanguage,
 	})
+
+	// Phase 2 read-side: project context + scope enumeration + artifact fetch.
+	deps := tools.Deps{
+		DB:           opts.DB,
+		Logger:       opts.Logger,
+		Version:      opts.Version,
+		ProjectSlug:  opts.Config.ProjectSlug,
+		UserLanguage: opts.Config.UserLanguage,
+	}
+	tools.RegisterProjectCurrent(s, deps)
+	tools.RegisterAreaList(s, deps)
+	tools.RegisterArtifactRead(s, deps)
 
 	return &Server{
 		sdk:    s,
@@ -51,6 +63,12 @@ func NewServer(opts Options) *Server {
 // Run blocks until the transport returns (client disconnected, ctx cancelled,
 // or fatal error). Graceful shutdown on ctx cancel is handled by the SDK.
 func (s *Server) Run(ctx context.Context, transport sdk.Transport) error {
-	s.logger.Info("mcp server ready", "tools", []string{"pindoc.ping"})
+	s.logger.Info("mcp server ready",
+		"tools", []string{
+			"pindoc.ping",
+			"pindoc.project.current",
+			"pindoc.area.list",
+			"pindoc.artifact.read",
+		})
 	return s.sdk.Run(ctx, transport)
 }
