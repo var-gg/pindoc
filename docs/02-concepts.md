@@ -1,200 +1,189 @@
 # 02. Concepts
 
-Varn의 핵심 개념들을 정의합니다. 이 개념들은 이후 모든 설계 문서의 공통 어휘입니다.
+Pindoc의 핵심 개념들. 이후 모든 설계 문서의 공통 어휘.
 
-## 7대 Primitive
+## 5대 Primitive
 
 ```
-Project
+Project (최상위 스코프)
    │
    ▼
-Harness (VARN.md)
+Harness (PINDOC.md — 에이전트 규약)
    │
    ▼
-Session ─ checkpoint? ─▶ Promote ─▶ Artifact ─▶ Graph ─▶ (다음 Session 컨텍스트 재주입)
-                           │
-                    (auto-publish,
-                     엣지 케이스만
-                     Review Queue)
+Promote ─▶ Artifact ─▶ Graph ─▶ (다음 Session의 Continuation Context)
 ```
 
-### 1. Project (최상위 컨테이너)
+### 1. Project
 
-> 한 Varn 인스턴스에 복수의 Project가 공존한다. 권한·Area·설정의 단위.
+> 한 Pindoc 인스턴스에 복수의 Project가 공존. 권한·Area·설정의 단위.
 
-**정의**: Varn의 최상위 스코프. 모든 Artifact/Area/Session/Member은 반드시 하나의 Project에 속한다.
+모든 Artifact/Area/Member는 반드시 하나의 Project에 속한다.
 
-**구조**:
 ```
-Varn Instance
- ├─ Project "shop-fe"     (FE repo, Web SaaS pack)
+Pindoc Instance
+ ├─ Project "shop-fe"   (FE repo, Web SaaS pack)
  │    ├─ Areas: /Cart, /Payment, /Auth
  │    └─ Members: Alice(writer-agent, approver-user), Bob(reader)
- ├─ Project "shop-be"     (BE repo, Web SaaS pack)
- └─ Project "side-game"   (사이드 프로젝트, Game pack skeleton)
+ ├─ Project "shop-be"   (BE repo)
+ └─ Project "side-game" (사이드 프로젝트, Game pack skeleton)
 ```
 
-**실전 시나리오**:
-- **FE/BE 분리 팀**: Project 두 개, 각 팀은 자기 Project에 writer, 매니지먼트는 양쪽 모두 접근
-- **Solo + 사이드 프로젝트**: 개인이 여러 Project 보유, 모두 같은 인스턴스
-- **영세 사업장 2~3명이 2개 프로젝트**: 한 인스턴스 공유, Project 단위 권한 분리
+**시나리오**:
+- FE/BE 분리 팀: Project 2개, 매니지먼트가 양쪽 접근
+- Solo + 사이드 프로젝트: 한 인스턴스에 여러 Project
+- 영세 2~3명이 복수 프로젝트: 한 인스턴스 공유, Project 단위 권한
 
-**V1 기본값**: `1 repo = 1 project`. 한 repo가 multi-project가 되는 케이스는 드물므로 이를 기본으로.
+**V1 기본값**: `1 repo = 1 project`.
 
-**Project 간 관계**:
-- Graph edge는 **Project 경계 넘어 가능** (FE Feature ↔ BE API 링크)
-- Search / Fast Landing은 **기본 현재 Project 범위**, 명시 시 cross-project
-- Agent token은 **project-scoped**
+**Cross-project**: Graph edge는 Project 경계 넘어 가능 (FE Feature ↔ BE API). Search / Fast Landing은 기본 현재 Project, 명시 시 cross-project.
 
 ---
 
 ### 2. Harness
 
-> MCP가 연결되는 순간 Varn이 에이전트의 base 행동 규약을 주입하는 장치. Project 단위로 1개.
+> MCP 연결 순간 Pindoc이 에이전트의 base 행동 규약을 주입. Project 단위 1개.
 
-**정의**: Varn MCP를 install하면 각 Project 루트에 `VARN.md`가 생성되고, `CLAUDE.md` / `AGENTS.md` / `.cursorrules`에 참조가 추가된다. 에이전트는 매 세션 시작 시 이 규약을 읽는다.
+Pindoc MCP install 시 각 Project 루트에 **`PINDOC.md`** 생성, `CLAUDE.md` / `AGENTS.md` / `.cursorrules`에 참조 추가. 에이전트는 매 세션 시작 시 이 규약 로드.
 
 **담긴 것**:
-- 언제 체크포인트 제안을 할지 (mode: `auto` / `manual` / `off`)
-- Propose → Pre-flight → Auto-publish 순서 강제
+- Checkpoint 휴리스틱 (mode: `auto` / `manual` / `off`)
+- Propose → Pre-flight → 자동 publish 순서
 - Referenced Confirmation 프로토콜
-- Sensitive ops(`sensitive_ops: auto|confirm`) 설정에 따라 Review Queue 활용 여부
-- Area 규율, URL 처리 규약
+- Sensitive ops 정책 (`sensitive_ops: auto` | `confirm`)
+- Area 규율
+- URL 처리 규약
 
-**왜 1번인가**: Varn MCP tool들은 **"에이전트가 알아서 쓸 때"가 아니라 "Harness가 에이전트에게 쓰라고 지시할 때"만** 의미 있음. 하네싱이 없으면 제품의 나머지가 작동하지 않는다.
+**왜 1번 인프라인가**: M1~M7은 "에이전트가 규약을 따른다"는 전제에서만 작동. Harness 없으면 Pindoc MCP가 "또 하나의 도구"로만 취급됨.
 
-자세한 스펙: `docs/09-varn-md-spec.md` (배치 B에서 작성 예정).
-
----
-
-### 3. Session
-
-> 에이전트와의 raw 작업 로그. 너저분함. 휘발성.
-
-**정의**: 코딩 에이전트(Claude Code / Cursor / Cline / Codex 등)와 사용자 간의 한 번의 작업 대화.
-
-**특징**:
-- 길다 (수천 줄~수만 줄)
-- 노이즈/시그널 비율 나쁨
-- 원본 가치는 낮지만 **맥락 가치** 있음
-- 닫히면 에이전트 컨텍스트에서 증발 (→ F6)
-
-**Varn 처리**: MCP로 stream 또는 bulk upload. 검색 가능한 형태로 저장하되 **1급 자산은 아님**.
+자세한 스펙은 `docs/09-pindoc-md-spec.md` (배치 B에서 작성 예정).
 
 ---
 
-### 4. Checkpoint
+### 3. Promote
 
-> Session 진행 중 "이 부분은 남길 가치가 있다"고 판단되는 지점.
+> 제품의 **중심 동사**. 에이전트가 Session 일부를 정제해 Artifact로 발행하는 행위.
+> **에이전트 주도 + auto-publish 기본.** 사람은 방향 제시자 — 승인자가 아님.
 
-**트리거 종류**:
+**Promote 6단계** (외부에서 보면 한 동작):
 
-1. **사용자 명시 요청** — "정리해줘", "위키에", "체크포인트"
-2. **에이전트 자율 판단** (VARN.md 휴리스틱):
-   - 한 주제 N턴 이상 + 결론 도달 신호
-   - 디버깅에서 resolution 도달
-   - 새 파일·모듈·스키마 생성
-   - ADR 유발 키워드
-3. **거절 반복 자동 off** — 세션 내 3회 거절 시 자율 제안 중지
+```
+1. Trigger        — 사용자 요청 or 에이전트 체크포인트 자율 판단
+2. Intent         — 에이전트가 kind/target_type/target_area/reason 선언
+3. Pre-flight     — Pindoc이 "더 일하고 와" 체크리스트 역지시 (M0.5)
+4. Conflict Check — 기존 artifact와 중복/충돌 심사
+5. Schema Valid.  — 타입별 필수 필드 검증
+6. Commit         — 내부 저장 + Graph 업데이트 + 이벤트 발행
+```
 
-**중요**: **완결된 정보만 대상이 아니다.** 유의미하면 `partial` 상태로 일단 기록. "나중에"가 아니라 **"일단 기록하고 성숙시킨다"**.
+6단계는 에이전트 입장에서 `propose` 한 번 호출 + 통과 시 자동 진행. 외부 관찰자 관점으로는 **"promote = 발행"** 하나의 사건.
+
+**Sensitive ops는 예외**: `Project.settings.sensitive_ops == "confirm"` 모드이고 해당 작업(삭제/supersede/settled 승격/신규 Area)이면 5단계까지 통과해도 6단계가 **Review Queue 대기**로 바뀜. 사람 OK 후 commit.
+
+**꼭 완결일 필요 없음**: 유의미하면 `partial` 로 일단 기록. `draft → partial → settled` 단계 성숙.
 
 ---
 
-### 5. Artifact
+### 4. Artifact
 
-> Checkpoint에서 에이전트가 publish한 것. 영속적. 자산.
+> Promote의 결과물. 영속적. 자산.
 
-**정의**: 타입이 정해진 구조화된 문서. Wiki 페이지 / 태스크 / TC.
+타입이 정해진 구조화된 문서. Wiki 페이지 / 태스크 / TC.
 
 **Tier 구조**:
-- **Tier A (Core, 강제)**: Decision, Analysis, Debug, Flow, Task, TC, Glossary
-- **Tier B (Domain Pack, 선택)**: Web SaaS (V1 stable), Game/ML/Mobile (V1.x+), 기타 (V2+)
+- **Tier A (Core, 강제)**: Decision(ADR), Analysis, Debug, Flow, Task, TC, Glossary
+- **Tier B (Domain Pack, 선택)**: Web SaaS (V1 stable), Game/ML/Mobile (V1.x+ skeleton), 기타 V2+
 - **Tier C (Custom, V2+)**: YAML 스키마로 팀 정의
 
 **특징**:
 - 타입별 **필수 스키마** (포맷 드리프트 방지)
-- **Agent-only write**: `created_by`·`last_modified_via` 모두 `AgentRef` 필수
-- **Project 소속 필수**: `project_id`
+- **Agent-only write**: `created_by` · `last_modified_via` 모두 `AgentRef` 필수
+- **Project 소속**: `project_id` 필수
 - **Git-pinned**: commit/PR/파일경로 고정
-- **Completeness 단계**: `draft` → `partial` → `settled`
+- **Area 소속**: 1개의 Area (수직 구분)
+- **Completeness**: `draft` / `partial` / `settled`
 
 ---
 
-### 6. Graph
+### 5. Graph
 
 > Artifact들 간의 관계망. 이것이 기억(Memory)의 실체.
 
-**노드와 엣지**:
-- 노드: Artifact (Document / Task / TC)
-- 엣지: `references`, `derives_from`, `validates`, `pinned_to`, `related_resource`, `supersedes`, `continuation_of`, `implements`, `blocked_by`, `relates_to`
+**노드**: Artifact (Document / Task / TC).
 
-**Project 경계**: edge는 Project를 넘어 연결 가능 (FE Feature ↔ BE API).
+**엣지 타입**: `references` / `derives_from` / `validates` / `implements` / `supersedes` / `pinned_to` / `related_resource` / `blocked_by` / `relates_to` / `continuation_of`.
 
----
+**Project 경계**: edge는 Project 넘어 가능. Cross-project edge 선언에는 양쪽 읽기 권한 필요.
 
-### 7. Promote
-
-> 제품의 중심 동사. Session의 일부를 Artifact로 승격시키는 행위.
-> **에이전트가 제안·실행하고, publish는 자동.** 사람은 방향 제시자 — **승인자가 아님**.
-
-### Promote 6단계 (경량화)
-
-```
-1. Trigger                 ─ 사용자 요청 or 에이전트 체크포인트 자율 판단
-2. Intent Declaration      ─ 에이전트가 kind/target_type/scope/reason 선언
-3. Pre-flight Check        ─ Varn이 에이전트에 "더 일하고 와" 체크리스트 역지시
-4. Conflict Check          ─ 기존 artifact와 중복/충돌 검사
-5. Schema Validation       ─ 타입별 필수 필드 검증
-6. Publish (auto)          ─ 바로 commit. 사람 승인 없음.
-```
-
-**이전 설계의 "Human Approve" 단계는 삭제**되었습니다. 이유:
-- 매 artifact에 사람 승인을 거는 건 원칙 1("사람은 방향 제시자")과 어긋남
-- Solo 사용자·자율 에이전트 환경에 마찰 과잉
-- 잘못 발행된 artifact는 사용자가 **"이거 지워/고쳐"** 하면 에이전트가 후속 propose로 처리
-- Completeness(`draft`/`partial`/`settled`)가 이미 "아직 미완"을 표현
-
-### Review Queue (엣지 케이스만 — 선택적)
-
-기본은 auto-publish. 단 아래 **되돌리기 힘든/민감한 작업**은 `sensitive_ops: confirm` 설정 시 Review Queue에 올라 사람 OK를 기다림:
-
-- **삭제 / archive**
-- **`settled` 승격** (완결 선언)
-- **`supersede`** (기존 문서를 대체)
-- **신규 Area 생성** (중복 방지 목적)
-- **`--force` 요청** (conflict HARD BLOCK 뚫기)
-
-기본값은 `sensitive_ops: auto` (모든 걸 auto-publish). 팀이 "중요 변경은 한 번 더 보자" 하면 `confirm`으로 전환. 어느 쪽이든 **일반 publish는 항상 auto**.
+**Graph = Derived View**: Edge는 Artifact 필드(`pins[]`, `related_resources[]`, `references[]` 등)에서 **도출되는 view**. Source of truth는 Artifact 필드. 이중 저장 아님.
 
 ---
 
 ## 보조 개념들
 
-### Pin (Hard)
+### Checkpoint
+
+Promote의 트리거 순간. 별도 저장 단위 아님.
+
+- 사용자 명시 요청 ("정리해줘")
+- 에이전트 자율 (N턴 + 결론 / 디버깅 resolution / 새 모듈 생성 / ADR 유발 키워드)
+- 3회 거절 시 세션 동안 자동 제안 off
+
+### SessionRef
+
+에이전트 대화 세션의 **외부 레퍼런스**. Pindoc은 raw 세션을 저장하지 않음.
 
 ```
-Pin {
-  repo, ref_type: "commit"|"branch"|"pr"|"path_only",
-  commit_sha?, branch?, pr_number?, paths[],
-  pinned_at, pinned_by
+SessionRef {
+  agent: "claude-code" | "cursor" | "cline" | "codex" | ...
+  session_id: string     // 해당 에이전트 클라이언트 내부 ID
+  timestamp: timestamp
+  user: UserRef
+  title_hint: string?    // Promote 시 에이전트가 제공한 1줄
 }
 ```
 
-Pin된 경로 변경 → `stale` 플래그 + Propagation Ledger 이벤트.
+Artifact의 `source_session: SessionRef` 필드로 참조. 사용자가 원하면 해당 클라이언트에서 원본 open — Pindoc은 원본 흡수하지 않음. 철학: **"너절한 채팅 로그는 해당 앱에서 보고, 관리 대상은 정돈된 artifact"**.
 
-### Related Resource (Soft)
+### Pin (Hard) vs Related Resource (Soft)
 
-```
-ResourceRef {
-  type: "code"|"asset"|"api"|"doc"|"link",
-  ref, purpose,
-  added_at, added_by,
-  last_verified_at?, verified_status
+| 타입 | 의미 | Stale 감지 | 저장 위치 |
+|---|---|---|---|
+| `Pin` | hard pin, 정합 필수 | ✅ 자동 | `Artifact.pins[]` |
+| `ResourceRef` | soft link, 맥락 navigation | ❌ (M7로 주기 검증) | `Artifact.related_resources[]` |
+
+Graph의 `pinned_to` / `related_resource` 엣지는 위 필드에서 derive.
+
+### Intent
+
+```json
+{
+  "kind": "new" | "modification" | "split" | "supersede",
+  "target_type": "Document/Debug",
+  "target_area": "/Payment",        // 단수 — Artifact는 1개 Area에만 속함
+  "target_id": "doc_xxx?",
+  "reason": "PG 타임아웃 재시도 반영",
+  "related_session": "SessionRef"
 }
 ```
 
-Stale 감지 대상 아님. Navigation + Context bundle 용도. **M7 Freshness Re-Check**로 주기 검증.
+**cross-area 는?** 1개 Area 원칙. "여러 area에 걸친" 건 별도 Artifact 여러 개 또는 상위 Area(예: `/Cross-cutting/Observability`)로 표현. Graph `relates_to` 엣지로 연결.
+
+### Pre-flight Check (Tool-driven Prompting)
+
+MCP 응답이 즉답 대신 체크리스트로 에이전트에 작업 역지시. [05 M0.5](05-mechanisms.md).
+
+### Referenced Confirmation
+
+에이전트가 사용자에게 확인 요청 시 **항상 링크 동반** 규약. [05 M0.6](05-mechanisms.md).
+
+### Review Queue
+
+**Sensitive ops만** 올라오는 대기열 (`sensitive_ops: confirm` 모드에서). 일반 publish는 auto. [06 Flow 3](06-ui-flows.md).
+
+### Continuation Context
+
+URL → `pindoc.artifact.read(url)` fetch 시 받는 번들: `{ artifact, neighbors, recent_changes, open_questions, source_session, related_resources, area_context, project }`.
 
 ### Completeness
 
@@ -202,84 +191,66 @@ Stale 감지 대상 아님. Navigation + Context bundle 용도. **M7 Freshness R
 - `partial`: 기본값. 의미 있는 내용.
 - `settled`: 완결. 사람 승인 필요 (Review Queue).
 
-### Intent
-
-```json
-{
-  "kind": "new" | "modification" | "split" | "supersede",
-  "target_type": "...",
-  "target_scope": ["Payment"],
-  "target_id": "...",
-  "reason": "...",
-  "related_session": "..."
-}
-```
-
-### Pre-flight Check (Tool-driven Prompting)
-
-MCP 응답이 즉답 대신 체크리스트로 에이전트에 작업 역지시하는 패턴. [05 M0.5](05-mechanisms.md).
-
-### Continuation Context
-
-URL → `varn.wiki.read()` fetch 시 받는 번들: `{ artifact, neighbors, recent_changes, open_questions, source_session, related_resources, area_context }`.
-
 ### Project Permission (Role)
 
-- `admin` — 프로젝트 설정, 멤버, Domain Pack 관리
-- `writer` (주로 에이전트 토큰) — Artifact write 권한
+- `admin` — 설정, 멤버, Domain Pack, agent token
+- `writer` (주로 에이전트) — Artifact write
 - `approver` (사람) — Review Queue 처리
-- `reader` — 읽기만
+- `reader` — 읽기
 
-한 사람/에이전트가 여러 Project에 서로 다른 role을 가질 수 있음.
-
-### Review Queue
-
-**엣지 케이스만** 올라오는 대기열. 일반 publish는 auto. [06 Flow 3](06-ui-flows.md) 참조.
+한 사람/에이전트가 여러 Project에 서로 다른 role.
 
 ---
+
+## 용어 경계 (Artifact vs Wiki vs Page 등)
+
+내부 기술 문서·데이터 모델에서는 **Artifact**.
+UI 라벨은 타입명 직접 노출 ("Debug", "Feature", "Task" 등) 또는 "페이지".
+README/홍보에서는 **Wiki / Pindoc wiki** 사용 가능.
+
+이 경계가 혼동되면 `docs/glossary.md` (배치 B에서 작성) 참조.
 
 ## 개념 간 관계도
 
 ```
-┌────────────────────────────┐
-│  Project (최상위)          │
-│  - 권한 스코프              │
-│  - Areas 보유              │
-│  - Harness (VARN.md)       │
-└──────────────┬─────────────┘
+┌──────────────────────────────┐
+│  Project (최상위)            │
+│  - 권한 스코프               │
+│  - Areas 보유                │
+│  - Harness (PINDOC.md)       │
+└──────────────┬───────────────┘
                │
                ▼
-┌─────────────┐
-│   Session   │  (에이전트 대화, 휘발성 → F6)
-└──────┬──────┘
-       │ Checkpoint trigger
-       ▼
+        [Agent Session]       (외부, Pindoc이 저장 안 함)
+               │
+               │ Checkpoint trigger
+               ▼
 ┌─────────────────────────────────┐
-│   Promote (에이전트 주도, 6단계) │
-│   1. Trigger                    │
-│   2. Intent                     │
-│   3. Pre-flight Check ★         │
-│   4. Conflict Check             │
-│   5. Schema Validation          │
-│   6. Publish (auto)             │
+│   Promote (에이전트 주도)        │
+│   1. Trigger                     │
+│   2. Intent                      │
+│   3. Pre-flight Check ★          │
+│   4. Conflict Check              │
+│   5. Schema Validation           │
+│   6. Commit (auto-publish        │
+│      or Review Queue if sensitive)│
 └────────┬────────────────────────┘
          │
-         │ (Sensitive ops 만
-         │  → Review Queue → 사람 OK)
          ▼
 ┌─────────────┐
-│  Artifact   │
-│  Tier A+B   │
-│  project_id │
+│  Artifact   │  source_session: SessionRef (외부 ref만)
+│  Tier A+B   │  project_id, area, pins[], related_resources[]
 └──────┬──────┘
-       │ Graph 구성
+       │
+       │ Graph (derived view)
        ▼
 ┌─────────────┐
 │   Memory    │
 └──────┬──────┘
-       │ Continuation (URL fetch)
+       │
+       │ Continuation (URL → agent fetch)
        ▼
-  [ 다음 Session ]
+   [ 다음 Agent Session ]
 ```
 
-이 루프가 Varn의 핵심입니다. 사람은 **대화 파트너**이자 **방향 제시자** — 타이핑하지 않고 승인 버튼도 거의 누르지 않습니다.
+**사람의 위치**: 대화 파트너 + 방향 제시자 + (엣지 케이스) approver. 타이핑·편집 없음.
