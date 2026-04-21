@@ -6,20 +6,29 @@ surfaces while the Go MCP server is scaffolded separately.
 
 ## Prerequisites
 
-- Node **22+** (Vite 8 requires it)
+- Node **20.15+** (Vite 6 minimum). **Node 22 recommended** — bumps the stack to
+  Vite 8 / plugin-react 6 (Rolldown + Oxc, the fastest current toolchain).
 - pnpm (or npm/yarn — lockfile intentionally omitted at this step)
+
+## Dev server
+
+- URL: `http://localhost:5830`
+- Port 5830 is pinned (`strictPort: true`) to avoid silent drift when other
+  dev servers are running. Chosen to dodge the common collision set
+  (3000/5000/5173/8000/8080/etc).
 
 ## Stack choices (2026-04-21)
 
-Speed-first, all on the latest stable majors:
+Latest versions that run on Node 20.15. When Node 22 is available, bump
+Vite + plugin-react majors per the comments in `package.json`.
 
 | Tool | Version | Why |
 |---|---|---|
-| Vite | 8.x | Rolldown + Oxc pipeline; currently the fastest JS bundler toolchain |
-| @vitejs/plugin-react | 6.x | Matches Vite 8; uses the built-in Oxc transform (no SWC plugin needed) |
+| Vite | 6.4.x | Fastest major compatible with Node 20.15. Upgrade to 8.x on Node 22 (Rolldown + Oxc pipeline). |
+| @vitejs/plugin-react | 5.2.x | Matches Vite 6. Pairs with plugin-react 6 under Vite 8. |
 | React | 19.2 | Latest stable; Actions, `use()`, `<form>` actions |
 | React Router | 7.x | Data APIs + type-safe loaders; imports from `react-router` (dom package folded in) |
-| TypeScript | 6.x | Latest major; compatible with our config |
+| TypeScript | 6.x | Latest major; works on Node 20 |
 
 TanStack Router was considered — its loader type-safety and cache win once we
 start pulling real artifact/project data. For M1 (iframe preview shell) it would
