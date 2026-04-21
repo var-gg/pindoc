@@ -43,6 +43,7 @@ export type Artifact = ArtifactRef & {
   body_markdown: string;
   tags: string[];
   author_version?: string;
+  superseded_by?: string;
   created_at: string;
 };
 

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet, Route, Routes, useParams } from "react-router";
 import { useI18n } from "./i18n";
-import { WikiRoute } from "./routes/Wiki";
+import { ReaderShell } from "./reader/ReaderShell";
 import { findSurface, previews, uiKits } from "./surfaces";
 
 export function App() {
@@ -12,19 +12,23 @@ export function App() {
         <Route path="/preview/:slug" element={<EmbeddedPreview />} />
       </Route>
       <Route path="/ui/:slug" element={<UiKitViewport />} />
-      <Route path="/wiki" element={<WikiRoute view="reader" />} />
-      <Route path="/wiki/:slug" element={<WikiRoute view="reader" />} />
-      <Route path="/tasks" element={<WikiRoute view="tasks" />} />
-      <Route path="/tasks/:slug" element={<WikiRoute view="tasks" />} />
-      <Route path="/graph" element={<WikiRoute view="graph" />} />
-      <Route path="/inbox" element={<WikiRoute view="inbox" />} />
+
+      {/* Phase 4 React-ified surfaces. ReaderShell owns top nav + sidebar
+          + sidecar so every live surface shares the design-system chrome. */}
+      <Route path="/wiki" element={<ReaderShell view="reader" />} />
+      <Route path="/wiki/:slug" element={<ReaderShell view="reader" />} />
+      <Route path="/tasks" element={<ReaderShell view="tasks" />} />
+      <Route path="/tasks/:slug" element={<ReaderShell view="tasks" />} />
+      <Route path="/graph" element={<ReaderShell view="graph" />} />
+      <Route path="/inbox" element={<ReaderShell view="inbox" />} />
     </Routes>
   );
 }
 
 function ShellLayout() {
-  // Wraps Home + preview cards (small design-system references).
-  // UI Kit routes use their own full-viewport layout, not this shell.
+  // Wraps Home + design-system preview cards. Live surfaces use their own
+  // reader shell (ReaderShell) which mounts directly under the top-level
+  // Routes, not under this scaffold.
   const { t, lang, setLang } = useI18n();
   return (
     <div className="m1-shell">
@@ -63,18 +67,10 @@ function ShellLayout() {
         <footer className="m1-shell__foot">
           <div className="m1-shell__langs">
             <span>{t("lang.switch")}:</span>
-            <button
-              type="button"
-              className={lang === "en" ? "is-active" : ""}
-              onClick={() => setLang("en")}
-            >
+            <button type="button" className={lang === "en" ? "is-active" : ""} onClick={() => setLang("en")}>
               {t("lang.en")}
             </button>
-            <button
-              type="button"
-              className={lang === "ko" ? "is-active" : ""}
-              onClick={() => setLang("ko")}
-            >
+            <button type="button" className={lang === "ko" ? "is-active" : ""} onClick={() => setLang("ko")}>
               {t("lang.ko")}
             </button>
           </div>
@@ -93,31 +89,23 @@ function Home() {
   return (
     <article className="m1-shell__home">
       <h1>{t("home.title")}</h1>
-      <p className="m1-shell__callout">
-        {t("home.callout")}
-      </p>
+      <p className="m1-shell__callout">{t("home.callout")}</p>
       <h2>Two kinds of surfaces</h2>
       <ul>
         <li>
-          <strong>UI kits</strong> open in a clean <em>full viewport</em> route
-          (<code>/ui/*</code>) with a device-size switcher (Desktop 1440 / Tablet
-          768 / Mobile 375 / Fit). That is the right way to judge layout.
+          <strong>Live data surfaces</strong> open in a React-ified Reader shell
+          ported from the Claude Design bundle. Wiki / Tasks / Graph / Inbox.
+          Top nav + sidebar + sidecar + ⌘K all match the handoff prototype.
+        </li>
+        <li>
+          <strong>UI kits</strong> open in a clean full-viewport route
+          (<code>/ui/*</code>) as the raw HTML prototypes — useful for diffing
+          against future Claude Design exports.
         </li>
         <li>
           <strong>Design-system references</strong> open here in this shell
-          (<code>/preview/*</code>) because they are small swatches — Typography,
-          Neutral ramp, Components, etc. Storybook-style, not product screens.
-        </li>
-      </ul>
-      <h2>What is mockup vs what is ours</h2>
-      <ul>
-        <li>
-          <code>web/public/design-system/</code> → Claude Design bundle,
-          unmodified. Do not edit here; iterate in Claude Design and re-export.
-        </li>
-        <li>
-          <code>web/src/</code> → M1 dev shell (routing + device switcher only).
-          Scaffolding, throwaway.
+          (<code>/preview/*</code>) because they are small swatches —
+          Typography, Neutral ramp, Components, etc.
         </li>
       </ul>
       <p className="m1-shell__note">
@@ -209,8 +197,7 @@ function NotFound({ slug }: { slug: string | undefined }) {
     <article className="m1-shell__home">
       <h1>Not found</h1>
       <p>
-        <code>{slug}</code> is not a known surface. Check
-        <code> src/surfaces.ts</code>.
+        <code>{slug}</code> is not a known surface. Check <code>src/surfaces.ts</code>.
       </p>
       <p>
         <Link to="/">Back to M1 home</Link>
