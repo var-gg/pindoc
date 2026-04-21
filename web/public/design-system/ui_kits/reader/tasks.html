@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pindoc — Task artifact</title>
+<link rel="stylesheet" href="../../colors_and_type.css?v=2">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script>
+  (function(){
+    try {
+      var saved = localStorage.getItem('pindoc.theme');
+      if (saved) { document.documentElement.setAttribute('data-theme-source','user');
+        if (saved === 'dark') document.documentElement.classList.add('theme-dark'); }
+    } catch(e){}
+  })();
+</script>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body { margin: 0; color: var(--fg-1); background: var(--bg-0); }
+
+  .app { display: grid; grid-template-rows: var(--nav-h) 1fr; height: 100vh; }
+
+  /* Top nav (minimal — slice from reader kit) */
+  .nav { display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--bg-1); border-bottom: 1px solid var(--border); }
+  .nav__brand { display: flex; align-items: center; gap: 8px; color: var(--fg-0); font-weight: 600; font-size: 14px; letter-spacing: -0.02em; flex-shrink: 0; }
+  .nav__tabs { display: flex; gap: 2px; margin-left: 8px; }
+  .nav__tab { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; background: transparent; border: 0; border-radius: var(--r-2); color: var(--fg-2); font-size: 13px; cursor: pointer; font-family: inherit; }
+  .nav__tab [data-lucide] { width: 14px; height: 14px; }
+  .nav__tab:hover { background: var(--bg-2); color: var(--fg-1); }
+  .nav__tab.active { background: var(--bg-2); color: var(--fg-0); }
+  .nav__spacer { flex: 1; }
+  .nav__theme { background: transparent; border: 0; padding: 6px; color: var(--fg-2); cursor: pointer; border-radius: var(--r-2); }
+  .nav__theme:hover { background: var(--bg-2); color: var(--fg-0); }
+  .nav__theme [data-lucide] { width: 15px; height: 15px; }
+
+  .main { overflow-y: auto; }
+  .mode-hide { display: none !important; }
+
+  /* ============ TASK DETAIL ============ */
+  .task { max-width: var(--reader-max); margin: 0 auto; padding: 40px 32px 96px; }
+  .crumbs { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); margin-bottom: 16px;}
+  .crumbs [data-lucide] { width: 12px; height: 12px; }
+  .crumbs .current { color: var(--fg-2); }
+
+  .task__header { display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: flex-start; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .task__title { font-size: var(--fs-3xl); line-height: 1.2; letter-spacing: -0.015em; font-weight: 600; color: var(--fg-0); margin: 0 0 10px; }
+  .task__subtitle { display:flex; align-items: center; gap: 10px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); }
+  .task__subtitle .av { width: 18px; height: 18px; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 500; background: oklch(90% 0.04 265); color: oklch(35% 0.14 265); }
+  :root.theme-dark .task__subtitle .av { background: oklch(30% 0.06 265); color: oklch(82% 0.10 265); }
+
+  .task__rail { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; min-width: 160px; }
+  .task__rail-row { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-3); }
+  .task__rail-row .k { color: var(--fg-4); text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px; }
+
+  /* Status pill — task variant */
+  .status-pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 12px; font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; border: 1px solid transparent; }
+  .status-pill .p-dot { width: 7px; height: 7px; }
+  .status-pill--todo        { background: var(--draft-bg);     color: var(--draft);     border-color: var(--draft-border); }
+  .status-pill--in_progress { background: var(--task-prog-bg); color: var(--task-prog); border-color: var(--task-prog-border); }
+  .status-pill--done        { background: var(--live-bg);      color: var(--live);      border-color: var(--live-border); }
+  .status-pill--archived    { background: var(--archived-bg);  color: var(--fg-2);      border-color: var(--archived-border); }
+
+  .status-pill--todo        .p-dot { background: var(--draft); }
+  .status-pill--in_progress .p-dot { background: var(--task-prog); animation: p-pulse 1.4s var(--ease-out) infinite; }
+  .status-pill--done        .p-dot { background: var(--live); }
+  .status-pill--archived    .p-dot { background: var(--archived); }
+
+  /* Priority chip — always same shape, only color differs */
+  .prio { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; border-radius: var(--r-1); border: 1px solid; letter-spacing: 0.02em; }
+  .prio .dot { width: 5px; height: 5px; border-radius: 50%; }
+  .prio--p0 { background: var(--prio-p0-bg); color: var(--prio-p0); border-color: var(--prio-p0-border); }
+  .prio--p1 { background: var(--prio-p1-bg); color: var(--prio-p1); border-color: var(--prio-p1-border); }
+  .prio--p2 { background: var(--prio-p2-bg); color: var(--prio-p2); border-color: var(--prio-p2-border); }
+  .prio--p3 { background: var(--prio-p3-bg); color: var(--prio-p3); border-color: var(--prio-p3-border); }
+  .prio--p0 .dot { background: var(--prio-p0); }
+  .prio--p1 .dot { background: var(--prio-p1); }
+  .prio--p2 .dot { background: var(--prio-p2); }
+  .prio--p3 .dot { background: var(--prio-p3); }
+
+  /* Area chip */
+  .chip-area { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; font-family: var(--font-mono); font-size: 11px; border-radius: var(--r-1); border: 1px solid var(--border); background: var(--bg-2); color: var(--fg-2); }
+
+  /* Blocked-by warning banner */
+  .blocked-banner { margin-top: 16px; padding: 12px 14px; background: var(--draft-bg); border: 1px solid var(--draft-border); border-radius: var(--r-3); color: var(--draft); font-size: 13.5px; display: flex; align-items: flex-start; gap: 10px; }
+  .blocked-banner [data-lucide] { width: 16px; height: 16px; margin-top: 1px; flex-shrink: 0; }
+  .blocked-banner .body { flex: 1; }
+  .blocked-banner .body .head { font-weight: 500; color: var(--fg-0); margin-bottom: 6px; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.02em; text-transform: uppercase; }
+  .blocked-banner .refs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .blocked-banner .ref { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; background: var(--bg-1); border: 1px solid var(--draft-border); border-radius: var(--r-1); font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-1); text-decoration: none; cursor: pointer; }
+  .blocked-banner .ref:hover { border-color: var(--fg-3); }
+  .blocked-banner .ref [data-lucide] { width: 10px; height: 10px; color: var(--fg-3); margin: 0; }
+
+  /* Body */
+  .task__body { margin-top: 32px; font-size: var(--fs-md); line-height: var(--lh-reader); color: var(--fg-1); }
+  .task__body h2 { font-size: 18px; font-weight: 600; color: var(--fg-0); margin: 32px 0 10px; font-family: var(--font-mono); letter-spacing: 0.02em; text-transform: uppercase; font-size: 12px; color: var(--fg-3); }
+  .task__body p { margin: 0 0 14px; }
+  .task__body code { font-family: var(--font-mono); font-size: 13.5px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; color: var(--fg-0); }
+
+  /* Acceptance criteria */
+  .ac { margin: 8px 0 0; padding: 0; list-style: none; }
+  .ac li { display: grid; grid-template-columns: 22px 1fr; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 14.5px; line-height: 1.55; color: var(--fg-1); }
+  .ac li:last-child { border-bottom: 0; }
+  .ac .box { font-family: var(--font-mono); font-size: 13px; color: var(--fg-3); user-select: none; padding-top: 1px; }
+  .ac li.done .box { color: var(--live); }
+  .ac li.done .text { color: var(--fg-3); text-decoration: line-through; text-decoration-color: var(--fg-4); text-decoration-thickness: 1px; }
+  .ac__footer { margin-top: 12px; font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-4); }
+
+  /* Graph edges block */
+  .edges-block { margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .edges-block h2 { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-3); font-weight: 500; margin: 0 0 10px; }
+  .edge-row { display: grid; grid-template-columns: 100px 1fr; gap: 10px; padding: 6px 0; font-size: 13px; }
+  .edge-row .rel { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.04em; padding-top: 2px; }
+  .edge-row .tgt { display: flex; align-items: center; gap: 6px; color: var(--fg-1); }
+  .edge-row .tgt [data-lucide] { width: 11px; height: 11px; color: var(--fg-4); }
+  .edge-row .tgt .chip-type { font-family: var(--font-mono); font-size: 10px; padding: 1px 4px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 2px; color: var(--fg-3); letter-spacing: 0.04em; }
+
+  /* Attempts timeline */
+  .attempts { margin-top: 24px; border: 1px solid var(--border); border-radius: var(--r-3); overflow: hidden; }
+  .attempts__head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: var(--bg-1); cursor: pointer; user-select: none; }
+  .attempts__head:hover { background: var(--bg-2); }
+  .attempts__head .title { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-2); letter-spacing: 0.04em; text-transform: uppercase; display: flex; align-items: center; gap: 8px; }
+  .attempts__head .count { background: var(--bg-3); color: var(--fg-1); font-family: var(--font-mono); font-size: 11px; padding: 1px 6px; border-radius: 8px; }
+  .attempts__head [data-lucide] { width: 14px; height: 14px; color: var(--fg-3); transition: transform var(--dur-fast) var(--ease-out); }
+  .attempts.open .attempts__head [data-lucide] { transform: rotate(90deg); }
+  .attempts__body { display: none; background: var(--bg-0); padding: 16px 14px; }
+  .attempts.open .attempts__body { display: block; }
+  .attempt { display: grid; grid-template-columns: 22px 1fr; gap: 12px; padding: 10px 0; position: relative; }
+  .attempt + .attempt { border-top: 1px dashed var(--border); }
+  .attempt .av { width: 18px; height: 18px; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 9px; font-weight: 500; background: oklch(90% 0.04 265); color: oklch(35% 0.14 265); }
+  :root.theme-dark .attempt .av { background: oklch(30% 0.06 265); color: oklch(82% 0.10 265); }
+  .attempt .av.cr { background: oklch(90% 0.05 310); color: oklch(38% 0.15 310); }
+  :root.theme-dark .attempt .av.cr { background: oklch(30% 0.07 310); color: oklch(80% 0.11 310); }
+  .attempt .av.cx { background: oklch(90% 0.05 160); color: oklch(38% 0.13 160); }
+  :root.theme-dark .attempt .av.cx { background: oklch(30% 0.07 160); color: oklch(78% 0.12 160); }
+  .attempt__meta { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-3); flex-wrap: wrap; margin-bottom: 3px; }
+  .attempt__meta .outcome { padding: 1px 5px; border-radius: 2px; font-size: 10.5px; letter-spacing: 0.02em; }
+  .attempt__meta .outcome--done    { background: var(--live-bg); color: var(--live); }
+  .attempt__meta .outcome--blocked { background: var(--stale-bg); color: var(--stale); }
+  .attempt__meta .outcome--abandoned { background: var(--archived-bg); color: var(--fg-2); }
+  .attempt__note { font-size: 13px; color: var(--fg-1); line-height: 1.55; }
+
+  /* ============ TASK LIST ============ */
+  .list-wrap { max-width: 1280px; margin: 0 auto; padding: 32px 32px 96px; }
+  .list-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px; flex-wrap: wrap; gap: 10px; }
+  .list-head h1 { font-size: 22px; letter-spacing: -0.01em; font-weight: 600; color: var(--fg-0); margin: 0; }
+  .list-head .sub { font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); }
+  .list-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 18px 0; font-family: var(--font-mono); font-size: 12px; align-items: center; }
+  .filter { padding: 5px 10px; background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-2); color: var(--fg-2); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  .filter:hover { border-color: var(--border-strong); color: var(--fg-1); }
+  .filter.active { background: var(--bg-3); color: var(--fg-0); border-color: var(--border-strong); }
+  .filter [data-lucide] { width: 12px; height: 12px; color: var(--fg-3); }
+  .filter .count { color: var(--fg-3); font-size: 11px; }
+  .filter-sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+
+  .list { background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-3); overflow: hidden; }
+  .list__colhead { display: grid; grid-template-columns: 120px 60px 1fr 160px 28px 100px; gap: 12px; padding: 10px 16px; background: var(--bg-2); border-bottom: 1px solid var(--border); font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-3); align-items: center; }
+  .row { display: grid; grid-template-columns: 120px 60px 1fr 160px 28px 100px; gap: 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .row:last-child { border-bottom: 0; }
+  .row:hover { background: var(--bg-2); }
+  .row__title { color: var(--fg-0); font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .row__title .id { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); margin-right: 8px; }
+  .row__title .blocked-ind { font-family: var(--font-mono); font-size: 10.5px; color: var(--stale); margin-left: 8px; padding: 1px 5px; background: var(--stale-bg); border: 1px solid var(--stale-border); border-radius: 2px; }
+  .row__area { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-2); }
+  .row__assignee .av { width: 20px; height: 20px; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 9px; font-weight: 500; background: oklch(90% 0.04 265); color: oklch(35% 0.14 265); }
+  :root.theme-dark .row__assignee .av { background: oklch(30% 0.06 265); color: oklch(82% 0.10 265); }
+  .row__assignee .av.cr { background: oklch(90% 0.05 310); color: oklch(38% 0.15 310); }
+  :root.theme-dark .row__assignee .av.cr { background: oklch(30% 0.07 310); color: oklch(80% 0.11 310); }
+  .row__assignee .av.cx { background: oklch(90% 0.05 160); color: oklch(38% 0.13 160); }
+  :root.theme-dark .row__assignee .av.cx { background: oklch(30% 0.07 160); color: oklch(78% 0.12 160); }
+  .row__assignee .av.none { background: transparent; border: 1px dashed var(--border-strong); color: var(--fg-4); }
+  .row__due { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-2); text-align: right; }
+  .row__due.overdue { color: var(--stale); }
+
+  /* ============ RESPONSIVE ============ */
+  @media (max-width: 1023px) {
+    .list__colhead { display: none; }
+    .row { grid-template-columns: 1fr; gap: 8px; padding: 14px 16px; }
+    .row__header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .row__title { white-space: normal; font-size: 14.5px; font-weight: 500; line-height: 1.35; }
+    .row__meta-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+    .task__header { grid-template-columns: 1fr; }
+    .task__rail { align-items: flex-start; flex-direction: row; flex-wrap: wrap; }
+  }
+
+  @media (max-width: 767px) {
+    .task { padding: 24px 20px 80px; }
+    .task__title { font-size: 22px; }
+    .list-wrap { padding: 20px 16px 80px; }
+    .nav__tabs .nav__tab span.label { display: none; }
+  }
+
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 4px; }
+  *::-webkit-scrollbar-thumb:hover { background: var(--bg-4); }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="nav">
+    <div class="nav__brand">
+      <svg width="20" height="20" viewBox="0 0 32 32" fill="none" style="color:var(--fg-0)">
+        <rect x="5" y="7.5" width="19" height="21" rx="2.5" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="9" y1="17" x2="20" y2="17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/>
+        <circle cx="24" cy="7.5" r="3.5" fill="currentColor"/>
+      </svg>
+      <span>pindoc</span>
+    </div>
+
+    <div class="nav__tabs">
+      <button class="nav__tab active" data-mode="detail"><i data-lucide="check-square"></i><span class="label">Task detail</span></button>
+      <button class="nav__tab" data-mode="list"><i data-lucide="list"></i><span class="label">Task list</span></button>
+    </div>
+
+    <div class="nav__spacer"></div>
+    <button class="nav__theme" id="themeBtn" aria-label="Toggle theme">
+      <i data-lucide="sun" id="iconLight"></i>
+      <i data-lucide="moon" id="iconDark" style="display:none"></i>
+    </button>
+  </div>
+
+  <div class="main">
+
+    <!-- ========= TASK DETAIL ========= -->
+    <div id="mode-detail">
+      <article class="task">
+        <div class="crumbs">
+          <span>platform</span><i data-lucide="chevron-right"></i><span>auth</span><i data-lucide="chevron-right"></i><span>tasks</span><i data-lucide="chevron-right"></i><span class="current">t-0118</span>
+        </div>
+
+        <header class="task__header">
+          <div>
+            <h1 class="task__title">Dual-write sessions to Postgres behind SESSION_STORE_SHADOW flag</h1>
+            <div class="task__subtitle">
+              <span>TASK · 0118</span>
+              <span>·</span>
+              <span class="av">cc</span><span>claude-code · opened 4h ago</span>
+              <span>·</span>
+              <span>implements ADR-0042</span>
+            </div>
+          </div>
+          <div class="task__rail">
+            <span class="status-pill status-pill--in_progress"><span class="p-dot"></span>in progress</span>
+            <span class="prio prio--p1"><span class="dot"></span>p1</span>
+            <div class="task__rail-row">
+              <span class="k">due</span>
+              <span style="color: var(--fg-1)">Dec 3</span>
+            </div>
+            <div class="task__rail-row">
+              <span class="k">assignee</span>
+              <span class="av">cc</span>
+            </div>
+          </div>
+        </header>
+
+        <!-- Blocked banner (visible only when non-empty) -->
+        <div class="blocked-banner">
+          <i data-lucide="alert-triangle"></i>
+          <div class="body">
+            <div class="head">Blocked by 2 artifacts</div>
+            <div>This task cannot progress until the following are resolved:</div>
+            <div class="refs">
+              <a class="ref"><i data-lucide="check-square"></i>T-0116 · set up pg session schema <span style="color:var(--stale)">· todo</span></a>
+              <a class="ref"><i data-lucide="file-text"></i>SPEC-0011 · session row format <span style="color:var(--draft)">· draft</span></a>
+            </div>
+          </div>
+        </div>
+
+        <div class="task__body">
+          <h2>Description</h2>
+          <p>Implement the shadow-write path specified in <code>ADR-0042</code>. Writes go to both Redis and Postgres; reads continue from Redis. A metric (<code>session.shadow.diff</code>) compares the two and alerts on divergence &gt; 0.1%.</p>
+          <p>This is intentionally a one-way valve for the first two weeks — no read traffic touches Postgres until divergence sits at zero for 72h.</p>
+
+          <h2>Acceptance criteria</h2>
+          <ul class="ac" id="ac">
+            <li class="done"><span class="box">[x]</span><span class="text">Schema migration merged and applied to staging</span></li>
+            <li class="done"><span class="box">[x]</span><span class="text">Shadow-write gated on <code>SESSION_STORE_SHADOW</code> env flag, off by default in prod</span></li>
+            <li><span class="box">[ ]</span><span class="text">Divergence metric emitting to Prom, with alert at &gt; 0.1% over 5m</span></li>
+            <li><span class="box">[ ]</span><span class="text">Dashboard panel added to <code>auth-platform</code> Grafana board</span></li>
+            <li><span class="box">[ ]</span><span class="text">Runbook entry for "shadow diverging" alert exists and is linked</span></li>
+            <li><span class="box">[ ]</span><span class="text">72h clean divergence window observed in staging before prod rollout</span></li>
+          </ul>
+          <div class="ac__footer">2 / 6 complete · updated by claude-code 12m ago</div>
+
+          <div class="edges-block">
+            <h2>Graph</h2>
+            <div class="edge-row"><span class="rel">implements</span><span class="tgt"><span class="chip-type">ADR</span>adr-0042-session-store <i data-lucide="arrow-up-right"></i></span></div>
+            <div class="edge-row"><span class="rel">depends on</span><span class="tgt"><span class="chip-type">SPEC</span>sessions-pg-schema <i data-lucide="arrow-up-right"></i></span></div>
+            <div class="edge-row"><span class="rel">mentions</span><span class="tgt"><span class="chip-type">RUNBOOK</span>session-janitor-runbook <i data-lucide="arrow-up-right"></i></span></div>
+          </div>
+
+          <div class="attempts open" id="attempts">
+            <div class="attempts__head">
+              <span class="title"><i data-lucide="chevron-right"></i>Agent attempts <span class="count">3</span></span>
+              <span style="font-family: var(--font-mono); font-size: 11px; color: var(--fg-3)">last · 12m ago</span>
+            </div>
+            <div class="attempts__body">
+              <div class="attempt">
+                <span class="av">cc</span>
+                <div>
+                  <div class="attempt__meta">
+                    <span style="color:var(--fg-1)">claude-code@v2.1</span>
+                    <span>·</span><span>started 12m ago · 4m 22s</span>
+                    <span class="outcome outcome--blocked">blocked</span>
+                  </div>
+                  <div class="attempt__note">Schema migration applied; divergence metric partially wired but Prom label cardinality exploded. Backing off — needs SPEC-0011 resolved before proceeding.</div>
+                </div>
+              </div>
+              <div class="attempt">
+                <span class="av cx">cx</span>
+                <div>
+                  <div class="attempt__meta">
+                    <span style="color:var(--fg-1)">codex@v0.9</span>
+                    <span>·</span><span>2h ago · 8m 17s</span>
+                    <span class="outcome outcome--done">done</span>
+                  </div>
+                  <div class="attempt__note">Shadow-write gate implemented. Opened PR; merged after review. See changelog entry <code>a3f2c1b</code>.</div>
+                </div>
+              </div>
+              <div class="attempt">
+                <span class="av">cc</span>
+                <div>
+                  <div class="attempt__meta">
+                    <span style="color:var(--fg-1)">claude-code@v2.1</span>
+                    <span>·</span><span>3h ago · 1m 04s</span>
+                    <span class="outcome outcome--abandoned">abandoned</span>
+                  </div>
+                  <div class="attempt__note">Initial scaffolding — reverted after discovering existing migration helper.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <!-- ========= TASK LIST ========= -->
+    <div id="mode-list" class="mode-hide">
+      <div class="list-wrap">
+        <div class="list-head">
+          <div>
+            <h1>Tasks · platform/auth</h1>
+            <div class="sub" style="margin-top: 4px">8 open · 1 blocked · sorted by priority</div>
+          </div>
+          <div class="sub">⌘K to filter</div>
+        </div>
+
+        <div class="list-filters">
+          <button class="filter active">All <span class="count">12</span></button>
+          <div class="filter-sep"></div>
+          <button class="filter"><span class="p-dot" style="background:var(--draft)"></span>todo <span class="count">4</span></button>
+          <button class="filter active"><span class="p-dot" style="background:var(--task-prog)"></span>in progress <span class="count">3</span></button>
+          <button class="filter"><span class="p-dot" style="background:var(--live)"></span>done <span class="count">5</span></button>
+          <div class="filter-sep"></div>
+          <button class="filter"><span class="dot" style="display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--prio-p0)"></span>p0</button>
+          <button class="filter"><span class="dot" style="display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--prio-p1)"></span>p1</button>
+          <div class="filter-sep"></div>
+          <button class="filter"><i data-lucide="user"></i>assignee</button>
+          <button class="filter"><i data-lucide="folder"></i>area</button>
+        </div>
+
+        <div class="list">
+          <div class="list__colhead">
+            <div>Status</div>
+            <div>Prio</div>
+            <div>Title</div>
+            <div>Area</div>
+            <div></div>
+            <div style="text-align: right">Due</div>
+          </div>
+
+          <!-- p0 first -->
+          <div class="row">
+            <div class="row__header"><span class="status-pill status-pill--in_progress"><span class="p-dot"></span>in progress</span></div>
+            <div><span class="prio prio--p0"><span class="dot"></span>p0</span></div>
+            <div class="row__title"><span class="id">T-0121</span>Fix token refresh race on device-flow retry<span class="blocked-ind">blocked</span>
+              <div class="row__meta-line" style="display:none">platform/auth · claude-code · Nov 29</div>
+            </div>
+            <div class="row__area"><i data-lucide="folder" style="width:11px;height:11px;color:var(--fg-4)"></i>platform/auth</div>
+            <div class="row__assignee"><span class="av">cc</span></div>
+            <div class="row__due overdue">Nov 29</div>
+          </div>
+
+          <div class="row">
+            <div><span class="status-pill status-pill--in_progress"><span class="p-dot"></span>in progress</span></div>
+            <div><span class="prio prio--p1"><span class="dot"></span>p1</span></div>
+            <div class="row__title"><span class="id">T-0118</span>Dual-write sessions to Postgres behind SESSION_STORE_SHADOW flag
+              <div class="row__meta-line" style="display:none">platform/auth · claude-code · Dec 3</div>
+            </div>
+            <div class="row__area"><i data-lucide="folder" style="width:11px;height:11px;color:var(--fg-4)"></i>platform/auth</div>
+            <div class="row__assignee"><span class="av">cc</span></div>
+            <div class="row__due">Dec 3</div>
+          </div>
+
+          <div class="row">
+            <div><span class="status-pill status-pill--todo"><span class="p-dot"></span>todo</span></div>
+            <div><span class="prio prio--p1"><span class="dot"></span>p1</span></div>
+            <div class="row__title"><span class="id">T-0116</span>Set up sessions pg schema (migration + seed)
+              <div class="row__meta-line" style="display:none">platform/auth · unassigned · Dec 1</div>
+            </div>
+            <div class="row__area"><i data-lucide="folder" style="width:11px;height:11px;color:var(--fg-4)"></i>platform/auth</div>
+            <div class="row__assignee"><span class="av none">—</span></div>
+            <div class="row__due">Dec 1</div>
+          </div>
+
+          <div class="row">
+            <div><span class="status-pill status-pill--in_progress"><span class="p-dot"></span>in progress</span></div>
+            <div><span class="prio prio--p2"><span class="dot"></span>p2</span></div>
+            <div class="row__title"><span class="id">T-0114</span>Grafana panel for session.shadow.diff divergence
+              <div class="row__meta-line" style="display:none">platform/auth · cursor · Dec 5</div>
+            </div>
+            <div class="row__area"><i data-lucide="folder" style="width:11px;height:11px;color:var(--fg-4)"></i>platform/auth</div>
+            <div class="row__assignee"><span class="av cr">cr</span></div>
+            <div class="row__due">Dec 5</div>
+          </div>
+
+          <div class="row">
+            <div><span class="status-pill status-pill--todo"><span class="p-dot"></span>todo</span></div>
+            <div><span class="prio prio--p2"><span class="dot"></span>p2</span></div>
+            <div class="row__title"><span class="id">T-0113</span>Runbook entry for shadow-diverging alert
+              <div class="row__meta-line" style="display:none">platform/auth · unassigned · —</div>
+            </div>
+            <div class="row__area"><i data-lucide="folder" style="width:11px;height:11px;color:var(--fg-4)"></i>platform/auth</div>
+            <div class="row__assignee"><span class="av none">—</span></div>
+            <div class="row__due" style="color:var(--fg-4)">—</div>
+          </div>
+
+          <div class="row">
+            <div><span class="status-pill status-pill--todo"><span class="p-dot"></span>todo</span></div>
+            <div><span class="prio prio--p3"><span class="dot"></span>p3</span></div>
+            <div class="row__title"><span class="id">T-0110</span>Audit legacy session_id collisions in staging before migration
+              <div class="row__meta-line" style="display:none">platform/auth · codex · —</div>
+            </div>
+            <div class="row__area"><i data-lucide="folder" style="width:11px;height:11px;color:var(--fg-4)"></i>platform/auth</div>
+            <div class="row__assignee"><span class="av cx">cx</span></div>
+            <div class="row__due" style="color:var(--fg-4)">—</div>
+          </div>
+
+          <div class="row">
+            <div><span class="status-pill status-pill--done"><span class="p-dot"></span>done</span></div>
+            <div><span class="prio prio--p1"><span class="dot"></span>p1</span></div>
+            <div class="row__title" style="color:var(--fg-2); text-decoration: line-through; text-decoration-color: var(--fg-4);"><span class="id">T-0107</span>Wire SESSION_STORE_SHADOW env flag through auth-gateway
+              <div class="row__meta-line" style="display:none">platform/auth · codex · Nov 26</div>
+            </div>
+            <div class="row__area"><i data-lucide="folder" style="width:11px;height:11px;color:var(--fg-4)"></i>platform/auth</div>
+            <div class="row__assignee"><span class="av cx">cx</span></div>
+            <div class="row__due" style="color:var(--fg-3)">Nov 26</div>
+          </div>
+
+          <div class="row">
+            <div><span class="status-pill status-pill--done"><span class="p-dot"></span>done</span></div>
+            <div><span class="prio prio--p2"><span class="dot"></span>p2</span></div>
+            <div class="row__title" style="color:var(--fg-2); text-decoration: line-through; text-decoration-color: var(--fg-4);"><span class="id">T-0104</span>Benchmark cache-miss latency on pg-backed sessions
+              <div class="row__meta-line" style="display:none">platform/auth · claude-code · Nov 24</div>
+            </div>
+            <div class="row__area"><i data-lucide="folder" style="width:11px;height:11px;color:var(--fg-4)"></i>platform/auth</div>
+            <div class="row__assignee"><span class="av">cc</span></div>
+            <div class="row__due" style="color:var(--fg-3)">Nov 24</div>
+          </div>
+
+          <div class="row">
+            <div><span class="status-pill status-pill--archived"><span class="p-dot"></span>archived</span></div>
+            <div><span class="prio prio--p3"><span class="dot"></span>p3</span></div>
+            <div class="row__title" style="color:var(--fg-3)"><span class="id">T-0098</span>Explore Redis Cluster v7 as an alternative path
+              <div class="row__meta-line" style="display:none">platform/auth · — · —</div>
+            </div>
+            <div class="row__area"><i data-lucide="folder" style="width:11px;height:11px;color:var(--fg-4)"></i>platform/auth</div>
+            <div class="row__assignee"><span class="av none">—</span></div>
+            <div class="row__due" style="color:var(--fg-4)">—</div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  lucide.createIcons();
+
+  // Theme
+  const root = document.documentElement;
+  const themeBtn = document.getElementById('themeBtn');
+  function renderThemeIcon() {
+    const isDark = root.classList.contains('theme-dark');
+    document.getElementById('iconLight').style.display = isDark ? 'none' : '';
+    document.getElementById('iconDark').style.display = isDark ? '' : 'none';
+  }
+  renderThemeIcon();
+  themeBtn.addEventListener('click', () => {
+    const isDark = root.classList.toggle('theme-dark');
+    root.setAttribute('data-theme-source', 'user');
+    try { localStorage.setItem('pindoc.theme', isDark ? 'dark' : 'light'); } catch(e){}
+    renderThemeIcon();
+  });
+
+  // Tabs
+  document.querySelectorAll('.nav__tab').forEach(t => {
+    t.addEventListener('click', () => {
+      document.querySelectorAll('.nav__tab').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      const mode = t.dataset.mode;
+      ['detail', 'list'].forEach(m => {
+        document.getElementById('mode-' + m).classList.toggle('mode-hide', m !== mode);
+      });
+    });
+  });
+
+  // Attempts collapse
+  const attempts = document.getElementById('attempts');
+  attempts.querySelector('.attempts__head').addEventListener('click', () => {
+    attempts.classList.toggle('open');
+    lucide.createIcons();
+  });
+</script>
+
+</body>
+</html>

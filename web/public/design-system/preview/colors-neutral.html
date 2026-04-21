@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pindoc — Neutral Ramp (OKLCH)</title>
+<link rel="stylesheet" href="../colors_and_type.css?v=2">
+<style>
+  body { margin: 0; padding: 48px; background: var(--bg-0); color: var(--fg-1); }
+  .section-head { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-3); margin: 0 0 16px; }
+  .ramp { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 32px; }
+  .swatch { border: 1px solid var(--border); border-radius: var(--r-2); padding: 12px; aspect-ratio: 1.6; display: flex; flex-direction: column; justify-content: flex-end; font-family: var(--font-mono); font-size: 10.5px;}
+  .swatch__name { font-weight: 500; }
+  .swatch__hex  { opacity: 0.7; margin-top: 2px; }
+  .notes { margin-top: 24px; padding: 16px 20px; border: 1px solid var(--border); border-radius: var(--r-3); background: var(--bg-1); font-size: 13.5px; line-height: 1.6; color: var(--fg-1); max-width: 720px; }
+  .notes strong { color: var(--fg-0); }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .themed-block { padding: 24px; border: 1px solid var(--border); border-radius: var(--r-3); background: var(--bg-1); }
+  .themed-block h4 { margin: 0 0 6px; color: var(--fg-0); font-size: 15px; }
+  .themed-block p { margin: 0; color: var(--fg-2); font-size: 12.5px; font-family: var(--font-mono); }
+  .dark { background: oklch(16% 0.008 265); border-color: oklch(28% 0.010 265); color: oklch(90% 0.005 265); }
+  .dark h4 { color: oklch(97% 0.003 265); }
+  .dark p { color: oklch(72% 0.010 265); }
+</style>
+</head>
+<body>
+
+<div class="section-head">Light (default) · neutral ramp · OKLCH</div>
+<div class="ramp">
+  <div class="swatch" style="background: var(--bg-0); color: var(--fg-1)"><span class="swatch__name">bg-0</span><span class="swatch__hex">L 98.5 · C 0.002 · H 80</span></div>
+  <div class="swatch" style="background: var(--bg-1); color: var(--fg-1)"><span class="swatch__name">bg-1</span><span class="swatch__hex">L 100</span></div>
+  <div class="swatch" style="background: var(--bg-2); color: var(--fg-1)"><span class="swatch__name">bg-2</span><span class="swatch__hex">L 96</span></div>
+  <div class="swatch" style="background: var(--bg-3); color: var(--fg-1)"><span class="swatch__name">bg-3</span><span class="swatch__hex">L 93</span></div>
+  <div class="swatch" style="background: var(--bg-4); color: var(--fg-1)"><span class="swatch__name">bg-4</span><span class="swatch__hex">L 89</span></div>
+</div>
+<div class="ramp">
+  <div class="swatch" style="background: var(--fg-4); color: var(--bg-0)"><span class="swatch__name">fg-4</span><span class="swatch__hex">L 72</span></div>
+  <div class="swatch" style="background: var(--fg-3); color: var(--bg-0)"><span class="swatch__name">fg-3</span><span class="swatch__hex">L 58 · APCA Lc 49</span></div>
+  <div class="swatch" style="background: var(--fg-2); color: var(--bg-0)"><span class="swatch__name">fg-2</span><span class="swatch__hex">L 45 · APCA Lc 66</span></div>
+  <div class="swatch" style="background: var(--fg-1); color: var(--bg-0)"><span class="swatch__name">fg-1</span><span class="swatch__hex">L 26 · APCA Lc 85 ✓</span></div>
+  <div class="swatch" style="background: var(--fg-0); color: var(--bg-0)"><span class="swatch__name">fg-0</span><span class="swatch__hex">L 16 · APCA Lc 94 ✓</span></div>
+</div>
+
+<div class="section-head">Accent · restrained indigo</div>
+<div style="display:flex; gap:12px; margin-bottom:28px;">
+  <div class="swatch" style="background: var(--accent-press); color:#fff; width:160px; aspect-ratio:auto; height:84px"><span class="swatch__name">accent-press</span><span class="swatch__hex">L 42</span></div>
+  <div class="swatch" style="background: var(--accent); color:#fff; width:160px; aspect-ratio:auto; height:84px"><span class="swatch__name">accent</span><span class="swatch__hex">L 54 · APCA Lc 78 ✓</span></div>
+  <div class="swatch" style="background: var(--accent-hover); color:#fff; width:160px; aspect-ratio:auto; height:84px"><span class="swatch__name">accent-hover</span><span class="swatch__hex">L 48</span></div>
+</div>
+
+<div class="section-head">Light / dark parity · same tokens, retuned in OKLCH</div>
+<div class="pair">
+  <div class="themed-block"><h4>Light (default)</h4><p>bg-0 L98.5 · fg-1 L26 · APCA Lc 85</p></div>
+  <div class="themed-block dark"><h4>Dark (toggle)</h4><p>bg-0 L16 · fg-1 L90 · APCA Lc −80</p></div>
+</div>
+
+<div class="notes">
+  <strong>Why OKLCH.</strong> Perceptual uniformity: equal L steps feel equal. A single hue rotation doesn't shift lightness. Matches how Linear, Radix, Tailwind v4 define palettes today.<br><br>
+  <strong>Why APCA, not 4.5:1.</strong> WCAG 2.x overstates contrast of dark colors on light backgrounds and understates mid-tones. APCA (WCAG 3 candidate) measures perceived lightness contrast. Targets: <strong>Lc ≥ 60 body text</strong>, <strong>Lc ≥ 75 small text and labels</strong>. All body and UI tokens meet these.<br><br>
+  <strong>Why light by default.</strong> NN/g and MDPI 2024–25 studies show light mode outperforms dark in long-form reading and cognitive tasks in lit environments. The Wiki Reader is long-form; dark remains first-class via toggle.
+</div>
+
+</body>
+</html>

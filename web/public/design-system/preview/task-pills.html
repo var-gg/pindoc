@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pindoc — Task pills</title>
+<link rel="stylesheet" href="../colors_and_type.css?v=2">
+<style>
+  body { margin: 0; padding: 40px; background: var(--bg-0); color: var(--fg-1); }
+  .head { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-3); margin: 0 0 14px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 28px; align-items: center; }
+  .status-pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 12px; font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; border: 1px solid transparent; }
+  .status-pill .p-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .status-pill--todo        { background: var(--draft-bg);     color: var(--draft);     border-color: var(--draft-border); }
+  .status-pill--in_progress { background: var(--task-prog-bg); color: var(--task-prog); border-color: var(--task-prog-border); }
+  .status-pill--done        { background: var(--live-bg);      color: var(--live);      border-color: var(--live-border); }
+  .status-pill--archived    { background: var(--archived-bg);  color: var(--fg-2);      border-color: var(--archived-border); }
+  .status-pill--todo        .p-dot { background: var(--draft); }
+  .status-pill--in_progress .p-dot { background: var(--task-prog); }
+  .status-pill--done        .p-dot { background: var(--live); }
+  .status-pill--archived    .p-dot { background: var(--archived); }
+
+  .prio { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; border-radius: var(--r-1); border: 1px solid; letter-spacing: 0.02em; }
+  .prio .dot { width: 5px; height: 5px; border-radius: 50%; display: inline-block; }
+  .prio--p0 { background: var(--prio-p0-bg); color: var(--prio-p0); border-color: var(--prio-p0-border); }
+  .prio--p1 { background: var(--prio-p1-bg); color: var(--prio-p1); border-color: var(--prio-p1-border); }
+  .prio--p2 { background: var(--prio-p2-bg); color: var(--prio-p2); border-color: var(--prio-p2-border); }
+  .prio--p3 { background: var(--prio-p3-bg); color: var(--prio-p3); border-color: var(--prio-p3-border); }
+  .prio--p0 .dot { background: var(--prio-p0); }
+  .prio--p1 .dot { background: var(--prio-p1); }
+  .prio--p2 .dot { background: var(--prio-p2); }
+  .prio--p3 .dot { background: var(--prio-p3); }
+
+  .note { max-width: 640px; padding: 14px 18px; background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-3); font-size: 13.5px; line-height: 1.6; color: var(--fg-1); }
+  .note strong { color: var(--fg-0); }
+  .note code { font-family: var(--font-mono); font-size: 12.5px; background: var(--bg-2); border: 1px solid var(--border); padding: 0 4px; border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<div class="head">Task · status pill · 4 states mapped to existing hues</div>
+<div class="row">
+  <span class="status-pill status-pill--todo"><span class="p-dot"></span>todo</span>
+  <span class="status-pill status-pill--in_progress"><span class="p-dot"></span>in progress</span>
+  <span class="status-pill status-pill--done"><span class="p-dot"></span>done</span>
+  <span class="status-pill status-pill--archived"><span class="p-dot"></span>archived</span>
+</div>
+
+<div class="head">Task · priority chip · 4 levels, same shape, only color/label differ</div>
+<div class="row">
+  <span class="prio prio--p0"><span class="dot"></span>p0</span>
+  <span class="prio prio--p1"><span class="dot"></span>p1</span>
+  <span class="prio prio--p2"><span class="dot"></span>p2</span>
+  <span class="prio prio--p3"><span class="dot"></span>p3</span>
+</div>
+
+<div class="note">
+  <strong>Mapping to existing hues — no new colors.</strong><br><br>
+  <code>todo</code> → <code>--draft</code> (amber)<br>
+  <code>in_progress</code> → <code>--task-prog</code> (indigo, desaturated accent)<br>
+  <code>done</code> → <code>--live</code> (emerald)<br>
+  <code>archived</code> → <code>--archived</code> (zinc)<br><br>
+  Priority spans red → orange → neutral → muted. <code>p0</code> reuses the rejected hue band; <code>p1</code> is a warm orange between amber and red; <code>p2</code> and <code>p3</code> are neutrals. All APCA Lc ≥ 60 on their tinted bg.
+</div>
+
+</body>
+</html>

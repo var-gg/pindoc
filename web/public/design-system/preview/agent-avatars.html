@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pindoc — Agent avatars</title>
+<link rel="stylesheet" href="../colors_and_type.css?v=2">
+<style>
+  body { margin: 0; padding: 48px; background: var(--bg-0); color: var(--fg-1); }
+  .section-head { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-3); margin: 0 0 16px;}
+  .grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 32px; }
+  .cell { display:flex; flex-direction:column; align-items:center; gap: 10px; padding: 20px; background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-2); font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+  .av { width:32px; height:32px; border-radius: var(--r-2); display:flex; align-items:center; justify-content:center; font-family: var(--font-mono); font-weight: 500; font-size: 12px; letter-spacing: 0.02em; }
+  .sizes { display: flex; align-items: flex-end; gap: 24px; margin-bottom: 40px;}
+  .sizes > div { display:flex; flex-direction:column; align-items:center; gap: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--fg-3);}
+  .row-example { padding: 20px; background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-3); display: flex; align-items: center; gap: 12px;}
+  .row-example .text { display: flex; flex-direction: column; gap: 2px; }
+  .row-example .name { font-family: var(--font-mono); font-size: 13px; color: var(--fg-1);}
+  .row-example .meta { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3);}
+  .rules { margin-top: 32px; padding: 20px; border: 1px solid var(--border); border-radius: var(--r-3); background: var(--bg-1); font-size: 14px; color: var(--fg-1); line-height: 1.6; max-width: 640px;}
+  .rules strong { color: var(--fg-0);}
+</style>
+</head>
+<body>
+
+<div class="section-head">Agent avatars · monogram tiles · fixed 6-color palette</div>
+<div class="grid">
+  <div class="cell"><div class="av" style="background:#2A3B66; color:#9DB3E8">cc</div>claude-code</div>
+  <div class="cell"><div class="av" style="background:#3B2A55; color:#B9A3DC">cr</div>cursor</div>
+  <div class="cell"><div class="av" style="background:#2A4A3A; color:#8BD1AE">cx</div>codex</div>
+  <div class="cell"><div class="av" style="background:#4A3A1E; color:#E0B977">ai</div>aider</div>
+  <div class="cell"><div class="av" style="background:#3A2A2A; color:#D99A9A">cl</div>cline</div>
+  <div class="cell"><div class="av" style="background:#2E3B44; color:#A2C3D4">dv</div>devin</div>
+</div>
+
+<div class="section-head">Sizes</div>
+<div class="sizes">
+  <div><div class="av" style="width:16px;height:16px;border-radius:2px;background:#2A3B66;color:#9DB3E8;font-size:8px">cc</div>16 · inline in chips</div>
+  <div><div class="av" style="width:20px;height:20px;border-radius:3px;background:#2A3B66;color:#9DB3E8;font-size:10px">cc</div>20 · in rows</div>
+  <div><div class="av" style="background:#2A3B66;color:#9DB3E8">cc</div>24 · nav, provenance</div>
+  <div><div class="av" style="width:40px;height:40px;border-radius:var(--r-3);background:#2A3B66;color:#9DB3E8;font-size:14px">cc</div>40 · agent settings</div>
+</div>
+
+<div class="section-head">In context</div>
+<div class="row-example">
+  <div class="av" style="background:#2A3B66; color:#9DB3E8">cc</div>
+  <div class="text">
+    <span class="name">claude-code</span>
+    <span class="meta">wrote adr-0042-session-store.md · 2h ago</span>
+  </div>
+</div>
+
+<div class="rules">
+  <strong>Rules.</strong> 2-letter monogram. Fixed palette — each agent gets one slot, deterministic. Desaturated tinted bg, lighter tint text. 4px radius (not circular — humans get circles, agents get squares). Never photographs, never mascots, never emoji.
+</div>
+
+</body>
+</html>

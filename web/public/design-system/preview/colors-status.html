@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pindoc — Status colors (OKLCH)</title>
+<link rel="stylesheet" href="../colors_and_type.css?v=2">
+<style>
+  body { margin: 0; padding: 48px; background: var(--bg-0); color: var(--fg-1); }
+  .section-head { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-3); margin: 0 0 16px;}
+  .row { display: grid; grid-template-columns: 140px 80px 1fr 1fr; gap: 16px; align-items: center; padding: 16px 0; border-bottom: 1px solid var(--border); }
+  .row:last-child { border-bottom: 0; }
+  .name { font-family: var(--font-mono); font-size: 13px; color: var(--fg-1); display:flex; align-items:center; gap: 10px;}
+  .hex { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+  .swatch-lg { height: 40px; border-radius: var(--r-2); border: 1px solid var(--border); }
+  .example { display: flex; align-items: center; gap: 10px; }
+  .tag { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; height: 20px; padding: 0 8px; border-radius: var(--r-1); border: 1px solid transparent; }
+  .rules { margin-top: 32px; padding: 20px; border: 1px solid var(--border); border-radius: var(--r-3); background: var(--bg-1); font-size: 14px; color: var(--fg-1); line-height: 1.6; max-width: 640px; }
+  .rules strong { color: var(--fg-0);}
+</style>
+</head>
+<body>
+
+<div class="section-head">Status · only saturated colors in product · APCA Lc ≥ 60 on tinted bg</div>
+
+<div class="row">
+  <div class="name"><span class="p-dot p-dot--draft p-dot--pulse"></span>draft</div>
+  <div class="hex">L 56 · amber</div>
+  <div class="swatch-lg" style="background: var(--draft)"></div>
+  <div class="example">
+    <span class="tag" style="background: var(--draft-bg); color: var(--draft); border-color: var(--draft-border)">draft</span>
+    <span style="font-family:var(--font-mono); font-size:12px; color:var(--fg-3)">written, awaiting review</span>
+  </div>
+</div>
+
+<div class="row">
+  <div class="name"><span class="p-dot p-dot--live"></span>live</div>
+  <div class="hex">L 46 · emerald</div>
+  <div class="swatch-lg" style="background: var(--live)"></div>
+  <div class="example">
+    <span class="tag" style="background: var(--live-bg); color: var(--live); border-color: var(--live-border)">live</span>
+    <span style="font-family:var(--font-mono); font-size:12px; color:var(--fg-3)">approved, current truth</span>
+  </div>
+</div>
+
+<div class="row">
+  <div class="name"><span class="p-dot p-dot--stale"></span>stale</div>
+  <div class="hex">L 50 · rose</div>
+  <div class="swatch-lg" style="background: var(--stale)"></div>
+  <div class="example">
+    <span class="tag" style="background: var(--stale-bg); color: var(--stale); border-color: var(--stale-border)">stale</span>
+    <span style="font-family:var(--font-mono); font-size:12px; color:var(--fg-3)">flagged out of date</span>
+  </div>
+</div>
+
+<div class="row">
+  <div class="name"><span class="p-dot p-dot--archived"></span>archived</div>
+  <div class="hex">L 50 · zinc</div>
+  <div class="swatch-lg" style="background: var(--archived)"></div>
+  <div class="example">
+    <span class="tag" style="background: var(--archived-bg); color: var(--fg-2); border-color: var(--archived-border)">archived</span>
+    <span style="font-family:var(--font-mono); font-size:12px; color:var(--fg-3)">intentionally retired</span>
+  </div>
+</div>
+
+<div class="row">
+  <div class="name"><span class="p-dot p-dot--rejected"></span>rejected</div>
+  <div class="hex">L 44 · red</div>
+  <div class="swatch-lg" style="background: var(--rejected)"></div>
+  <div class="example">
+    <span class="tag" style="background: var(--rejected-bg); color: var(--rejected); border-color: var(--rejected-border)">rejected</span>
+    <span style="font-family:var(--font-mono); font-size:12px; color:var(--fg-3)">declined, audit-only</span>
+  </div>
+</div>
+
+<div class="rules">
+  <strong>Usage.</strong> Status color appears <strong>only</strong> as the 6px dot, or as a low-saturation chip (tinted bg + saturated text, 1px tinted border). Never as card backgrounds. Never as button fills. Never as row highlights. Tokens are OKLCH so lightness steps stay perceptually uniform across hues.
+</div>
+
+</body>
+</html>

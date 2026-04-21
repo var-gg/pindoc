@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pindoc — Brand mark</title>
+<link rel="stylesheet" href="../colors_and_type.css?v=2">
+<style>
+  body { margin: 0; padding: 48px; background: var(--bg-0); color: var(--fg-1); }
+  .section-head {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--fg-3); margin: 0 0 16px;
+  }
+  .cluster { display:grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 40px;}
+  .tile { padding: 40px; background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-3); display: flex; align-items: center; justify-content: center; min-height: 160px;}
+  .tile.light { background: #FAFAF7; border-color: #E1E1DA; color: #1A1C20; }
+  .sizes { display: flex; align-items: flex-end; gap: 32px; }
+  .sizes > div { display: flex; flex-direction: column; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+  .sizes svg { color: var(--fg-0); }
+  .meaning { max-width: 640px; padding: 20px; border: 1px solid var(--border); border-radius: var(--r-3); background: var(--bg-1); font-size: 14px; line-height: 1.6; color: var(--fg-1); }
+  .meaning strong { color: var(--fg-0); }
+  .wordmark svg { color: var(--fg-0); }
+</style>
+</head>
+<body>
+
+<div class="section-head">Mark</div>
+<div class="cluster">
+  <div class="tile">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="96" height="96" fill="none" style="color: var(--fg-0);">
+      <rect x="5" y="7.5" width="19" height="21" rx="2.5" stroke="currentColor" stroke-width="1.5"/>
+      <line x1="9" y1="13" x2="17" y2="13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/>
+      <line x1="9" y1="17" x2="20" y2="17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/>
+      <line x1="9" y1="21" x2="15" y2="21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/>
+      <circle cx="24" cy="7.5" r="3.5" fill="currentColor"/>
+      <line x1="26.2" y1="4.5" x2="29" y2="3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <div class="tile light">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="96" height="96" fill="none" style="color: #1A1C20;">
+      <rect x="5" y="7.5" width="19" height="21" rx="2.5" stroke="currentColor" stroke-width="1.5"/>
+      <line x1="9" y1="13" x2="17" y2="13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/>
+      <line x1="9" y1="17" x2="20" y2="17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/>
+      <line x1="9" y1="21" x2="15" y2="21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/>
+      <circle cx="24" cy="7.5" r="3.5" fill="currentColor"/>
+      <line x1="26.2" y1="4.5" x2="29" y2="3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+  </div>
+</div>
+
+<div class="section-head">Size behavior</div>
+<div class="sizes" style="margin-bottom:40px">
+  <div><svg width="16" height="16" viewBox="0 0 32 32" fill="none"><rect x="5" y="7.5" width="19" height="21" rx="2.5" stroke="currentColor" stroke-width="1.5"/><circle cx="24" cy="7.5" r="3.5" fill="currentColor"/></svg>16 · favicon</div>
+  <div><svg width="24" height="24" viewBox="0 0 32 32" fill="none"><rect x="5" y="7.5" width="19" height="21" rx="2.5" stroke="currentColor" stroke-width="1.5"/><line x1="9" y1="17" x2="20" y2="17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/><circle cx="24" cy="7.5" r="3.5" fill="currentColor"/></svg>24 · nav</div>
+  <div><svg width="48" height="48" viewBox="0 0 32 32" fill="none"><rect x="5" y="7.5" width="19" height="21" rx="2.5" stroke="currentColor" stroke-width="1.5"/><line x1="9" y1="13" x2="17" y2="13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/><line x1="9" y1="17" x2="20" y2="17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/><line x1="9" y1="21" x2="15" y2="21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/><circle cx="24" cy="7.5" r="3.5" fill="currentColor"/><line x1="26.2" y1="4.5" x2="29" y2="3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>48 · auth</div>
+  <div><svg width="96" height="96" viewBox="0 0 32 32" fill="none"><rect x="5" y="7.5" width="19" height="21" rx="2.5" stroke="currentColor" stroke-width="1.5"/><line x1="9" y1="13" x2="17" y2="13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/><line x1="9" y1="17" x2="20" y2="17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/><line x1="9" y1="21" x2="15" y2="21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/><circle cx="24" cy="7.5" r="3.5" fill="currentColor"/><line x1="26.2" y1="4.5" x2="29" y2="3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>96 · splash</div>
+</div>
+
+<div class="section-head">Wordmark</div>
+<div class="cluster">
+  <div class="tile wordmark">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 32" width="240" height="48" fill="none" style="color:var(--fg-0);">
+      <rect x="5" y="7.5" width="19" height="21" rx="2.5" stroke="currentColor" stroke-width="1.5"/>
+      <line x1="9" y1="13" x2="17" y2="13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/>
+      <line x1="9" y1="17" x2="20" y2="17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/>
+      <line x1="9" y1="21" x2="15" y2="21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/>
+      <circle cx="24" cy="7.5" r="3.5" fill="currentColor"/>
+      <line x1="26.2" y1="4.5" x2="29" y2="3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <text x="40" y="22" font-family="Inter, sans-serif" font-size="18" font-weight="600" letter-spacing="-0.02em" fill="currentColor">pindoc</text>
+    </svg>
+  </div>
+  <div class="tile light">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 32" width="240" height="48" fill="none" style="color: #1A1C20;">
+      <rect x="5" y="7.5" width="19" height="21" rx="2.5" stroke="currentColor" stroke-width="1.5"/>
+      <line x1="9" y1="13" x2="17" y2="13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/>
+      <line x1="9" y1="17" x2="20" y2="17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/>
+      <line x1="9" y1="21" x2="15" y2="21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/>
+      <circle cx="24" cy="7.5" r="3.5" fill="currentColor"/>
+      <line x1="26.2" y1="4.5" x2="29" y2="3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <text x="40" y="22" font-family="Inter, sans-serif" font-size="18" font-weight="600" letter-spacing="-0.02em" fill="currentColor">pindoc</text>
+    </svg>
+  </div>
+</div>
+
+<div class="meaning">
+  <strong>Meaning.</strong> A document with a graph-node pin breaking through the top-right corner and a short edge escaping off-canvas. The mark says: <em>this page is a typed node in a larger graph, and it was pinned here by something that is not you.</em> Wordmark is lowercase Inter SemiBold, tight tracking (−0.02em).
+</div>
+
+</body>
+</html>

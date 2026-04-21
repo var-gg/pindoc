@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pindoc — Wiki Reader</title>
+<link rel="stylesheet" href="../../colors_and_type.css?v=2">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script>
+  // Theme bootstrap — runs before paint to avoid flash.
+  (function(){
+    try {
+      var saved = localStorage.getItem('pindoc.theme'); // 'light' | 'dark' | null
+      var root = document.documentElement;
+      if (saved) {
+        root.setAttribute('data-theme-source','user');
+        if (saved === 'dark') root.classList.add('theme-dark');
+      }
+    } catch(e){}
+  })();
+</script>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body { margin: 0; color: var(--fg-1); }
+
+  /* App shell */
+  .app { display: grid; grid-template-rows: var(--nav-h) 1fr; height: 100vh; background: var(--bg-0); }
+
+  /* Top nav */
+  .nav { display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--bg-1); border-bottom: 1px solid var(--border); }
+  .nav__brand { display: flex; align-items: center; gap: 8px; color: var(--fg-0); font-weight: 600; font-size: 14px; letter-spacing: -0.02em; flex-shrink: 0; }
+  .nav__project { display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-2); font-family: var(--font-mono); font-size: 12px; color: var(--fg-1); cursor: pointer; flex-shrink: 0; }
+  .nav__project:hover { background: var(--bg-3); }
+  .nav__project [data-lucide] { width: 12px; height: 12px; color: var(--fg-3); }
+  .nav__spacer { flex: 1; min-width: 0; }
+  .nav__search { display:flex; align-items:center; gap: 8px; height: 28px; padding: 0 10px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-2); width: 320px; min-width: 0; cursor: pointer; }
+  .nav__search [data-lucide] { width: 13px; height: 13px; color: var(--fg-3); flex-shrink: 0; }
+  .nav__search span { color: var(--fg-3); font-size: 13px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nav__search .kbd { flex-shrink: 0; }
+  .kbd { display: inline-flex; align-items: center; height: 18px; padding: 0 5px; font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); background: var(--bg-3); border: 1px solid var(--border); border-radius: 3px; }
+  .nav__tabs { display: flex; gap: 2px; }
+  .nav__tab { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; background: transparent; border: 0; border-radius: var(--r-2); color: var(--fg-2); font-size: 13px; cursor: pointer; font-family: inherit; position: relative;}
+  .nav__tab [data-lucide] { width: 14px; height: 14px; }
+  .nav__tab:hover { background: var(--bg-2); color: var(--fg-1); }
+  .nav__tab.active { background: var(--bg-2); color: var(--fg-0); }
+  .nav__tab .count { font-family: var(--font-mono); font-size: 11px; color: var(--draft); background: var(--draft-bg); border: 1px solid var(--draft-border); border-radius: 2px; padding: 0 4px; height: 16px; display: inline-flex; align-items: center; }
+  .nav__user { width: 24px; height: 24px; border-radius: 50%; background: var(--bg-3); color: var(--fg-1); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 500; cursor: pointer; flex-shrink: 0; }
+  .nav__theme { background: transparent; border: 0; padding: 6px; color: var(--fg-2); cursor: pointer; border-radius: var(--r-2); flex-shrink: 0; }
+  .nav__theme:hover { background: var(--bg-2); color: var(--fg-0); }
+  .nav__theme [data-lucide] { width: 15px; height: 15px; }
+  .nav__menu { display: none; background: transparent; border: 0; padding: 6px; color: var(--fg-1); cursor: pointer; }
+  .nav__menu [data-lucide] { width: 20px; height: 20px; }
+
+  /* Main layout */
+  .main { display: grid; grid-template-columns: var(--sidebar-w) 1fr var(--sidecar-w); overflow: hidden; }
+
+  /* Sidebar */
+  .sidebar { background: var(--bg-0); border-right: 1px solid var(--border); overflow-y: auto; padding: 12px 0; }
+  .side-section { padding: 12px 12px 4px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-3); }
+  .side-item { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: center; padding: 6px 12px; color: var(--fg-1); font-size: 13px; cursor: pointer; border-left: 2px solid transparent;}
+  .side-item [data-lucide] { width: 14px; height: 14px; color: var(--fg-3); }
+  .side-item:hover { background: var(--bg-2); }
+  .side-item.active { background: var(--bg-2); color: var(--fg-0); border-left-color: var(--accent); }
+  .side-item.active [data-lucide] { color: var(--fg-1); }
+  .side-item__count { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3);}
+  .side-sub .side-item { padding-left: 28px; }
+
+  /* Content */
+  .content { overflow-y: auto; background: var(--bg-0); }
+  .reader { max-width: var(--reader-max); margin: 0 auto; padding: 48px 32px 96px; }
+  .crumbs { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); margin-bottom: 20px;}
+  .crumbs [data-lucide] { width: 12px; height: 12px; }
+  .crumbs span.current { color: var(--fg-2); }
+
+  .art-title { font-size: var(--fs-3xl); line-height: 1.2; letter-spacing: -0.015em; font-weight: 600; color: var(--fg-0); margin: 0 0 16px; }
+  .art-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 32px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+  .art-meta__sep { color: var(--fg-4); font-family: var(--font-mono); }
+  .art-meta .prov { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 12px; color: var(--fg-2); }
+  .av { width: 20px; height: 20px; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 10px; font-weight: 500; background: oklch(90% 0.04 265); color: oklch(35% 0.14 265);}
+  :root.theme-dark .av, .theme-dark-preview .av { background: oklch(30% 0.06 265); color: oklch(82% 0.10 265);}
+  .av.cr { background: oklch(90% 0.05 310); color: oklch(38% 0.15 310);}
+  :root.theme-dark .av.cr { background: oklch(30% 0.07 310); color: oklch(80% 0.11 310);}
+  .av.cx { background: oklch(90% 0.05 160); color: oklch(38% 0.13 160);}
+  :root.theme-dark .av.cx { background: oklch(30% 0.07 160); color: oklch(78% 0.12 160);}
+
+  .chip { display:inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; border-radius: var(--r-1); border: 1px solid var(--border); background: var(--bg-2); color: var(--fg-1); white-space: nowrap;}
+  .chip--draft    { background: var(--draft-bg); color: var(--draft); border-color: var(--draft-border); }
+  .chip--live     { background: var(--live-bg); color: var(--live); border-color: var(--live-border); }
+  .chip--stale    { background: var(--stale-bg); color: var(--stale); border-color: var(--stale-border); }
+  .chip--archived { background: var(--archived-bg); color: var(--fg-2); border-color: var(--archived-border); }
+  .chip--area     { color: var(--fg-2); background: transparent; }
+
+  .art-body { font-size: var(--fs-md); line-height: var(--lh-reader); color: var(--fg-1); }
+  .art-body h2 { font-size: 22px; letter-spacing: -0.01em; color: var(--fg-0); margin: 40px 0 12px; font-weight: 600; }
+  .art-body h3 { font-size: 17px; color: var(--fg-0); margin: 28px 0 8px; font-weight: 600; }
+  .art-body p { margin: 0 0 16px; }
+  .art-body ul { margin: 0 0 16px; padding-left: 22px; }
+  .art-body ul li { margin-bottom: 6px; }
+  .art-body code { font-family: var(--font-mono); font-size: 13.5px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; color: var(--fg-0); }
+  .art-body a.wiki { color: var(--fg-0); border-bottom: 1px dashed var(--fg-4); text-decoration: none; padding-bottom: 1px;}
+  .art-body a.wiki:hover { border-bottom-color: var(--accent); color: var(--accent); }
+  .art-body a.wiki [data-lucide] { width: 10px; height: 10px; color: var(--fg-4); margin-right: 2px;}
+  .art-body blockquote { margin: 20px 0; padding: 12px 16px; border-left: 2px solid var(--border-strong); color: var(--fg-2); font-size: 14.5px; }
+
+  .backlinks { margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--border);}
+  .backlinks h4 { font-size: 13px; font-family: var(--font-mono); letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-3); margin: 0 0 12px; font-weight: 500;}
+  .backlink { display: block; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-2); margin-bottom: 8px; text-decoration: none; color: var(--fg-1);}
+  .backlink:hover { background: var(--bg-2); border-color: var(--border-strong);}
+  .backlink__head { display:flex; align-items:center; gap: 8px; font-size: 13px; color: var(--fg-0); flex-wrap: wrap;}
+  .backlink__excerpt { margin-top: 4px; font-size: 12.5px; color: var(--fg-2); line-height: 1.5;}
+
+  /* Sidecar */
+  .sidecar { background: var(--bg-1); border-left: 1px solid var(--border); overflow-y: auto; }
+  .sidecar__head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border);}
+  .sidecar__head h3 { margin: 0; font-size: 13px; font-family: var(--font-mono); letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-3); font-weight: 500;}
+  .graph-wrap { padding: 16px; }
+  .mini-graph { height: 200px; background: var(--bg-0); border: 1px solid var(--border); border-radius: var(--r-3); overflow: hidden; }
+  .relations { padding: 0 16px 16px; }
+  .relation { display: grid; grid-template-columns: 72px 1fr; gap: 10px; padding: 7px 0; font-size: 12.5px; }
+  .relation__label { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-3); padding-top: 2px;}
+  .relation__target { color: var(--fg-1); display: flex; align-items: center; gap: 6px; }
+  .relation__target [data-lucide] { width: 10px; height: 10px; color: var(--fg-4); }
+
+  .provenance { padding: 14px 16px; border-top: 1px solid var(--border); }
+  .provenance__row { display: grid; grid-template-columns: 72px 1fr; gap: 10px; font-family: var(--font-mono); font-size: 12px; padding: 5px 0; color: var(--fg-2); }
+  .provenance__row .k { color: var(--fg-3); }
+  .provenance__row .v { color: var(--fg-1); }
+
+  /* Command palette */
+  .palette-overlay { position: fixed; inset: 0; background: oklch(0% 0 0 / 0.35); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: flex; align-items: flex-start; justify-content: center; padding-top: 120px; z-index: 100; opacity: 0; pointer-events: none; transition: opacity var(--dur-med) var(--ease-out); }
+  :root.theme-dark .palette-overlay { background: oklch(0% 0 0 / 0.55); }
+  .palette-overlay.open { opacity: 1; pointer-events: auto; }
+  .palette { width: 640px; max-width: calc(100vw - 32px); background: var(--bg-1); border: 1px solid var(--border-strong); border-radius: var(--r-4); box-shadow: var(--shadow-palette); overflow: hidden; transform: translateY(-8px); transition: transform var(--dur-med) var(--ease-out); }
+  .palette-overlay.open .palette { transform: translateY(0);}
+  .palette__input { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .palette__input [data-lucide] { width: 16px; height: 16px; color: var(--fg-3); }
+  .palette__input input { flex: 1; background: transparent; border: 0; outline: none; color: var(--fg-0); font-size: 15px; font-family: inherit; }
+  .palette__section { padding: 8px 0; border-bottom: 1px solid var(--border);}
+  .palette__section:last-child { border-bottom: 0;}
+  .palette__section-head { padding: 6px 16px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-4);}
+  .palette__item { position: relative; display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: center; padding: 10px 16px; font-size: 13.5px; color: var(--fg-1); cursor: pointer;}
+  .palette__item [data-lucide] { width: 15px; height: 15px; color: var(--fg-3);}
+  .palette__item.selected { background: var(--bg-3); color: var(--fg-0);}
+  .palette__item.selected [data-lucide] { color: var(--fg-1);}
+  .palette__item.selected::before { content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 2px; height: 24px; background: var(--accent);}
+  .palette__item .mono { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3);}
+  .palette__foot { display: flex; gap: 16px; padding: 8px 16px; background: var(--bg-0); border-top: 1px solid var(--border); font-family: var(--font-mono); font-size: 11px; color: var(--fg-3);}
+
+  /* Inbox */
+  .inbox { overflow-y: auto; padding: 32px 32px 96px; max-width: 980px; margin: 0 auto;}
+  .inbox__head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px; flex-wrap: wrap; gap: 8px;}
+  .inbox__head h1 { font-size: 22px; letter-spacing: -0.01em; font-weight: 600; color: var(--fg-0); margin: 0;}
+  .inbox__filters { display: flex; gap: 8px; margin: 16px 0 20px; font-family: var(--font-mono); font-size: 12px; flex-wrap: wrap;}
+  .inbox__filter { padding: 5px 10px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-2); color: var(--fg-2); cursor: pointer; display: inline-flex; align-items: center; gap: 6px;}
+  .inbox__filter.active { background: var(--bg-3); color: var(--fg-0); border-color: var(--border-strong);}
+  .inbox__filter .count { color: var(--fg-3); font-size: 11px;}
+
+  .queue-item { background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-3); margin-bottom: 12px; overflow: hidden;}
+  .queue-item__head { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--border); align-items: center;}
+  .queue-item__title { display: flex; flex-direction: column; gap: 6px; min-width: 0;}
+  .queue-item__title h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--fg-0);}
+  .queue-item__title .meta { display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-3); flex-wrap: wrap;}
+  .queue-item__actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0;}
+  .btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; font-family: inherit; font-size: 12.5px; font-weight: 500; border-radius: var(--r-2); border: 1px solid transparent; cursor: pointer; transition: background var(--dur-fast) linear; white-space: nowrap;}
+  .btn--primary { background: var(--accent); color: var(--accent-fg); }
+  .btn--primary:hover { background: var(--accent-hover); }
+  .btn--secondary { background: var(--bg-2); color: var(--fg-1); border-color: var(--border); }
+  .btn--secondary:hover { background: var(--bg-3); }
+  .btn--danger { background: transparent; color: var(--rejected); border-color: var(--rejected-border); }
+  .btn--danger:hover { background: var(--rejected-bg); }
+  .btn [data-lucide] { width: 13px; height: 13px;}
+
+  .diff { padding: 12px 18px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.7; background: var(--bg-0); overflow-x: auto;}
+  .diff__line { display: grid; grid-template-columns: 32px 14px 1fr; gap: 8px; }
+  .diff__ln { color: var(--fg-4); text-align: right;}
+  .diff__mark { color: var(--fg-4);}
+  .diff__add { background: var(--diff-add-bg);}
+  .diff__add .diff__mark, .diff__add .diff__code { color: var(--diff-add-fg);}
+  .diff__del { background: var(--diff-del-bg);}
+  .diff__del .diff__mark, .diff__del .diff__code { color: var(--diff-del-fg);}
+
+  /* Graph view */
+  .graph-view { position: relative; overflow: hidden; background: radial-gradient(ellipse at center, var(--bg-1) 0%, var(--bg-0) 85%); height: 100%;}
+  .graph-view svg { width: 100%; height: 100%; display: block; }
+  .graph-legend { position: absolute; top: 20px; left: 20px; background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-3); padding: 12px 14px; font-family: var(--font-mono); font-size: 11.5px;}
+  .graph-legend__row { display:flex; align-items:center; gap: 8px; padding: 3px 0; color: var(--fg-2);}
+  .graph-inspector { position: absolute; top: 20px; right: 20px; width: 280px; max-width: calc(100vw - 40px); background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-3); padding: 14px; }
+  .graph-inspector h4 { margin: 0 0 8px; font-size: 14px; color: var(--fg-0);}
+  .graph-inspector .meta { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-3); margin-bottom: 12px;}
+  .graph-inspector .edges { display: flex; flex-direction: column; gap: 6px; }
+  .graph-inspector .edge { display: grid; grid-template-columns: 80px 1fr; gap: 8px; font-size: 12.5px; color: var(--fg-1);}
+  .graph-inspector .edge .rel { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.04em; padding-top: 2px;}
+
+  .mode-hide { display: none !important; }
+
+  /* Mobile action bar (sticky bottom) for Inbox review on narrow screens */
+  .mobile-actions { display: none; }
+
+  /* ============== RESPONSIVE ============== */
+  @media (max-width: 1023px) {
+    .main { grid-template-columns: 1fr; }
+    .sidebar { display: none; position: fixed; top: var(--nav-h); left: 0; bottom: 0; width: 260px; background: var(--bg-0); border-right: 1px solid var(--border); z-index: 50; padding-top: 8px; }
+    .sidebar.open { display: block; box-shadow: var(--shadow-float); }
+    .sidecar { display: none; }
+    .nav__menu { display: inline-flex; align-items: center; justify-content: center; }
+    .nav__project { display: none; }
+    .nav__brand span.word { display: none; }
+    .nav__tabs .nav__tab span.label { display: none; }
+    .nav__tabs .nav__tab { padding: 0 8px; }
+    .nav__search { width: 160px; }
+    .nav__search span { display: none; }
+    .nav__search .kbd { display: none; }
+    .reader { padding: 32px 24px 80px; }
+  }
+
+  @media (max-width: 767px) {
+    .nav { gap: 8px; padding: 0 12px; }
+    .nav__tabs { display: none; }
+    .nav__search { flex: 1; width: auto; }
+    .reader { padding: 24px 20px 120px; max-width: 100%; }
+    .art-title { font-size: 24px; }
+    .art-body { font-size: 15.5px; }
+    .art-meta { gap: 8px; }
+
+    .inbox { padding: 20px 16px 120px; }
+    .queue-item__head { grid-template-columns: 1fr; }
+    .queue-item__actions { display: none; }  /* collapsed into sticky bar when expanded */
+
+    /* Mobile Cmd+K is a bottom sheet */
+    .palette-overlay { padding-top: 0; align-items: flex-end; }
+    .palette { width: 100%; max-width: 100%; border-radius: var(--r-4) var(--r-4) 0 0; border-bottom: 0; transform: translateY(16px); max-height: 85vh; display: flex; flex-direction: column; }
+    .palette-overlay.open .palette { transform: translateY(0); }
+    .palette__input { padding: 18px 16px; }
+    .palette__input input { font-size: 16px; }   /* prevents iOS zoom */
+    .palette__foot { display: none; }
+    .palette__section { overflow-y: auto; }
+
+    /* Sticky mobile action bar (for inbox review) */
+    .mobile-actions { display: flex; position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); gap: 8px; background: var(--bg-1); border-top: 1px solid var(--border); box-shadow: var(--shadow-float); }
+    .mobile-actions .btn { flex: 1; justify-content: center; height: 44px; font-size: 14px; }  /* 44px hit target */
+
+    /* Sidecar becomes a bottom sheet triggered from reader */
+    .meta-sheet-btn { display: inline-flex; }
+  }
+
+  .meta-sheet-btn { display: none; }  /* only shown on mobile */
+
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-track { background: transparent;}
+  *::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 4px;}
+  *::-webkit-scrollbar-thumb:hover { background: var(--bg-4);}
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <div class="nav">
+    <button class="nav__menu" id="menuBtn" aria-label="Open menu"><i data-lucide="menu"></i></button>
+    <div class="nav__brand">
+      <svg width="20" height="20" viewBox="0 0 32 32" fill="none" style="color:var(--fg-0); flex-shrink:0;">
+        <rect x="5" y="7.5" width="19" height="21" rx="2.5" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="9" y1="17" x2="20" y2="17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/>
+        <circle cx="24" cy="7.5" r="3.5" fill="currentColor"/>
+      </svg>
+      <span class="word">pindoc</span>
+    </div>
+    <button class="nav__project">
+      <span>acme-platform</span>
+      <i data-lucide="chevron-down"></i>
+    </button>
+
+    <div class="nav__tabs">
+      <button class="nav__tab active" data-mode="reader"><i data-lucide="file-text"></i><span class="label">Wiki</span></button>
+      <button class="nav__tab" data-mode="inbox"><i data-lucide="inbox"></i><span class="label">Inbox</span> <span class="count">3</span></button>
+      <button class="nav__tab" data-mode="graph"><i data-lucide="share-2"></i><span class="label">Graph</span></button>
+    </div>
+
+    <div class="nav__spacer"></div>
+
+    <button class="nav__search" id="openPalette">
+      <i data-lucide="search"></i>
+      <span>Search or run command...</span>
+      <span class="kbd">⌘K</span>
+    </button>
+
+    <button class="nav__theme" id="themeBtn" aria-label="Toggle theme">
+      <i data-lucide="sun" id="themeIconLight"></i>
+      <i data-lucide="moon" id="themeIconDark" style="display:none"></i>
+    </button>
+
+    <div class="nav__user">JL</div>
+  </div>
+
+  <div class="main">
+    <aside class="sidebar" id="sidebar">
+      <div class="side-section">Areas</div>
+      <div class="side-item">
+        <i data-lucide="folder"></i><span>platform</span><span class="side-item__count">18</span>
+      </div>
+      <div class="side-sub">
+        <div class="side-item active">
+          <i data-lucide="folder-open"></i><span>auth</span><span class="side-item__count">6</span>
+        </div>
+        <div class="side-item"><i data-lucide="folder"></i><span>billing</span><span class="side-item__count">4</span></div>
+        <div class="side-item"><i data-lucide="folder"></i><span>storage</span><span class="side-item__count">8</span></div>
+      </div>
+      <div class="side-item"><i data-lucide="folder"></i><span>product</span><span class="side-item__count">12</span></div>
+      <div class="side-item"><i data-lucide="folder"></i><span>infra</span><span class="side-item__count">9</span></div>
+
+      <div class="side-section" style="margin-top: 12px">Types</div>
+      <div class="side-item"><i data-lucide="file-text"></i><span>ADR</span><span class="side-item__count">14</span></div>
+      <div class="side-item"><i data-lucide="zap"></i><span>Feature</span><span class="side-item__count">22</span></div>
+      <div class="side-item"><i data-lucide="bug"></i><span>Debug</span><span class="side-item__count">7</span></div>
+      <div class="side-item"><i data-lucide="book"></i><span>Runbook</span><span class="side-item__count">5</span></div>
+
+      <div class="side-section" style="margin-top: 12px">Agents</div>
+      <div class="side-item"><span class="av" style="width:14px;height:14px;font-size:8px">cc</span><span>claude-code</span><span class="side-item__count">31</span></div>
+      <div class="side-item"><span class="av cr" style="width:14px;height:14px;font-size:8px">cr</span><span>cursor</span><span class="side-item__count">12</span></div>
+      <div class="side-item"><span class="av cx" style="width:14px;height:14px;font-size:8px">cx</span><span>codex</span><span class="side-item__count">5</span></div>
+    </aside>
+
+    <main class="content">
+      <!-- READER -->
+      <div id="mode-reader">
+        <article class="reader">
+          <div class="crumbs">
+            <span>platform</span><i data-lucide="chevron-right"></i><span>auth</span><i data-lucide="chevron-right"></i><span class="current">adr-0042</span>
+          </div>
+
+          <h1 class="art-title">Session store migration — Redis to Postgres</h1>
+
+          <div class="art-meta">
+            <span class="chip chip--live"><span class="p-dot p-dot--live"></span>live</span>
+            <span class="chip">ADR · 0042</span>
+            <span class="chip chip--area">platform/auth</span>
+            <span class="art-meta__sep">·</span>
+            <div class="prov">
+              <span class="av">cc</span><span>written by claude-code</span>
+            </div>
+            <span class="art-meta__sep">·</span>
+            <span class="prov">promoted 2h ago · verified against <code>a3f2c1b</code></span>
+          </div>
+
+          <div class="art-body">
+            <h2>Context</h2>
+            <p>We run session state in <code>acme-platform</code> through a Redis cluster fronted by the <a class="wiki" href="#"><i data-lucide="link"></i>auth-gateway</a> service. Over the last quarter we saw three incidents where a cold replica promotion caused session loss for ~12 minutes — a worse outcome than any plausible p99 latency penalty.</p>
+            <p>This ADR proposes migrating session storage to the existing Postgres cluster and retiring the Redis dependency for auth.</p>
+
+            <h2>Decision</h2>
+            <p>Use Postgres as the canonical session store. A write-through LRU in-process cache keeps hot-path p50 under 2ms. The existing <a class="wiki" href="#"><i data-lucide="link"></i>oauth-device-flow</a> implementation requires no changes.</p>
+
+            <blockquote>Sessions are not hot data. They are medium-warm data we were treating as hot because Redis made it easy.</blockquote>
+
+            <h3>Trade-offs accepted</h3>
+            <ul>
+              <li>p99 latency rises from ~4ms to ~11ms on cache miss. Acceptable given the traffic profile.</li>
+              <li>Postgres connection pool pressure increases ~8%. <a class="wiki" href="#"><i data-lucide="link"></i>pgbouncer-sizing</a> already has headroom.</li>
+              <li>Loses Redis-side TTL automation; replaced by a nightly janitor job (<a class="wiki" href="#"><i data-lucide="link"></i>session-janitor-runbook</a>).</li>
+            </ul>
+
+            <h2>Rollout</h2>
+            <p>Dual-write for 14 days, read from Postgres, fall back to Redis on miss. After burn-in, flip <code>SESSION_STORE=pg</code> and decommission the Redis cluster.</p>
+
+            <div class="backlinks">
+              <h4>Backlinks · 4 artifacts reference this</h4>
+              <a class="backlink" href="#"><div class="backlink__head"><span class="chip">RUNBOOK</span>session-janitor-runbook</div><div class="backlink__excerpt">Implements the TTL cleanup referenced in ADR-0042...</div></a>
+              <a class="backlink" href="#"><div class="backlink__head"><span class="chip">FEATURE</span>oauth-device-flow</div><div class="backlink__excerpt">Depends on session store; no changes required...</div></a>
+              <a class="backlink" href="#"><div class="backlink__head"><span class="chip">DEBUG</span>redis-cold-replica-2026-q1</div><div class="backlink__excerpt">One of the three incidents cited as motivation...</div></a>
+              <a class="backlink" href="#"><div class="backlink__head"><span class="chip">ADR</span>adr-0038-pgbouncer-sizing</div><div class="backlink__excerpt">Provides the pool-pressure headroom this decision depends on...</div></a>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <!-- INBOX -->
+      <div id="mode-inbox" class="mode-hide inbox">
+        <div class="inbox__head">
+          <h1>Inbox</h1>
+          <div style="font-family: var(--font-mono); font-size: 12px; color: var(--fg-3)">3 pending · 1 changes-requested</div>
+        </div>
+        <div style="font-size: 13.5px; color: var(--fg-2);">Agent-authored drafts awaiting human approval.</div>
+
+        <div class="inbox__filters">
+          <button class="inbox__filter active">All <span class="count">4</span></button>
+          <button class="inbox__filter">Drafts <span class="count">3</span></button>
+          <button class="inbox__filter">Changes requested <span class="count">1</span></button>
+          <button class="inbox__filter">By me</button>
+        </div>
+
+        <div class="queue-item">
+          <div class="queue-item__head">
+            <div class="queue-item__title">
+              <h3>adr-0042-session-store.md — edits after review comment</h3>
+              <div class="meta">
+                <span class="chip chip--draft"><span class="p-dot p-dot--draft p-dot--pulse"></span>draft</span>
+                <span>ADR · 0042</span><span>platform/auth</span><span>·</span>
+                <span class="av">cc</span><span>claude-code · 12m ago</span>
+                <span>·</span><span style="color:var(--fg-2)">+14 / −6</span>
+              </div>
+            </div>
+            <div class="queue-item__actions">
+              <button class="btn btn--secondary"><i data-lucide="message-square"></i>Comment</button>
+              <button class="btn btn--danger"><i data-lucide="x"></i>Reject</button>
+              <button class="btn btn--primary"><i data-lucide="check"></i>Promote</button>
+            </div>
+          </div>
+          <div class="diff">
+            <div class="diff__line"><span class="diff__ln">42</span><span class="diff__mark"> </span><span class="diff__code" style="color:var(--fg-2)">## Trade-offs accepted</span></div>
+            <div class="diff__line diff__del"><span class="diff__ln">43</span><span class="diff__mark">−</span><span class="diff__code">- p99 rises from ~4ms to ~9ms. Probably fine.</span></div>
+            <div class="diff__line diff__add"><span class="diff__ln">43</span><span class="diff__mark">+</span><span class="diff__code">- p99 rises from ~4ms to ~11ms on cache miss. Acceptable given the traffic profile.</span></div>
+            <div class="diff__line diff__add"><span class="diff__ln">45</span><span class="diff__mark">+</span><span class="diff__code">- Loses Redis-side TTL automation; replaced by a nightly janitor job.</span></div>
+          </div>
+        </div>
+
+        <div class="queue-item">
+          <div class="queue-item__head">
+            <div class="queue-item__title">
+              <h3>feature-oauth-device-flow.md — new draft</h3>
+              <div class="meta">
+                <span class="chip chip--draft"><span class="p-dot p-dot--draft p-dot--pulse"></span>draft</span>
+                <span>FEATURE</span><span>platform/auth</span><span>·</span>
+                <span class="av cr">cr</span><span>cursor · 1h ago</span>
+                <span>·</span><span style="color:var(--fg-2)">new file · 186 lines</span>
+              </div>
+            </div>
+            <div class="queue-item__actions">
+              <button class="btn btn--secondary">Open</button>
+              <button class="btn btn--primary"><i data-lucide="check"></i>Promote</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="queue-item">
+          <div class="queue-item__head">
+            <div class="queue-item__title">
+              <h3>runbook-billing-webhook-retry.md — flagged stale</h3>
+              <div class="meta">
+                <span class="chip chip--stale"><span class="p-dot p-dot--stale"></span>stale</span>
+                <span>RUNBOOK</span><span>product/billing</span><span>·</span>
+                <span class="av cx">cx</span><span>codex · 3h ago</span>
+              </div>
+            </div>
+            <div class="queue-item__actions">
+              <button class="btn btn--secondary">Open</button>
+              <button class="btn btn--primary">Assign to agent</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- GRAPH -->
+      <div id="mode-graph" class="mode-hide graph-view">
+        <svg viewBox="0 0 800 560" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+            </marker>
+          </defs>
+          <g stroke="currentColor" stroke-width="1.2" fill="none" opacity="0.45" style="color:var(--fg-3)">
+            <line x1="400" y1="280" x2="560" y2="200" marker-end="url(#arrow)"/>
+            <line x1="400" y1="280" x2="600" y2="340" marker-end="url(#arrow)"/>
+            <line x1="400" y1="280" x2="240" y2="200" marker-end="url(#arrow)"/>
+            <line x1="400" y1="280" x2="220" y2="380" marker-end="url(#arrow)"/>
+            <line x1="560" y1="200" x2="680" y2="140" stroke-dasharray="3 3"/>
+            <line x1="240" y1="200" x2="120" y2="140"/>
+            <line x1="220" y1="380" x2="120" y2="460"/>
+            <line x1="600" y1="340" x2="700" y2="440"/>
+            <line x1="600" y1="340" x2="560" y2="200"/>
+          </g>
+          <g font-family="JetBrains Mono, monospace" font-size="11">
+            <g transform="translate(400,280)"><circle r="22" fill="var(--live-bg)" stroke="var(--live)" stroke-width="1.5"/><text text-anchor="middle" dy="4" fill="var(--live)" font-weight="500">ADR·42</text><text text-anchor="middle" y="42" fill="var(--fg-1)">session-store</text></g>
+            <g transform="translate(560,200)"><circle r="18" fill="var(--draft-bg)" stroke="var(--draft)" stroke-width="1.5"/><text text-anchor="middle" dy="4" fill="var(--draft)">OAuth</text><text text-anchor="middle" y="36" fill="var(--fg-2)">oauth-device-flow</text></g>
+            <g transform="translate(600,340)"><circle r="18" fill="var(--live-bg)" stroke="var(--live)" stroke-width="1.5"/><text text-anchor="middle" dy="4" fill="var(--live)">RB</text><text text-anchor="middle" y="36" fill="var(--fg-2)">session-janitor</text></g>
+            <g transform="translate(240,200)"><circle r="18" fill="var(--live-bg)" stroke="var(--live)" stroke-width="1.5"/><text text-anchor="middle" dy="4" fill="var(--live)">ADR·38</text><text text-anchor="middle" y="36" fill="var(--fg-2)">pgbouncer</text></g>
+            <g transform="translate(220,380)"><circle r="18" fill="var(--stale-bg)" stroke="var(--stale)" stroke-width="1.5"/><text text-anchor="middle" dy="4" fill="var(--stale)">DBG</text><text text-anchor="middle" y="36" fill="var(--fg-2)">redis-cold-repl</text></g>
+            <g transform="translate(680,140)" opacity="0.55"><circle r="14" fill="var(--archived-bg)" stroke="var(--archived)" stroke-width="1.5"/><text text-anchor="middle" dy="4" fill="var(--fg-2)">ADR·22</text><text text-anchor="middle" y="30" fill="var(--fg-3)">redis-cluster</text></g>
+            <g transform="translate(120,140)"><circle r="14" fill="var(--live-bg)" stroke="var(--live)" stroke-width="1.5"/><text text-anchor="middle" dy="4" fill="var(--live)">FT</text><text text-anchor="middle" y="30" fill="var(--fg-2)">pool-config</text></g>
+            <g transform="translate(120,460)"><circle r="14" fill="var(--live-bg)" stroke="var(--live)" stroke-width="1.5"/><text text-anchor="middle" dy="4" fill="var(--live)">RB</text><text text-anchor="middle" y="30" fill="var(--fg-2)">incident-runbook</text></g>
+            <g transform="translate(700,440)"><circle r="14" fill="var(--live-bg)" stroke="var(--live)" stroke-width="1.5"/><text text-anchor="middle" dy="4" fill="var(--live)">SP</text><text text-anchor="middle" y="30" fill="var(--fg-2)">janitor-spec</text></g>
+          </g>
+        </svg>
+
+        <div class="graph-legend">
+          <div style="color:var(--fg-1); margin-bottom: 6px; font-weight: 500;">Edges</div>
+          <div class="graph-legend__row">— depends-on</div>
+          <div class="graph-legend__row">— implements</div>
+          <div class="graph-legend__row">-- supersedes</div>
+          <div style="color:var(--fg-1); margin: 10px 0 6px; font-weight: 500;">Nodes</div>
+          <div class="graph-legend__row"><span class="p-dot p-dot--live"></span>live</div>
+          <div class="graph-legend__row"><span class="p-dot p-dot--draft"></span>draft</div>
+          <div class="graph-legend__row"><span class="p-dot p-dot--stale"></span>stale</div>
+          <div class="graph-legend__row"><span class="p-dot p-dot--archived"></span>archived</div>
+        </div>
+
+        <div class="graph-inspector">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span class="chip chip--live"><span class="p-dot p-dot--live"></span>live</span><span class="chip">ADR · 42</span></div>
+          <h4>Session store migration</h4>
+          <div class="meta">platform/auth · claude-code · 2h ago</div>
+          <div class="edges">
+            <div class="edge"><span class="rel">depends on</span><span>pgbouncer-sizing</span></div>
+            <div class="edge"><span class="rel">supersedes</span><span>adr-22-redis-cluster</span></div>
+            <div class="edge"><span class="rel">implements</span><span>session-janitor</span></div>
+            <div class="edge"><span class="rel">mentions</span><span>oauth-device-flow</span></div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <aside class="sidecar" id="sidecar">
+      <div class="sidecar__head">
+        <h3>This artifact</h3>
+      </div>
+      <div class="graph-wrap">
+        <div class="mini-graph">
+          <svg viewBox="0 0 280 200" style="width:100%; height:100%">
+            <g stroke="currentColor" stroke-width="1" fill="none" opacity="0.4" style="color:var(--fg-3)">
+              <line x1="140" y1="100" x2="210" y2="55"/>
+              <line x1="140" y1="100" x2="230" y2="135"/>
+              <line x1="140" y1="100" x2="70"  y2="65"/>
+              <line x1="140" y1="100" x2="60"  y2="150"/>
+            </g>
+            <g font-family="JetBrains Mono, monospace" font-size="9">
+              <g transform="translate(140,100)"><circle r="14" fill="var(--live-bg)" stroke="var(--live)" stroke-width="1.5"/><text text-anchor="middle" dy="3" fill="var(--live)">ADR·42</text></g>
+              <g transform="translate(210,55)"><circle r="9" fill="var(--draft-bg)" stroke="var(--draft)" stroke-width="1.2"/><text text-anchor="middle" y="22" fill="var(--fg-2)">oauth</text></g>
+              <g transform="translate(230,135)"><circle r="9" fill="var(--live-bg)" stroke="var(--live)" stroke-width="1.2"/><text text-anchor="middle" y="22" fill="var(--fg-2)">janitor</text></g>
+              <g transform="translate(70,65)"><circle r="9" fill="var(--live-bg)" stroke="var(--live)" stroke-width="1.2"/><text text-anchor="middle" y="22" fill="var(--fg-2)">pgbouncer</text></g>
+              <g transform="translate(60,150)"><circle r="9" fill="var(--stale-bg)" stroke="var(--stale)" stroke-width="1.2"/><text text-anchor="middle" y="22" fill="var(--fg-2)">cold-repl</text></g>
+            </g>
+          </svg>
+        </div>
+      </div>
+      <div class="relations">
+        <div class="relation"><span class="relation__label">supersedes</span><span class="relation__target"><i data-lucide="arrow-up-right"></i>adr-22-redis-cluster</span></div>
+        <div class="relation"><span class="relation__label">depends on</span><span class="relation__target"><i data-lucide="arrow-up-right"></i>adr-38-pgbouncer</span></div>
+        <div class="relation"><span class="relation__label">implements</span><span class="relation__target"><i data-lucide="arrow-up-right"></i>session-janitor</span></div>
+        <div class="relation"><span class="relation__label">mentions</span><span class="relation__target"><i data-lucide="arrow-up-right"></i>oauth-device-flow</span></div>
+      </div>
+      <div class="provenance">
+        <div class="provenance__row"><span class="k">author</span><span class="v">claude-code@v2.1</span></div>
+        <div class="provenance__row"><span class="k">harness</span><span class="v">mcp/acme-platform</span></div>
+        <div class="provenance__row"><span class="k">promoted</span><span class="v">2h ago by jl</span></div>
+        <div class="provenance__row"><span class="k">commit</span><span class="v">a3f2c1b</span></div>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- Mobile sticky action bar (shown on small screens when Inbox is active) -->
+  <div class="mobile-actions" id="mobileActions" style="display:none">
+    <button class="btn btn--danger"><i data-lucide="x"></i>Reject</button>
+    <button class="btn btn--secondary"><i data-lucide="message-square"></i>Comment</button>
+    <button class="btn btn--primary"><i data-lucide="check"></i>Promote</button>
+  </div>
+
+</div>
+
+<div class="palette-overlay" id="paletteOverlay">
+  <div class="palette" role="dialog">
+    <div class="palette__input">
+      <i data-lucide="search"></i>
+      <input id="paletteInput" placeholder="Search artifacts, run commands..." value="session">
+      <span class="kbd">esc</span>
+    </div>
+    <div class="palette__section">
+      <div class="palette__section-head">Artifacts</div>
+      <div class="palette__item selected"><i data-lucide="file-text"></i><div><div>Session store migration</div><div class="mono">ADR · 42 · platform/auth · live</div></div><span class="p-dot p-dot--live"></span></div>
+      <div class="palette__item"><i data-lucide="file-text"></i><div><div>Session janitor runbook</div><div class="mono">RUNBOOK · platform/auth · live</div></div><span class="p-dot p-dot--live"></span></div>
+      <div class="palette__item"><i data-lucide="file-text"></i><div><div>Sessions postgres schema</div><div class="mono">SPEC · platform/auth · draft</div></div><span class="p-dot p-dot--draft"></span></div>
+    </div>
+    <div class="palette__section">
+      <div class="palette__section-head">Actions</div>
+      <div class="palette__item"><i data-lucide="check"></i><div>Promote current draft to live</div><span class="mono">⌘ ↵</span></div>
+      <div class="palette__item"><i data-lucide="share-2"></i><div>Open in graph view</div><span class="mono">G</span></div>
+      <div class="palette__item"><i data-lucide="bot"></i><div>Ask claude-code to update this artifact</div><span class="mono">⌘ I</span></div>
+    </div>
+    <div class="palette__foot">
+      <span><span class="kbd">↑↓</span> navigate</span>
+      <span><span class="kbd">↵</span> open</span>
+      <span><span class="kbd">⌘↵</span> run action</span>
+      <span><span class="kbd">esc</span> close</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  lucide.createIcons();
+
+  // Theme toggle
+  const themeBtn = document.getElementById('themeBtn');
+  const root = document.documentElement;
+  function renderThemeIcon() {
+    // Light is default. Dark only when .theme-dark class is present.
+    const isDark = root.classList.contains('theme-dark');
+    document.getElementById('themeIconLight').style.display = isDark ? 'none' : '';
+    document.getElementById('themeIconDark').style.display = isDark ? '' : 'none';
+  }
+  renderThemeIcon();
+  themeBtn.addEventListener('click', () => {
+    const isDark = root.classList.toggle('theme-dark');
+    root.setAttribute('data-theme-source', 'user');
+    try { localStorage.setItem('pindoc.theme', isDark ? 'dark' : 'light'); } catch(e){}
+    renderThemeIcon();
+  });
+
+  // Tabs
+  document.querySelectorAll('.nav__tab').forEach(t => {
+    t.addEventListener('click', () => {
+      document.querySelectorAll('.nav__tab').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      const mode = t.dataset.mode;
+      ['reader','inbox','graph'].forEach(m => {
+        document.getElementById('mode-' + m).classList.toggle('mode-hide', m !== mode);
+      });
+      const isMobile = window.matchMedia('(max-width: 767px)').matches;
+      document.getElementById('mobileActions').style.display = (isMobile && mode === 'inbox') ? 'flex' : 'none';
+    });
+  });
+
+  // Mobile menu
+  const menuBtn = document.getElementById('menuBtn');
+  const sidebar = document.getElementById('sidebar');
+  menuBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+
+  // Palette
+  const overlay = document.getElementById('paletteOverlay');
+  const input = document.getElementById('paletteInput');
+  document.getElementById('openPalette').addEventListener('click', () => {
+    overlay.classList.add('open'); setTimeout(() => input.focus(), 50);
+  });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); overlay.classList.add('open'); setTimeout(()=>input.focus(), 50);}
+    if (e.key === 'Escape') overlay.classList.remove('open');
+  });
+
+  // React to viewport changes for mobile action bar
+  window.addEventListener('resize', () => {
+    const isMobile = window.matchMedia('(max-width: 767px)').matches;
+    const mode = document.querySelector('.nav__tab.active').dataset.mode;
+    document.getElementById('mobileActions').style.display = (isMobile && mode === 'inbox') ? 'flex' : 'none';
+  });
+</script>
+
+</body>
+</html>

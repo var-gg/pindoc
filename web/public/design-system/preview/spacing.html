@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pindoc — Spacing, radii, elevation</title>
+<link rel="stylesheet" href="../colors_and_type.css?v=2">
+<style>
+  body { margin: 0; padding: 48px; background: var(--bg-0); color: var(--fg-1); }
+  .section-head {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--fg-3); margin: 0 0 16px;
+  }
+  section + section { margin-top: 48px; }
+  .spacing-row { display: flex; align-items: center; gap: 16px; padding: 6px 0; }
+  .sp-label { width: 80px; font-family: var(--font-mono); font-size: 12px; color: var(--fg-2); }
+  .sp-bar { background: var(--accent); height: 14px; border-radius: 2px; }
+  .sp-px { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+  .radii { display: flex; gap: 24px; }
+  .radii > div { flex: 1; padding: 24px; background: var(--bg-2); border: 1px solid var(--border); text-align: center; font-family: var(--font-mono); font-size: 12px; color: var(--fg-2); }
+  .elev { display: flex; gap: 32px; margin-top: 16px;}
+  .elev > div { flex:1; padding: 32px; background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-3); font-family: var(--font-mono); font-size: 12px; color: var(--fg-2); }
+  .elev .float { box-shadow: 0 8px 24px -12px rgba(0,0,0,0.6), 0 2px 6px -2px rgba(0,0,0,0.4); }
+  .elev .palette { box-shadow: 0 24px 48px -16px rgba(0,0,0,0.7), 0 4px 12px -4px rgba(0,0,0,0.5); }
+</style>
+</head>
+<body>
+
+<section>
+  <div class="section-head">Spacing · 4px base</div>
+  <div class="spacing-row"><span class="sp-label">sp-1</span><div class="sp-bar" style="width:4px"></div><span class="sp-px">4px</span></div>
+  <div class="spacing-row"><span class="sp-label">sp-2</span><div class="sp-bar" style="width:8px"></div><span class="sp-px">8px</span></div>
+  <div class="spacing-row"><span class="sp-label">sp-3</span><div class="sp-bar" style="width:12px"></div><span class="sp-px">12px</span></div>
+  <div class="spacing-row"><span class="sp-label">sp-4</span><div class="sp-bar" style="width:16px"></div><span class="sp-px">16px</span></div>
+  <div class="spacing-row"><span class="sp-label">sp-5</span><div class="sp-bar" style="width:20px"></div><span class="sp-px">20px</span></div>
+  <div class="spacing-row"><span class="sp-label">sp-6</span><div class="sp-bar" style="width:24px"></div><span class="sp-px">24px</span></div>
+  <div class="spacing-row"><span class="sp-label">sp-8</span><div class="sp-bar" style="width:32px"></div><span class="sp-px">32px</span></div>
+  <div class="spacing-row"><span class="sp-label">sp-10</span><div class="sp-bar" style="width:48px"></div><span class="sp-px">48px</span></div>
+  <div class="spacing-row"><span class="sp-label">sp-12</span><div class="sp-bar" style="width:64px"></div><span class="sp-px">64px</span></div>
+</section>
+
+<section>
+  <div class="section-head">Radii</div>
+  <div class="radii">
+    <div style="border-radius:2px">r-1 · 2px · chips, dots</div>
+    <div style="border-radius:4px">r-2 · 4px · inputs, buttons</div>
+    <div style="border-radius:6px">r-3 · 6px · cards, menus</div>
+    <div style="border-radius:8px">r-4 · 8px · ⌘K palette</div>
+  </div>
+  <div style="margin-top:12px; font-family: var(--font-mono); font-size: 11px; color: var(--fg-4);">No border-radius: 9999px. No capsules.</div>
+</section>
+
+<section>
+  <div class="section-head">Elevation · only floating surfaces</div>
+  <div class="elev">
+    <div class="float">shadow-float<br><span style="color:var(--fg-4)">menus, toasts, dropdowns</span></div>
+    <div class="palette">shadow-palette<br><span style="color:var(--fg-4)">⌘K, modals</span></div>
+  </div>
+  <div style="margin-top:12px; font-family: var(--font-mono); font-size: 11px; color: var(--fg-4);">Borders define surfaces. Shadows lift.</div>
+</section>
+
+</body>
+</html>

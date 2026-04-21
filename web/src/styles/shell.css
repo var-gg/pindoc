@@ -1,0 +1,130 @@
+/* M1 preview shell — uses tokens from /design-system/colors_and_type.css.
+   Do not invent new tokens here. Shell chrome only. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg-0);
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+  font-size: var(--fs-base);
+  line-height: var(--lh-normal);
+}
+
+.m1-shell {
+  display: grid;
+  grid-template-columns: 256px 1fr;
+  height: 100vh;
+}
+
+.m1-shell__nav {
+  background: var(--bg-1);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-3);
+  gap: var(--sp-3);
+  overflow-y: auto;
+}
+
+.m1-shell__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: 600;
+  color: var(--fg-0);
+  font-size: var(--fs-base);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.m1-shell__group {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps, 0.04em);
+  margin: var(--sp-3) 0 var(--sp-1);
+}
+
+.m1-shell__link {
+  display: block;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-2);
+  color: var(--fg-1);
+  font-size: var(--fs-sm);
+  text-decoration: none;
+}
+
+.m1-shell__link:hover {
+  background: var(--bg-2);
+  color: var(--fg-0);
+}
+
+.m1-shell__link.active {
+  background: color-mix(in oklch, var(--accent) 22%, transparent);
+  color: var(--accent);
+}
+
+.m1-shell__foot {
+  margin-top: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+.m1-shell__main {
+  overflow: hidden;
+  display: flex;
+}
+
+.m1-shell__home {
+  max-width: 66ch;
+  padding: var(--sp-6) var(--sp-6);
+  line-height: var(--lh-reader);
+}
+
+.m1-shell__home h1 {
+  font-size: var(--fs-2xl);
+  margin: 0 0 var(--sp-4);
+}
+
+.m1-shell__home p {
+  margin: 0 0 var(--sp-4);
+  color: var(--fg-1);
+}
+
+.m1-shell__home code {
+  font-family: var(--font-mono);
+  font-size: 0.925em;
+  background: var(--bg-2);
+  padding: 2px 6px;
+  border-radius: var(--r-1);
+}
+
+.m1-shell__note {
+  color: var(--fg-3);
+  font-size: var(--fs-sm);
+  border-top: 1px solid var(--border);
+  padding-top: var(--sp-4);
+}
+
+.m1-shell__frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--bg-0);
+}

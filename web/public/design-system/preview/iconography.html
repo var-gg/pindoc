@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pindoc — Iconography</title>
+<link rel="stylesheet" href="../colors_and_type.css?v=2">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<style>
+  body { margin: 0; padding: 48px; background: var(--bg-0); color: var(--fg-1); }
+  .section-head {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--fg-3); margin: 0 0 16px;
+  }
+  .grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; margin-bottom: 40px; }
+  .icon-cell {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+    padding: 16px; background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-2);
+    font-family: var(--font-mono); font-size: 11px; color: var(--fg-3);
+  }
+  .icon-cell [data-lucide] { color: var(--fg-1); }
+  .sizes { display: flex; align-items: center; gap: 32px; margin-bottom: 32px; }
+  .sizes > div { display: flex; flex-direction: column; align-items:center; gap: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+  .sizes [data-lucide] { color: var(--fg-0); }
+  .rules { margin-top: 32px; padding: 20px; border: 1px solid var(--border); border-radius: var(--r-3); background: var(--bg-1); font-size: 14px; color: var(--fg-1); line-height: 1.6; max-width: 640px; }
+  .rules strong { color: var(--fg-0); }
+  .rules p { margin: 0 0 8px; }
+</style>
+</head>
+<body>
+
+<div class="section-head">Icon system · Lucide · 1.5 stroke · currentColor</div>
+
+<div class="sizes">
+  <div><i data-lucide="search" width="14" height="14" stroke-width="1.5"></i>14 · in chips</div>
+  <div><i data-lucide="search" width="16" height="16" stroke-width="1.5"></i>16 · default</div>
+  <div><i data-lucide="search" width="20" height="20" stroke-width="1.5"></i>20 · larger chrome</div>
+  <div><i data-lucide="search" width="24" height="24" stroke-width="1.5"></i>24 · empty states</div>
+</div>
+
+<div class="section-head">Common icons · signal, not decoration</div>
+<div class="grid">
+  <div class="icon-cell"><i data-lucide="search" width="20" height="20" stroke-width="1.5"></i>search</div>
+  <div class="icon-cell"><i data-lucide="command" width="20" height="20" stroke-width="1.5"></i>command</div>
+  <div class="icon-cell"><i data-lucide="inbox" width="20" height="20" stroke-width="1.5"></i>inbox</div>
+  <div class="icon-cell"><i data-lucide="file-text" width="20" height="20" stroke-width="1.5"></i>artifact</div>
+  <div class="icon-cell"><i data-lucide="git-branch" width="20" height="20" stroke-width="1.5"></i>branch</div>
+  <div class="icon-cell"><i data-lucide="share-2" width="20" height="20" stroke-width="1.5"></i>graph</div>
+  <div class="icon-cell"><i data-lucide="check" width="20" height="20" stroke-width="1.5"></i>approve</div>
+  <div class="icon-cell"><i data-lucide="x" width="20" height="20" stroke-width="1.5"></i>reject</div>
+  <div class="icon-cell"><i data-lucide="message-square" width="20" height="20" stroke-width="1.5"></i>comment</div>
+  <div class="icon-cell"><i data-lucide="history" width="20" height="20" stroke-width="1.5"></i>history</div>
+  <div class="icon-cell"><i data-lucide="link" width="20" height="20" stroke-width="1.5"></i>link</div>
+  <div class="icon-cell"><i data-lucide="arrow-right" width="20" height="20" stroke-width="1.5"></i>promote</div>
+  <div class="icon-cell"><i data-lucide="archive" width="20" height="20" stroke-width="1.5"></i>archive</div>
+  <div class="icon-cell"><i data-lucide="bot" width="20" height="20" stroke-width="1.5"></i>agent</div>
+  <div class="icon-cell"><i data-lucide="folder" width="20" height="20" stroke-width="1.5"></i>area</div>
+  <div class="icon-cell"><i data-lucide="settings" width="20" height="20" stroke-width="1.5"></i>settings</div>
+</div>
+
+<div class="rules">
+  <p><strong>Rules.</strong> Lucide at 1.5 stroke. <strong>Icons are signal, not decoration.</strong> Every icon must communicate a specific action or type. No decorative icons in headings or empty states. No emoji in chrome. No unicode glyphs as icons.</p>
+  <p>Icons inherit <code style="color:var(--fg-0)">currentColor</code>. They never carry their own color.</p>
+  <p style="color:var(--fg-2)"><strong style="color:var(--draft)">Flagged for user:</strong> If Pindoc has a custom icon library, swap Lucide and retune stroke/size.</p>
+</div>
+
+<script>lucide.createIcons();</script>
+</body>
+</html>

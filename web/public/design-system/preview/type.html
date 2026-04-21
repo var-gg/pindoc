@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pindoc — Typography</title>
+<link rel="stylesheet" href="../colors_and_type.css?v=2">
+<style>
+  body { margin: 0; padding: 48px; background: var(--bg-0); }
+  .stack > * + * { margin-top: 24px; }
+  .spec { display: flex; align-items: baseline; gap: 16px; }
+  .spec__label {
+    flex: 0 0 140px;
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--fg-3);
+  }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 32px 0; }
+</style>
+</head>
+<body>
+<div class="stack">
+  <div class="spec"><span class="spec__label">DISPLAY · 48/1.05</span>
+    <span style="font-size:48px; line-height:1.05; letter-spacing:-0.02em; font-weight:600; color:var(--fg-0)">Typed, graph-linked</span></div>
+  <div class="spec"><span class="spec__label">H1 · 32/1.2</span>
+    <span class="p-h1">The wiki you never type into</span></div>
+  <div class="spec"><span class="spec__label">H2 · 24/1.35</span>
+    <span class="p-h2">Promote draft to live</span></div>
+  <div class="spec"><span class="spec__label">H3 · 20/1.35</span>
+    <span class="p-h3">Authentication · Architecture</span></div>
+  <div class="spec"><span class="spec__label">H4 · 18/1.35</span>
+    <span class="p-h4">Backlinks (4)</span></div>
+</div>
+
+<hr>
+
+<div class="stack">
+  <div class="spec"><span class="spec__label">BODY · 16/1.6</span>
+    <span class="p-body" style="max-width:520px;">We moved session state from Redis to Postgres because the failure mode of a cold Redis replica was worse than the p99 latency penalty of a pg lookup.</span></div>
+  <div class="spec"><span class="spec__label">UI · 14/1.5</span>
+    <span class="p-ui">Filter by area — platform/auth</span></div>
+  <div class="spec"><span class="spec__label">SMALL · 13</span>
+    <span class="p-small">written by claude-code · 2h ago</span></div>
+  <div class="spec"><span class="spec__label">MICRO · 12</span>
+    <span class="p-micro">Last verified against commit a3f2c1b</span></div>
+</div>
+
+<hr>
+
+<div class="stack">
+  <div class="spec"><span class="spec__label">MONO · 13</span>
+    <span class="p-mono" style="color:var(--fg-1)">adr-0042-session-store.md</span></div>
+  <div class="spec"><span class="spec__label">LABEL · 12/caps</span>
+    <span class="p-label">Platform / Auth</span></div>
+  <div class="spec"><span class="spec__label">TYPE CHIP</span>
+    <span class="p-chip"><span class="p-dot p-dot--live"></span>ADR · 0042</span></div>
+</div>
+
+<hr>
+
+<div style="font-family: var(--font-mono); font-size: 14px; color: var(--fg-2); line-height: 1.8">
+  <div>Inter — UI sans · 400 / 500 / 600</div>
+  <div>JetBrains Mono — type chips, code, IDs, agent names · 400 / 500</div>
+  <div style="color: var(--fg-3); margin-top: 8px">No reading serif. Dev-tool coherence over reading feel.</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pindoc — Sidebar chrome</title>
+<link rel="stylesheet" href="../../colors_and_type.css?v=2">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script>
+  (function(){
+    try {
+      var saved = localStorage.getItem('pindoc.theme');
+      if (saved) { document.documentElement.setAttribute('data-theme-source','user');
+        if (saved === 'dark') document.documentElement.classList.add('theme-dark'); }
+    } catch(e){}
+  })();
+</script>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body { margin: 0; color: var(--fg-1); background: var(--bg-0); font-family: var(--font-sans); }
+
+  .app { display: grid; grid-template-rows: var(--nav-h) 1fr; height: 100vh; }
+  .nav { display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--bg-1); border-bottom: 1px solid var(--border); }
+  .nav__brand { display: flex; align-items: center; gap: 8px; color: var(--fg-0); font-weight: 600; font-size: 14px; letter-spacing: -0.02em; }
+  .nav__menu { background: transparent; border: 0; padding: 6px; color: var(--fg-2); cursor: pointer; border-radius: var(--r-2); display: none; }
+  .nav__menu:hover { background: var(--bg-2); }
+  .nav__menu [data-lucide] { width: 18px; height: 18px; }
+  .nav__collapse { background: transparent; border: 0; padding: 6px; color: var(--fg-2); cursor: pointer; border-radius: var(--r-2); margin-left: auto; }
+  .nav__collapse:hover { background: var(--bg-2); color: var(--fg-0); }
+  .nav__collapse [data-lucide] { width: 15px; height: 15px; }
+
+  .main { display: grid; grid-template-columns: 260px 1fr; height: 100%; overflow: hidden; transition: grid-template-columns var(--dur-med) var(--ease-out); }
+  .app.collapsed .main { grid-template-columns: 48px 1fr; }
+
+  /* =============== SIDEBAR =============== */
+  .sb { background: var(--bg-1); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; position: relative; }
+
+  /* ---- Project switcher ---- */
+  .proj { position: relative; padding: 10px; border-bottom: 1px solid var(--border); }
+  .proj__trigger { display: grid; grid-template-columns: 20px 1fr auto; gap: 10px; align-items: center; width: 100%; padding: 8px 10px; background: var(--bg-0); border: 1px solid var(--border); border-radius: var(--r-2); cursor: pointer; font-family: inherit; color: var(--fg-0); }
+  .proj__trigger:hover { border-color: var(--border-strong); background: var(--bg-2); }
+  .proj__swatch { width: 18px; height: 18px; border-radius: 4px; flex-shrink: 0; }
+  .proj__name { font-size: 13.5px; font-weight: 500; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.01em; }
+  .proj__kbd { display: flex; align-items: center; gap: 4px; font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); flex-shrink: 0; }
+  .proj__kbd .kbd { display: inline-flex; align-items: center; height: 16px; padding: 0 4px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 3px; }
+  .proj__chev { width: 13px; height: 13px; color: var(--fg-3); flex-shrink: 0; }
+
+  .proj__pop { position: absolute; top: calc(100% - 4px); left: 10px; right: 10px; background: var(--bg-1); border: 1px solid var(--border-strong); border-radius: var(--r-3); box-shadow: var(--shadow-float); z-index: 40; display: none; overflow: hidden; }
+  .proj__pop.open { display: block; }
+  .proj__pop-group { padding: 8px 0; }
+  .proj__pop-group + .proj__pop-group { border-top: 1px solid var(--border); }
+  .proj__pop-head { padding: 4px 14px 6px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-4); }
+  .proj__pop-row { display: grid; grid-template-columns: 18px 1fr auto; gap: 10px; align-items: center; padding: 7px 14px; cursor: pointer; font-size: 13px; color: var(--fg-1); }
+  .proj__pop-row:hover { background: var(--bg-2); }
+  .proj__pop-row.active { background: var(--bg-2); }
+  .proj__pop-row.active::before { content: ""; position: absolute; left: 0; width: 2px; top: 3px; bottom: 3px; background: var(--accent); }
+  .proj__pop-row { position: relative; }
+  .proj__pop-row .role { font-family: var(--font-mono); font-size: 10px; padding: 1px 5px; border-radius: 2px; letter-spacing: 0.02em; border: 1px solid var(--border); color: var(--fg-3); background: var(--bg-2); }
+  .proj__pop-row .role--writer { color: var(--task-prog); background: var(--task-prog-bg); border-color: var(--task-prog-border); }
+  .proj__pop-row .role--approver { color: var(--live); background: var(--live-bg); border-color: var(--live-border); }
+  .proj__pop-row .role--reader { color: var(--fg-2); }
+  .proj__pop-foot { padding: 6px 0; border-top: 1px solid var(--border); background: var(--bg-0); }
+  .proj__pop-foot .proj__pop-row { color: var(--fg-2); }
+  .proj__pop-foot .proj__pop-row [data-lucide] { width: 13px; height: 13px; color: var(--fg-3); }
+
+  /* ---- Scroll wrapper for the rest ---- */
+  .sb__scroll { flex: 1; overflow-y: auto; padding: 6px 0; }
+
+  /* ---- Section header ---- */
+  .sb-section { padding: 10px 14px 4px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-4); display: flex; align-items: center; justify-content: space-between;}
+  .sb-section button { background: transparent; border: 0; padding: 2px; color: var(--fg-4); cursor: pointer; border-radius: 2px; display: flex; }
+  .sb-section button:hover { color: var(--fg-2); background: var(--bg-2); }
+  .sb-section button [data-lucide] { width: 11px; height: 11px; }
+
+  /* ---- Nav items ---- */
+  .item { display: grid; grid-template-columns: 16px 1fr auto; gap: 10px; align-items: center; padding: 6px 14px; font-size: 13px; color: var(--fg-1); cursor: pointer; border-left: 2px solid transparent; min-height: 30px; white-space: nowrap; }
+  .item [data-lucide] { width: 14px; height: 14px; color: var(--fg-3); flex-shrink: 0; }
+  .item:hover { background: var(--bg-2); }
+  .item:hover [data-lucide] { color: var(--fg-1); }
+  .item.active { background: oklch(from var(--accent) l c h / 0.10); color: var(--accent); font-weight: 500; border-left-color: var(--accent); }
+  .item.active [data-lucide] { color: var(--accent); }
+  .item__count { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); flex-shrink: 0; }
+  .item .badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 6px; border-radius: 9px; background: var(--bg-3); color: var(--fg-1); font-family: var(--font-mono); font-size: 11px; font-weight: 500; flex-shrink: 0; }
+  .item .badge.accent { background: var(--accent); color: var(--accent-fg); }
+
+  /* ---- Area tree ---- */
+  .tree .item { padding-left: 14px; }
+  .tree .item__caret { width: 12px; height: 12px; color: var(--fg-4); transition: transform var(--dur-fast) var(--ease-out); cursor: pointer; }
+  .tree .item[data-open="true"] .item__caret { transform: rotate(90deg); }
+  .tree .item > .item__caret-slot { width: 14px; display: flex; align-items: center; justify-content: center; }
+  .tree-row { display: grid; grid-template-columns: 14px 14px 1fr auto; gap: 8px; align-items: center; padding: 6px 14px; font-size: 13px; color: var(--fg-1); cursor: pointer; border-left: 2px solid transparent; min-height: 30px; white-space: nowrap; position: relative; }
+  .tree-row:hover { background: var(--bg-2); }
+  .tree-row [data-lucide].folder { width: 13px; height: 13px; color: var(--fg-3); }
+  .tree-row.active { background: oklch(from var(--accent) l c h / 0.10); color: var(--accent); font-weight: 500; border-left-color: var(--accent); }
+  .tree-row.active [data-lucide].folder { color: var(--accent); }
+  .tree-row .caret { width: 14px; height: 14px; color: var(--fg-4); cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 2px; transition: transform var(--dur-fast) var(--ease-out); }
+  .tree-row .caret:hover { color: var(--fg-1); background: var(--bg-3); }
+  .tree-row .caret.empty { visibility: hidden; }
+  .tree-row[data-open="true"] .caret [data-lucide] { transform: rotate(90deg); }
+  .tree-row [data-lucide].caret-icon { width: 11px; height: 11px; transition: transform var(--dur-fast) var(--ease-out); }
+  .tree-row[data-open="true"] [data-lucide].caret-icon { transform: rotate(90deg); }
+  .tree-row .count { font-family: var(--font-mono); font-size: 11px; color: var(--fg-4); }
+  .tree-children { display: none; padding-left: 16px; position: relative; }
+  .tree-row[data-open="true"] + .tree-children { display: block; }
+  .tree-children::before { content: ""; position: absolute; left: 22px; top: 0; bottom: 4px; width: 1px; background: var(--border); opacity: 0.7; }
+
+  .tree-special { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); }
+  .tree-special .tree-row [data-lucide].folder { color: var(--fg-4); }
+
+  .tree-req { padding: 8px 14px 4px; }
+  .tree-req button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; background: transparent; border: 1px dashed var(--border-strong); border-radius: var(--r-2); color: var(--fg-3); font-family: inherit; font-size: 12px; cursor: pointer; }
+  .tree-req button:hover { color: var(--fg-1); border-color: var(--fg-3); background: var(--bg-2); }
+  .tree-req button [data-lucide] { width: 12px; height: 12px; }
+
+  /* ---- Type filter chips ---- */
+  .types { padding: 4px 12px 10px; display: flex; flex-wrap: wrap; gap: 5px; }
+  .type-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.03em; text-transform: uppercase; background: var(--bg-0); border: 1px solid var(--border); border-radius: var(--r-1); color: var(--fg-2); cursor: pointer; user-select: none; }
+  .type-chip:hover { border-color: var(--border-strong); color: var(--fg-1); }
+  .type-chip.active { background: oklch(from var(--accent) l c h / 0.12); border-color: oklch(from var(--accent) l c h / 0.35); color: var(--accent); }
+  .types__clear { padding: 0 14px 10px; font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); cursor: pointer; }
+  .types__clear:hover { color: var(--accent); }
+
+  /* ---- Footer ---- */
+  .sb__foot { border-top: 1px solid var(--border); padding: 8px 0; background: var(--bg-1); }
+  .sb__foot .item { padding: 6px 14px; }
+  .user-row { display: grid; grid-template-columns: 24px 1fr auto; gap: 10px; align-items: center; padding: 8px 14px; margin: 4px 8px 4px; background: var(--bg-0); border: 1px solid var(--border); border-radius: var(--r-2); cursor: pointer; }
+  .user-row:hover { background: var(--bg-2); }
+  .user-row__av { width: 24px; height: 24px; border-radius: 50%; background: oklch(90% 0.04 265); color: oklch(35% 0.14 265); display: flex; align-items: center; justify-content: center; font-size: 10.5px; font-weight: 500; font-family: var(--font-mono); }
+  :root.theme-dark .user-row__av { background: oklch(30% 0.06 265); color: oklch(82% 0.10 265); }
+  .user-row__name { font-size: 12.5px; color: var(--fg-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .user-row__agent { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-3); display: flex; align-items: center; gap: 5px; margin-top: 1px; }
+  .user-row__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--live); display: inline-block; animation: p-pulse 1.6s var(--ease-out) infinite; }
+
+  /* =============== COLLAPSED (icon-rail) state =============== */
+  .app.collapsed .sb { overflow: visible; }
+  .app.collapsed .proj { padding: 10px 6px; border-bottom: 1px solid var(--border); }
+  .app.collapsed .proj__trigger { grid-template-columns: 1fr; padding: 6px; justify-items: center; background: transparent; border: 0; }
+  .app.collapsed .proj__trigger:hover { background: var(--bg-2); }
+  .app.collapsed .proj__name,
+  .app.collapsed .proj__kbd,
+  .app.collapsed .proj__chev,
+  .app.collapsed .item__count,
+  .app.collapsed .item .badge,
+  .app.collapsed .sb-section,
+  .app.collapsed .types,
+  .app.collapsed .types__clear,
+  .app.collapsed .tree-req,
+  .app.collapsed .user-row__name,
+  .app.collapsed .user-row__agent { display: none !important; }
+  .app.collapsed .item,
+  .app.collapsed .tree-row { grid-template-columns: 1fr; padding: 8px 0; justify-items: center; border-left: 0; position: relative; }
+  .app.collapsed .item [data-lucide],
+  .app.collapsed .tree-row [data-lucide].folder { width: 16px; height: 16px; }
+  .app.collapsed .item > *:not([data-lucide]):not(.tooltip),
+  .app.collapsed .tree-row > *:not([data-lucide]):not(.tooltip) { display: none; }
+  .app.collapsed .item.active::before,
+  .app.collapsed .tree-row.active::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px; background: var(--accent); }
+  .app.collapsed .tree-children { display: none !important; }
+  .app.collapsed .user-row { grid-template-columns: 1fr; padding: 6px; justify-items: center; margin: 4px; }
+  .app.collapsed .tooltip { position: absolute; left: calc(100% + 6px); top: 50%; transform: translateY(-50%); background: var(--fg-0); color: var(--bg-0); font-size: 11.5px; padding: 4px 8px; border-radius: var(--r-2); white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity var(--dur-fast) var(--ease-out); z-index: 30; font-family: var(--font-sans); font-weight: 500; box-shadow: var(--shadow-float); }
+  .app.collapsed .item:hover .tooltip,
+  .app.collapsed .tree-row:hover .tooltip,
+  .app.collapsed .user-row:hover .tooltip { opacity: 1; }
+  .tooltip { display: none; }
+  .app.collapsed .tooltip { display: inline-block; }
+
+  /* =============== MAIN CANVAS (demo) =============== */
+  .canvas { overflow-y: auto; background: var(--bg-0); }
+  .canvas__inner { max-width: 960px; margin: 0 auto; padding: 40px 32px; }
+  .canvas h1 { font-size: 22px; font-weight: 600; color: var(--fg-0); margin: 0 0 4px; letter-spacing: -0.01em; }
+  .canvas .sub { font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); margin-bottom: 24px; }
+  .canvas__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .canvas__card { background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-3); padding: 16px 18px; }
+  .canvas__card h3 { margin: 0 0 6px; font-size: 14px; color: var(--fg-0); font-weight: 600; }
+  .canvas__card p { margin: 0; font-size: 13px; color: var(--fg-2); line-height: 1.5; }
+  .demo-note { margin-top: 40px; padding: 16px 20px; background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-3); font-size: 13.5px; color: var(--fg-1); line-height: 1.6; }
+  .demo-note strong { color: var(--fg-0); }
+  .demo-note code { font-family: var(--font-mono); font-size: 12.5px; background: var(--bg-2); border: 1px solid var(--border); padding: 0 4px; border-radius: 2px; }
+
+  /* =============== RESPONSIVE =============== */
+  @media (max-width: 767px) {
+    .nav__menu { display: inline-flex; align-items: center; }
+    .main { grid-template-columns: 1fr; }
+    .sb { position: fixed; top: var(--nav-h); left: 0; bottom: 0; width: 280px; z-index: 50; transform: translateX(-100%); transition: transform var(--dur-med) var(--ease-out); }
+    .app.drawer-open .sb { transform: translateX(0); box-shadow: var(--shadow-float); }
+    .nav__collapse { display: none; }
+    .app.collapsed .main { grid-template-columns: 1fr; }
+  }
+
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 4px; }
+  *::-webkit-scrollbar-thumb:hover { background: var(--bg-4); }
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <div class="nav">
+    <button class="nav__menu" id="menuBtn" aria-label="Open sidebar"><i data-lucide="menu"></i></button>
+    <div class="nav__brand">
+      <svg width="20" height="20" viewBox="0 0 32 32" fill="none" style="color:var(--fg-0)">
+        <rect x="5" y="7.5" width="19" height="21" rx="2.5" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="9" y1="17" x2="20" y2="17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.55"/>
+        <circle cx="24" cy="7.5" r="3.5" fill="currentColor"/>
+      </svg>
+      <span>pindoc</span>
+    </div>
+    <button class="nav__collapse" id="collapseBtn" aria-label="Collapse sidebar">
+      <i data-lucide="panel-left-close" id="iconExpanded"></i>
+      <i data-lucide="panel-left-open" id="iconCollapsed" style="display:none"></i>
+    </button>
+  </div>
+
+  <div class="main">
+    <aside class="sb" id="sidebar">
+
+      <!-- ============ PROJECT SWITCHER ============ -->
+      <div class="proj">
+        <button class="proj__trigger" id="projTrigger">
+          <span class="proj__swatch" style="background: oklch(62% 0.19 275)"></span>
+          <span class="proj__name">acme-platform</span>
+          <span class="proj__kbd"><span class="kbd">⌘P</span></span>
+          <i data-lucide="chevrons-up-down" class="proj__chev"></i>
+          <span class="tooltip">acme-platform</span>
+        </button>
+        <div class="proj__pop" id="projPop">
+          <div class="proj__pop-group">
+            <div class="proj__pop-head">Acme · 4 projects</div>
+            <div class="proj__pop-row active">
+              <span class="proj__swatch" style="background: oklch(62% 0.19 275)"></span>
+              <span><div style="font-weight:500;color:var(--fg-0)">acme-platform</div><div style="font-family:var(--font-mono);font-size:10.5px;color:var(--fg-3);margin-top:2px">54 artifacts · 3 pending</div></span>
+              <span class="role role--approver">approver</span>
+            </div>
+            <div class="proj__pop-row">
+              <span class="proj__swatch" style="background: oklch(60% 0.16 155)"></span>
+              <span><div style="font-weight:500;color:var(--fg-0)">acme-web</div><div style="font-family:var(--font-mono);font-size:10.5px;color:var(--fg-3);margin-top:2px">31 artifacts</div></span>
+              <span class="role role--approver">approver</span>
+            </div>
+            <div class="proj__pop-row">
+              <span class="proj__swatch" style="background: oklch(60% 0.16 55)"></span>
+              <span><div style="font-weight:500;color:var(--fg-0)">acme-billing</div><div style="font-family:var(--font-mono);font-size:10.5px;color:var(--fg-3);margin-top:2px">18 artifacts</div></span>
+              <span class="role role--writer">writer</span>
+            </div>
+            <div class="proj__pop-row">
+              <span class="proj__swatch" style="background: oklch(60% 0.14 20)"></span>
+              <span><div style="font-weight:500;color:var(--fg-0)">acme-infra</div><div style="font-family:var(--font-mono);font-size:10.5px;color:var(--fg-3);margin-top:2px">26 artifacts</div></span>
+              <span class="role role--reader">reader</span>
+            </div>
+          </div>
+          <div class="proj__pop-group">
+            <div class="proj__pop-head">Personal</div>
+            <div class="proj__pop-row">
+              <span class="proj__swatch" style="background: oklch(60% 0.14 310)"></span>
+              <span><div style="font-weight:500;color:var(--fg-0)">sandbox</div><div style="font-family:var(--font-mono);font-size:10.5px;color:var(--fg-3);margin-top:2px">4 artifacts</div></span>
+              <span class="role role--approver">approver</span>
+            </div>
+          </div>
+          <div class="proj__pop-foot">
+            <div class="proj__pop-row">
+              <i data-lucide="plus"></i>
+              <span>New project</span>
+              <span class="role" style="border:0; background:transparent; font-family:var(--font-mono); font-size:10px; color:var(--fg-4)">⌘⇧N</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sb__scroll">
+
+        <!-- ============ PRIMARY NAV ============ -->
+        <div class="sb-section">Navigate</div>
+        <div class="item"><i data-lucide="home"></i><span>Dashboard</span><span class="item__count"></span><span class="tooltip">Dashboard</span></div>
+        <div class="item active"><i data-lucide="inbox"></i><span>Inbox</span><span class="badge accent">3</span><span class="tooltip">Inbox · 3</span></div>
+        <div class="item"><i data-lucide="share-2"></i><span>Graph</span><span class="item__count"></span><span class="tooltip">Graph</span></div>
+        <div class="item"><i data-lucide="check-square"></i><span>Tasks</span><span class="badge">12</span><span class="tooltip">Tasks · 12</span></div>
+        <div class="item"><i data-lucide="clock"></i><span>Recently promoted</span><span class="item__count">10</span><span class="tooltip">Recently promoted</span></div>
+
+        <!-- ============ AREA TREE ============ -->
+        <div class="sb-section">
+          <span>Areas</span>
+          <button aria-label="Collapse all"><i data-lucide="chevrons-up-down"></i></button>
+        </div>
+        <div class="tree">
+          <div class="tree-row active" data-open="true">
+            <span class="caret"><i data-lucide="chevron-right" class="caret-icon"></i></span>
+            <i data-lucide="folder-open" class="folder"></i>
+            <span>platform</span>
+            <span class="count">22</span>
+            <span class="tooltip">platform · 22</span>
+          </div>
+          <div class="tree-children" style="display:block">
+            <div class="tree-row active" data-open="false">
+              <span class="caret empty"></span>
+              <i data-lucide="folder" class="folder"></i>
+              <span>auth</span>
+              <span class="count">8</span>
+            </div>
+            <div class="tree-row" data-open="false">
+              <span class="caret empty"></span>
+              <i data-lucide="folder" class="folder"></i>
+              <span>billing</span>
+              <span class="count">4</span>
+            </div>
+            <div class="tree-row" data-open="false">
+              <span class="caret empty"></span>
+              <i data-lucide="folder" class="folder"></i>
+              <span>storage</span>
+              <span class="count">6</span>
+            </div>
+            <div class="tree-row" data-open="true">
+              <span class="caret"><i data-lucide="chevron-right" class="caret-icon"></i></span>
+              <i data-lucide="folder-open" class="folder"></i>
+              <span>observability</span>
+              <span class="count">4</span>
+            </div>
+            <div class="tree-children" style="display:block; padding-left: 32px;">
+              <div class="tree-row" data-open="false">
+                <span class="caret empty"></span>
+                <i data-lucide="folder" class="folder"></i>
+                <span>metrics</span>
+                <span class="count">2</span>
+              </div>
+              <div class="tree-row" data-open="false">
+                <span class="caret empty"></span>
+                <i data-lucide="folder" class="folder"></i>
+                <span>tracing</span>
+                <span class="count">2</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="tree-row" data-open="false">
+            <span class="caret"><i data-lucide="chevron-right" class="caret-icon"></i></span>
+            <i data-lucide="folder" class="folder"></i>
+            <span>product</span>
+            <span class="count">15</span>
+          </div>
+
+          <div class="tree-row" data-open="false">
+            <span class="caret"><i data-lucide="chevron-right" class="caret-icon"></i></span>
+            <i data-lucide="folder" class="folder"></i>
+            <span>infra</span>
+            <span class="count">9</span>
+          </div>
+
+          <div class="tree-row" data-open="false">
+            <span class="caret"><i data-lucide="chevron-right" class="caret-icon"></i></span>
+            <i data-lucide="folder" class="folder"></i>
+            <span>design</span>
+            <span class="count">6</span>
+          </div>
+
+          <div class="tree-special">
+            <div class="tree-row" data-open="false">
+              <span class="caret empty"></span>
+              <i data-lucide="layers" class="folder"></i>
+              <span style="color: var(--fg-2); font-style: italic">/cross-cutting</span>
+              <span class="count">3</span>
+            </div>
+            <div class="tree-row" data-open="false">
+              <span class="caret empty"></span>
+              <i data-lucide="archive" class="folder"></i>
+              <span style="color: var(--fg-2); font-style: italic">/misc</span>
+              <span class="count">2</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="tree-req">
+          <button><i data-lucide="message-square-plus"></i>Request new Area</button>
+        </div>
+
+        <!-- ============ TYPE FILTER CHIPS ============ -->
+        <div class="sb-section">Types</div>
+        <div class="types">
+          <span class="type-chip active">Decision</span>
+          <span class="type-chip">Analysis</span>
+          <span class="type-chip">Debug</span>
+          <span class="type-chip">Flow</span>
+          <span class="type-chip active">Task</span>
+          <span class="type-chip">TC</span>
+          <span class="type-chip">Glossary</span>
+          <span class="type-chip">Feature</span>
+          <span class="type-chip">API</span>
+          <span class="type-chip">Screen</span>
+          <span class="type-chip">DataModel</span>
+        </div>
+        <div class="types__clear">Clear · 2 selected</div>
+
+      </div>
+
+      <!-- ============ FOOTER ============ -->
+      <div class="sb__foot">
+        <div class="item"><i data-lucide="file-code"></i><span>PINDOC.md</span><span class="item__count" style="color: var(--fg-4); font-size: 10px">Harness</span><span class="tooltip">PINDOC.md</span></div>
+        <div class="item"><i data-lucide="settings"></i><span>Settings</span><span class="item__count"></span><span class="tooltip">Settings</span></div>
+        <div class="user-row">
+          <span class="user-row__av">JL</span>
+          <div style="min-width: 0">
+            <div class="user-row__name">jamie lin</div>
+            <div class="user-row__agent"><span class="user-row__dot"></span>claude-code connected</div>
+          </div>
+          <i data-lucide="chevron-up" style="width: 13px; height: 13px; color: var(--fg-3);"></i>
+          <span class="tooltip">jamie · cc online</span>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- Demo canvas so the sidebar has context -->
+    <main class="canvas">
+      <div class="canvas__inner">
+        <h1>Inbox · platform/auth</h1>
+        <div class="sub">Filtered to types: Decision, Task · 2 selected · 3 pending</div>
+
+        <div class="canvas__grid">
+          <div class="canvas__card"><h3>adr-0042 · session-store migration</h3><p>Edits after review comment — <code>+14 / −6</code>. claude-code · 12m ago.</p></div>
+          <div class="canvas__card"><h3>task-0118 · dual-write shadow</h3><p>New agent attempt, marked blocked by SPEC-0011. claude-code · 12m ago.</p></div>
+          <div class="canvas__card"><h3>adr-0044 · pg indexing strategy</h3><p>New draft — 186 lines. cursor · 1h ago.</p></div>
+          <div class="canvas__card"><h3>task-0121 · token refresh race</h3><p>Promoted to live after review. codex · 2h ago.</p></div>
+        </div>
+
+        <div class="demo-note">
+          <strong>Sidebar behaviour reference.</strong><br>
+          Hit <code>⌘P</code> (or click the project name) to switch projects. Use the top-right <code>panel-left</code> button to collapse the sidebar to an icon rail — hover any icon to see its label. The <em>area tree</em> and <em>type filter</em> drive the scope of every surface; they persist across Wiki, Inbox, Graph, and Task list. Creation affordances (<code>+ New project</code>, <code>Request new Area</code>) always open a review dialog — the agent does the write, the human approves.
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+  lucide.createIcons();
+
+  const app = document.getElementById('app');
+
+  // Project switcher popover
+  const projTrigger = document.getElementById('projTrigger');
+  const projPop = document.getElementById('projPop');
+  projTrigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    projPop.classList.toggle('open');
+  });
+  document.addEventListener('click', () => projPop.classList.remove('open'));
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'p' && !e.shiftKey) {
+      e.preventDefault();
+      projPop.classList.toggle('open');
+    }
+    if (e.key === 'Escape') projPop.classList.remove('open');
+  });
+
+  // Collapse sidebar
+  const collapseBtn = document.getElementById('collapseBtn');
+  collapseBtn.addEventListener('click', () => {
+    const isCollapsed = app.classList.toggle('collapsed');
+    document.getElementById('iconExpanded').style.display = isCollapsed ? 'none' : '';
+    document.getElementById('iconCollapsed').style.display = isCollapsed ? '' : 'none';
+    try { localStorage.setItem('pindoc.sidebar', isCollapsed ? 'collapsed' : 'expanded'); } catch(e){}
+  });
+  try {
+    if (localStorage.getItem('pindoc.sidebar') === 'collapsed') {
+      app.classList.add('collapsed');
+      document.getElementById('iconExpanded').style.display = 'none';
+      document.getElementById('iconCollapsed').style.display = '';
+    }
+  } catch(e){}
+
+  // Mobile drawer
+  document.getElementById('menuBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    app.classList.toggle('drawer-open');
+  });
+  document.addEventListener('click', (e) => {
+    if (app.classList.contains('drawer-open') && !e.target.closest('.sb') && !e.target.closest('#menuBtn')) {
+      app.classList.remove('drawer-open');
+    }
+  });
+
+  // Area tree expand/collapse
+  document.querySelectorAll('.tree-row .caret').forEach(c => {
+    if (c.classList.contains('empty')) return;
+    c.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const row = c.closest('.tree-row');
+      const isOpen = row.getAttribute('data-open') === 'true';
+      row.setAttribute('data-open', String(!isOpen));
+      const children = row.nextElementSibling;
+      if (children && children.classList.contains('tree-children')) {
+        children.style.display = isOpen ? 'none' : 'block';
+      }
+      // swap folder icon
+      const f = row.querySelector('[data-lucide].folder');
+      if (f) f.setAttribute('data-lucide', isOpen ? 'folder' : 'folder-open');
+      lucide.createIcons();
+    });
+  });
+
+  // Type chip toggle
+  document.querySelectorAll('.type-chip').forEach(c => {
+    c.addEventListener('click', () => {
+      c.classList.toggle('active');
+      const n = document.querySelectorAll('.type-chip.active').length;
+      const clr = document.querySelector('.types__clear');
+      clr.textContent = n ? `Clear · ${n} selected` : '';
+      clr.style.visibility = n ? 'visible' : 'hidden';
+    });
+  });
+</script>
+
+</body>
+</html>
