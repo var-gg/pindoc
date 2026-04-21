@@ -123,6 +123,80 @@ Project-scoped. Agent token이 특정 Project의 write 권한을 가짐.
 - **Propagation Ledger**: Event를 dependent에 전파
 - **Resource Index + M7**: Related Resource 인덱스 + 주기 verify 스케줄
 - **Search Index**: Artifact 전문 + 의미 검색 (pgvector) — F6 해결의 코어
+- **Embedding Layer**: Pluggable provider + 자동 chunking (아래 상세)
+
+### Embedding Layer
+
+Semantic search / Fast Landing / Conflict check 의 공통 의존성. 3가지 설계 원칙:
+
+**1. Pluggable Provider Interface**
+
+```go
+type Provider interface {
+    Embed(ctx context.Context, req Request) (Response, error)
+    Info() Info
+}
+
+type Info struct {
+    Name        string   // "embeddinggemma" | "bge-m3" | "http" | ...
+    ModelID     string
+    Dimension   int      // 768 (gemma) / 1024 (bge-m3) / 3072 (openai-3-large)
+    MaxTokens   int      // 2048 (gemma) / 8192 (bge-m3) / 8191 (openai)
+    TaskPrefix  bool     // Gemma uses task-aware prefix
+    Distance    string   // "cosine" | "dot"
+    Multilingual bool
+}
+```
+
+**2. V1 내장 구현 3종 + Config swap**
+
+| Provider | 용도 | RAM | 기본 여부 |
+|---|---|---|---|
+| `embeddinggemma` | On-device dev/small-team default | ~200MB | ✅ default |
+| `bge-m3` | 고품질 self-host (GPU or 8GB+ RAM) | 3-5GB | 옵션 |
+| `http` | Ollama / TEI / OpenAI / Cohere / Vertex 등 외부 | N/A | 옵션 |
+
+Swap은 `pindoc.config.yaml` or PINDOC.md frontmatter:
+
+```yaml
+embedding:
+  provider: http
+  endpoint: https://api.openai.com/v1/embeddings
+  model: text-embedding-3-large
+  api_key_env: OPENAI_API_KEY
+  info:
+    dimension: 3072
+    max_tokens: 8191
+```
+
+설치 시 모델 선택 화면 없음 (default + `pindoc init --embedding=<name>` flag). [06 Flow 0 §onboarding](06-ui-flows.md).
+
+**3. Automatic Chunking (V1 필수)**
+
+Artifact body가 `Provider.MaxTokens` 초과 가능 (특히 한국어 장문 — 한국어 2000자 ≈ 1000-1500 토큰). 따라서:
+
+```
+Artifact
+  ├─ title_vec           (embed(title), 항상 1)
+  ├─ body_chunk_vecs[]   (섹션 boundary로 분할, 각 chunk 임베딩)
+  └─ summary_vec         (에이전트가 제출한 1-문장 요약, optional)
+```
+
+**Chunking 규칙**:
+- 우선: H2/H3 heading boundary 기준
+- 초과 시: 문단 boundary 기준
+- 각 chunk는 parent artifact의 title을 prefix로 carry (retrieval 맥락 유지)
+- Chunk별 `chunk_idx`, `span_start`/`span_end` 저장 (UI에서 hit highlight)
+
+**Retrieval 흐름**:
+1. Query embed → top-K 유사 chunk
+2. Parent artifact 그룹화 + 랭킹 재계산 (chunk 합치기 — multi-hit artifact 부스트)
+3. Return: 각 artifact의 best chunk 를 snippet으로, 전체 artifact 링크
+
+**Pre-flight와의 연동**:
+- `pindoc.artifact.propose` 시 서버가 `len(body_tokens) vs Provider.MaxTokens` 체크
+- 80% 초과: WARN · 100% 초과: NOT_READY 체크리스트에 "split into sections" 힌트
+- 에이전트는 `pindoc.project.current` 응답에서 `embedding_provider.max_tokens` 를 알아냄 → 애초에 장문 쓸 때 예산 고려
 
 ### Web UI
 
