@@ -181,28 +181,47 @@ claude mcp list           # pindoc 있음
 - 기존 `artifact_chunks` 전체 재-embed 배치 스크립트 (15개 artifact 한 번에)
 - 스모크: `/api/p/pindoc/search?q=…` 한국어 쿼리 5개로 의미 검색 품질 확인
 
-## Phase 11 — Write contract 강화 + semantic conflict (핵심 블록)
+## Phase 11 — Write contract 강화 + semantic conflict (핵심 블록, 2차 피어리뷰 후 확장)
 
-피어리뷰 공통 P0 + 저자 확정 범위. "typed section schema 확정은 out-of-scope" — 스키마 최소 필드 + 진화형 template artifact 구조만.
+피어리뷰 1차+2차 공통 P0 + 저자 확정 범위. "typed section schema 확정은 out-of-scope" — 스키마 최소 필드 + 진화형 template artifact 구조만.
 
-- `artifact.propose` 입력 확장:
+- **`search_receipt` — 2차 피어리뷰 반영, soft→hard 업그레이드**:
+  - `artifact.search` / `context.for_task` 응답에 서버 발급 opaque token (TTL 10분) 포함.
+  - `artifact.propose`는 `basis.search_receipt` 필수 (create 경로만). Update 경로(`update_of`)는 receipt 불필요 — 대상 artifact read가 이미 증거.
+  - 서버는 receipt의 project/session/TTL을 검증. 1차 피어리뷰 때 우려한 "lazy agent가 가짜 refs 넣기"는 receipt 기반이라 우회 불가.
+  - Hard block — receipt 없으면 `not_ready` + `NO_SRCH` code.
+- **`artifact.propose` 입력 확장**:
+  - `basis.search_receipt` (필수, create 경로)
   - `basis.source_session` (optional) — 감사 추적용 세션 ID
-  - `basis.search_refs[]` (optional) — "봤다" 주장. 서버는 이벤트 로그만 남김, hard-enforce 안 함
   - `pins[]: [{repo, commit, path, lines?}]` — code-linked 증거
   - `expected_version` — `update_of` 경로에서 optimistic lock (`max(revision_number)` 비교)
   - `supersede_of` — 기존 artifact를 `status=superseded`로 전환하면서 새 artifact 생성
   - `relates_to[]: [{target_id, relation}]` — `implements | references | blocks` 등
 - 신규 테이블 `artifact_edges(source_id, target_id, relation, created_at)` — `relates_to[]`의 persistence.
+- **`context.for_task` 응답 확장 — 2차 피어리뷰 반영**:
+  - `search_receipt` 발급
+  - `candidate_updates[]` — 현 landings 중 "새 propose 대신 update_of 대상으로 의심되는" artifact
+  - `stale[]` — pin이 commit diff와 어긋나 보이는 artifact
 - `body_json` 활용 시작 — Debug/Decision/Analysis/Task 4 타입에 최소 필드만 (Debug=`symptom/resolution`, Decision=`decision/rationale` 수준). 나머지 섹션 구조는 **template artifact**로 풀어서 별도 artifact로 관리 (Phase 13).
 - **Semantic conflict block** — `artifact.propose(new)` 시 `artifact.search`로 top-K 유사도 distance가 임계치 이하면 `not_ready` + `next_tools: [artifact.read]` + `related: [...]`. exact-title만 막는 현재 guard 상향.
+- **`_unsorted` area auto-seed (2차 피어리뷰 반영)** — area 판단 불가 시 agent가 쓸 fallback. `misc`와 구분 (misc는 의도된 area, _unsorted는 "분류 필요" 큐). Reader UI에 "분류 필요" 위젯, 주기적으로 agent가 재분류.
 
 ## Phase 12 — Agent ergonomics (envelope + view + actor)
 
-피어리뷰 P1 블록 통합.
+피어리뷰 1차+2차 P1 블록 통합.
 
-- **Machine-readable `not_ready`**: `{status, draft_id?, failed:[stable_code], next_tools:[...], related:[{id,url}]}`. stable code 테이블은 docs/에 별도.
+- **Machine-readable `not_ready`**: `{status, draft_id?, failed:[stable_code], next_tools:[...], related:[{id,url}]}`. 2차 피어리뷰가 구체 stable code까지 제안 — **채택**:
+  - `NO_SRCH` — `basis.search_receipt` 없거나 만료
+  - `NEED_PIN` — code-linked type(Debug/Decision/Feature)에 pin 없음
+  - `NEED_VER` — `update_of` 경로인데 `expected_version` 없음
+  - `VER_CONFLICT` — `expected_version`이 현 revision과 불일치 (race)
+  - `AREA_BAD` — 없는 area_slug
+  - `POSSIBLE_DUP` — semantic conflict hit, `candidate_updates`와 함께 반환
+  - `DBG_NO_REPRO` — Debug인데 reproduction section 부재
+  - `DEC_NO_ALT` — Decision인데 alternatives/rationale 부재
 - **`artifact.read(view=brief|full|continuation)`**: brief=title/summary/pins/stale, continuation=brief + 최근 revision delta + relates_to neighbors. 기존 default는 `full` 유지.
 - **Actor hardening (stdio)**: `author_id`는 표시용 metadata로 재정의. 서버가 session 단위 `agent_id` (UUID) 를 ping 첫 호출 시 발급, propose 감사에 기록. `author_id` spoof 공격 surface 축소.
+- **Mode split은 not_ready 응답에만 한정 (2차 피어리뷰 권고 축소 반영)**: default는 compact (fail codes만), `verbose` 모드에서 자연어 hint 추가. tool 전체에 mode 파라미터 붙이는 건 현 규모에서 과설계 — 반려.
 
 ## Phase 13 — Template artifact seed
 

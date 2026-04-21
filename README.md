@@ -48,7 +48,7 @@ Agent Session ── checkpoint ──▶ Promote ──▶ Artifact ──▶ G
 - **Typed Documents (Tier A/B/C)** — Decision/Analysis/Debug/Flow/Task/TC/Glossary + Domain Pack.
 - **Git-pinned artifacts** — 커밋/PR/파일 경로 고정. 코드 변경 시 stale 자동.
 - **Fast Landing** — 완벽 인덱스 아님. 핵심 리소스 1~3개로의 빠른 착륙. M7 자가 검증.
-- **Multi-project by default** — 한 인스턴스 = 복수 프로젝트. FE/BE 분리·Solo 사이드 프로젝트·영세 팀 현실 지원.
+- **Multi-project by Design** — 한 인스턴스 = 복수 프로젝트 (schema/URL/UI 모두 `/p/:project/…` 스코프). V1 MCP runtime은 "1 subprocess = 1 project" 제약 — 프로젝트 전환은 새 MCP 연결로. FE/BE 분리·Solo 사이드 프로젝트·영세 팀 현실 지원.
 
 ## Target Users
 
@@ -60,16 +60,23 @@ Agent Session ── checkpoint ──▶ Promote ──▶ Artifact ──▶ G
 
 🚧 **M1 스캐폴드 진행 중** — 기획 완료, 구현 착수. 이 repo가 **첫 meta-dogfooding 사례**입니다. Phase 2 완료 시점부터 docs는 Pindoc을 통해서만 수정됩니다.
 
-### M1 현 진행 상태
+### M1 현 진행 상태 (2026-04-22)
 
 - ✅ Phase 1 — Docker Compose + Go MCP 서버 스켈레톤 + `pindoc.ping` stdio handshake
-- ⏳ Phase 2 — Project/Area/Artifact schema + `propose`/`read`/`search` 도구
-- ⏳ Phase 3 — EmbeddingGemma 통합 + Fast Landing
-- ⏳ Phase 4 — Web UI 실데이터 연결 (iframe 벗김)
-- ⏳ Phase 5 — `pindoc.harness.install` + i18n (ko/en)
-- ⏳ Phase 6 — 기존 docs/ 를 Pindoc artifact로 임포트
+- ✅ Phase 2 — Project/Area/Artifact schema + `propose`/`read`/`search` 도구
+- ✅ Phase 3 — 임베딩 레이어 (stub default, HTTP provider 준비됨)
+- ✅ Phase 4 — Web UI 실데이터 연결 (Reader + Sidebar + Sidecar + ⌘K)
+- ✅ Phase 5 — `pindoc.harness.install` + i18n (ko/en)
+- ✅ Phase 6 — `docs/*.md` 15개를 Pindoc artifact로 임포트 (meta-dogfood 시드)
+- ✅ Phase 7 — revision 시스템 (revisions / diff / summary_since + history·diff UI)
+- ✅ Phase 8 — URL 멀티프로젝트 재구조화 (`/p/:project/…` canonical + `pindoc.project.create` MCP tool)
+- ✅ Phase 9 — `human_url`/`agent_ref` 분리 + `capabilities` 블록 + spec↔runtime drift 가시화
+- ⏳ Phase 10 — real embedder dogfood (Python sidecar → `PINDOC_EMBED_PROVIDER=http`)
+- ⏳ Phase 11 — write contract 강화 (`search_receipt` + `pins[]` + `expected_version` + semantic conflict + `body_json` minimal + `relates_to[]`)
+- ⏳ Phase 12 — `not_ready` machine-readable envelope + `artifact.read(view=…)` + actor hardening
+- ⏳ Phase 13 — template artifact seed (포맷도 evolving artifact)
 
-상세: [docs/12-m1-implementation-plan.md](docs/12-m1-implementation-plan.md)
+상세: [docs/12-m1-implementation-plan.md](docs/12-m1-implementation-plan.md) · 외부 피어리뷰 판단: [docs/14-peer-review-response.md](docs/14-peer-review-response.md)
 
 ## Quick start (M1 개발자)
 

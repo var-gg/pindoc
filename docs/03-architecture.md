@@ -82,9 +82,16 @@ MCP = write (write-only), Wiki UI = read + (엣지) approve. REST API = 3차.
 
 Tier A core 강제 + Tier B Domain Pack + Tier C Custom(V2+).
 
-### 원칙 7. Multi-project by Default
+### 원칙 7. Multi-project by Design (V1 runtime: one MCP session = one project)
 
-한 인스턴스 = 복수 Project. Solo 사이드 프로젝트 / FE·BE 분리 / 영세 2~3명 복수 프로젝트 1급 지원.
+한 Pindoc 인스턴스는 복수 Project를 호스팅하도록 **설계**됐다 (schema, URL, Web UI 모두 `/p/:project/…` 스코프). Solo 사이드 프로젝트 / FE·BE 분리 / 영세 2~3명 복수 프로젝트가 1급 시민.
+
+**V1 runtime 제약**: MCP subprocess 하나는 **한 프로젝트에 고정**된다 (`PINDOC_PROJECT` env로 결정, 세션 중 switch 불가). 이유:
+- stdio MCP transport에서 session-level scope switching은 SDK 수준 지원이 제한적
+- "wrong-project write"는 치명적 UX 실패 — hidden state switching보다 **"새 프로젝트를 쓰려면 새 MCP subprocess"** 가 안전
+- V1.5 agent token + per-project 권한 모델 도입 시 `pindoc.project.switch` 재검토
+
+Web UI는 멀티프로젝트 switcher를 이미 지원 (`/p/:project/…` canonical URL). MCP 쪽 single-project scope는 V1 구현의 의도적 단순화이며, 외부 에이전트가 프로젝트 간 전환하려면 새 MCP 연결을 여는 게 현재 운영 모델.
 
 ### 원칙 8. Customization via Slots, Not Forks
 

@@ -146,14 +146,53 @@ Review A 제안: "최근 10분 내 search/read 호출 없으면 propose hard blo
 
 Phase 13은 이 원칙을 코드화한다. `body_json` 검증을 minimal로 유지한 이유도 여기 — 스키마가 early lock-in되면 format best practice의 진화를 막는다.
 
-## 7. 정리 — 리포트 활용 원칙
+## 7. 정리 — 1차 리포트 활용 원칙
 
 - **수용 6개** (Phase 9/10/11/12/13)
 - **변형 수용 4개** (원안 축소)
 - **반려 6개** (철학/설계/우선순위)
 - **보완 추가 3개** (리포트 놓침, 실무 dogfood 기반)
 
-이 문서 자체도 `update_of`로 revision 대상. 다음 라운드 고급추론 리포트를 받으면 이 판단을 갱신한다.
+## 8. 2차 리포트 (2026-04-22 post-Phase 9) 판단 요약
+
+Phase 9 (`human_url`/`agent_ref` 분리 + capabilities + spec drift 표) 커밋 이후 받은 2차 고급추론 리포트. 1차 대비 훨씬 implementation-level로 날카로움.
+
+### 2차 리포트가 새로 제시한 것 (1차에 없던)
+
+| 항목 | 판단 | 반영 |
+|---|---|---|
+| **`search_receipt` 기반 write gating** | **수용 (업그레이드)**. 1차의 `basis.search_refs[]` soft 설계를 서버-발급 opaque token + TTL로 교체. 우회 불가. 1차 때 우려한 "lazy agent 가짜 refs" 시나리오 해결. | Phase 11 범위 확장 |
+| **`context.for_task`에 `candidate_updates[]` + `stale[]`** | 수용. 다음 세션 update flow의 첫 단추. 복잡도 낮음, UX 가치 높음. | Phase 11 범위 확장 |
+| **`not_ready` stable code 구체 네이밍** (`NO_SRCH`, `NEED_PIN`, `NEED_VER`, `AREA_BAD`, `POSSIBLE_DUP`, `DBG_NO_REPRO`, `DEC_NO_ALT`) | 수용. Phase 12 구현 시 그대로 사용. `VER_CONFLICT` 추가. | Phase 12 |
+| **`_unsorted` area auto-seed + quarantine** | 수용. `misc`는 의도된 area, `_unsorted`는 "분류 필요" 큐로 분리. Reader UI에 위젯. | Phase 11 |
+| **V1 MCP "single-project scoped" 명시 강화** | 수용. 원칙 7을 "Multi-project by Design" 재명명, runtime 제약 명시. README·docs/09에도 배지. | 이번 문서 작업 (Phase 8 후속) |
+
+### 2차 리포트 반려
+
+| 항목 | 반려 이유 |
+|---|---|
+| README를 "regulatory memory plane" 추상명사로 재작성 | 저자 원안 ("agent가 쓰는 위키") 유지 — 1차 리포트 반려 판단 그대로 |
+| artifact type 4개 이하 (`decision/debug/plan/guide`) — Task 제거 | Task는 실무 wedge 중심 (wiki+tracker 분리 pain) — 반려 |
+| Stub retrieval일 때 write hard block | 과도. dogfood 자체를 막음. `stub` warning + `capabilities.retrieval_quality` 표시로 충분. |
+| Serena/CodeGraphContext 통합 후보로 좁히기 | 독립 제품으로 증명 후 V2에서 검토. 지금 narrative에 넣으면 하위 layer로 자기 규정되는 역효과. |
+| rate limit per-agent/session/day | self-host 환경 과설계. V1.5 auth 단계에서 재검토. |
+| Tool 전체 short/verbose/debug mode split | 현 규모 과설계. 축소 수용 — `not_ready` 응답에만 한정 (Phase 12). |
+| `p` project slug 전체 응답 canonical echo | MCP subprocess = 한 project 원칙 + Phase 9 capabilities에 이미 포함. 중복 → 축소 수용 (`not_ready` / propose accepted만 에코). |
+
+### 2차 리포트가 놓친 것 / 이미 해소한 것 (걸러낸 지적)
+
+- "spec↔runtime drift가 P0" — Phase 9에서 [docs/10 Implementation Status](./10-mcp-tools-spec.md) 표로 해소. 리포트가 이 변경을 반영 못 하고 drift 리스크로 재지적.
+- "human_url/agent_ref 분리 필요" — Phase 9 완료. 리포트는 이미 칭찬함.
+- "multi-project by default 메시지 과함" — Phase 8 완료. 단 [docs/03 원칙 7](./03-architecture.md) 문구가 여전히 "by default"로 남아 있어 외부 독자가 오해. 이번 라운드에서 "Multi-project by Design + V1 runtime: 1 session = 1 project"로 재명명.
+- "review queue가 runtime보다 앞서 있다" — `capabilities.review_queue_supported: false`로 이미 표시. 리포트가 상단 `capabilities`를 빠르게 읽지 못한 것.
+
+### 판단 요약
+
+- **수용 5개** — Phase 11 범위 확장 + Phase 12 구체화 + Phase 8 후속 문서 작업
+- **반려 7개** — 포지셔닝/철학/우선순위 관련
+- **이미 해소됐는데 리포트가 놓친 것 4개** — drift 표, Phase 9 분리, Phase 8 URL 구조, capabilities 상태 표시
+
+1차 때 wedge 정체성은 확정됐고, 2차는 그 wedge를 지탱할 **MCP contract의 teeth (search_receipt, stable codes, candidate_updates)** 를 구체화했다. 포지셔닝 이슈는 반복 제기됐지만 저자 원안 유지 — 외부 리뷰어가 흔드는 축이 아니라 저자가 고정한 축.
 
 ## 참고
 

@@ -26,6 +26,7 @@ project_id:      proj_{xxx}
 project_slug:    {shop-fe}
 project_name:    {Shop Frontend}
 server_url:      {https://pindoc.mycompany.dev | http://localhost:5733}
+mcp_scope:       single-project  # V1: 이 MCP subprocess는 위 project_slug에 고정. 다른 프로젝트를 쓰려면 새 MCP 연결.
 active_packs:    [web-saas]   # Tier A는 항상 활성, 여기는 Tier B만
 mode:            auto         # auto | manual | off
 sensitive_ops:   auto         # auto | confirm
