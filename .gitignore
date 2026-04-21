@@ -16,3 +16,18 @@ node_modules/
 dist/
 build/
 .cache/
+
+# Go
+/bin/
+*.exe
+*.test
+*.out
+*.prof
+go.work
+go.work.sum
+
+# Migrations runtime state (when goose is wired up)
+*.db
+
+# Local secrets
+.mcp.json

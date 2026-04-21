@@ -58,7 +58,41 @@ Agent Session ── checkpoint ──▶ Promote ──▶ Artifact ──▶ G
 
 ## Status
 
-🚧 **Design phase** — 구현 전. 이 repo가 **첫 meta-dogfooding 사례**입니다. Pindoc이 아직 없어 수동으로 작성 중이지만, V1 공개 시 이 문서들이 pindoc.org 인스턴스로 이관됩니다.
+🚧 **M1 스캐폴드 진행 중** — 기획 완료, 구현 착수. 이 repo가 **첫 meta-dogfooding 사례**입니다. Phase 2 완료 시점부터 docs는 Pindoc을 통해서만 수정됩니다.
+
+### M1 현 진행 상태
+
+- ✅ Phase 1 — Docker Compose + Go MCP 서버 스켈레톤 + `pindoc.ping` stdio handshake
+- ⏳ Phase 2 — Project/Area/Artifact schema + `propose`/`read`/`search` 도구
+- ⏳ Phase 3 — EmbeddingGemma 통합 + Fast Landing
+- ⏳ Phase 4 — Web UI 실데이터 연결 (iframe 벗김)
+- ⏳ Phase 5 — `pindoc.harness.install` + i18n (ko/en)
+- ⏳ Phase 6 — 기존 docs/ 를 Pindoc artifact로 임포트
+
+상세: [docs/12-m1-implementation-plan.md](docs/12-m1-implementation-plan.md)
+
+## Quick start (M1 개발자)
+
+**사전 요구사항** (Windows/macOS/Linux 공통):
+- Go **1.24+** (`winget install GoLang.Go` / `brew install go`)
+- Docker **27+** (Desktop 또는 engine)
+- Node **20.15+** & pnpm **10+**
+
+```bash
+# DB 기동 (Postgres 16 + pgvector)
+docker compose up -d db
+
+# Go 의존성
+go mod tidy
+
+# MCP 서버 직접 실행 (Claude Code가 stdio로 붙음)
+go run ./cmd/pindoc-server
+
+# 또는 정적 웹 미리보기 (디자인 시스템 프로토타입)
+cd web && pnpm install && pnpm dev   # http://localhost:5830
+```
+
+**Claude Code에 등록**: `.mcp.json.example` 을 `~/.claude/mcp.json` 에 복사 (또는 병합) 후 Claude Code 재시작. `claude mcp list` 로 `pindoc` 확인. 새 세션에서 `pindoc.ping` 실행하면 handshake 성공.
 
 ## Read the design
 

@@ -1,0 +1,45 @@
+# Pindoc local dev stack.
+#
+# Intentionally single-service for the M1 phase: Postgres 16 with pgvector
+# pre-loaded. The MCP server, web UI, and embedding sidecar run on the host
+# (so restarts are fast and Go/pnpm tooling stays in hot-reload mode).
+#
+# Upgrade path: when we want container-everything for a deploy artefact,
+# split this into docker-compose.prod.yml. For now, host-native dev + one
+# DB container is the lowest-friction setup.
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: pindoc-db
+    environment:
+      POSTGRES_DB: pindoc
+      POSTGRES_USER: pindoc
+      POSTGRES_PASSWORD: pindoc_dev
+      # Tune for a 2GB host: Pindoc is write-light; keep Postgres lean so the
+      # embedding model has room. Override via PG_* env for real deployments.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pindoc_db:/var/lib/postgresql/data
+      - ./migrations:/migrations:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pindoc -d pindoc"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    # Conservative memory settings for a cheap cloud tier.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - max_connections=50
+      - -c
+      - work_mem=8MB
+
+volumes:
+  pindoc_db:
+    name: pindoc_db
