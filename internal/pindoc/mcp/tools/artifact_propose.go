@@ -12,6 +12,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
+	"github.com/var-gg/pindoc/internal/pindoc/i18n"
 )
 
 // ValidArtifactTypes are the types Phase 2 accepts. Tier A (7) + Tier B
@@ -67,16 +68,17 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 		},
 		func(ctx context.Context, _ *sdk.CallToolRequest, in artifactProposeInput) (*sdk.CallToolResult, artifactProposeOutput, error) {
 			// --- Pre-flight ----------------------------------------------
-			checklist, code := preflight(&in)
+			lang := deps.UserLanguage
+			checklist, code := preflight(&in, lang)
 			if len(checklist) > 0 {
 				return nil, artifactProposeOutput{
 					Status:    "not_ready",
 					ErrorCode: code,
 					Checklist: checklist,
 					SuggestedActions: []string{
-						"Fix every item in the checklist.",
-						"For type: call pindoc.project.current to confirm Tier A/B types your project accepts.",
-						"For area_slug: call pindoc.area.list and pick one; use 'misc' if nothing fits.",
+						i18n.T(lang, "suggested.fix_all"),
+						i18n.T(lang, "suggested.confirm_types"),
+						i18n.T(lang, "suggested.use_misc"),
 					},
 				}, nil
 			}
@@ -94,11 +96,11 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 					Status:    "not_ready",
 					ErrorCode: "AREA_NOT_FOUND",
 					Checklist: []string{
-						fmt.Sprintf("✗ area_slug %q does not exist in project %q", in.AreaSlug, deps.ProjectSlug),
+						fmt.Sprintf(i18n.T(lang, "preflight.area_not_found"), in.AreaSlug, deps.ProjectSlug),
 					},
 					SuggestedActions: []string{
-						"Call pindoc.area.list to see valid slugs.",
-						"If you truly need a new area, create it manually via the admin flow (Phase 3+) or use 'misc' for now.",
+						i18n.T(lang, "suggested.list_areas"),
+						i18n.T(lang, "suggested.area_or_misc"),
 					},
 				}, nil
 			}
@@ -120,12 +122,12 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 					Status:    "not_ready",
 					ErrorCode: "CONFLICT_EXACT_TITLE",
 					Checklist: []string{
-						fmt.Sprintf("✗ An artifact with this exact title already exists (id=%s, slug=%s).", existingID, existingSlug),
+						fmt.Sprintf(i18n.T(lang, "preflight.conflict_exact"), existingID, existingSlug),
 					},
 					SuggestedActions: []string{
-						fmt.Sprintf("Call pindoc.artifact.read with id_or_slug=%q to review the existing one.", existingSlug),
-						"If this is an update, add a supersedes chain (Phase 2.x+, not yet implemented — for now archive the old one manually).",
-						"If this is a different document, pick a more specific title.",
+						fmt.Sprintf(i18n.T(lang, "suggested.read_existing"), existingSlug),
+						i18n.T(lang, "suggested.supersede"),
+						i18n.T(lang, "suggested.pick_title"),
 					},
 				}, nil
 			}
@@ -225,36 +227,36 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 
 // preflight runs the cheap synchronous checks. Returns a list of ✗-prefixed
 // lines the agent should address, plus a short error code. Empty list +
-// empty code means clean.
-func preflight(in *artifactProposeInput) ([]string, string) {
+// empty code means clean. Strings pulled from i18n bundle.
+func preflight(in *artifactProposeInput, lang string) ([]string, string) {
 	var checklist []string
 	code := ""
 
 	if _, ok := validArtifactTypes[in.Type]; !ok {
 		checklist = append(checklist,
-			fmt.Sprintf("✗ type %q is not in the Tier A + Web SaaS pack whitelist", in.Type))
+			fmt.Sprintf(i18n.T(lang, "preflight.type_invalid"), in.Type))
 		code = "INVALID_TYPE"
 	}
 	if strings.TrimSpace(in.Title) == "" {
-		checklist = append(checklist, "✗ title is empty")
+		checklist = append(checklist, i18n.T(lang, "preflight.title_empty"))
 		if code == "" {
 			code = "MISSING_FIELD"
 		}
 	}
 	if strings.TrimSpace(in.BodyMarkdown) == "" {
-		checklist = append(checklist, "✗ body_markdown is empty")
+		checklist = append(checklist, i18n.T(lang, "preflight.body_empty"))
 		if code == "" {
 			code = "MISSING_FIELD"
 		}
 	}
 	if strings.TrimSpace(in.AreaSlug) == "" {
-		checklist = append(checklist, "✗ area_slug is empty — call pindoc.area.list and pick one")
+		checklist = append(checklist, i18n.T(lang, "preflight.area_empty"))
 		if code == "" {
 			code = "MISSING_FIELD"
 		}
 	}
 	if strings.TrimSpace(in.AuthorID) == "" {
-		checklist = append(checklist, "✗ author_id is empty (use 'claude-code', 'cursor', 'codex', ...)")
+		checklist = append(checklist, i18n.T(lang, "preflight.author_empty"))
 		if code == "" {
 			code = "MISSING_FIELD"
 		}
@@ -264,22 +266,18 @@ func preflight(in *artifactProposeInput) ([]string, string) {
 		case "draft", "partial", "settled":
 		default:
 			checklist = append(checklist,
-				fmt.Sprintf("✗ completeness %q invalid; pick draft|partial|settled", in.Completeness))
+				fmt.Sprintf(i18n.T(lang, "preflight.completeness_invalid"), in.Completeness))
 			if code == "" {
 				code = "INVALID_FIELD"
 			}
 		}
 	}
 
-	// Type-specific required fields.
-	// Phase 2 keeps these minimal; richer per-type checklists land alongside
-	// Phase 3 when we have real dogfooding data telling us which types need
-	// guardrails.
+	// Type-specific guardrails.
 	switch in.Type {
 	case "Task":
 		if !strings.Contains(strings.ToLower(in.BodyMarkdown), "acceptance") {
-			checklist = append(checklist,
-				"✗ Task body should include at least one acceptance criterion (a line matching '- [ ] ...').")
+			checklist = append(checklist, i18n.T(lang, "preflight.task_acceptance"))
 			if code == "" {
 				code = "TYPE_GUARDRAIL"
 			}
@@ -287,8 +285,7 @@ func preflight(in *artifactProposeInput) ([]string, string) {
 	case "Decision":
 		lower := strings.ToLower(in.BodyMarkdown)
 		if !strings.Contains(lower, "decision") || !strings.Contains(lower, "context") {
-			checklist = append(checklist,
-				"✗ Decision body should include 'Context' and 'Decision' sections (ADR convention).")
+			checklist = append(checklist, i18n.T(lang, "preflight.adr_sections"))
 			if code == "" {
 				code = "TYPE_GUARDRAIL"
 			}

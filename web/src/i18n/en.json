@@ -1,0 +1,29 @@
+{
+  "nav.live_data": "Live data",
+  "nav.ui_kits": "UI kits (full screen)",
+  "nav.design_refs": "Design-system references",
+  "nav.bundle_docs": "Bundle docs",
+  "nav.wiki_reader": "Wiki Reader",
+  "nav.design_readme": "Design README",
+  "nav.design_skill": "Design SKILL",
+
+  "home.title": "Pindoc · M1 visual skeleton",
+  "home.callout": "Everything shown here is a Claude Design mockup. Not a React component yet. The outer left rail is a dev scaffold for browsing the handoff — it is not part of the product. React-ification starts in M1.5 (Wiki Reader first).",
+
+  "wiki.loading": "Loading…",
+  "wiki.error_title": "Can't reach pindoc-api.",
+  "wiki.error_hint_prefix": "Start it with:",
+  "wiki.error_hint_cmd": "go run ./cmd/pindoc-api",
+  "wiki.error_hint_suffix": "(listens on 127.0.0.1:5831).",
+  "wiki.section_areas": "Areas",
+  "wiki.section_artifacts": "Artifacts",
+  "wiki.empty_list": "No artifacts yet. Write one via pindoc.artifact.propose.",
+  "wiki.empty_detail": "Pick an artifact.",
+  "wiki.meta_artifacts": "%s artifacts · %s",
+  "wiki.written_by": "written by %s",
+  "wiki.published": "published %s",
+
+  "lang.switch": "Language",
+  "lang.en": "English",
+  "lang.ko": "한국어"
+}

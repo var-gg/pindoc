@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import { api, type Area, type Artifact, type ArtifactRef, type Project } from "../api/client";
+import { useI18n } from "../i18n";
 
 type LoadState =
   | { kind: "loading" }
@@ -10,6 +11,7 @@ type LoadState =
 export function WikiRoute() {
   const params = useParams<{ slug?: string }>();
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const { t } = useI18n();
 
   useEffect(() => {
     let cancelled = false;
@@ -45,16 +47,16 @@ export function WikiRoute() {
   }, [params.slug]);
 
   if (state.kind === "loading") {
-    return <div className="wiki__state">Loading…</div>;
+    return <div className="wiki__state">{t("wiki.loading")}</div>;
   }
   if (state.kind === "error") {
     return (
       <div className="wiki__state wiki__state--error">
-        <strong>Can't reach pindoc-api.</strong>
+        <strong>{t("wiki.error_title")}</strong>
         <p>{state.message}</p>
         <p>
-          Start it with: <code>go run ./cmd/pindoc-api</code> (listens on{" "}
-          <code>127.0.0.1:5831</code>).
+          {t("wiki.error_hint_prefix")} <code>{t("wiki.error_hint_cmd")}</code>{" "}
+          {t("wiki.error_hint_suffix")}
         </p>
       </div>
     );
@@ -69,12 +71,12 @@ export function WikiRoute() {
           <div>
             <div className="wiki__name">{project.name}</div>
             <div className="wiki__meta">
-              {project.artifacts_count} artifacts · {project.primary_language}
+              {t("wiki.meta_artifacts", project.artifacts_count, project.primary_language)}
             </div>
           </div>
         </header>
         <section>
-          <h3>Areas</h3>
+          <h3>{t("wiki.section_areas")}</h3>
           <ul className="wiki__areas">
             {areas.map((a) => (
               <li key={a.id} className={a.is_cross_cutting ? "is-cross" : undefined}>
@@ -85,9 +87,9 @@ export function WikiRoute() {
           </ul>
         </section>
         <section>
-          <h3>Artifacts</h3>
+          <h3>{t("wiki.section_artifacts")}</h3>
           <ul className="wiki__list">
-            {list.length === 0 && <li className="wiki__empty">No artifacts yet. Write one via pindoc.artifact.propose.</li>}
+            {list.length === 0 && <li className="wiki__empty">{t("wiki.empty_list")}</li>}
             {list.map((a) => (
               <li key={a.id} className={detail?.id === a.id ? "is-active" : undefined}>
                 <Link to={`/wiki/${a.slug}`}>
@@ -101,13 +103,14 @@ export function WikiRoute() {
         </section>
       </aside>
       <main className="wiki__main">
-        {detail ? <ArtifactView detail={detail} /> : <div className="wiki__empty">Pick an artifact.</div>}
+        {detail ? <ArtifactView detail={detail} /> : <div className="wiki__empty">{t("wiki.empty_detail")}</div>}
       </main>
     </div>
   );
 }
 
 function ArtifactView({ detail }: { detail: Artifact }) {
+  const { t } = useI18n();
   const publishedAt = useMemo(
     () => (detail.published_at ? new Date(detail.published_at).toLocaleString() : "—"),
     [detail.published_at],
@@ -122,8 +125,8 @@ function ArtifactView({ detail }: { detail: Artifact }) {
         <h1>{detail.title}</h1>
         <div className="reader__meta">
           <span className={`reader__badge reader__badge--${detail.status}`}>{detail.status}</span>
-          <span>written by {detail.author_id}</span>
-          <span>published {publishedAt}</span>
+          <span>{t("wiki.written_by", detail.author_id)}</span>
+          <span>{t("wiki.published", publishedAt)}</span>
         </div>
       </header>
       <pre className="reader__body">{detail.body_markdown}</pre>

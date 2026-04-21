@@ -1,0 +1,29 @@
+{
+  "nav.live_data": "실시간 데이터",
+  "nav.ui_kits": "UI 키트 (풀스크린)",
+  "nav.design_refs": "디자인 시스템 참조",
+  "nav.bundle_docs": "번들 문서",
+  "nav.wiki_reader": "Wiki Reader",
+  "nav.design_readme": "디자인 README",
+  "nav.design_skill": "디자인 SKILL",
+
+  "home.title": "Pindoc · M1 비주얼 스켈레톤",
+  "home.callout": "여기 보이는 것은 모두 Claude Design 목업입니다. 아직 React 컴포넌트가 아닙니다. 왼쪽의 외부 레일은 핸드오프를 훑어보기 위한 개발용 scaffold일 뿐, 제품의 일부가 아닙니다. React화는 M1.5 (Wiki Reader 먼저)에서 시작합니다.",
+
+  "wiki.loading": "불러오는 중…",
+  "wiki.error_title": "pindoc-api에 연결할 수 없습니다.",
+  "wiki.error_hint_prefix": "다음 명령으로 시작하세요:",
+  "wiki.error_hint_cmd": "go run ./cmd/pindoc-api",
+  "wiki.error_hint_suffix": "(127.0.0.1:5831 에서 대기).",
+  "wiki.section_areas": "Area",
+  "wiki.section_artifacts": "Artifact",
+  "wiki.empty_list": "아직 artifact가 없습니다. pindoc.artifact.propose 로 하나 작성하세요.",
+  "wiki.empty_detail": "artifact를 선택하세요.",
+  "wiki.meta_artifacts": "artifact %s개 · %s",
+  "wiki.written_by": "%s 작성",
+  "wiki.published": "%s 발행",
+
+  "lang.switch": "언어",
+  "lang.en": "English",
+  "lang.ko": "한국어"
+}

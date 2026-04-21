@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet, Route, Routes, useParams } from "react-router";
+import { useI18n } from "./i18n";
 import { WikiRoute } from "./routes/Wiki";
 import { findSurface, previews, uiKits } from "./surfaces";
 
@@ -20,6 +21,7 @@ export function App() {
 function ShellLayout() {
   // Wraps Home + preview cards (small design-system references).
   // UI Kit routes use their own full-viewport layout, not this shell.
+  const { t, lang, setLang } = useI18n();
   return (
     <div className="m1-shell">
       <aside className="m1-shell__nav">
@@ -28,30 +30,49 @@ function ShellLayout() {
           <span>Pindoc · M1</span>
         </header>
         <nav>
-          <p className="m1-shell__group">Live data</p>
-          <NavLink to="/wiki" className="m1-shell__link">Wiki Reader</NavLink>
-          <p className="m1-shell__group">UI kits (full screen)</p>
+          <p className="m1-shell__group">{t("nav.live_data")}</p>
+          <NavLink to="/wiki" className="m1-shell__link">{t("nav.wiki_reader")}</NavLink>
+          <p className="m1-shell__group">{t("nav.ui_kits")}</p>
           {uiKits.map((s) => (
             <Link key={s.slug} to={`/ui/${s.slug}`} className="m1-shell__link">
               {s.label}
               {s.sublabel && <span className="m1-shell__sublabel">{s.sublabel}</span>}
             </Link>
           ))}
-          <p className="m1-shell__group">Design-system references</p>
+          <p className="m1-shell__group">{t("nav.design_refs")}</p>
           {previews.map((s) => (
             <NavLink key={s.slug} to={`/preview/${s.slug}`} className="m1-shell__link">
               {s.label}
             </NavLink>
           ))}
-          <p className="m1-shell__group">Bundle docs</p>
+          <p className="m1-shell__group">{t("nav.bundle_docs")}</p>
           <a className="m1-shell__link" href="/design-system/README.md" target="_blank" rel="noreferrer">
-            Design README
+            {t("nav.design_readme")}
           </a>
           <a className="m1-shell__link" href="/design-system/SKILL.md" target="_blank" rel="noreferrer">
-            Design SKILL
+            {t("nav.design_skill")}
           </a>
         </nav>
-        <footer className="m1-shell__foot">M1 scaffold · design-system v0</footer>
+        <footer className="m1-shell__foot">
+          <div className="m1-shell__langs">
+            <span>{t("lang.switch")}:</span>
+            <button
+              type="button"
+              className={lang === "en" ? "is-active" : ""}
+              onClick={() => setLang("en")}
+            >
+              {t("lang.en")}
+            </button>
+            <button
+              type="button"
+              className={lang === "ko" ? "is-active" : ""}
+              onClick={() => setLang("ko")}
+            >
+              {t("lang.ko")}
+            </button>
+          </div>
+          <div>M1 scaffold · design-system v0</div>
+        </footer>
       </aside>
       <main className="m1-shell__main">
         <Outlet />
@@ -61,14 +82,12 @@ function ShellLayout() {
 }
 
 function Home() {
+  const { t } = useI18n();
   return (
     <article className="m1-shell__home">
-      <h1>Pindoc · M1 visual skeleton</h1>
+      <h1>{t("home.title")}</h1>
       <p className="m1-shell__callout">
-        <strong>Everything shown here is a Claude Design mockup.</strong> Not a
-        React component yet. The outer left rail is a dev scaffold for browsing
-        the handoff — it is not part of the product. React-ification starts in
-        M1.5 (Wiki Reader first).
+        {t("home.callout")}
       </p>
       <h2>Two kinds of surfaces</h2>
       <ul>
