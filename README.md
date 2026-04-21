@@ -1,9 +1,11 @@
 # Varn
 
-> Where agent work becomes team memory.
+> **The wiki you never type into.**
+> Where agent work becomes lasting memory.
 
-**Varn**은 코딩 에이전트가 쓰고, 팀이 읽는 지식/태스크 워크벤치입니다.
-MCP로 연결만 하면, 에이전트의 너저분한 세션 로그가 구조화된 문서와 태스크로 승격(promote)됩니다.
+**Varn**은 사람이 직접 타이핑하지 않는 위키입니다.
+모든 쓰기는 코딩 에이전트(Claude Code / Cursor / Cline / Codex)를 통해 일어나고,
+사람은 승인·거절·방향 제시만 합니다.
 
 `var.gg` 생태계의 첫 플래그십 제품.
 
@@ -11,52 +13,66 @@ MCP로 연결만 하면, 에이전트의 너저분한 세션 로그가 구조화
 
 ## Why Varn
 
-2026년의 개발팀은 에이전트와 협업합니다. 하지만 에이전트의 출력은 대부분 세 갈래로 사라집니다.
+2026년의 개발자는 에이전트와 협업합니다. 하지만 에이전트의 출력은 세 갈래로 사라집니다:
 
-1. **휘발** — 터미널 세션이 닫히면 디버깅 2시간이 증발
-2. **고립** — 각자 터미널에 갇혀 팀에 공유되지 않음
-3. **파편화** — Notion, Linear, Slack에 흩어진 흔적만 남음
+1. **휘발** — 터미널 세션 닫히면 디버깅 2시간이 증발
+2. **검색 지옥** — 월 단위로 쌓인 세션·채팅 중 "그때 그거" 못 찾음
+3. **파편화** — Notion/Linear/Slack에 흩어진 흔적만
 
-그 결과 팀은 같은 문제를 여러 번 풉니다. 신입 에이전트는 매번 "오늘 입사한 신입"처럼 시작합니다. 머리만 최신이고 꼬리는 stale인 상태가 반복됩니다.
+그 결과 개인·팀은 같은 문제를 N번 풉니다. 신입 에이전트는 매번 "오늘 입사"처럼 시작합니다.
 
-**Varn은 이 흐름을 바꿉니다.** 에이전트가 세션에서 만든 가치를 사람이 한 번 검수하면, 그것이 구조화된 팀 자산이 되고, 다음 에이전트 세션의 컨텍스트로 자동 로딩됩니다.
+**Varn은 이 흐름을 바꿉니다.** 에이전트가 세션에서 만든 가치를 사람이 한 번 OK 하면, 구조화된 자산이 되고, 다음 세션의 컨텍스트로 자동 주입됩니다.
 
 ## Core Loop
 
 ```
-Session (너저분한 원석)
-    ↓  Promote
-Artifact (구조화된 문서 / 태스크)
-    ↓  Graph
-Team Memory (검색·참조·컨텍스트 주입)
-    ↓  Inject
-Next Session
+Harness (VARN.md)
+   │
+   ▼
+Session ── checkpoint ──▶ Promote ──▶ Artifact ──▶ Graph ──▶ Next Session
+(raw)     (에이전트 제안)   (에이전트 주도,          (typed,                  ▲
+           ↕                사람 OK만)              pinned,                   │
+          VARN.md 휴리스틱                          area-tagged)              │
+                                                                              │
+                                                   URL → agent fetch ─────────┘
+                                                   (Continuation Context)
 ```
 
 ## What makes Varn different
 
-- **MCP write-path 강제**: 에이전트는 자유롭게 못 씁니다. 의도(intent)를 선언하고, 기존 문서와의 충돌을 심사받고, 타입 스키마를 지켜야 발행됩니다.
-- **Typed documents**: 분석/ADR/디버그/플로우/피처 — 타입별 스키마 네이티브. 포맷 드리프트 차단.
-- **Git-pinned artifacts**: 모든 문서는 커밋/PR/파일경로에 고정. 코드 변경 시 stale 자동 표시.
-- **TC as first-class citizen**: 테스트 케이스가 태스크의 1급 객체. Close 조건으로 강제.
-- **Propagation ledger**: 문서 변경이 연관 태스크/TC/코드경로에 전파되어 "지금 실제와 어긋난 것"을 추적.
+- **Agent-only write surface** — UI에 편집 버튼 없음. 오탈자부터 아키텍처까지 전부 에이전트 경유.
+- **Harness Reversal** — Varn MCP가 연결되면 `VARN.md`로 에이전트의 base 규약을 주입. 에이전트는 이 규율 아래 움직임.
+- **Tool-driven Pre-flight Check** — `propose` 요청은 즉답 대신 체크리스트로 에이전트에게 **더 많은 일을 지시**. MCP가 응답 서버가 아니라 regulator.
+- **Referenced Confirmation** — 에이전트가 사용자에게 확인 요청할 때 **항상 링크 동반**. 단편 설명 없이 맥락 위에서 판단.
+- **Typed Documents (Tier A/B/C)** — Decision/Analysis/Debug/Flow/Task/TC/Glossary + Domain Pack. 포맷 드리프트 차단.
+- **Git-pinned artifacts** — 커밋/PR/파일 경로 고정. 코드 변경 시 stale 자동.
+- **Fast Landing** — "완벽한 인덱스" 대신 "핵심 리소스 1~3개로의 빠른 착륙". 쓰면서 점점 정확해짐 (M7 자가 검증).
+- **TC as first-class citizen** — Feature close 조건으로 강제.
+
+## Target Users
+
+- **Solo 개발자** — F6(세션 검색 지옥) 해결만으로도 가치. 1급 시민.
+- **2~10인 소규모 팀** — 에이전트 사용자 최소 1명.
+- **자율 에이전트 환경 (OpenClaw 등)** — VARN.md mode=auto로 human-out-of-the-loop 지원.
 
 ## Status
 
-🚧 **Design phase** — 이 repo는 지금 설계 문서만 있습니다. 구현 전.
+🚧 **Design phase** — 이 repo는 지금 설계 문서 + 첫 dogfooding 기록. 구현 전.
+
+**이 리포지토리 자체가 Varn의 첫 meta-dogfooding 사례입니다.** Varn이 아직 없어서 설계 문서를 수동 작성하고 있지만, V1 공개 시점에는 이 문서들이 Varn 인스턴스로 마이그레이션됩니다.
 
 ## Read the design
 
-- [00 Vision](docs/00-vision.md) — 왜 만드는가, 북극성
-- [01 Problem](docs/01-problem.md) — 풀려는 실패 모드들
-- [02 Concepts](docs/02-concepts.md) — Session / Artifact / Promote / Graph
-- [03 Architecture](docs/03-architecture.md) — 시스템 구조
-- [04 Data Model](docs/04-data-model.md) — Typed documents, TC, dependency graph
-- [05 Mechanisms](docs/05-mechanisms.md) — Write-intent router, propagation ledger 등
-- [06 UI Flows](docs/06-ui-flows.md) — Promote UI, stale dashboard
-- [07 Roadmap](docs/07-roadmap.md) — V1 / V1.x / V2
-- [08 Non-Goals](docs/08-non-goals.md) — 하지 않을 것들
+- [00 Vision](docs/00-vision.md) — 왜 만드는가, 북극성, 디자인 원칙
+- [01 Problem](docs/01-problem.md) — 풀려는 실패 모드 F1–F6
+- [02 Concepts](docs/02-concepts.md) — Harness / Session / Checkpoint / Artifact / Graph / Promote
+- [03 Architecture](docs/03-architecture.md) — 시스템 구조, MCP Layer, Web UI
+- [04 Data Model](docs/04-data-model.md) — Tier A/B 타입, Area, Pin vs Related Resource, Graph
+- [05 Mechanisms](docs/05-mechanisms.md) — M0 Harness Reversal, M0.5 Pre-flight, M0.6 Referenced Confirmation, M1–M7
+- [06 UI Flows](docs/06-ui-flows.md) — Wiki Reader, Approve Inbox, Agent-side UX
+- [07 Roadmap](docs/07-roadmap.md) — V1 / V1.1 / V1.x / V2
+- [08 Non-Goals](docs/08-non-goals.md) — 하지 않을 것들 (원칙 1부터)
 
 ## License
 
-To be decided. Candidate: AGPL-3.0 (Wiki.js와 동일, 네트워크 사용까지 카피레프트).
+To be decided. Candidate: **AGPL-3.0** (Wiki.js와 동일, 네트워크 사용까지 카피레프트).

@@ -2,6 +2,13 @@
 
 주요 UI 화면과 상호작용 흐름. 와이어프레임은 ASCII로, 실제 디자인은 구현 단계에서.
 
+## 핵심 원칙 (UI 전반)
+
+1. **사람은 타이핑하지 않는다** — Artifact 본문의 편집 UI 없음. "수정이 필요하다" → 에이전트에게 피드백.
+2. **Wiki Reader가 1차 UX** — 사용자가 가장 많은 시간을 보내는 화면.
+3. **Referenced Confirmation** — 에이전트 채팅 내 확인 요청은 항상 링크 동반.
+4. **딥링크 없이 동작** — URL을 에이전트 채팅에 던지면 `varn.wiki.read`로 fetch. 커스텀 스킴 의존 없음.
+
 ## 화면 맵
 
 ```
@@ -10,10 +17,10 @@
 │                                              │
 │  ┌─────────┐  ┌──────────────────────────┐ │
 │  │ Sidebar │  │   Main Content            │ │
-│  │         │  │                           │ │
-│  │ Sessions│  │   (선택한 항목에 따라 변함)│ │
-│  │ Promote │  │                           │ │
-│  │ Library │  │                           │ │
+│  │         │  │   (선택한 화면에 따라)     │ │
+│  │ Wiki ★  │  │                           │ │
+│  │ Approve │  │                           │ │
+│  │ Sessions│  │                           │ │
 │  │ Stale   │  │                           │ │
 │  │ Graph   │  │                           │ │
 │  │ Settings│  │                           │ │
@@ -22,386 +29,378 @@
 ```
 
 주요 화면 6개:
-1. **Sessions** — 에이전트 세션 리스트
-2. **Promote** — 세션을 artifact로 승격하는 편집기 (★ 핵심)
-3. **Library** — Artifact 열람/편집
-4. **Stale Dashboard** — 낡은/전파 대기 artifact
-5. **Graph** — 관계 시각화
-6. **Settings** — 팀, git repo, 스키마 설정
+1. **Wiki Reader** (★ 1차) — Artifact 열람, Area/Type 트리 네비, Related Resources
+2. **Approve Inbox** — 에이전트 draft 승인/거절 (편집 없음)
+3. **Sessions** — 세션 리스트 + 의미 검색 (F6)
+4. **Stale Dashboard** — 낡은·전파 대기
+5. **Graph Explorer** — 관계 시각화
+6. **Settings** — Git repo, Domain Pack, 멤버, VARN.md mode
+
+추가로 UI가 아닌 **에이전트-side UX**(Flow 2)가 1급 설계 대상.
 
 ---
 
-## Flow 1: 세션을 Promote하기 (★ 핵심 플로우)
+## Flow 0: Harness Install & 첫 Checkpoint
 
-이 제품의 **wow moment**가 담긴 플로우. 가장 정교하게 설계해야 함.
+**처음 한 번** 실행되는 플로우.
 
-### Entry Points
+### Step 1: Install
 
-1. CLI에서 `varn promote` 실행
-2. 에이전트가 `/promote` 커맨드로 요청
-3. Web UI의 Sessions 리스트에서 "Promote" 버튼
-
-### Step 1: Select (범위 선택)
-
-```
-┌───────────────────────────────────────────────────────┐
-│  Session: 2026-04-21 13:42 · Claude Code · alice     │
-│  Duration: 2h 14m · 127 turns                         │
-├───────────────────────────────────────────────────────┤
-│                                                        │
-│  [체크박스] Turn 1–15   "결제 실패 상황 확인"          │
-│  [체크박스] Turn 16–42  "로그 분석 및 가설 수립"        │
-│  [체크박스] Turn 43–89  "PG사 API 타임아웃 검증" ★    │
-│  [체크박스] Turn 90–127 "Retry 로직 수정 및 테스트"    │
-│                                                        │
-│  ──────────────────────────────────────────────────    │
-│                                                        │
-│  또는 AI가 자동으로 의미 있는 구간 제안:                 │
-│    [Auto-select] 버튼                                  │
-│                                                        │
-│  선택됨: 2 구간                                         │
-│                                      [Next →]         │
-└───────────────────────────────────────────────────────┘
+```bash
+$ cd my-project
+$ varn install
+→ VARN.md 생성 (프로젝트 루트)
+→ CLAUDE.md / AGENTS.md / .cursorrules 에
+  "See ./VARN.md for this project's agent protocol." 삽입
+→ Varn 서버 주소, agent token, Domain Pack 선택 질문
 ```
 
-**UX 원칙**:
-- 전체 세션을 한 번에 promote하는 건 안티패턴 → 구간 선택 유도
-- "Auto-select"가 있어서 사람이 판단 힘들면 AI가 제안
-- 여러 구간 선택 시 → 다음 단계에서 artifact 여러 개로 분할될 수 있음
-
-### Step 2: Intent Declaration
+### Step 2: Domain Pack 선택 (install-time)
 
 ```
-┌───────────────────────────────────────────────────────┐
-│                   무엇을 만들까요?                      │
-├───────────────────────────────────────────────────────┤
-│                                                        │
-│  [선택된 구간 미리보기]                                 │
-│  "PG사 API 타임아웃 검증 + Retry 로직 수정"             │
-│                                                        │
-│  타입 선택:                                             │
-│    ◯ Analysis  (코드/시스템 분석)                       │
-│    ◉ Debug     (디버깅 세션 요약) ← 추천                │
-│    ◯ Flow      (흐름 문서)                              │
-│    ◯ ADR       (아키텍처 결정)                          │
-│    ◯ Feature   (피쳐 개요)                              │
-│    ◯ Task      (할일)                                   │
-│                                                        │
-│  Scope 태그:  [payment] [retry] [+ 추가]               │
-│                                                        │
-│  이 작업은:                                             │
-│    ◉ 새 문서 작성 (new)                                 │
-│    ◯ 기존 문서 업데이트                                 │
-│    ◯ 기존 문서 분할                                     │
-│                                                        │
-│                              [← Back]  [Next →]        │
-└───────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│  이 프로젝트의 Domain Pack 선택              │
+├─────────────────────────────────────────────┤
+│  ☑ Web SaaS/SI      (stable, 권장)           │
+│  ☐ Game             (skeleton)               │
+│  ☐ ML/AI            (skeleton)               │
+│  ☐ Mobile           (skeleton)               │
+│  ☐ CS Desktop       (skeleton, V2)           │
+│  ☐ Library/SDK      (skeleton, V2)           │
+│  ☐ Embedded         (skeleton, V2)           │
+│                                              │
+│  다중 선택 가능. 나중에 추가·변경 가능.        │
+│                        [완료]                 │
+└─────────────────────────────────────────────┘
 ```
 
-### Step 2.5: Conflict Check (중간 관문)
+### Step 3: 첫 세션
 
-Intent 제출 직후 시스템이 자동 검사. 충돌 발견 시:
-
-```
-┌───────────────────────────────────────────────────────┐
-│  ⚠ 관련 문서가 이미 있습니다                            │
-├───────────────────────────────────────────────────────┤
-│                                                        │
-│  유사도 88% ─ Debug: "결제 타임아웃 재시도 문제"        │
-│  유사도 76% ─ Flow: "결제 처리 플로우 V3"               │
-│  유사도 71% ─ Analysis: "결제 실패율 분석"              │
-│                                                        │
-│  어떻게 하시겠습니까?                                    │
-│                                                        │
-│    ◉ 기존 Debug 문서 업데이트                           │
-│    ◯ Flow 문서 업데이트                                 │
-│    ◯ 별개 이슈임 (새 문서 계속 작성)                     │
-│      └ 이유:                                            │
-│        [이번은 DB 타임아웃으로 원인이 다름          ]    │
-│                                                        │
-│                              [← Back]  [Continue →]    │
-└───────────────────────────────────────────────────────┘
-```
-
-**이 화면이 Varn의 정체성.** Notion/Linear는 절대 이 화면을 보여주지 않음.
-
-### Step 3: Draft Review
+사용자가 평소처럼 Claude Code / Cursor 실행:
+- 에이전트가 CLAUDE.md → VARN.md 자동 로드
+- "이 프로젝트는 Varn이 연결되어 있습니다. Checkpoint mode: auto." 메시지
+- 사용자가 뭔가 작업하다가 결론 도달 → 에이전트가 **역으로** 제안:
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                      Draft 검토                           │
-├──────────────────────────────────────────────────────────┤
-│ Type: Debug  ·  Scope: [payment, retry]  ·  kind: new    │
-│─────────────────────────────────────────────────────────│
-│                                                           │
-│ # PG사 API 타임아웃 재시도 오류                            │
-│                                                           │
-│ ## Symptom                                                │
-│ 결제 요청 중 약 3%가 504 Gateway Timeout으로 실패...      │
-│                                                           │
-│ ## Reproduction                                           │
-│ 1. 결제 요청 (프로덕션 환경)                              │
-│ 2. 네트워크 지연 > 3초 상황에서 발생                       │
-│ ...                                                       │
-│                                                           │
-│ ## Hypotheses Tried                                       │
-│ - [rejected] PG사 서버 과부하                             │
-│ - [rejected] 클라이언트 네트워크 문제                      │
-│ - [confirmed] Retry 없는 단일 요청 패턴 ★                 │
-│                                                           │
-│ ## Root Cause                                             │
-│ retry.ts의 단일 요청 구조. 3초 타임아웃 시 바로 실패 반환. │
-│                                                           │
-│ ## Resolution                                             │
-│ Exponential backoff with 3 retries 도입.                  │
-│                                                           │
-│ [편집] 버튼으로 인라인 수정 가능                           │
-│                                                           │
-│ ──── Pin 설정 ────                                        │
-│ 📁 src/payment/retry.ts @ commit a3f5e2c  [✓]             │
-│ 📁 src/payment/gateway.ts @ commit a3f5e2c  [✓]           │
-│                                                           │
-│ ──── 파생 액션 (선택) ────                                │
-│ □ TC 생성 제안 3건                                        │
-│   - "Retry 3회 후 실패" (agent)                           │
-│   - "네트워크 타임아웃 재시도" (agent)                     │
-│   - "중복 결제 방지" (human_e2e)                          │
-│ □ Task 생성 제안 1건                                      │
-│   - "모니터링 알람 추가"                                  │
-│                                                           │
-│                      [← Back]  [Edit]  [Publish ✓]       │
-└──────────────────────────────────────────────────────────┘
-```
-
-**핵심 UX**:
-- Draft는 **에이전트가 자동 생성**. 사람은 검수가 주 업무.
-- Pin은 자동 제안, 사람이 체크/언체크.
-- 파생 액션(TC, Task)이 함께 제안되어 한 번에 팀 자산 풀 구축 가능.
-
-### Step 4: Publish Confirmation
-
-```
-┌───────────────────────────────────────────────────────┐
-│  ✓ 발행 완료                                            │
-├───────────────────────────────────────────────────────┤
-│                                                        │
-│  📄 Debug: "PG사 API 타임아웃 재시도 오류"              │
-│                                                        │
-│  생성된 관계:                                           │
-│    ├─ references → "결제 타임아웃 재시도 문제" (Debug)   │
-│    ├─ pinned_to → src/payment/retry.ts                  │
-│    ├─ derives_from → sess_2026-04-21-abc123            │
-│    └─ 관련 Feature 자동 링크: "결제 신뢰성"               │
-│                                                        │
-│  파생 생성:                                             │
-│    ├─ TC 3개                                            │
-│    └─ Task 1개                                          │
-│                                                        │
-│  알림:                                                  │
-│    [ ] Slack에 링크 공유                                │
-│        채널: [#payments ▼]                              │
-│                                                        │
-│  영향 전파:                                             │
-│    3개 artifact가 업데이트 대상에 추가됨                 │
-│    → Stale Dashboard에서 확인                           │
-│                                                        │
-│              [Dashboard로]  [새 Promote]  [닫기]         │
-└───────────────────────────────────────────────────────┘
+Agent: 이 부분 정리할 만한 단위가 된 것 같습니다.
+  제안: Debug artifact 생성
+    - scope: /Payment
+    - title: "PG사 API 타임아웃 재시도 오류"
+    - completeness: partial
+  
+  Preview: https://varn.myproject.dev/drafts/xyz
+  
+  승인하시면 저장합니다. (Y/n/편집지시)
 ```
 
 ---
 
-## Flow 2: Artifact 열람
+## Flow 1: Wiki Reader + Continuation (★ 1차)
 
-### Library 화면
+**매일 쓰는 화면.**
+
+### Wiki Reader 기본 레이아웃
 
 ```
-┌───────────────────────────────────────────────────────┐
-│  🔍 [결제 타임아웃               ]  필터▼  정렬▼        │
-├───────────────────────────────────────────────────────┤
-│                                                        │
-│ Debug · payment, retry                                 │
-│ PG사 API 타임아웃 재시도 오류             🔴 pinned    │
-│ alice · 2h ago · references 2 · 3 TCs                 │
-│ ─────────────────────────────────────────────         │
-│                                                        │
-│ Flow · payment                                         │
-│ 결제 처리 플로우 V3                       🟡 stale     │
-│ bob · 3d ago · referenced by 5                        │
-│ ─────────────────────────────────────────────         │
-│                                                        │
-│ ADR · payment                                          │
-│ ADR-042: 결제 재시도 정책                 ✓ fresh      │
-│ alice · 1w ago · 1 supersede                          │
-│ ─────────────────────────────────────────────         │
-│                                                        │
-│                  [Load more]                           │
-└───────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  [🔍 결제 타임아웃          ]  [Area ▼]  [Type ▼]  [Completeness ▼]│
+├──────┬─────────────────────────────────┬────────────────────────┤
+│Tree  │  # PG사 API 타임아웃 재시도 오류  │ ─── Related ───        │
+│      │     Debug · /Payment              │ 📁 Code                │
+│ 📂 /Payment                              │ retry.ts              │
+│  ├Feature                                │ gateway.ts            │
+│  ├Debug ★                                │ api/payment.ts        │
+│  ├Flow                                   │ [→ GitHub]            │
+│  └ADR                                    │                        │
+│ 📂 /Cart       ## Symptom                │ 🌐 External            │
+│ 📂 /Auth       결제 요청 중 3%가 504...  │ PG provider docs      │
+│                                          │                        │
+│ ─ Type ─       ## Reproduction           │ ─── Graph ──           │
+│ 📁 Decision    1. 결제 요청 (prod)      │ ← references           │
+│ 📁 Analysis    2. 네트워크 지연 > 3s    │   ADR-042              │
+│ 📁 Debug ★                               │ → validates            │
+│ 📁 Flow        ## Hypotheses Tried       │   TC-payment-retry     │
+│ 📁 Task        - [rejected] 서버 과부하  │                        │
+│ 📁 TC          - [confirmed] 단일요청 ★  │ ─── Status ──          │
+│ 📁 Glossary                              │ ✓ partial              │
+│                ## Root Cause              │ 📌 pinned to retry.ts  │
+│                retry.ts 단일 요청 구조    │ 🟢 verified 2h ago     │
+│                                          │                        │
+│                [▶ 이 문서로 대화 이어가기]│                        │
+│                                          │                        │
+└──────┴─────────────────────────────────┴────────────────────────┘
 ```
 
-**Artifact 상세 뷰** 는 본문 렌더 + 우측 사이드바에 메타정보(graph, pin, history).
+**핵심 요소**:
+- **2축 트리 네비**: Area 축 / Type 축 (Tier A + 활성 Tier B)
+- **본문 영역**: 마크다운 렌더, **편집 버튼 없음**
+- **Related Resources 사이드 패널**: 별도 섹션, 본문 오염 없음. `type: code` 클릭 시 GitHub로 outbound
+- **Graph 사이드**: 관계 artifact 바로 이동
+- **Status 사이드**: completeness, pin 상태, verified 시각 (M7)
+- **"이 문서로 대화 이어가기"** 버튼 — 클릭 시 artifact URL이 클립보드에 복사되고 간단한 도움말 (에이전트 채팅에 붙여넣기하세요)
+
+### Continuation: URL → 에이전트 채팅
+
+사용자 흐름:
+1. Wiki에서 "이 문서로 대화 이어가기" → URL 복사
+2. 에이전트 채팅에 URL 붙여넣기: `https://varn.myproject.dev/a/doc_debug_xyz 에 대해 이어서 논의하고 싶어`
+3. 에이전트는 VARN.md 규약에 따라 `varn.wiki.read(url)` 호출
+4. Continuation Context 수령 (본문 + neighbors + related_resources + recent_changes)
+5. 대화 재개
+
+**딥링크 없이도 완전 동작**. 커스텀 스킴·파트너십 불필요.
+
+### "수정이 필요할 때"
+
+사용자는 직접 편집 못 함. 대신:
+- Wiki에서 **"수정 요청"** 버튼 → 에이전트 채팅으로 이동 (URL + "다음을 수정: ..." 템플릿)
+- 에이전트가 변경 사항 반영한 propose 제출
+- 사용자는 Approve Inbox에서 승인
 
 ---
 
-## Flow 3: Stale Dashboard
+## Flow 2: Checkpoint Proposal (Agent-side UX, MCP 응답)
+
+**UI가 없는 플로우**. 사용자는 평소처럼 에이전트와 대화하고, 중요한 순간 에이전트가 먼저 제안.
+
+### 에이전트가 사용자에게 (VARN.md 준수)
 
 ```
-┌────────────────────────────────────────────────────────┐
-│             🔔 Stale Dashboard                         │
-├────────────────────────────────────────────────────────┤
-│                                                         │
-│  🔴 HIGH (3)                                            │
-│  ─────────                                              │
-│  Debug: "결제 타임아웃 재시도 문제"                      │
-│  원인: src/payment/retry.ts가 수정됨 (2h ago)            │
-│  최신 커밋: "Exponential backoff 도입"                  │
-│  액션: [최신화 ▸] [새 세션] [Dismiss]                    │
-│                                                         │
-│  TC: "네트워크 타임아웃 재시도"                          │
-│  원인: 마지막 pass 이후 관련 코드 변경                   │
-│  액션: [재실행 ▸] [Dismiss]                             │
-│                                                         │
-│  ...                                                    │
-│                                                         │
-│  🟡 MEDIUM (7)                                          │
-│  ─────────                                              │
-│  ...                                                    │
-│                                                         │
-│  🔵 LOW (12)                                            │
-│  ─────────                                              │
-│  ...                                                    │
-│                                                         │
-└────────────────────────────────────────────────────────┘
+Agent: 이 작업 꽤 묶여서 정리할 단위가 됐습니다.
+  
+  정리 대상:
+    - Debug "PG사 API 타임아웃 재시도 오류"
+    - /Payment 에 속함
+  
+  관련 기존 문서:
+    - [ADR-042 결제 재시도 정책](https://varn.example.com/a/adr-042)
+    - [Analysis 결제 실패율](https://varn.example.com/a/analysis-payment-fail)
+  
+  영향 코드 (pin 후보):
+    - [retry.ts L10-55](https://github.com/org/app/blob/a3f5e2c/src/payment/retry.ts#L10-L55)
+  
+  Preview: https://varn.example.com/drafts/xyz
+  
+  어떻게 할까요?
+    [a] 이대로 저장 (partial)
+    [b] 완결(settled)으로 저장
+    [c] 편집 지시
+    [d] 아직 저장하지 마 (거절)
 ```
 
-**이 화면의 가치**: "지금 팀 지식 중에서 실제와 어긋날 가능성 높은 것"을 **시각적으로 카운트다운**시켜서, 팀이 catch-up 세션을 돌릴 동기를 만든다.
+**Referenced Confirmation 준수**: 1줄 요약 + URL + repo line range + 대안.
 
----
+### Conflict 발견 시 (MCP 응답 → 에이전트 → 사용자)
 
-## Flow 4: Sessions
-
-```
-┌────────────────────────────────────────────────────────┐
-│                  Agent Sessions                         │
-├────────────────────────────────────────────────────────┤
-│                                                         │
-│  [필터: 내 세션 ▼] [기간: 최근 7일 ▼]                    │
-│                                                         │
-│  ──────────────────────────────────────────────────     │
-│  2h ago · Claude Code · alice · 2h 14m · 127 turns     │
-│  🏷 결제 타임아웃 / retry / PG API                      │
-│  [Promote ▸] [Open]                                     │
-│                                                         │
-│  5h ago · Cursor · alice · 47m · 32 turns              │
-│  🏷 테스트 코드 정리                                     │
-│  [Promote ▸] [Open]                                     │
-│                                                         │
-│  1d ago · Claude Code · bob · 1h 5m · 68 turns         │
-│  🏷 결제 처리 플로우 리팩토링 · ⭐ Promoted              │
-│  [View Artifacts (2)] [Open]                            │
-│                                                         │
-│  ──────────────────────────────────────────────────     │
-└────────────────────────────────────────────────────────┘
-```
-
-- 각 세션은 자동 생성된 태그로 요약
-- Promote된 세션은 연결된 artifact 표시
-- "Open" = 세션 원본 로그 뷰어
-
----
-
-## Flow 5: Graph Explorer
-
-```
-┌────────────────────────────────────────────────────────┐
-│                    Graph Explorer                       │
-├────────────────────────────────────────────────────────┤
-│                                                         │
-│  Search: [Feature: 결제 재시도          ]               │
-│                                                         │
-│          ┌────────────────┐                             │
-│          │ Feature:       │                             │
-│          │ 결제 재시도    │                             │
-│          └───┬────────┬───┘                             │
-│              │        │                                  │
-│      implements     validates                            │
-│              │        │                                  │
-│    ┌─────────▼──┐  ┌──▼──────┐  ┌──────────┐           │
-│    │ Task: ...  │  │ TC: ... │  │ TC: ...  │           │
-│    │   [done]   │  │ passing │  │ passing  │           │
-│    └────────────┘  └─────────┘  └──────────┘           │
-│              │                                           │
-│       derives_from                                      │
-│              │                                           │
-│    ┌─────────▼──┐                                       │
-│    │ Debug: ... │                                       │
-│    │  pinned 🔴  │                                       │
-│    └────────────┘                                       │
-│                                                         │
-└────────────────────────────────────────────────────────┘
-```
-
-- d3 또는 Cytoscape 기반 인터랙티브 그래프
-- 노드 클릭 → artifact 열람
-- 엣지 색으로 타입 구분
-
-V1에서는 간단한 인접 리스트로 시작. 풀 그래프 뷰는 V1.1.
-
----
-
-## Flow 6: Agent Interaction (UI 없음)
-
-사람 UI가 아닌, 에이전트가 보는 **MCP 응답 형태**도 UX의 일부:
-
-```
-(에이전트가 varn.artifact.propose 호출)
-  ↓
-Varn 응답 예시:
+내부 MCP 응답:
+```json
 {
   "status": "conflict_detected",
   "draft_id": "draft_xxx",
   "conflicts": [
-    {
-      "artifact_id": "doc_debug_xxx",
-      "similarity": 0.88,
-      "title": "결제 타임아웃 재시도 문제",
-      "snippet": "..."
-    }
+    {"artifact_id": "doc_debug_old", "similarity": 0.88,
+     "title": "결제 타임아웃 재시도 문제", "url": "https://varn.example.com/a/doc_debug_old"}
   ],
   "suggested_actions": [
-    {"action": "update_existing", "target": "doc_debug_xxx"},
+    {"action": "update_existing", "target": "doc_debug_old"},
     {"action": "prove_distinct", "requires": "reason"}
   ]
 }
 ```
 
-에이전트가 이걸 받아서 사용자에게 보여주는 방식:
+에이전트가 사용자에게:
 ```
-Agent: 관련 문서가 이미 있네요:
-  - [88% 유사] "결제 타임아웃 재시도 문제" (bob, 2주 전)
+Agent: 관련 문서가 이미 있습니다:
+  - [88% 유사] 결제 타임아웃 재시도 문제 (https://varn.example.com/a/doc_debug_old)
   
-이것을 업데이트할까요, 아니면 별개 이슈로 새로 만들까요?
-별개라면 그 이유를 알려주세요.
+  업데이트하시겠습니까, 별개 이슈로 새로 만드시겠습니까?
+  별개라면 이유를 알려주세요.
 ```
 
-**MCP 응답이 에이전트 UX를 결정함.** 응답 스키마를 잘 설계하는 게 곧 에이전트-side UX 설계.
+**MCP 응답이 에이전트 UX를 결정함**. 응답 스키마 설계 = 에이전트-side UX 설계.
+
+---
+
+## Flow 3: Approve Inbox
+
+에이전트 propose가 Pre-flight + Conflict + Schema 전부 통과한 후 **사람의 최종 OK** 받을 때.
+
+### 리스트 뷰
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                   Approve Inbox (3)                         │
+├────────────────────────────────────────────────────────────┤
+│                                                              │
+│ 🟡 new · Debug · /Payment                                    │
+│ PG사 API 타임아웃 재시도 오류                                 │
+│ alice의 claude-code · 3m ago · draft_xyz                    │
+│ [Preview ▸]  [OK]  [NO]  [피드백 요청]                       │
+│ ─────────────────────────────────────                        │
+│                                                              │
+│ 🔵 modification · Flow · /Payment                            │
+│ 결제 처리 플로우 V3 (retry 흐름 업데이트)                      │
+│ alice의 claude-code · 15m ago                                │
+│ [Preview ▸]  [OK]  [NO]  [피드백 요청]                       │
+│ ─────────────────────────────────────                        │
+│                                                              │
+│ 🟢 related_resource verify · Feature · /Cart                 │
+│ 장바구니 재시도 Feature · resources 2건 갱신 제안             │
+│ bob의 cursor · 1h ago                                        │
+│ [Diff ▸]  [OK]  [NO]                                        │
+└────────────────────────────────────────────────────────────┘
+```
+
+### Preview (편집 없음)
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Preview — draft_xyz                                          │
+├──────────────────────────────────────────────────────────────┤
+│ Type: Debug · Area: /Payment · completeness: partial         │
+│──────────────────────────────────────────────────────────────│
+│                                                                │
+│ # PG사 API 타임아웃 재시도 오류                                 │
+│                                                                │
+│ ## Symptom                                                     │
+│ 결제 요청 중 약 3%가 504 Gateway Timeout...                    │
+│                                                                │
+│ ## Reproduction                                                │
+│ 1. 결제 요청 (프로덕션)                                        │
+│ ...                                                            │
+│                                                                │
+│ ## Hypotheses Tried                                            │
+│ - [rejected] PG사 서버 과부하                                   │
+│ - [rejected] 클라이언트 네트워크                                │
+│ - [confirmed] Retry 없는 단일 요청                              │
+│                                                                │
+│ ── Pin 제안 ──                                                 │
+│ 📁 src/payment/retry.ts @ a3f5e2c  [✓]                         │
+│                                                                │
+│ ── Related Resources 제안 ──                                   │
+│ 📁 src/payment/gateway.ts  [✓]                                 │
+│ 🌐 https://pg-provider.example/docs                            │
+│                                                                │
+│ ── 파생 제안 ──                                                 │
+│ □ TC 3건                                                       │
+│ □ Task 1건 "모니터링 알람 추가"                                  │
+│                                                                │
+│                 [← Back]  [피드백 요청]  [NO]  [OK]             │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**편집 없음** — 대신:
+- **[OK]** → 그대로 commit
+- **[NO]** → draft 폐기
+- **[피드백 요청]** → 에이전트에게 자유 텍스트 피드백 전달 → 에이전트가 수정된 propose 재제출 → 다시 Inbox로
+
+---
+
+## Flow 4: Sessions (F6 해결)
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                     Agent Sessions                            │
+├──────────────────────────────────────────────────────────────┤
+│  🔍 [결제 타임아웃            ]  의미 검색 ▼                   │
+│  [필터: 내 세션 ▼]  [기간: 최근 30일 ▼]  [Agent: 전체 ▼]       │
+│                                                                │
+│  ────────────────────────────────────────────────              │
+│  2h ago · Claude Code · alice · 2h 14m · 127 turns             │
+│  🏷 결제 타임아웃 / retry / PG API                              │
+│  [Open] [Promote ▸]  ⭐ 1 artifact                              │
+│                                                                │
+│  3d ago · Cursor · alice · 47m · 32 turns                      │
+│  🏷 결제 실패율 분석                                            │
+│  [Open] [Promote ▸]                                             │
+│                                                                │
+│  2w ago · Claude Code · alice · 1h 5m · 68 turns               │
+│  🏷 PG사 타임아웃 재시도 / gateway / timeout                    │
+│  [Open] [Promote ▸]  ⭐ 1 artifact                              │
+│                                                                │
+│  ────────────────────────────────────────────────              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+- **의미 검색** (F6 핵심): 키워드 + 벡터 유사도 hybrid. 한국어↔영어 gap 해소.
+- **자동 태그**: 세션 내용 기반 자동 추출
+- **Promoted 세션 마크**: ⭐ + 연결된 artifact 개수
+- **교차 에이전트 검색**: Claude Code + Cursor + Cline 세션 통합
+
+---
+
+## Flow 5: Stale Dashboard
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│             🔔 Stale Dashboard                                │
+├──────────────────────────────────────────────────────────────┤
+│                                                                │
+│  🔴 HIGH (3)                                                   │
+│  ─────────                                                     │
+│  Debug: "결제 타임아웃 재시도 문제"                              │
+│  원인: src/payment/retry.ts 수정됨 (2h ago)                     │
+│  최신 커밋: "Exponential backoff 도입"                          │
+│  [에이전트에게 최신화 요청 ▸] [Dismiss]                         │
+│                                                                │
+│  ...                                                           │
+│                                                                │
+│  🟡 MEDIUM (7)  · 🔵 LOW (12)                                  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+- **"최신화 요청"**: 에이전트에 새 세션 task 던짐 → 에이전트가 pinned 코드 diff 보고 업데이트 propose
+- V1은 간단 리스트, V1.1에서 3-tier 풍부한 UX
+
+---
+
+## Flow 6: Graph Explorer
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                   Graph Explorer                              │
+├──────────────────────────────────────────────────────────────┤
+│  Search: [Feature: 결제 재시도        ]                        │
+│                                                                │
+│            ┌────────────────┐                                  │
+│            │ Feature:       │                                  │
+│            │ 결제 재시도    │                                   │
+│            └──┬──┬──┬──────┘                                  │
+│    implements │  │  │ validates                               │
+│   ┌───────────┘  │  └──────────┐                             │
+│   ▼              ▼              ▼                              │
+│ [Task done]  [TC passing]  [TC passing]                        │
+│                                                                │
+│ derives_from                                                   │
+│   ▼                                                            │
+│ [Debug pinned 🔴]                                              │
+│                                                                │
+│ related_resource                                               │
+│   ▼                                                            │
+│ [code: retry.ts] [code: gateway.ts] [doc: PG external]         │
+└──────────────────────────────────────────────────────────────┘
+```
+
+- V1: 간단 인접 리스트
+- V1.1: d3/Cytoscape 기반 인터랙티브
 
 ---
 
 ## UX 원칙 요약
 
-1. **Promote가 제일 정성 들인 플로우여야 함** — 다른 기능 허술해도 promote는 매끈해야
-2. **충돌/에러 화면이 기회다** — "왜 막혔는지"를 사람이 이해하고 쉽게 다음 액션 할 수 있게
-3. **AI 자동 제안 + 사람 검수 패턴 반복** — 사람이 처음부터 쓰게 하지 않음
-4. **Diff와 pin을 항상 보이게** — 변화와 고정점이 제품 정체성
-5. **Slack 공유는 1클릭** — 자체 메신저 없으니 연결을 매끄럽게
-
----
+1. **사람은 타이핑하지 않는다** — UI에 편집 버튼 없음, 어디에도
+2. **Wiki Reader가 제일 정성 들인 화면** — 매일 쓰는 곳
+3. **Referenced Confirmation** — 에이전트 확인 요청은 항상 링크 동반 (이 프로토콜이 Varn을 다른 에이전트-wiki와 구분하는 매일의 경험)
+4. **충돌·에러 화면이 기회** — "왜 막혔는지"를 에이전트가 사용자에게 링크와 함께 설명
+5. **AI 자동 제안 + 사람 OK 패턴 반복** — 사람이 처음부터 쓰게 하지 않음
+6. **URL → 대화 재개가 1급 이동 경로** — 딥링크 없이도 완전 동작
+7. **Related Resources는 본문 밖 사이드 패널** — 메타데이터 분리
+8. **Slack 공유는 1클릭** (V1.1) — 자체 메신저 없으니 연결 매끄럽게
 
 ## 디자인 가이드라인 (구현 단계)
 
 - **톤**: Linear처럼 깔끔, Obsidian처럼 집중. 장식 최소화.
-- **색**: 기본 뉴트럴 + 상태별 색 (fresh 초록, stale 노랑, conflict 빨강)
-- **밀도**: 정보 밀도 높게. 개발자 도구는 아이패드 앱이 아니다.
-- **키보드 우선**: 모든 주요 액션 단축키. `Cmd+P` promote 등.
-- **다크 모드**: Day 1부터 지원.
+- **색**: 뉴트럴 + 상태별 (fresh 초록, stale 노랑, conflict 빨강, draft 회색)
+- **밀도**: 정보 밀도 높게. 개발자 도구는 아이패드 앱이 아님.
+- **키보드 우선**: 모든 주요 액션 단축키. `Cmd+K` 검색, `Cmd+Shift+A` Approve Inbox 등.
+- **다크 모드**: Day 1부터.
