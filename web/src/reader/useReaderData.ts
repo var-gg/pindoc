@@ -42,11 +42,14 @@ export function useReaderData(slug?: string): LoadState {
           api.areas(),
           api.artifacts(),
         ]);
+        // Only load detail when a slug is explicitly requested. The
+        // handoff's intended navigation is ⌘K-first; auto-loading the
+        // latest artifact made /tasks and /wiki render identically
+        // (first artifact is an Analysis), which hid the point of the
+        // type filter entirely.
         let detail: Artifact | null = null;
         if (slug) {
           detail = await api.artifact(slug);
-        } else if (listResp.artifacts.length > 0) {
-          detail = await api.artifact(listResp.artifacts[0]!.slug);
         }
         if (cancelled) return;
 

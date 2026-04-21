@@ -1,8 +1,8 @@
-import ReactMarkdown from "react-markdown";
 import { ChevronRight } from "lucide-react";
 import type { Artifact, ArtifactRef } from "../api/client";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
+import { PindocMarkdown } from "./Markdown";
 
 type Props = {
   detail: Artifact | null;
@@ -57,7 +57,7 @@ export function ReaderSurface({ detail, emptyMessage }: Props) {
         </div>
 
         <div className="art-body">
-          <ReactMarkdown>{detail.body_markdown}</ReactMarkdown>
+          <PindocMarkdown source={detail.body_markdown} />
         </div>
 
         <RelatedHint detail={detail} />

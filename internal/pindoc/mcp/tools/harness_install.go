@@ -156,6 +156,29 @@ reading every token you produced. Follow it.
 - Code references: use relative paths or full GitHub blob URLs with
   line ranges. The agent at the other end of the graph can follow these.
 
+## Markdown rendering contract
+
+The Pindoc Wiki Reader renders GitHub-flavored markdown plus Mermaid.
+Stick to this surface so what you write round-trips visually.
+
+- Headings H1 through H6, ordered/unordered lists, nested lists.
+- Tables (GFM pipe syntax).
+- Task lists: "- [ ] todo" / "- [x] done" — used by Task artifacts.
+- Strikethrough: "~~text~~".
+- Autolinks: bare URLs become links.
+- Inline and fenced code blocks. Language label on the fence is
+  preserved for future syntax highlighting; current render is plain
+  monospace.
+- Mermaid diagrams: use a fenced block whose language is "mermaid" and
+  the reader renders it as inline SVG. Prefer mermaid over ASCII art
+  for Flow artifacts.
+- NOT supported today: LaTeX/KaTeX math, raw HTML embeds, custom
+  admonition blocks. If you need any of these, flag them in the body
+  as plain text and propose an M1.x extension.
+
+Call pindoc.project.current to fetch this list programmatically — it
+stays in sync with whatever the server actually renders.
+
 ## When in doubt
 
 - pindoc.project.current → you lost track of the project ID.

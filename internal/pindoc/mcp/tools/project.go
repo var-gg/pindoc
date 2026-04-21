@@ -11,15 +11,38 @@ import (
 type projectCurrentInput struct{}
 
 type projectCurrentOutput struct {
-	ID              string    `json:"id"`
-	Slug            string    `json:"slug"`
-	Name            string    `json:"name"`
-	Description     string    `json:"description,omitempty"`
-	Color           string    `json:"color,omitempty"`
-	PrimaryLanguage string    `json:"primary_language"`
-	AreasCount      int       `json:"areas_count"`
-	ArtifactsCount  int       `json:"artifacts_count"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID              string        `json:"id"`
+	Slug            string        `json:"slug"`
+	Name            string        `json:"name"`
+	Description     string        `json:"description,omitempty"`
+	Color           string        `json:"color,omitempty"`
+	PrimaryLanguage string        `json:"primary_language"`
+	AreasCount      int           `json:"areas_count"`
+	ArtifactsCount  int           `json:"artifacts_count"`
+	CreatedAt       time.Time     `json:"created_at"`
+	Rendering       RenderingCaps `json:"rendering"`
+}
+
+// RenderingCaps mirrors the HTTP API shape so MCP callers get the same
+// guidance. Kept in lockstep with internal/pindoc/httpapi/handlers.go.
+type RenderingCaps struct {
+	MarkdownFlavor string   `json:"markdown_flavor"`
+	Extensions     []string `json:"extensions"`
+	CodeLanguages  []string `json:"code_languages"`
+	Notes          string   `json:"notes,omitempty"`
+}
+
+var pindocRenderingCaps = RenderingCaps{
+	MarkdownFlavor: "gfm",
+	Extensions: []string{
+		"tables",
+		"task_lists",
+		"strikethrough",
+		"autolink",
+		"mermaid",
+	},
+	CodeLanguages: []string{"any"},
+	Notes:         "Headings H1-H6, ordered/unordered lists, blockquotes, inline code, fenced code, links. Mermaid via ```mermaid fence. Math/KaTeX not supported (M1.x).",
 }
 
 // RegisterProjectCurrent wires pindoc.project.current. Returns the active
@@ -63,6 +86,7 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 			if color != nil {
 				out.Color = *color
 			}
+			out.Rendering = pindocRenderingCaps
 			return nil, out, nil
 		},
 	)

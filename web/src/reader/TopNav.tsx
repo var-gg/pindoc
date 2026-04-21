@@ -83,8 +83,15 @@ export function TopNav({
         {theme === "dark" ? <Moon className="lucide" /> : <Sun className="lucide" />}
       </button>
 
-      <div className="nav__user" title={project.name}>
-        {project.name.slice(0, 2).toUpperCase()}
+      {/* Avatar placeholder — V1 self-host binds it to the GitHub OAuth
+          user; M1 has no auth yet, so the tooltip spells that out rather
+          than putting random project initials here. */}
+      <div
+        className="nav__user"
+        title={t("nav.user_placeholder")}
+        style={{ opacity: 0.55 }}
+      >
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 10 }}>—</span>
       </div>
     </div>
   );

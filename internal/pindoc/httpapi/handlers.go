@@ -11,15 +11,40 @@ import (
 )
 
 type projectInfo struct {
-	ID              string    `json:"id"`
-	Slug            string    `json:"slug"`
-	Name            string    `json:"name"`
-	Description     string    `json:"description,omitempty"`
-	Color           string    `json:"color,omitempty"`
-	PrimaryLanguage string    `json:"primary_language"`
-	AreasCount      int       `json:"areas_count"`
-	ArtifactsCount  int       `json:"artifacts_count"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID              string        `json:"id"`
+	Slug            string        `json:"slug"`
+	Name            string        `json:"name"`
+	Description     string        `json:"description,omitempty"`
+	Color           string        `json:"color,omitempty"`
+	PrimaryLanguage string        `json:"primary_language"`
+	AreasCount      int           `json:"areas_count"`
+	ArtifactsCount  int           `json:"artifacts_count"`
+	CreatedAt       time.Time     `json:"created_at"`
+	Rendering       RenderingCaps `json:"rendering"`
+}
+
+// RenderingCaps tells an agent which markdown features actually render in
+// Pindoc's Wiki Reader. Anything not listed may round-trip correctly but
+// will not visually render — agents should stick to this set when
+// proposing artifact bodies.
+type RenderingCaps struct {
+	MarkdownFlavor string   `json:"markdown_flavor"`
+	Extensions     []string `json:"extensions"`
+	CodeLanguages  []string `json:"code_languages"`
+	Notes          string   `json:"notes,omitempty"`
+}
+
+var pindocRenderingCaps = RenderingCaps{
+	MarkdownFlavor: "gfm",
+	Extensions: []string{
+		"tables",
+		"task_lists",
+		"strikethrough",
+		"autolink",
+		"mermaid", // fenced ```mermaid blocks render as SVG
+	},
+	CodeLanguages: []string{"any"}, // plain monospace rendering for all
+	Notes:         "Headings H1–H6, ordered/unordered lists, blockquotes, inline code, fenced code, links. Mermaid via ```mermaid fence. Math/KaTeX not supported (M1.x).",
 }
 
 func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
@@ -52,6 +77,7 @@ func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
 	if color != nil {
 		out.Color = *color
 	}
+	out.Rendering = pindocRenderingCaps
 	writeJSON(w, http.StatusOK, out)
 }
 

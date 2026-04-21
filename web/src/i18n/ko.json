@@ -10,6 +10,7 @@
   "nav.search_hint": "검색 또는 명령어 실행...",
   "nav.theme_toggle": "테마 전환",
   "nav.project_switcher_soon": "프로젝트 스위처는 M1.5 (multi-project) 에 도입 예정입니다.",
+  "nav.user_placeholder": "사용자 프로필 자리 — V1 self-host에 GitHub OAuth 연결 예정.",
   "nav.design_readme": "디자인 README",
   "nav.design_skill": "디자인 SKILL",
 

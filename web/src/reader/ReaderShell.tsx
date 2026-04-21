@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import type { Artifact, ArtifactRef } from "../api/client";
 import { useI18n } from "../i18n";
 import { CmdK } from "./CmdK";
@@ -20,6 +20,7 @@ type Props = {
 export function ReaderShell({ view }: Props) {
   const { slug } = useParams<{ slug?: string }>();
   const { t } = useI18n();
+  const navigate = useNavigate();
   const state = useReaderData(slug);
   const [theme, setThemeState] = useState<Theme>(() => initTheme());
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -33,6 +34,21 @@ export function ReaderShell({ view }: Props) {
   useEffect(() => {
     setSelectedTypeState(view === "tasks" ? "Task" : null);
   }, [view]);
+
+  const baseRoute = view === "tasks" ? "/tasks" : "/wiki";
+
+  // When the user filters via the sidebar we drop the currently-selected
+  // artifact so the filter effect is visible (otherwise the reader body
+  // would paper over the list). Filter-while-detail-shown is a future
+  // UX improvement that needs in-place scroll to next matching artifact.
+  function handleSelectArea(next: string | null) {
+    setSelectedArea(next);
+    if (slug) navigate(baseRoute);
+  }
+  function handleSelectType(next: string | null) {
+    setSelectedTypeState((prev) => (prev === next ? null : next));
+    if (slug) navigate(baseRoute);
+  }
 
   // ⌘K listener — global-level so palette opens from any surface.
   useEffect(() => {
@@ -101,11 +117,9 @@ export function ReaderShell({ view }: Props) {
           types={types}
           agents={agents}
           selectedArea={selectedArea}
-          onSelectArea={setSelectedArea}
+          onSelectArea={handleSelectArea}
           selectedType={selectedType}
-          onSelectType={(tkey) =>
-            setSelectedTypeState((prev) => (prev === tkey ? null : tkey))
-          }
+          onSelectType={handleSelectType}
           open={menuOpen}
         />
         <Body

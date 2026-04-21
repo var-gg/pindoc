@@ -15,6 +15,9 @@ type Props = {
   onSelectType: (t: string | null) => void;
   open: boolean;
 };
+// Sidebar click behavior: selecting an area or type clears any open
+// artifact so the filter effect is immediately visible in the list.
+// See ReaderShell.handleSelectArea / handleSelectType.
 
 const TYPE_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   Decision: FileText,
@@ -76,6 +79,7 @@ export function Sidebar({
               key={a.id}
               className={`side-item${selectedArea === a.slug ? " active" : ""}`}
               onClick={() => onSelectArea(selectedArea === a.slug ? null : a.slug)}
+              data-testid={`area-${a.slug}`}
             >
               <Folder className="lucide" />
               <span>{a.name}</span>

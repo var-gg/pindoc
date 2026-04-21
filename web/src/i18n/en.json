@@ -10,6 +10,7 @@
   "nav.search_hint": "Search or run command...",
   "nav.theme_toggle": "Toggle theme",
   "nav.project_switcher_soon": "Project switcher arrives in M1.5 (multi-project).",
+  "nav.user_placeholder": "User profile placeholder — binds to GitHub OAuth in V1 self-host.",
   "nav.design_readme": "Design README",
   "nav.design_skill": "Design SKILL",
 
