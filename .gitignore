@@ -29,5 +29,7 @@ go.work.sum
 # Migrations runtime state (when goose is wired up)
 *.db
 
-# Local secrets
-.mcp.json
+# Reserved for when we introduce an env secrets file
+# (.mcp.json itself is project-scoped and committed — it has no secrets today)
+.env.local
+*.secret

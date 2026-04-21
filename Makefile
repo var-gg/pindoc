@@ -28,7 +28,7 @@ db-logs:
 	docker compose logs -f db
 
 server-build:
-	go build -o bin/pindoc-server ./cmd/pindoc-server
+	go build -o bin/pindoc-server$(shell go env GOEXE) ./cmd/pindoc-server
 
 server-run:
 	go run ./cmd/pindoc-server
