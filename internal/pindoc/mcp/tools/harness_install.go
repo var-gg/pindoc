@@ -179,6 +179,36 @@ Stick to this surface so what you write round-trips visually.
 Call pindoc.project.current to fetch this list programmatically — it
 stays in sync with whatever the server actually renders.
 
+## Updating an existing artifact
+
+Pindoc tracks revision history. When you need to change an existing
+artifact rather than create a new one, call pindoc.artifact.propose
+with two extra fields:
+
+    update_of:   <id or slug of the artifact being revised>
+    commit_msg:  <one-line rationale>
+
+The server appends a new revision, re-embeds the body, and emits an
+artifact.revised event. If you omit update_of and the title collides
+with an existing artifact, the Pre-flight Check returns NOT_READY with
+the update_of value you should pass on retry — follow it.
+
+### Reviewing change history
+
+- pindoc.artifact.revisions(id_or_slug)      — list revisions (meta only).
+- pindoc.artifact.diff(id_or_slug, from, to) — per-section deltas +
+                                                unified diff between two
+                                                revisions. Read
+                                                section_deltas first; only
+                                                fall back to unified_diff
+                                                when a reviewer asks.
+- pindoc.artifact.summary_since(id_or_slug, since_rev | since_time)
+                                              — catch up on everything
+                                                that has changed since a
+                                                reference point. Use when
+                                                a user says "what's new
+                                                on X since yesterday".
+
 ## When in doubt
 
 - pindoc.project.current → you lost track of the project ID.

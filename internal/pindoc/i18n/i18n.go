@@ -32,8 +32,14 @@ var bundle = Bundle{
 		"suggested.list_areas":        "Call pindoc.area.list to see valid slugs.",
 		"suggested.area_or_misc":      "If you truly need a new area, create it manually via the admin flow (Phase 3+) or use 'misc' for now.",
 		"suggested.read_existing":     "Call pindoc.artifact.read with id_or_slug=%q to review the existing one.",
-		"suggested.supersede":         "If this is an update, add a supersedes chain (Phase 2.x+, not yet implemented — for now archive the old one manually).",
+		"suggested.update_of_hint":    "If this is an update, call pindoc.artifact.propose again with update_of=%q and commit_msg=\"<why>\" to write a new revision.",
 		"suggested.pick_title":        "If this is a different document, pick a more specific title.",
+		"suggested.commit_msg_hint":   "Provide commit_msg as a one-line rationale (e.g. 'clarify trade-offs' or 'add 2026-04-22 decision').",
+		"suggested.verify_diff":       "If the body differs from what you intended, recompute and retry; otherwise there is nothing to record.",
+
+		"preflight.update_needs_commit":   "✗ commit_msg is required when update_of is set",
+		"preflight.update_target_missing": "✗ update_of target %q not found in this project",
+		"preflight.no_changes":            "✗ the submitted body and title match the current head — nothing to record",
 	},
 	"ko": {
 		"preflight.title_empty":       "✗ title이 비어 있음",
@@ -53,8 +59,14 @@ var bundle = Bundle{
 		"suggested.list_areas":        "pindoc.area.list를 호출해 유효한 slug를 확인하세요.",
 		"suggested.area_or_misc":      "정말 새 area가 필요하면 admin 플로우(Phase 3+)로 생성하거나 지금은 'misc'를 사용하세요.",
 		"suggested.read_existing":     "pindoc.artifact.read를 id_or_slug=%q 로 호출해 기존 artifact를 확인하세요.",
-		"suggested.supersede":         "업데이트라면 supersede 체인을 연결하세요 (Phase 2.x+, 미구현 — 지금은 기존을 수동으로 archive).",
+		"suggested.update_of_hint":    "업데이트라면 pindoc.artifact.propose를 다시 호출하되 update_of=%q + commit_msg=\"<왜>\" 를 넘겨 새 revision을 작성하세요.",
 		"suggested.pick_title":        "다른 문서라면 더 구체적인 제목을 선택하세요.",
+		"suggested.commit_msg_hint":   "commit_msg에 한 줄 사유를 넣으세요 (예: 'trade-off 명확화', '2026-04-22 결정 추가').",
+		"suggested.verify_diff":       "body가 원래 의도와 다르면 다시 계산 후 재시도; 맞다면 기록할 것이 없습니다.",
+
+		"preflight.update_needs_commit":   "✗ update_of 지정 시 commit_msg 필수",
+		"preflight.update_target_missing": "✗ update_of 대상 %q 를 이 프로젝트에서 찾을 수 없음",
+		"preflight.no_changes":            "✗ 제출된 body와 title이 현재 head와 동일 — 기록할 변경 없음",
 	},
 }
 

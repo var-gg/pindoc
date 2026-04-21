@@ -63,6 +63,11 @@ func NewServer(opts Options) *Server {
 	tools.RegisterArtifactSearch(s, deps)
 	tools.RegisterContextForTask(s, deps)
 
+	// Phase 7 revision history.
+	tools.RegisterArtifactRevisions(s, deps)
+	tools.RegisterArtifactDiff(s, deps)
+	tools.RegisterArtifactSummary(s, deps)
+
 	return &Server{
 		sdk:    s,
 		logger: opts.Logger,
@@ -82,6 +87,9 @@ func (s *Server) Run(ctx context.Context, transport sdk.Transport) error {
 			"pindoc.harness.install",
 			"pindoc.artifact.search",
 			"pindoc.context.for_task",
+			"pindoc.artifact.revisions",
+			"pindoc.artifact.diff",
+			"pindoc.artifact.summary_since",
 		})
 	return s.sdk.Run(ctx, transport)
 }

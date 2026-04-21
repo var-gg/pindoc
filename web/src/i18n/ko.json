@@ -41,6 +41,23 @@
   "cmdk.open": "열기",
   "cmdk.close": "닫기",
 
+  "history.title": "수정 이력",
+  "history.count": "리비전 %s개",
+  "history.no_commit_msg": "(커밋 메시지 없음)",
+  "history.diff_prev": "이전과 비교",
+  "history.open_latest": "최신 보기 →",
+  "history.recent_changes": "최근 변경",
+  "history.more_revisions": "… %s개 더",
+
+  "diff.title": "차이 · rev %s → rev %s",
+  "diff.section_summary": "섹션별 변경",
+  "diff.unified": "통합 차이",
+  "diff.preamble": "(머리말)",
+  "diff.change.added": "추가됨",
+  "diff.change.removed": "제거됨",
+  "diff.change.modified": "수정됨",
+  "diff.change.unchanged": "변동없음",
+
   "home.title": "Pindoc · M1 비주얼 스켈레톤",
   "home.callout": "여기 보이는 것은 모두 Claude Design 목업입니다. 아직 React 컴포넌트가 아닙니다. 왼쪽의 외부 레일은 핸드오프를 훑어보기 위한 개발용 scaffold일 뿐, 제품의 일부가 아닙니다. React화는 M1.5 (Wiki Reader 먼저)에서 시작합니다.",
 

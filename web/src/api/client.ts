@@ -58,6 +58,59 @@ export type SearchHit = {
   distance: number;
 };
 
+export type RevisionRow = {
+  revision_number: number;
+  title: string;
+  body_hash: string;
+  author_id: string;
+  author_version?: string;
+  commit_msg?: string;
+  completeness: string;
+  created_at: string;
+};
+
+export type RevisionsResp = {
+  artifact_id: string;
+  slug: string;
+  title: string;
+  revisions: RevisionRow[];
+};
+
+export type DiffRevMeta = {
+  revision_number: number;
+  title: string;
+  author_id: string;
+  author_version?: string;
+  commit_msg?: string;
+  created_at: string;
+};
+
+export type DiffStats = {
+  lines_added: number;
+  lines_removed: number;
+  bytes_added: number;
+  bytes_removed: number;
+};
+
+export type SectionDelta = {
+  heading: string;
+  change: "unchanged" | "modified" | "added" | "removed";
+  excerpt_before?: string;
+  excerpt_after?: string;
+  lines_added: number;
+  lines_removed: number;
+};
+
+export type DiffResp = {
+  artifact_id: string;
+  slug: string;
+  from: DiffRevMeta;
+  to: DiffRevMeta;
+  stats: DiffStats;
+  section_deltas: SectionDelta[];
+  unified_diff: string;
+};
+
 const base = "";
 
 async function j<T>(path: string): Promise<T> {
@@ -87,4 +140,15 @@ export const api = {
     j<{ query: string; hits: SearchHit[]; notice?: string }>(
       `/api/search?q=${encodeURIComponent(q)}`,
     ),
+  revisions: (idOrSlug: string) =>
+    j<RevisionsResp>(`/api/artifacts/${encodeURIComponent(idOrSlug)}/revisions`),
+  diff: (idOrSlug: string, from?: number, to?: number) => {
+    const qs = new URLSearchParams();
+    if (from) qs.set("from", String(from));
+    if (to) qs.set("to", String(to));
+    const q = qs.toString();
+    return j<DiffResp>(
+      `/api/artifacts/${encodeURIComponent(idOrSlug)}/diff${q ? `?${q}` : ""}`,
+    );
+  },
 };

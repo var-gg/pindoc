@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet, Route, Routes, useParams } from "react-router";
 import { useI18n } from "./i18n";
+import { Diff } from "./reader/Diff";
+import { History } from "./reader/History";
 import { ReaderShell } from "./reader/ReaderShell";
 import { findSurface, previews, uiKits } from "./surfaces";
 
@@ -17,6 +19,8 @@ export function App() {
           + sidecar so every live surface shares the design-system chrome. */}
       <Route path="/wiki" element={<ReaderShell view="reader" />} />
       <Route path="/wiki/:slug" element={<ReaderShell view="reader" />} />
+      <Route path="/wiki/:slug/history" element={<History />} />
+      <Route path="/wiki/:slug/diff" element={<Diff />} />
       <Route path="/tasks" element={<ReaderShell view="tasks" />} />
       <Route path="/tasks/:slug" element={<ReaderShell view="tasks" />} />
       <Route path="/graph" element={<ReaderShell view="graph" />} />

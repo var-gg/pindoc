@@ -41,6 +41,23 @@
   "cmdk.open": "open",
   "cmdk.close": "close",
 
+  "history.title": "Revision history",
+  "history.count": "%s revisions",
+  "history.no_commit_msg": "(no commit message)",
+  "history.diff_prev": "diff vs previous",
+  "history.open_latest": "Open latest →",
+  "history.recent_changes": "Recent changes",
+  "history.more_revisions": "... and %s more",
+
+  "diff.title": "Diff · rev %s → rev %s",
+  "diff.section_summary": "Section summary",
+  "diff.unified": "Unified diff",
+  "diff.preamble": "(preamble)",
+  "diff.change.added": "added",
+  "diff.change.removed": "removed",
+  "diff.change.modified": "modified",
+  "diff.change.unchanged": "unchanged",
+
   "home.title": "Pindoc · M1 visual skeleton",
   "home.callout": "Everything shown here is a Claude Design mockup. Not a React component yet. The outer left rail is a dev scaffold for browsing the handoff — it is not part of the product. React-ification starts in M1.5 (Wiki Reader first).",
 

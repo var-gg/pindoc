@@ -32,6 +32,8 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/areas", d.handleAreas)
 	mux.HandleFunc("GET /api/artifacts", d.handleArtifactList)
 	mux.HandleFunc("GET /api/artifacts/{idOrSlug}", d.handleArtifactGet)
+	mux.HandleFunc("GET /api/artifacts/{idOrSlug}/revisions", d.handleArtifactRevisions)
+	mux.HandleFunc("GET /api/artifacts/{idOrSlug}/diff", d.handleArtifactDiff)
 	mux.HandleFunc("GET /api/search", d.handleSearch)
 	mux.HandleFunc("GET /api/health", d.handleHealth)
 	return withCORS(withRecover(mux, d.Logger))

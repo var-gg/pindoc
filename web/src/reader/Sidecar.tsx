@@ -1,5 +1,7 @@
-import { ArrowUpRight } from "lucide-react";
-import type { Artifact } from "../api/client";
+import { useEffect, useState } from "react";
+import { Link } from "react-router";
+import { ArrowUpRight, History as HistoryIcon } from "lucide-react";
+import { api, type Artifact, type RevisionRow } from "../api/client";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
 
@@ -89,6 +91,8 @@ export function Sidecar({ detail }: Props) {
         )}
       </div>
 
+      <RecentChanges slug={detail.slug} />
+
       <div className="provenance">
         <div className="provenance__row">
           <span className="k">{t("sidecar.prov_author")}</span>
@@ -120,5 +124,80 @@ export function Sidecar({ detail }: Props) {
         </div>
       </div>
     </aside>
+  );
+}
+
+function RecentChanges({ slug }: { slug: string }) {
+  const { t } = useI18n();
+  const [revs, setRevs] = useState<RevisionRow[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await api.revisions(slug);
+        if (!cancelled) setRevs(resp.revisions);
+      } catch {
+        if (!cancelled) setRevs([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
+
+  if (!revs || revs.length === 0) return null;
+  const shown = revs.slice(0, 3);
+  const remainder = revs.length - shown.length;
+
+  return (
+    <div className="provenance" style={{ paddingBottom: 6 }}>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        marginBottom: 8,
+      }}>
+        <div className="provenance__row" style={{ gridTemplateColumns: "1fr", margin: 0, padding: 0 }}>
+          <span className="k" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            {t("history.recent_changes")}
+          </span>
+        </div>
+        <Link
+          to={`/wiki/${slug}/history`}
+          style={{ color: "var(--fg-2)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontFamily: "var(--font-mono)" }}
+        >
+          <HistoryIcon className="lucide" style={{ width: 11, height: 11 }} />
+          {shown.length < revs.length ? t("history.count", revs.length) : ""}
+        </Link>
+      </div>
+      {shown.map((r) => {
+        const av = agentAvatar(r.author_id);
+        return (
+          <div key={r.revision_number} style={{ padding: "4px 0", fontSize: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--fg-1)" }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-3)" }}>
+                rev {r.revision_number}
+              </span>
+              <span className={av.className} style={{ width: 12, height: 12, fontSize: 7 }}>
+                {av.initials}
+              </span>
+              <span style={{ color: "var(--fg-2)", fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {r.commit_msg || t("history.no_commit_msg")}
+              </span>
+            </div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "var(--fg-4)", marginLeft: 36 }}>
+              {new Date(r.created_at).toLocaleString()}
+            </div>
+          </div>
+        );
+      })}
+      {remainder > 0 && (
+        <Link
+          to={`/wiki/${slug}/history`}
+          style={{ fontSize: 11, color: "var(--fg-3)", fontFamily: "var(--font-mono)", textDecoration: "none" }}
+        >
+          {t("history.more_revisions", remainder)}
+        </Link>
+      )}
+    </div>
   );
 }

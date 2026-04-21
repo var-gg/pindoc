@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
@@ -37,6 +39,17 @@ type artifactProposeInput struct {
 	Completeness string   `json:"completeness,omitempty" jsonschema:"draft|partial|settled; default partial"`
 	AuthorID     string   `json:"author_id" jsonschema:"'claude-code', 'cursor', 'codex', etc."`
 	AuthorVersion string  `json:"author_version,omitempty" jsonschema:"e.g. 'opus-4.7'"`
+
+	// UpdateOf switches this call from "create a new artifact" to "append a
+	// revision to an existing one". Accepts artifact UUID, project-scoped
+	// slug, or pindoc://slug URL. When set, exact-title conflict is
+	// skipped and a new artifact_revisions row is written.
+	UpdateOf string `json:"update_of,omitempty" jsonschema:"id, slug, or pindoc:// URL of the artifact to revise"`
+
+	// CommitMsg is a short one-liner stored on the revision row so diff
+	// views and history lists can explain why the body changed. Required
+	// when update_of is set; ignored otherwise.
+	CommitMsg string `json:"commit_msg,omitempty" jsonschema:"required for updates; one line rationale"`
 }
 
 type artifactProposeOutput struct {
@@ -46,10 +59,12 @@ type artifactProposeOutput struct {
 	SuggestedActions []string `json:"suggested_actions,omitempty"`
 
 	// Only set on Status == "accepted".
-	ArtifactID   string    `json:"artifact_id,omitempty"`
-	Slug         string    `json:"slug,omitempty"`
-	URL          string    `json:"url,omitempty"`
-	PublishedAt  time.Time `json:"published_at,omitzero"`
+	ArtifactID     string    `json:"artifact_id,omitempty"`
+	Slug           string    `json:"slug,omitempty"`
+	URL            string    `json:"url,omitempty"`
+	PublishedAt    time.Time `json:"published_at,omitzero"`
+	Created        bool      `json:"created"`           // false on updates
+	RevisionNumber int       `json:"revision_number"`   // 1 on create, N+1 on update
 }
 
 // RegisterArtifactPropose wires pindoc.artifact.propose — the only write
@@ -81,6 +96,11 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						i18n.T(lang, "suggested.use_misc"),
 					},
 				}, nil
+			}
+
+			// --- Update path (update_of set) -----------------------------
+			if strings.TrimSpace(in.UpdateOf) != "" {
+				return handleUpdate(ctx, deps, in, lang)
 			}
 
 			// --- Resolve area + project ----------------------------------
@@ -125,8 +145,8 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						fmt.Sprintf(i18n.T(lang, "preflight.conflict_exact"), existingID, existingSlug),
 					},
 					SuggestedActions: []string{
+						fmt.Sprintf(i18n.T(lang, "suggested.update_of_hint"), existingSlug),
 						fmt.Sprintf(i18n.T(lang, "suggested.read_existing"), existingSlug),
-						i18n.T(lang, "suggested.supersede"),
 						i18n.T(lang, "suggested.pick_title"),
 					},
 				}, nil
@@ -214,15 +234,198 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				return nil, artifactProposeOutput{}, fmt.Errorf("commit: %w", err)
 			}
 
+			// First revision — keep the invariant that every artifact has
+			// at least one artifact_revisions row. Done outside the tx
+			// (commit just happened) which is safe because a missing
+			// revision row still has the artifact intact; a background
+			// backfill (future) can repair it.
+			if _, err := deps.DB.Exec(ctx, `
+				INSERT INTO artifact_revisions (
+					artifact_id, revision_number, title, body_markdown, body_hash, tags,
+					completeness, author_kind, author_id, author_version, commit_msg
+				) VALUES ($1, 1, $2, $3, $4, $5, $6, 'agent', $7, $8, 'initial')
+			`, newID, in.Title, in.BodyMarkdown, bodyHash(in.BodyMarkdown), in.Tags,
+				completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion)); err != nil {
+				deps.Logger.Warn("initial revision insert failed — head row still present",
+					"artifact_id", newID, "err", err)
+			}
+
 			return nil, artifactProposeOutput{
-				Status:      "accepted",
-				ArtifactID:  newID,
-				Slug:        finalSlug,
-				URL:         fmt.Sprintf("pindoc://%s", finalSlug),
-				PublishedAt: publishedAt,
+				Status:         "accepted",
+				ArtifactID:     newID,
+				Slug:           finalSlug,
+				URL:            fmt.Sprintf("pindoc://%s", finalSlug),
+				PublishedAt:    publishedAt,
+				Created:        true,
+				RevisionNumber: 1,
 			}, nil
 		},
 	)
+}
+
+// handleUpdate writes a new revision for an existing artifact, updates the
+// head row, re-chunks embeddings, and emits an event. Runs in a single
+// transaction so search never sees a half-indexed update.
+func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang string) (*sdk.CallToolResult, artifactProposeOutput, error) {
+	if strings.TrimSpace(in.CommitMsg) == "" {
+		return nil, artifactProposeOutput{
+			Status:    "not_ready",
+			ErrorCode: "MISSING_COMMIT_MSG",
+			Checklist: []string{i18n.T(lang, "preflight.update_needs_commit")},
+			SuggestedActions: []string{
+				i18n.T(lang, "suggested.commit_msg_hint"),
+			},
+		}, nil
+	}
+
+	ref := normalizeRef(in.UpdateOf)
+
+	var artifactID, projectID, currentBody, currentTitle string
+	var lastRev int
+	err := deps.DB.QueryRow(ctx, `
+		SELECT a.id::text, a.project_id::text, a.body_markdown, a.title,
+		       COALESCE((SELECT max(revision_number) FROM artifact_revisions WHERE artifact_id = a.id), 0)
+		FROM artifacts a
+		JOIN projects p ON p.id = a.project_id
+		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
+		LIMIT 1
+	`, deps.ProjectSlug, ref).Scan(&artifactID, &projectID, &currentBody, &currentTitle, &lastRev)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, artifactProposeOutput{
+			Status:    "not_ready",
+			ErrorCode: "UPDATE_TARGET_NOT_FOUND",
+			Checklist: []string{
+				fmt.Sprintf(i18n.T(lang, "preflight.update_target_missing"), in.UpdateOf),
+			},
+			SuggestedActions: []string{
+				i18n.T(lang, "suggested.list_areas"),
+			},
+		}, nil
+	}
+	if err != nil {
+		return nil, artifactProposeOutput{}, fmt.Errorf("resolve update target: %w", err)
+	}
+
+	// No-op detection: identical body + title → reject so history stays
+	// clean. Agents that hit this should stop retrying.
+	if currentBody == in.BodyMarkdown && currentTitle == in.Title {
+		return nil, artifactProposeOutput{
+			Status:    "not_ready",
+			ErrorCode: "NO_CHANGES",
+			Checklist: []string{i18n.T(lang, "preflight.no_changes")},
+			SuggestedActions: []string{
+				i18n.T(lang, "suggested.verify_diff"),
+			},
+		}, nil
+	}
+
+	// Area is preserved on update — moving across areas is a supersede,
+	// not a revision. Treat area_slug as a reconfirm-of-current.
+	var areaID string
+	if err := deps.DB.QueryRow(ctx, `
+		SELECT area.id::text FROM areas area
+		JOIN projects p ON p.id = area.project_id
+		WHERE p.slug = $1 AND area.slug = $2
+	`, deps.ProjectSlug, in.AreaSlug).Scan(&areaID); err != nil {
+		return nil, artifactProposeOutput{
+			Status:    "not_ready",
+			ErrorCode: "AREA_NOT_FOUND",
+			Checklist: []string{
+				fmt.Sprintf(i18n.T(lang, "preflight.area_not_found"), in.AreaSlug, deps.ProjectSlug),
+			},
+		}, nil
+	}
+
+	if in.Tags == nil {
+		in.Tags = []string{}
+	}
+	completeness := in.Completeness
+	if completeness == "" {
+		completeness = "partial"
+	}
+
+	tx, err := deps.DB.Begin(ctx)
+	if err != nil {
+		return nil, artifactProposeOutput{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	newRev := lastRev + 1
+	var revID string
+	err = tx.QueryRow(ctx, `
+		INSERT INTO artifact_revisions (
+			artifact_id, revision_number, title, body_markdown, body_hash, tags,
+			completeness, author_kind, author_id, author_version, commit_msg
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'agent', $8, $9, $10)
+		RETURNING id::text
+	`, artifactID, newRev, in.Title, in.BodyMarkdown, bodyHash(in.BodyMarkdown),
+		in.Tags, completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), in.CommitMsg,
+	).Scan(&revID)
+	if err != nil {
+		return nil, artifactProposeOutput{}, fmt.Errorf("insert revision: %w", err)
+	}
+
+	var publishedAt time.Time
+	var slug string
+	err = tx.QueryRow(ctx, `
+		UPDATE artifacts
+		   SET title          = $2,
+		       body_markdown  = $3,
+		       tags           = $4,
+		       completeness   = $5,
+		       author_id      = $6,
+		       author_version = $7,
+		       updated_at     = now()
+		 WHERE id = $1
+		RETURNING slug, COALESCE(published_at, now())
+	`, artifactID, in.Title, in.BodyMarkdown, in.Tags, completeness,
+		in.AuthorID, nullIfEmpty(in.AuthorVersion),
+	).Scan(&slug, &publishedAt)
+	if err != nil {
+		return nil, artifactProposeOutput{}, fmt.Errorf("update head: %w", err)
+	}
+
+	// Re-chunk: drop old chunks, generate new.
+	if _, err := tx.Exec(ctx, `DELETE FROM artifact_chunks WHERE artifact_id = $1`, artifactID); err != nil {
+		return nil, artifactProposeOutput{}, fmt.Errorf("purge chunks: %w", err)
+	}
+	if deps.Embedder != nil {
+		if err := embedAndStoreChunks(ctx, tx, deps.Embedder, artifactID, in.Title, in.BodyMarkdown); err != nil {
+			deps.Logger.Warn("re-embed failed — artifact updated without vectors",
+				"artifact_id", artifactID, "err", err)
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO events (project_id, kind, subject_id, payload)
+		VALUES ($1, 'artifact.revised', $2, jsonb_build_object(
+			'revision_number', $3::int,
+			'slug',            $4::text,
+			'author_id',       $5::text,
+			'commit_msg',      $6::text
+		))
+	`, projectID, artifactID, newRev, slug, in.AuthorID, in.CommitMsg); err != nil {
+		return nil, artifactProposeOutput{}, fmt.Errorf("event: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, artifactProposeOutput{}, fmt.Errorf("commit: %w", err)
+	}
+
+	return nil, artifactProposeOutput{
+		Status:         "accepted",
+		ArtifactID:     artifactID,
+		Slug:           slug,
+		URL:            fmt.Sprintf("pindoc://%s", slug),
+		PublishedAt:    publishedAt,
+		Created:        false,
+		RevisionNumber: newRev,
+	}, nil
+}
+
+func bodyHash(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:])
 }
 
 // preflight runs the cheap synchronous checks. Returns a list of ✗-prefixed
