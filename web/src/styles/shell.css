@@ -263,3 +263,238 @@ body {
   box-shadow: 0 4px 14px -6px oklch(16% 0.01 265 / 0.18);
   border-radius: var(--r-2);
 }
+
+/* Live Wiki route — real data from pindoc-api. */
+
+.wiki {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  height: 100%;
+  overflow: hidden;
+}
+
+.wiki__state {
+  padding: var(--sp-6);
+  color: var(--fg-1);
+  max-width: 66ch;
+  line-height: var(--lh-reader);
+}
+
+.wiki__state--error strong {
+  display: block;
+  color: var(--stale);
+  margin-bottom: var(--sp-2);
+}
+
+.wiki__state code {
+  font-family: var(--font-mono);
+  background: var(--bg-2);
+  padding: 2px 6px;
+  border-radius: var(--r-1);
+}
+
+.wiki__nav {
+  background: var(--bg-1);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.wiki__project {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.wiki__dot {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--r-1);
+  flex-shrink: 0;
+}
+
+.wiki__name {
+  font-weight: 600;
+  color: var(--fg-0);
+}
+
+.wiki__meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+}
+
+.wiki__nav h3 {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  margin: 0 0 var(--sp-2);
+}
+
+.wiki__areas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wiki__areas li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 6px;
+  font-size: var(--fs-sm);
+  border-radius: var(--r-2);
+  color: var(--fg-1);
+}
+
+.wiki__areas li.is-cross {
+  border-top: 1px dashed var(--border);
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-2);
+  color: var(--fg-2);
+  font-style: italic;
+}
+
+.wiki__area-count {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+}
+
+.wiki__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wiki__list li a {
+  display: grid;
+  grid-template-columns: 60px 1fr;
+  gap: var(--sp-2);
+  padding: 6px 6px;
+  border-radius: var(--r-2);
+  color: var(--fg-1);
+  text-decoration: none;
+  align-items: baseline;
+}
+
+.wiki__list li a:hover {
+  background: var(--bg-2);
+  color: var(--fg-0);
+}
+
+.wiki__list li.is-active a {
+  background: color-mix(in oklch, var(--accent) 22%, transparent);
+  color: var(--accent);
+}
+
+.wiki__chip {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+}
+
+.wiki__title {
+  font-size: var(--fs-sm);
+}
+
+.wiki__row-meta {
+  display: none;
+}
+
+.wiki__empty {
+  padding: var(--sp-3);
+  color: var(--fg-3);
+  font-size: var(--fs-sm);
+}
+
+.wiki__main {
+  overflow-y: auto;
+  padding: var(--sp-6);
+}
+
+.reader {
+  max-width: 66ch;
+  line-height: var(--lh-reader);
+}
+
+.reader header {
+  margin-bottom: var(--sp-6);
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.reader__crumb {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+  margin-bottom: var(--sp-2);
+}
+
+.reader__type {
+  color: var(--fg-1);
+}
+
+.reader__slug {
+  color: var(--fg-2);
+}
+
+.reader h1 {
+  font-size: var(--fs-3xl);
+  line-height: var(--lh-tight);
+  margin: 0 0 var(--sp-3);
+}
+
+.reader__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--fg-2);
+  align-items: center;
+}
+
+.reader__badge {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  padding: 2px 8px;
+  border-radius: var(--r-1);
+  text-transform: lowercase;
+  letter-spacing: var(--tracking-caps);
+}
+
+.reader__badge--published {
+  background: color-mix(in oklch, var(--live) 22%, transparent);
+  color: var(--live);
+}
+
+.reader__badge--stale {
+  background: color-mix(in oklch, var(--stale) 22%, transparent);
+  color: var(--stale);
+}
+
+.reader__badge--archived {
+  background: var(--bg-2);
+  color: var(--fg-3);
+}
+
+.reader__body {
+  font-family: var(--font-sans);
+  font-size: var(--fs-md);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0;
+}

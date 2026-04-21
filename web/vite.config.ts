@@ -11,6 +11,14 @@ export default defineConfig({
     port: 5830,
     strictPort: true, // fail loudly if 5830 is taken rather than silently drifting
     open: false,
+    proxy: {
+      // Forward /api/* to the pindoc-api daemon (see cmd/pindoc-api).
+      // Keeps the UI on a single origin so no CORS dance during dev.
+      "/api": {
+        target: "http://127.0.0.1:5831",
+        changeOrigin: false,
+      },
+    },
   },
   preview: {
     port: 5830,

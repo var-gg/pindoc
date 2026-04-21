@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet, Route, Routes, useParams } from "react-router";
+import { WikiRoute } from "./routes/Wiki";
 import { findSurface, previews, uiKits } from "./surfaces";
 
 export function App() {
@@ -10,6 +11,8 @@ export function App() {
         <Route path="/preview/:slug" element={<EmbeddedPreview />} />
       </Route>
       <Route path="/ui/:slug" element={<UiKitViewport />} />
+      <Route path="/wiki" element={<WikiRoute />} />
+      <Route path="/wiki/:slug" element={<WikiRoute />} />
     </Routes>
   );
 }
@@ -25,6 +28,8 @@ function ShellLayout() {
           <span>Pindoc · M1</span>
         </header>
         <nav>
+          <p className="m1-shell__group">Live data</p>
+          <NavLink to="/wiki" className="m1-shell__link">Wiki Reader</NavLink>
           <p className="m1-shell__group">UI kits (full screen)</p>
           {uiKits.map((s) => (
             <Link key={s.slug} to={`/ui/${s.slug}`} className="m1-shell__link">
