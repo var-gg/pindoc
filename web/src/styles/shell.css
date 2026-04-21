@@ -128,3 +128,138 @@ body {
   border: 0;
   background: var(--bg-0);
 }
+
+.m1-shell__sublabel {
+  display: block;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  margin-top: 2px;
+}
+
+.m1-shell__callout {
+  background: var(--bg-2);
+  border-left: 2px solid var(--accent);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-2);
+  margin-bottom: var(--sp-5);
+}
+
+.m1-shell__home h2 {
+  font-size: var(--fs-xl);
+  margin: var(--sp-6) 0 var(--sp-3);
+}
+
+.m1-shell__home ul {
+  margin: 0 0 var(--sp-4);
+  padding-left: var(--sp-5);
+  line-height: var(--lh-reader);
+}
+
+.m1-shell__home ul li {
+  margin-bottom: var(--sp-2);
+}
+
+/* UI Kit full-viewport layout — no shell nav, just a slim topbar + frame stage */
+
+.uikit {
+  display: grid;
+  grid-template-rows: 40px 1fr;
+  height: 100vh;
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+}
+
+.uikit__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-sm);
+}
+
+.uikit__back {
+  color: var(--fg-1);
+  text-decoration: none;
+  font-family: var(--font-mono);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-2);
+}
+
+.uikit__back:hover {
+  background: var(--bg-2);
+  color: var(--fg-0);
+}
+
+.uikit__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.uikit__title > span:first-child {
+  font-weight: 600;
+  color: var(--fg-0);
+  white-space: nowrap;
+}
+
+.uikit__sub {
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uikit__devices {
+  display: inline-flex;
+  gap: 4px;
+  background: var(--bg-2);
+  padding: 2px;
+  border-radius: var(--r-3);
+  border: 1px solid var(--border);
+}
+
+.uikit__dev {
+  background: transparent;
+  border: 0;
+  color: var(--fg-2);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  padding: 4px 10px;
+  border-radius: var(--r-2);
+  cursor: pointer;
+}
+
+.uikit__dev:hover {
+  color: var(--fg-0);
+  background: var(--bg-3);
+}
+
+.uikit__dev.is-active {
+  background: var(--bg-0);
+  color: var(--fg-0);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.uikit__stage {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: auto;
+  padding: var(--sp-3);
+}
+
+.uikit__frame {
+  border: 1px solid var(--border);
+  background: var(--bg-0);
+  box-shadow: 0 4px 14px -6px oklch(16% 0.01 265 / 0.18);
+  border-radius: var(--r-2);
+}
