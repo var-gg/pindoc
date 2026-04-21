@@ -9,7 +9,11 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"strings"
+	"time"
+
+	"github.com/var-gg/pindoc/internal/pindoc/embed"
 )
 
 type Config struct {
@@ -27,18 +31,59 @@ type Config struct {
 	// Multi-project selection lands in Phase 4; for now one instance = one
 	// project per `pindoc init` invocation.
 	ProjectSlug string
+
+	// Embed controls which embedding provider is built at startup.
+	Embed embed.Config
 }
 
 // Load builds a Config from process env vars. It never fails for Phase 1
 // usage (there are no required fields); the error return is reserved for
 // when real validation lands.
 func Load() (*Config, error) {
-	return &Config{
+	cfg := &Config{
 		DatabaseURL:  env("PINDOC_DATABASE_URL", "postgres://pindoc:pindoc_dev@localhost:5432/pindoc?sslmode=disable"),
 		LogLevel:     env("PINDOC_LOG_LEVEL", "info"),
 		UserLanguage: strings.ToLower(env("PINDOC_USER_LANGUAGE", "en")),
 		ProjectSlug:  env("PINDOC_PROJECT", "pindoc"),
-	}, nil
+		Embed: embed.Config{
+			Provider:     env("PINDOC_EMBED_PROVIDER", "stub"),
+			Endpoint:     env("PINDOC_EMBED_ENDPOINT", ""),
+			APIKey:       env("PINDOC_EMBED_API_KEY", ""),
+			Model:        env("PINDOC_EMBED_MODEL", ""),
+			Dimension:    envInt("PINDOC_EMBED_DIM", 0),
+			MaxTokens:    envInt("PINDOC_EMBED_MAX_TOKENS", 0),
+			Multilingual: envBool("PINDOC_EMBED_MULTILINGUAL", true),
+			Timeout:      envDuration("PINDOC_EMBED_TIMEOUT", 0),
+		},
+	}
+	return cfg, nil
+}
+
+func envInt(key string, fallback int) int {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		if i, err := strconv.Atoi(v); err == nil {
+			return i
+		}
+	}
+	return fallback
+}
+
+func envBool(key string, fallback bool) bool {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
+	}
+	return fallback
+}
+
+func envDuration(key string, fallback time.Duration) time.Duration {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return fallback
 }
 
 func env(key, fallback string) string {

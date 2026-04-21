@@ -13,15 +13,17 @@ import (
 
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
+	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/mcp/tools"
 )
 
 type Options struct {
-	Name    string
-	Version string
-	Logger  *slog.Logger
-	Config  *config.Config
-	DB      *db.Pool
+	Name     string
+	Version  string
+	Logger   *slog.Logger
+	Config   *config.Config
+	DB       *db.Pool
+	Embedder embed.Provider
 }
 
 type Server struct {
@@ -49,14 +51,17 @@ func NewServer(opts Options) *Server {
 		Version:      opts.Version,
 		ProjectSlug:  opts.Config.ProjectSlug,
 		UserLanguage: opts.Config.UserLanguage,
+		Embedder:     opts.Embedder,
 	}
 	tools.RegisterProjectCurrent(s, deps)
 	tools.RegisterAreaList(s, deps)
 	tools.RegisterArtifactRead(s, deps)
 
-	// Phase 2.3 write-side: first real artifact write + harness bootstrap.
+	// Phase 2.3 write-side + Phase 3 retrieval.
 	tools.RegisterArtifactPropose(s, deps)
 	tools.RegisterHarnessInstall(s, deps)
+	tools.RegisterArtifactSearch(s, deps)
+	tools.RegisterContextForTask(s, deps)
 
 	return &Server{
 		sdk:    s,
@@ -75,6 +80,8 @@ func (s *Server) Run(ctx context.Context, transport sdk.Transport) error {
 			"pindoc.artifact.read",
 			"pindoc.artifact.propose",
 			"pindoc.harness.install",
+			"pindoc.artifact.search",
+			"pindoc.context.for_task",
 		})
 	return s.sdk.Run(ctx, transport)
 }

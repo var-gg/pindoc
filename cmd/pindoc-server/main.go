@@ -20,6 +20,7 @@ import (
 
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
+	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	pmcp "github.com/var-gg/pindoc/internal/pindoc/mcp"
 )
 
@@ -67,12 +68,28 @@ func main() {
 	}
 	logger.Info("db ready", "migrations", "applied")
 
+	embedder, err := embed.Build(cfg.Embed)
+	if err != nil {
+		logger.Error("embed provider build failed", "err", err)
+		os.Exit(1)
+	}
+	info := embedder.Info()
+	logger.Info("embedder ready",
+		"name", info.Name, "model", info.ModelID,
+		"dim", info.Dimension, "max_tokens", info.MaxTokens,
+		"multilingual", info.Multilingual,
+	)
+	if info.Name == "stub" {
+		logger.Warn("using stub embedder — retrieval quality is hash-based, not semantic. Set PINDOC_EMBED_PROVIDER=http + PINDOC_EMBED_ENDPOINT=... to enable real embeddings.")
+	}
+
 	server := pmcp.NewServer(pmcp.Options{
-		Name:    "pindoc",
-		Version: version,
-		Logger:  logger,
-		Config:  cfg,
-		DB:      pool,
+		Name:     "pindoc",
+		Version:  version,
+		Logger:   logger,
+		Config:   cfg,
+		DB:       pool,
+		Embedder: embedder,
 	})
 
 	err = server.Run(ctx, &sdk.StdioTransport{})
@@ -83,7 +100,8 @@ func main() {
 		// The SDK wraps its close signal as a non-typed error on Windows;
 		// fall back to a substring check so clean disconnects don't log
 		// at ERROR and trip on-disconnect alerting when we wire that up.
-		err != nil && strings.Contains(err.Error(), "server is closing"):
+		err != nil && strings.Contains(err.Error(), "server is closing"),
+		err != nil && strings.Contains(err.Error(), "file already closed"):
 		logger.Info("pindoc-server stopped cleanly", "reason", errReason(err))
 		return
 	default:

@@ -4,12 +4,12 @@ import (
 	"log/slog"
 
 	"github.com/var-gg/pindoc/internal/pindoc/db"
+	"github.com/var-gg/pindoc/internal/pindoc/embed"
 )
 
 // Deps is the shared context every tool handler needs. Keeping this tiny on
 // purpose — anything added here shows up in every tool's signature and
-// becomes an implicit dependency you cannot avoid paying for. DB, logger,
-// and the current-project slug are the only must-haves for Phase 2.
+// becomes an implicit dependency you cannot avoid paying for.
 type Deps struct {
 	DB      *db.Pool
 	Logger  *slog.Logger
@@ -23,4 +23,8 @@ type Deps struct {
 	// when selecting NOT_READY / suggested_action templates. Phase 5
 	// replaces this with a per-project lookup.
 	UserLanguage string
+
+	// Embedder generates vectors for chunking on write and for query-side
+	// search / context.for_task. Phase 3+.
+	Embedder embed.Provider
 }

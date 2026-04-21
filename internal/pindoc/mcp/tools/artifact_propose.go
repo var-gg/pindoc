@@ -10,6 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/var-gg/pindoc/internal/pindoc/embed"
 )
 
 // ValidArtifactTypes are the types Phase 2 accepts. Tier A (7) + Tier B
@@ -145,6 +147,9 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			if completeness == "" {
 				completeness = "partial"
 			}
+			if in.Tags == nil {
+				in.Tags = []string{}
+			}
 
 			// --- INSERT + event in one tx --------------------------------
 			tx, err := deps.DB.Begin(ctx)
@@ -190,6 +195,17 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				))
 			`, projectID, newID, in.AreaSlug, in.Type, finalSlug, in.AuthorID); err != nil {
 				return nil, artifactProposeOutput{}, fmt.Errorf("event insert: %w", err)
+			}
+
+			// Embed title + body chunks in the same transaction so search
+			// never observes a half-indexed artifact. If the embedder fails
+			// we still keep the artifact — search becomes keyword-only for
+			// that row until re-embedding lands in Phase 3.x.
+			if deps.Embedder != nil {
+				if err := embedAndStoreChunks(ctx, tx, deps.Embedder, newID, in.Title, in.BodyMarkdown); err != nil {
+					deps.Logger.Warn("chunk/embed failed — artifact saved without vectors",
+						"artifact_id", newID, "err", err)
+				}
 			}
 
 			if err := tx.Commit(ctx); err != nil {
@@ -304,6 +320,74 @@ func nullIfEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+// embedAndStoreChunks computes vectors for the title and each body chunk
+// and inserts them into artifact_chunks inside the caller's transaction.
+// All vectors pad to the DB column width (768) — see embed/vector.go for
+// the rationale.
+func embedAndStoreChunks(ctx context.Context, tx pgx.Tx, provider embed.Provider, artifactID, title, body string) error {
+	info := provider.Info()
+
+	// Title vector (always one, kind='title').
+	titleRes, err := provider.Embed(ctx, embed.Request{Texts: []string{title}, Kind: embed.KindDocument})
+	if err != nil {
+		return fmt.Errorf("embed title: %w", err)
+	}
+	if len(titleRes.Vectors) != 1 {
+		return fmt.Errorf("embed title: got %d vectors", len(titleRes.Vectors))
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO artifact_chunks (
+			artifact_id, kind, chunk_index, heading, span_start, span_end,
+			text, embedding, model_name, model_dim
+		) VALUES ($1, 'title', 0, NULL, 0, 0, $2, $3::vector, $4, $5)
+	`,
+		artifactID,
+		title,
+		embed.VectorString(embed.PadTo768(titleRes.Vectors[0])),
+		info.Name+":"+info.ModelID,
+		info.Dimension,
+	); err != nil {
+		return fmt.Errorf("store title chunk: %w", err)
+	}
+
+	// Body chunks (kind='body').
+	chunks := embed.ChunkBody(title, body, 600)
+	if len(chunks) == 0 {
+		return nil
+	}
+	texts := make([]string, len(chunks))
+	for i, c := range chunks {
+		texts[i] = c.Text
+	}
+	bodyRes, err := provider.Embed(ctx, embed.Request{Texts: texts, Kind: embed.KindDocument})
+	if err != nil {
+		return fmt.Errorf("embed body: %w", err)
+	}
+	if len(bodyRes.Vectors) != len(chunks) {
+		return fmt.Errorf("embed body: got %d vectors want %d", len(bodyRes.Vectors), len(chunks))
+	}
+	for i, c := range chunks {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO artifact_chunks (
+				artifact_id, kind, chunk_index, heading, span_start, span_end,
+				text, embedding, model_name, model_dim
+			) VALUES ($1, 'body', $2, $3, $4, $5, $6, $7::vector, $8, $9)
+		`,
+			artifactID,
+			c.Index,
+			nullIfEmpty(c.Heading),
+			c.SpanStart, c.SpanEnd,
+			c.Text,
+			embed.VectorString(embed.PadTo768(bodyRes.Vectors[i])),
+			info.Name+":"+info.ModelID,
+			info.Dimension,
+		); err != nil {
+			return fmt.Errorf("store body chunk %d: %w", c.Index, err)
+		}
+	}
+	return nil
 }
 
 // isUniqueViolation is a best-effort check against pgx's error message.
