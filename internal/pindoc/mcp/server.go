@@ -54,6 +54,10 @@ func NewServer(opts Options) *Server {
 	tools.RegisterAreaList(s, deps)
 	tools.RegisterArtifactRead(s, deps)
 
+	// Phase 2.3 write-side: first real artifact write + harness bootstrap.
+	tools.RegisterArtifactPropose(s, deps)
+	tools.RegisterHarnessInstall(s, deps)
+
 	return &Server{
 		sdk:    s,
 		logger: opts.Logger,
@@ -69,6 +73,8 @@ func (s *Server) Run(ctx context.Context, transport sdk.Transport) error {
 			"pindoc.project.current",
 			"pindoc.area.list",
 			"pindoc.artifact.read",
+			"pindoc.artifact.propose",
+			"pindoc.harness.install",
 		})
 	return s.sdk.Run(ctx, transport)
 }
