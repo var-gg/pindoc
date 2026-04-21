@@ -6,8 +6,25 @@ surfaces while the Go MCP server is scaffolded separately.
 
 ## Prerequisites
 
-- Node 20+
+- Node **22+** (Vite 8 requires it)
 - pnpm (or npm/yarn — lockfile intentionally omitted at this step)
+
+## Stack choices (2026-04-21)
+
+Speed-first, all on the latest stable majors:
+
+| Tool | Version | Why |
+|---|---|---|
+| Vite | 8.x | Rolldown + Oxc pipeline; currently the fastest JS bundler toolchain |
+| @vitejs/plugin-react | 6.x | Matches Vite 8; uses the built-in Oxc transform (no SWC plugin needed) |
+| React | 19.2 | Latest stable; Actions, `use()`, `<form>` actions |
+| React Router | 7.x | Data APIs + type-safe loaders; imports from `react-router` (dom package folded in) |
+| TypeScript | 6.x | Latest major; compatible with our config |
+
+TanStack Router was considered — its loader type-safety and cache win once we
+start pulling real artifact/project data. For M1 (iframe preview shell) it would
+be premature complexity, so we stay on React Router and revisit at M1.5 when
+React-ifying the Reader surface.
 
 ## Run
 
