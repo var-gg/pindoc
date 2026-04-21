@@ -29,6 +29,14 @@
 - UI: `/wiki/:slug/history`, `/wiki/:slug/diff?from=&to=` (이후 Phase 8에서 `/p/:project/wiki/...`)
 - PINDOC.md 템플릿에 update flow 문서화
 
+### Phase 10 — Real embedder dogfood (2026-04-22 완료)
+- Docker TEI (`intfloat/multilingual-e5-base`, 768 dim, `--auto-truncate`) compose 서비스 추가.
+- `embed/http.go`에 E5 prefix (`query: ` / `passage: `) 로직, config/registry에 wiring.
+- `cmd/pindoc-reembed` CLI 신규: per-artifact 트랜잭션, 32개 배치 전송.
+- Makefile에 `embed-up`, `server-run-http`, `api-run-http`, `reembed-build` 타겟 + `EMBED_ENV` 블록.
+- 17개 artifact 전체 재-embed. 의미 검색 품질 실측 확인 (한국어 쿼리 distance 0.14-0.17, stub 때 랜덤 수준에서 실제 의미 매칭으로 전환).
+- `capabilities.retrieval_quality` 자동으로 `"http"` 반영.
+
 ### Phase 9 — Referenced Confirmation hardening (2026-04-22 완료)
 - `artifact.{propose,read,search}` + `context.for_task` 응답에 `agent_ref` (`pindoc://<slug>`) + `human_url` (`/p/:project/wiki/<slug>`) 분리.
 - `project.current` 응답에 `capabilities` 블록 (`multi_project`, `retrieval_quality`, `auth_mode`, `update_via`, `review_queue_supported`). bootstrap 1 call.
@@ -54,18 +62,35 @@
 
 ---
 
-## 2. 다음 작업 — Phase 10 real embedder (Phase 9 완료 후 다음)
+## 2. 다음 작업 — Phase 11 write contract 강화 (Phase 10 완료 후 다음)
 
-Phase 8 (URL) + Phase 9 (human_url/capabilities/spec drift) 완료. 다음 큰 블록:
+Phase 8 (URL) + Phase 9 (human_url/capabilities/spec drift) + Phase 10 (real embedder) 완료. 다음 큰 블록:
 
-### Phase 10 — Real embedder dogfood
-- `services/embed-sidecar/` Python FastAPI 기동 + `PINDOC_EMBED_PROVIDER=http` 로 스위치.
-- 기존 artifact_chunks 재-embed 배치 (작은 스크립트 하나).
-- 스모크: `/api/p/pindoc/search?q=…` 한국어 쿼리에 의미 있는 답.
-- 이후 Phase 11 semantic conflict의 전제조건.
+### Phase 11 — Write contract 강화
+- `search_receipt` 서버 발급 (artifact.search / context.for_task) + propose에서 요구 (hard enforce)
+- `artifact.propose` 입력 확장: `pins[]`, `expected_version`, `supersede_of`, `relates_to[]`
+- `artifact_edges` 테이블 신규
+- `body_json` 최소 필드 검증 (Debug/Decision/Analysis/Task 4 타입)
+- Semantic conflict block (Phase 10 real embedder 위에서 이제 가능)
+- `context.for_task`에 `candidate_updates[]`, `stale[]`
+- `_unsorted` area auto-seed
 
-상세: [docs/12-m1-implementation-plan.md](./12-m1-implementation-plan.md) Phase 10~13 섹션.
+상세: [docs/12-m1-implementation-plan.md](./12-m1-implementation-plan.md) Phase 11 섹션.
 리뷰 판단 근거: [docs/14-peer-review-response.md](./14-peer-review-response.md).
+
+### 실행 환경 재개 체크리스트 (Phase 10 이후)
+
+현재 세션 종료 후 다음 세션 시작 시:
+
+```bash
+docker compose up -d db embed   # Postgres + TEI 둘 다 기동
+make api-run-http &             # pindoc-api with http embedder
+cd web && pnpm dev              # Vite (필요 시)
+```
+
+또는 `make server-run-http` / `make api-run-http` 로 개별 기동.
+
+TEI 첫 기동 시 모델 다운로드 2-3분. 이후는 volume 캐시 재사용.
 
 ### 아래는 Phase 8 계획 (완료됨 — 참고용 스냅샷)
 

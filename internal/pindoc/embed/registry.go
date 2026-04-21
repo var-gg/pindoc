@@ -20,6 +20,12 @@ type Config struct {
 	MaxTokens    int
 	Multilingual bool
 	Timeout      time.Duration
+
+	// PrefixQuery / PrefixDocument are prepended to each input text based
+	// on Request.Kind. Needed for E5-family models which are trained with
+	// "query: " / "passage: " prefixes. See embed/http.go for details.
+	PrefixQuery    string
+	PrefixDocument string
 }
 
 func Build(cfg Config) (Provider, error) {
@@ -46,13 +52,15 @@ func Build(cfg Config) (Provider, error) {
 			cfg.MaxTokens = 2048
 		}
 		return NewHTTP(HTTPConfig{
-			Endpoint:     cfg.Endpoint,
-			APIKey:       cfg.APIKey,
-			Model:        cfg.Model,
-			Dimension:    cfg.Dimension,
-			MaxTokens:    cfg.MaxTokens,
-			Multilingual: cfg.Multilingual,
-			Timeout:      cfg.Timeout,
+			Endpoint:       cfg.Endpoint,
+			APIKey:         cfg.APIKey,
+			Model:          cfg.Model,
+			Dimension:      cfg.Dimension,
+			MaxTokens:      cfg.MaxTokens,
+			Multilingual:   cfg.Multilingual,
+			Timeout:        cfg.Timeout,
+			PrefixQuery:    cfg.PrefixQuery,
+			PrefixDocument: cfg.PrefixDocument,
 		}), nil
 	default:
 		return nil, fmt.Errorf("unknown embedding provider %q (valid: stub, http)", cfg.Provider)

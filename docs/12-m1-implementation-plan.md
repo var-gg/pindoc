@@ -172,14 +172,23 @@ claude mcp list           # pindoc 있음
 - `pindoc.project.current` 응답에 **`capabilities` 블록** 추가: `multi_project`, `retrieval_quality` (`stub`|`http`), `auth_mode` (`none`), `update_via` (`update_of`), `review_queue_supported` (`false`). 에이전트가 bootstrap 1회로 서버가 지원하는 플래그 파악.
 - PINDOC.md 템플릿에 "agent가 사용자에게 링크 공유 시 `human_url` 값을 그대로 붙여넣어라" 규약 명시.
 
-## Phase 10 — Real embedder dogfood (다음 작업)
+## Phase 10 — Real embedder dogfood (완료 · 2026-04-22)
 
 `PINDOC_EMBED_PROVIDER=stub` 기본값이 `pindoc.artifact.search` / `context.for_task`의 품질을 hash 기반으로 고정함. 외부 리포트 공통 P1.
 
-- `services/embed-sidecar/` Python FastAPI 기동 (EmbeddingGemma-300M 기본)
-- `PINDOC_EMBED_PROVIDER=http`, `PINDOC_EMBED_ENDPOINT=http://127.0.0.1:5860/v1/embeddings` 로 전환
-- 기존 `artifact_chunks` 전체 재-embed 배치 스크립트 (15개 artifact 한 번에)
-- 스모크: `/api/p/pindoc/search?q=…` 한국어 쿼리 5개로 의미 검색 품질 확인
+**Python sidecar가 아니라 Docker 기반 TEI 채택**. 이유: 저자 환경에 이미 Docker 있음, Python stack 설치 불필요, 한 줄 compose 서비스로 끝남, 모델 weight 캐시도 volume으로 자동 관리.
+
+- [docker-compose.yml](../docker-compose.yml)에 `embed` 서비스 추가 (`ghcr.io/huggingface/text-embeddings-inference:cpu-1.6`, model: `intfloat/multilingual-e5-base`, 768 dim, 다국어 XLM-RoBERTa backbone)
+- `--auto-truncate` 플래그로 512-token 초과 chunk 자동 truncate
+- [embed/http.go](../internal/pindoc/embed/http.go)에 E5-style `query: ` / `passage: ` prefix 로직 추가 (`PINDOC_EMBED_PREFIX_QUERY` / `_DOCUMENT` env)
+- [embed/registry.go](../internal/pindoc/embed/registry.go) + [config/config.go](../internal/pindoc/config/config.go)에 prefix 필드 wiring
+- [cmd/pindoc-reembed](../cmd/pindoc-reembed/main.go) CLI 신규 — 전체 artifact 재-embed, per-artifact 트랜잭션, 32개씩 배치 전송 (TEI의 `max_batch_requests=8` 대응)
+- [Makefile](../Makefile)에 `embed-up`, `server-run-http`, `api-run-http`, `reembed-build` 타겟 추가. `EMBED_ENV` 블록으로 env 세트 한 곳에서 관리.
+- 17개 artifact 전체 재-embed 성공, stub → http 전환 후 의미 검색 품질 실측:
+  - "Harness Reversal" → mechanisms M0 섹션 1순위 (distance 0.17)
+  - "중복 문서 방지" → problem-space F1. 중복 생성 1순위 (0.16)
+  - "agent 쓰기 규율" → architecture 원칙 1. Agent-only Write Surface 1순위 (0.14)
+- `capabilities.retrieval_quality` 자동으로 `"http"`로 전환 (Phase 9 capabilities 블록 반영).
 
 ## Phase 11 — Write contract 강화 + semantic conflict (핵심 블록, 2차 피어리뷰 후 확장)
 

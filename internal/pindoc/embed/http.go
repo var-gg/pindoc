@@ -22,10 +22,12 @@ import (
 // we add; servers are expected to ignore unknown fields). A reference
 // Python sidecar lives at services/embed-sidecar/.
 type HTTPProvider struct {
-	endpoint string
-	apiKey   string
-	client   *http.Client
-	info     Info
+	endpoint       string
+	apiKey         string
+	client         *http.Client
+	info           Info
+	prefixQuery    string
+	prefixDocument string
 }
 
 type HTTPConfig struct {
@@ -37,6 +39,15 @@ type HTTPConfig struct {
 	Multilingual bool
 	Distance     string // "cosine" default
 	Timeout      time.Duration
+
+	// PrefixQuery / PrefixDocument prepend a literal string to each input
+	// text based on embed.Request.Kind. E5-family models ("intfloat/e5-*",
+	// "intfloat/multilingual-e5-*") require "query: " / "passage: " to hit
+	// trained quality. Models that don't care (Jina, Nomic, BGE-small)
+	// leave these empty. Set via env PINDOC_EMBED_PREFIX_QUERY /
+	// PINDOC_EMBED_PREFIX_DOCUMENT. Empty = no prefix.
+	PrefixQuery    string
+	PrefixDocument string
 }
 
 func NewHTTP(c HTTPConfig) *HTTPProvider {
@@ -47,9 +58,11 @@ func NewHTTP(c HTTPConfig) *HTTPProvider {
 		c.Distance = "cosine"
 	}
 	return &HTTPProvider{
-		endpoint: c.Endpoint,
-		apiKey:   c.APIKey,
-		client:   &http.Client{Timeout: c.Timeout},
+		endpoint:       c.Endpoint,
+		apiKey:         c.APIKey,
+		client:         &http.Client{Timeout: c.Timeout},
+		prefixQuery:    c.PrefixQuery,
+		prefixDocument: c.PrefixDocument,
 		info: Info{
 			Name:         "http",
 			ModelID:      c.Model,
@@ -79,7 +92,21 @@ type httpResp struct {
 }
 
 func (p *HTTPProvider) Embed(ctx context.Context, req Request) (*Response, error) {
-	buf, err := json.Marshal(httpReq{Model: p.info.ModelID, Input: req.Texts, Kind: string(req.Kind)})
+	prefix := ""
+	switch req.Kind {
+	case KindQuery:
+		prefix = p.prefixQuery
+	case KindDocument:
+		prefix = p.prefixDocument
+	}
+	texts := req.Texts
+	if prefix != "" {
+		texts = make([]string, len(req.Texts))
+		for i, t := range req.Texts {
+			texts[i] = prefix + t
+		}
+	}
+	buf, err := json.Marshal(httpReq{Model: p.info.ModelID, Input: texts, Kind: string(req.Kind)})
 	if err != nil {
 		return nil, err
 	}

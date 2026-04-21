@@ -1,12 +1,13 @@
 # Pindoc local dev stack.
 #
-# Intentionally single-service for the M1 phase: Postgres 16 with pgvector
-# pre-loaded. The MCP server, web UI, and embedding sidecar run on the host
-# (so restarts are fast and Go/pnpm tooling stays in hot-reload mode).
+# Two services: Postgres 16 + pgvector, and Text Embeddings Inference (TEI).
+# The MCP server and web UI run on the host so Go/pnpm tooling stays in
+# hot-reload mode. TEI is containerised because it owns a model runtime
+# (tokenizer + weights) that we don't want to install on the host.
 #
 # Upgrade path: when we want container-everything for a deploy artefact,
-# split this into docker-compose.prod.yml. For now, host-native dev + one
-# DB container is the lowest-friction setup.
+# split this into docker-compose.prod.yml. For now, host-native dev + two
+# service containers is the lowest-friction setup.
 
 services:
   db:
@@ -40,6 +41,54 @@ services:
       - -c
       - work_mem=8MB
 
+  # Text Embeddings Inference — HuggingFace's Rust server that exposes any
+  # sentence-transformer-compatible model as an OpenAI-style /v1/embeddings
+  # endpoint. CPU image works everywhere; swap to -turing / -ampere etc. for
+  # GPU hosts.
+  #
+  # Default model: intfloat/multilingual-e5-base (768 dim, XLM-RoBERTa
+  # backbone, Korean quality is solid). It needs "query: " / "passage: "
+  # prefixes per the E5 convention — Pindoc's HTTPProvider handles that on
+  # the client side based on embed.Request.Kind.
+  #
+  # To swap models:
+  #   1. Change MODEL_ID below (and PINDOC_EMBED_MODEL on the host).
+  #   2. If the new model has a different dimension ≤768, update
+  #      PINDOC_EMBED_DIM. The DB column is vector(768) + PadTo768 truncates
+  #      / zero-pads so >768 dim models lose their tail.
+  #   3. Re-embed: go run ./cmd/pindoc-reembed
+  embed:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    container_name: pindoc-embed
+    command:
+      - --model-id=intfloat/multilingual-e5-base
+      - --port=80
+      # Truncate inputs that exceed the model's max_tokens (512 for e5-base)
+      # instead of erroring. Our chunker caps at ~600 bytes which stays
+      # under 512 tokens in English but can overflow in Korean dense text.
+      # Silent truncation is fine for retrieval — the tail of a long chunk
+      # is usually less semantically important than its heading-near body.
+      - --auto-truncate
+    environment:
+      # Cache downloaded weights to the named volume so container recreates
+      # don't re-download ~500MB every time.
+      HF_HOME: /data
+    ports:
+      - "5860:80"
+    volumes:
+      - pindoc_embed_cache:/data
+    healthcheck:
+      # /health returns 200 once the model has loaded. First boot may take
+      # a minute while weights download.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+
 volumes:
   pindoc_db:
     name: pindoc_db
+  pindoc_embed_cache:
+    name: pindoc_embed_cache
