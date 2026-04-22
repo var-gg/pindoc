@@ -1,9 +1,10 @@
-# Session Handoff — Tier 3 진입 직후 / Decision 6건 발행 완료
+# Session Handoff — Tier 3 중간 / Decision 8건 + Phase 18 Task 발행 완료
 
 > 이전 handoff [docs/15](./15-session-handoff-dogfood.md)은 dogfood 진입
 > 시점(Phase 16 직후)의 스냅샷이었고, 그 이후 **Phase 17 + follow-up
-> a/b/c/d + Tier 1·2 dogfood + Decision 6건 발행 + threshold 실전 검증**이
-> 완료됐다. 이 문서는 Tier 3 중간지점 스냅샷이자 다음 세션 프롬프트.
+> a/b/c/d + Tier 1·2 dogfood + Decision 8건 + Phase 18 Task + pre-flight
+> 3종(title/H2/H1) + threshold 실전 검증**이 완료됐다. 이 문서는 Tier 3
+> 중간지점 스냅샷이자 다음 세션 프롬프트.
 
 ---
 
@@ -28,9 +29,12 @@ e0af0f7  Phase 17: Bundled EmbeddingGemma restored as default embedder
 | Template | 4 | `_template_{analysis,decision,debug,task}` |
 | Tier 1 (Phase 17) | 5 | `pindoc-agent-written-8`, `pindoc-url`, `pindoc-3-tier-a-b-types-pin-vs-resourceref`, `pindoc-mcp-tools-v1-implementation-status-spec-runtime-drift`, `pindoc-4-data-model-3-axis` (slug 일부 ASCII 축소본) |
 | Tier 2 (Part B) | 8 | `pindoc-문제-f1-f6-실패-모드`, `pindoc-non-goals-헌법`, `pindoc-5-primitive-개념`, `pindoc-md-harness-spec`, `pindoc-v1-로드맵-bm-phase`, `pindoc-m1-phase-chain-1-17`, `pindoc-ui-wiki-reader-cmdk-flow`, `pindoc-design-system-v0-handoff` |
-| **Decision (이번 세션)** | **6** | `decision-slug-unicode-preservation`, `decision-include-templates-unified`, `decision-embedder-used-response-field`, `decision-pin-path-warn`, `decision-conflict-threshold-recalibration-tier2`, `decision-license-apache-2-0` |
+| **Decision (이번 세션)** | **8** | D1-D4 + `decision-conflict-threshold-recalibration-tier2` + `decision-license-apache-2-0` + `decision-project-locale-composite-key` + `decision-title-heading-rule-preflight` |
+| **Task (이번 세션)** | **1** | `task-phase-18-project-locale-implementation` (locale 구현 예약, status=todo, priority=p1) |
 
 전부 gemma 벡터. 전부 `embedder_used.name == "embeddinggemma"` 응답 필드 확인.
+테스트용 `_test_preflight_smoke` 1건은 archive 처리 (pre-flight warning
+발동 검증 후).
 
 ### Threshold calibration 실전 검증 (NEW 0.13/0.30)
 
@@ -98,6 +102,31 @@ Phase 17 follow-up 4건 Decision artifact 전부 `accepted`:
 ### Step 3b — pairwise 재측정
 
 docker psql로 `artifact_chunks.embedding <=> embedding` 쿼리 실행. 결과 docs/16 §Part E.
+
+### 2nd pass (UX 피드백 후 — locale + pre-flight)
+
+저자의 Reader UI 피드백: (1) Area 명칭 툴팁 부재, (2) 한·영 혼재, (3)
+제목이 agent 관점 기술약어라 human reader가 식별 불가, (4) 폭/여백/배지
+단조, (5) 스크롤 TOC 부재. 진단: C(제목)·F(heading/TOC) = content rule,
+나머지 A/B/D/E = UI CSS. 저자 분류로 content rule은 연구원 모드 즉시,
+UI는 MCP 사용 모드 Task 등록(별도 세션 예정).
+
+**연구원 모드 즉시 집행 결과**:
+
+| 항목 | slug / 함수 | 결과 |
+|---|---|---|
+| Decision: Project locale 복합키 | `decision-project-locale-composite-key` | accepted, pins=3, edges=3 |
+| Decision: 제목·H2 규범 pre-flight | `decision-title-heading-rule-preflight` | accepted, pins=2, edges=3 |
+| Pre-flight 3종 구현 | `titleLengthWarnings` · `bodyH1Warnings` · `requiredH2Warnings` + `requiredH2ByType` + `updatePathWarnings` | [artifact_propose.go](../internal/pindoc/mcp/tools/artifact_propose.go) |
+| Smoke test (의도적 violation) | `_test_preflight_smoke` | warnings 4건 발동 확인 → archive |
+| Phase 18 Task | `task-phase-18-project-locale-implementation` | accepted, pins=5, edges=3, warnings=`[RECOMMEND_READ_BEFORE_CREATE]`(정상 advisory 0.26) |
+
+**MCP re-spawn 3회 성공**:
+- (1st) server.exe@14:22 → .exe@18:59 (Phase 17 follow-up)
+- (2nd) server.exe@18:59 → .exe@20:34 (threshold recalib)
+- (3rd) server.exe@20:34 → .exe@22:47 (pre-flight warnings)
+
+이 세션 총 9 artifact 신규(Decision 8 + Task 1) + 테스트 artifact 1 archive.
 
 ---
 

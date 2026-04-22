@@ -636,6 +636,9 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 
 			warnings := createWarnings(ctx, deps, projectID, in.Title, in.BodyMarkdown)
 			warnings = append(warnings, pinPathWarnings(deps, in.Pins)...)
+			warnings = append(warnings, titleLengthWarnings(in.Title)...)
+			warnings = append(warnings, bodyH1Warnings(in.BodyMarkdown)...)
+			warnings = append(warnings, requiredH2Warnings(in.BodyMarkdown, in.Type)...)
 			return nil, artifactProposeOutput{
 				Status:         "accepted",
 				ArtifactID:     newID,
@@ -895,9 +898,23 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		RevisionNumber: newRev,
 		PinsStored:     pinsStored,
 		EdgesStored:    edgesStored,
-		Warnings:       pinPathWarnings(deps, in.Pins),
+		Warnings:       updatePathWarnings(deps, in),
 		EmbedderUsed:   embedderInfo(deps),
 	}, nil
+}
+
+// updatePathWarnings aggregates non-blocking advisories for the update
+// (revision) path. Skips the semantic near-duplicate probe — updating in
+// place can't produce a duplicate — but runs the structural/pin gates so
+// the agent learns about title length / heading / pin-path issues on
+// revised artifacts too.
+func updatePathWarnings(deps Deps, in artifactProposeInput) []string {
+	var out []string
+	out = append(out, pinPathWarnings(deps, in.Pins)...)
+	out = append(out, titleLengthWarnings(in.Title)...)
+	out = append(out, bodyH1Warnings(in.BodyMarkdown)...)
+	out = append(out, requiredH2Warnings(in.BodyMarkdown, in.Type)...)
+	return out
 }
 
 // embedderInfo returns a pointer-typed EmbedderInfo ready for the propose
@@ -1515,6 +1532,95 @@ func pinPathWarnings(deps Deps, pins []ArtifactPinInput) []string {
 		}
 	}
 	return out
+}
+
+// titleLengthWarnings flags title rune count outside the human-readable
+// band (Decision decision-title-heading-rule-preflight). rune-based so the
+// gate is language-neutral — 한글/영문/CJK/아랍 동등. Warning-level only.
+func titleLengthWarnings(title string) []string {
+	n := len([]rune(strings.TrimSpace(title)))
+	var out []string
+	if n < 15 {
+		out = append(out, fmt.Sprintf("TITLE_TOO_SHORT:%d_runes", n))
+	}
+	if n > 80 {
+		out = append(out, fmt.Sprintf("TITLE_TOO_LONG:%d_runes", n))
+	}
+	return out
+}
+
+// bodyH1Warnings flags an H1 inside body_markdown. Reader renders
+// artifact.title as the H1 already; a second H1 fragments the TOC.
+func bodyH1Warnings(body string) []string {
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "# ") {
+			return []string{"BODY_HAS_H1_REDUNDANT"}
+		}
+	}
+	return nil
+}
+
+// requiredH2Warnings flags missing mandatory H2 sections per Type. Fuzzy
+// match: a slot is satisfied if any of its synonyms appear as an H2
+// (case-insensitive). en/ko synonyms tolerate the current bilingual
+// template corpus; Phase 18 template locale-split will normalise them.
+func requiredH2Warnings(body, artifactType string) []string {
+	slots := requiredH2ByType(artifactType)
+	if len(slots) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool)
+	for _, line := range strings.Split(body, "\n") {
+		after, ok := strings.CutPrefix(line, "## ")
+		if !ok {
+			continue
+		}
+		heading := strings.ToLower(strings.TrimSpace(strings.TrimRight(after, "#")))
+		seen[heading] = true
+	}
+	var out []string
+	for _, syn := range slots {
+		matched := false
+		for _, alt := range syn {
+			if seen[strings.ToLower(alt)] {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			out = append(out, "MISSING_H2:"+syn[0])
+		}
+	}
+	return out
+}
+
+// requiredH2ByType returns canonical H2 slots per Type plus accepted
+// synonyms (first entry = canonical English used for the warning label).
+// Debug keeps its existing keyword-based pre-flight check (debug_no_repro /
+// debug_no_resolution) — unification deferred to Phase 18.
+func requiredH2ByType(t string) [][]string {
+	switch t {
+	case "Decision":
+		return [][]string{
+			{"Context", "맥락", "컨텍스트"},
+			{"Decision", "결정"},
+			{"Rationale", "근거"},
+			{"Alternatives considered", "Alternatives", "대안"},
+			{"Consequences", "영향", "결과"},
+		}
+	case "Analysis":
+		return [][]string{
+			{"TL;DR", "요약"},
+		}
+	case "Task":
+		return [][]string{
+			{"Purpose", "목적"},
+			{"Scope", "범위"},
+			{"Acceptance criteria", "Acceptance", "완료 기준", "완료기준"},
+		}
+	default:
+		return nil
+	}
 }
 
 // findSemanticAdvisories is findSemanticConflicts' soft cousin: returns
