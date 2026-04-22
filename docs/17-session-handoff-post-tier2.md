@@ -128,6 +128,28 @@ UI는 MCP 사용 모드 Task 등록(별도 세션 예정).
 
 이 세션 총 9 artifact 신규(Decision 8 + Task 1) + 테스트 artifact 1 archive.
 
+### 3rd pass (layer 경계 정리 — Phase/workplan 용어 MCP blind)
+
+저자 지적: **"plan artifact"가 온전히 기능 못 함** — (1) 모든 plan이 Phase 1부터라 번호 global collision, (2) body revision stall(live changelog로 변질), (3) Task↔Plan cross-ref가 textual grep 기반이라 graph 이식 실패. 결론: **MCP·artifact 레이어는 Phase blind**. Phase/Sprint/Tier/M1 같은 workplan 수명 용어는 Claude Code 세션 plan + git commits + docs/*.md workplan 파일에만 살고 artifact 레이어로 누수 금지.
+
+**집행 결과**:
+
+| # | 작업 | 방식 | 결과 |
+|---|---|---|---|
+| 1 | D-title-heading-rule revision 2 | `update_of` r1→r2 | 4조 추가: workplan 수명 용어 prose ban + plan navigation 검색팁(relates_to edges + artifact.read) |
+| 2 | Phase 18 Task rename | `update_of` r1→r2 | title "Project locale 복합키 구현 — 스키마·URL·migration·template seed" (Phase 18 제거). slug은 immutable 정책 유지 |
+| 3 | Plan 재정의 Decision 신규 | create | `decision-plan-concept-mcp-blind` — 레이어 경계 4단 확정, Plan = declarative scope 선언, progress 추적은 Task query 파생, Milestone type은 V1.x |
+| 4 | M1 plan artifact supersede | `supersede_of` → new slug `pindoc-m1-scope-summary` | Phase 1-17 번호 매김 제거, 14 작업 축 declarative 선언으로 재작성. 기존 artifact archived |
+
+warnings 관찰:
+- `decision-plan-concept-mcp-blind`·`pindoc-m1-scope-summary` 발행 모두 `RECOMMEND_READ_BEFORE_CREATE` 발동(상호 distance 0.36-0.39, 정상 advisory)
+- `_test_preflight_smoke` 후 추가 archive: 기존 `pindoc-m1-phase-chain-1-17` (supersede로 자동)
+
+**이 세션 누적 artifact 변화**:
+- 신규(active): Decision 9 (D1-D4 + threshold + Apache + locale + title-rule + plan-blind) + Task 1 + scope-summary 1 = 11
+- Superseded/archived: `pindoc-m1-phase-chain-1-17` (Tier 2 분) + `_test_preflight_smoke` (smoke test) = 2
+- Revision 2 진입: D-title-heading-rule + Phase 18 Task
+
 ---
 
 ## 3. 다음 세션 착수 (Tier 3 잔여 + 관측)
