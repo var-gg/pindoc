@@ -1,4 +1,5 @@
-import { Folder, FolderOpen, FileText, Zap, Bug, Book, BookOpen, Hash, Check, Code, LayoutTemplate } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, ChevronRight, Folder, FolderOpen, FileText, Zap, Bug, Book, BookOpen, Hash, Check, Code, LayoutTemplate } from "lucide-react";
 import type { ComponentType } from "react";
 import type { Area } from "../api/client";
 import { useI18n } from "../i18n";
@@ -17,9 +18,11 @@ type Props = {
   showTemplates: boolean;
   onToggleTemplates: () => void;
 };
-// Sidebar click behavior: selecting an area or type clears any open
-// artifact so the filter effect is immediately visible in the list.
-// See ReaderShell.handleSelectArea / handleSelectType.
+
+// AreaNode is the tree-enriched Area: same fields + resolved children.
+// Cross-cutting areas stay outside the tree (they are category-orthogonal
+// by design — see docs/04-data-model §Area).
+type AreaNode = Area & { children: AreaNode[] };
 
 const TYPE_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   Decision: FileText,
@@ -34,6 +37,28 @@ const TYPE_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   Screen: Book,
   DataModel: Hash,
 };
+
+// buildAreaTree turns a flat list into a tree by parent_slug. Areas whose
+// parent_slug is unknown (or empty) are roots. Sorts siblings by slug at
+// every level so the tree is deterministic across renders.
+function buildAreaTree(areas: Area[]): AreaNode[] {
+  const bySlug = new Map<string, AreaNode>();
+  for (const a of areas) {
+    bySlug.set(a.slug, { ...a, children: [] });
+  }
+  const roots: AreaNode[] = [];
+  bySlug.forEach((node) => {
+    const parent = node.parent_slug ? bySlug.get(node.parent_slug) : undefined;
+    if (parent) parent.children.push(node);
+    else roots.push(node);
+  });
+  const sortTree = (nodes: AreaNode[]) => {
+    nodes.sort((a, b) => a.slug.localeCompare(b.slug));
+    nodes.forEach((n) => sortTree(n.children));
+  };
+  sortTree(roots);
+  return roots;
+}
 
 export function Sidebar({
   areas,
@@ -51,6 +76,7 @@ export function Sidebar({
 
   const regular = areas.filter((a) => !a.is_cross_cutting);
   const crossCutting = areas.filter((a) => a.is_cross_cutting);
+  const tree = buildAreaTree(regular);
 
   return (
     <aside className={`sidebar${open ? " open" : ""}`}>
@@ -63,17 +89,14 @@ export function Sidebar({
         <FolderOpen className="lucide" />
         <span>{t("wiki.area_all")}</span>
       </button>
-      {regular.map((a) => (
-        <button
-          type="button"
-          key={a.id}
-          className={`side-item${selectedArea === a.slug ? " active" : ""}`}
-          onClick={() => onSelectArea(selectedArea === a.slug ? null : a.slug)}
-        >
-          {selectedArea === a.slug ? <FolderOpen className="lucide" /> : <Folder className="lucide" />}
-          <span>{a.name}</span>
-          <span className="side-item__count">{a.artifact_count}</span>
-        </button>
+      {tree.map((node) => (
+        <AreaTreeNode
+          key={node.id}
+          node={node}
+          level={0}
+          selectedArea={selectedArea}
+          onSelectArea={onSelectArea}
+        />
       ))}
       {crossCutting.length > 0 && (
         <div className="side-sub">
@@ -152,5 +175,72 @@ export function Sidebar({
         </>
       )}
     </aside>
+  );
+}
+
+function AreaTreeNode({
+  node,
+  level,
+  selectedArea,
+  onSelectArea,
+}: {
+  node: AreaNode;
+  level: number;
+  selectedArea: string | null;
+  onSelectArea: (slug: string | null) => void;
+}) {
+  // Default to expanded: Pindoc trees are shallow (2-3 levels), so
+  // collapse-by-default hides more than it helps on first render.
+  const [expanded, setExpanded] = useState(true);
+  const hasChildren = node.children.length > 0;
+  const active = selectedArea === node.slug;
+  const indent = { paddingLeft: 8 + level * 14 } as React.CSSProperties;
+
+  return (
+    <>
+      <button
+        type="button"
+        className={`side-item${active ? " active" : ""}`}
+        style={indent}
+        onClick={() => onSelectArea(active ? null : node.slug)}
+      >
+        {hasChildren ? (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded((v) => !v);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+                setExpanded((v) => !v);
+              }
+            }}
+            className="side-item__toggle"
+            aria-label={expanded ? "collapse" : "expand"}
+            style={{ display: "inline-flex", alignItems: "center" }}
+          >
+            {expanded ? <ChevronDown className="lucide" /> : <ChevronRight className="lucide" />}
+          </span>
+        ) : (
+          <span style={{ width: 14, display: "inline-block" }} />
+        )}
+        {active ? <FolderOpen className="lucide" /> : <Folder className="lucide" />}
+        <span>{node.name}</span>
+        <span className="side-item__count">{node.artifact_count}</span>
+      </button>
+      {hasChildren && expanded && node.children.map((child) => (
+        <AreaTreeNode
+          key={child.id}
+          node={child}
+          level={level + 1}
+          selectedArea={selectedArea}
+          onSelectArea={onSelectArea}
+        />
+      ))}
+    </>
   );
 }

@@ -150,6 +150,62 @@ Before calling pindoc.artifact.propose:
   new head.
 - update_of and supersede_of are mutually exclusive.
 
+## Task auto-proposal heuristic
+
+Task artifacts are the "what needs to be done next" layer of the graph.
+The user does not always say "make a task" explicitly — watch for the
+signals below and REVERSE-PROPOSE to the user: "shall I record this as
+a Task?". Do not create a Task silently without confirmation.
+
+### Capture signals
+
+- Imperative phrasing with a future action: "나중에 X 해야겠네", "이거
+  고쳐야지", "X 할 필요가 있네", "TODO:", "should eventually X".
+- A Decision artifact just landed and has unresolved execution steps —
+  propose one Task per execution step, linked back to the Decision via
+  relates_to=implements.
+- A Debug artifact resolved a bug without a regression test — propose
+  a Task for "add regression test for <slug>".
+- An Analysis artifact surfaced "open questions" — each open question
+  with a concrete next action becomes a Task candidate.
+- The user describes a plan with 3+ distinct steps ("먼저 X 하고, 그
+  다음에 Y, 마지막에 Z") — propose Tasks for each step.
+
+### Source separation
+
+Agents work from two kinds of substrate, and the Task body should be
+written differently for each:
+
+- **Code-derived Task** (implement a feature, fix a bug, refactor):
+  required — read the repo first, pin the exact paths/lines you'll
+  touch via pins[], set area_slug to the code's area. Do not write the
+  Task body from the user's words alone; cross-check against actual
+  file contents.
+- **Design / discussion / idea Task** (explore an approach, compare
+  options, draft a plan): pins optional. Link to the parent Analysis
+  or Decision artifact via relates_to. These tasks are where the user
+  and agent will collaborate next — keep the body short, acceptance
+  criteria concrete enough that "done" is unambiguous.
+
+### What to include
+
+- title: action-verb phrased ("Add retry backoff to payment gateway",
+  "Investigate session timeout hypothesis"). Avoid noun-only titles.
+- body: follow _template_task structure — 목적/범위/분석 요약/TODO
+  (acceptance criteria as checkbox list)/리소스/TC·DoD/Open issues.
+- relates_to: attach the parent Decision/Analysis/Debug so the Task
+  isn't orphaned.
+- pins: required when the Task touches code.
+
+### Anti-patterns
+
+- Do NOT propose a Task for trivial one-off comments ("let's discuss
+  this Friday" is not a Task).
+- Do NOT create a Task that duplicates an in-progress artifact. Run
+  the normal context.for_task / artifact.search step first.
+- Do NOT silently create a Task after the user has declined a proposal
+  in the same session — track per-session decline count.
+
 ## Referenced Confirmation protocol (M0.6)
 
 When you ask the user for approval, review, or a decision, always include:
