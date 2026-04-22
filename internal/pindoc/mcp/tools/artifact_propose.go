@@ -97,15 +97,30 @@ type artifactProposeBasis struct {
 	SourceSession string `json:"source_session,omitempty"`
 }
 
-// ArtifactPinInput is the agent-facing shape for a single code pin. `path`
-// is mandatory (enforced at DB level); everything else is optional because
-// agents frequently don't know the commit or lines precisely at write time.
+// ArtifactPinInput is the agent-facing shape for a single pin. `path` is
+// always mandatory (DB CHECK); the other fields depend on `kind`:
+//
+//	kind="code" (default) — repo, commit_sha, path (file path),
+//	                        lines_start/lines_end. Phase 11a original.
+//	kind="resource"       — path holds a typed resource reference like
+//	                        "aws:vpc:vpc-0c6bff25" or "k8s:ns:pod-123";
+//	                        repo/commit/lines are ignored.
+//	kind="url"            — path holds an absolute URL ("https://…");
+//	                        repo/commit/lines are ignored.
+//
+// Agents that don't set kind get "code" — preserves all Phase 11a call
+// sites without rewrite.
 type ArtifactPinInput struct {
-	Repo       string `json:"repo,omitempty" jsonschema:"'origin' default; named remote when multi-repo"`
-	CommitSHA  string `json:"commit_sha,omitempty"`
-	Path       string `json:"path"`
-	LinesStart int    `json:"lines_start,omitempty"`
-	LinesEnd   int    `json:"lines_end,omitempty"`
+	Kind       string `json:"kind,omitempty" jsonschema:"one of code | resource | url; default code"`
+	Repo       string `json:"repo,omitempty" jsonschema:"'origin' default; named remote when multi-repo; code kind only"`
+	CommitSHA  string `json:"commit_sha,omitempty" jsonschema:"code kind only"`
+	Path       string `json:"path" jsonschema:"code: file path; resource: typed resource ref; url: absolute URL"`
+	LinesStart int    `json:"lines_start,omitempty" jsonschema:"code kind only"`
+	LinesEnd   int    `json:"lines_end,omitempty" jsonschema:"code kind only"`
+}
+
+var validPinKinds = map[string]struct{}{
+	"code": {}, "resource": {}, "url": {},
 }
 
 // ArtifactRelationInput is the agent-facing shape for one edge.
@@ -940,19 +955,31 @@ func preflight(in *artifactProposeInput, lang string) (checklist []string, faile
 		}
 	}
 
-	// Phase 11a: shape-check pins + relates_to. Hard-blocks only on
-	// structurally invalid input (empty path, unknown relation). Missing
-	// entirely = soft (Phase 11b will escalate NEED_PIN for code-linked
+	// Phase 11a + 15c: shape-check pins + relates_to. Hard-blocks only on
+	// structurally invalid input (empty path, unknown relation/kind).
+	// Missing entirely = soft (future escalation NEED_PIN for code-linked
 	// types once search_receipt is in place).
 	for i, p := range in.Pins {
+		kind := strings.TrimSpace(p.Kind)
+		if kind == "" {
+			kind = "code"
+		}
+		if _, ok := validPinKinds[kind]; !ok {
+			push(fmt.Sprintf(i18n.T(lang, "preflight.pin_kind_invalid"), i, p.Kind), "PIN_KIND_INVALID")
+		}
 		if strings.TrimSpace(p.Path) == "" {
 			push(fmt.Sprintf(i18n.T(lang, "preflight.pin_path_empty"), i), "PIN_PATH_EMPTY")
 		}
-		if p.LinesStart < 0 || p.LinesEnd < 0 {
-			push(fmt.Sprintf(i18n.T(lang, "preflight.pin_lines_invalid"), i), "PIN_LINES_INVALID")
+		if kind == "code" {
+			if p.LinesStart < 0 || p.LinesEnd < 0 {
+				push(fmt.Sprintf(i18n.T(lang, "preflight.pin_lines_invalid"), i), "PIN_LINES_INVALID")
+			}
+			if p.LinesStart > 0 && p.LinesEnd > 0 && p.LinesEnd < p.LinesStart {
+				push(fmt.Sprintf(i18n.T(lang, "preflight.pin_lines_range"), i), "PIN_LINES_INVALID")
+			}
 		}
-		if p.LinesStart > 0 && p.LinesEnd > 0 && p.LinesEnd < p.LinesStart {
-			push(fmt.Sprintf(i18n.T(lang, "preflight.pin_lines_range"), i), "PIN_LINES_INVALID")
+		if kind == "url" && !strings.Contains(p.Path, "://") {
+			push(fmt.Sprintf(i18n.T(lang, "preflight.pin_url_invalid"), i), "PIN_URL_INVALID")
 		}
 	}
 	for i, r := range in.RelatesTo {
@@ -1141,7 +1168,7 @@ func patchFieldsFor(code string) []string {
 		return []string{"author_id"}
 	case "TYPE_INVALID":
 		return []string{"type"}
-	case "PIN_PATH_EMPTY", "PIN_LINES_INVALID":
+	case "PIN_PATH_EMPTY", "PIN_LINES_INVALID", "PIN_KIND_INVALID", "PIN_URL_INVALID":
 		return []string{"pins"}
 	case "REL_TARGET_EMPTY", "REL_INVALID":
 		return []string{"relates_to"}
@@ -1205,15 +1232,26 @@ func resolveRelatesTo(ctx context.Context, tx pgx.Tx, projectSlug string, relate
 func insertPins(ctx context.Context, tx pgx.Tx, artifactID string, pins []ArtifactPinInput) (int, error) {
 	n := 0
 	for _, p := range pins {
+		kind := strings.TrimSpace(p.Kind)
+		if kind == "" {
+			kind = "code"
+		}
 		repo := strings.TrimSpace(p.Repo)
 		if repo == "" {
 			repo = "origin"
 		}
+		// Non-code kinds don't use line ranges or commit_sha; null them
+		// out so the row is consistent with the kind semantics.
+		var commit any = nullIfEmpty(p.CommitSHA)
+		var linesStart any = nullIfZero(p.LinesStart)
+		var linesEnd any = nullIfZero(p.LinesEnd)
+		if kind != "code" {
+			commit, linesStart, linesEnd = nil, nil, nil
+		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO artifact_pins (artifact_id, repo, commit_sha, path, lines_start, lines_end)
-			VALUES ($1, $2, $3, $4, $5, $6)
-		`, artifactID, repo, nullIfEmpty(p.CommitSHA), p.Path,
-			nullIfZero(p.LinesStart), nullIfZero(p.LinesEnd),
+			INSERT INTO artifact_pins (artifact_id, kind, repo, commit_sha, path, lines_start, lines_end)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`, artifactID, kind, repo, commit, p.Path, linesStart, linesEnd,
 		); err != nil {
 			return n, fmt.Errorf("pin insert: %w", err)
 		}

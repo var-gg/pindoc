@@ -63,9 +63,12 @@ type artifactReadOutput struct {
 }
 
 // PinRef mirrors artifact_pins rows. Empty repo defaults to "origin" in
-// the migration, so we always have a non-empty value here.
+// the migration, so we always have a non-empty value here. Kind is
+// "code" | "resource" | "url" (Phase 15c); repo/commit_sha/lines_* are
+// only meaningful on kind="code".
 type PinRef struct {
-	Repo       string `json:"repo"`
+	Kind       string `json:"kind"`
+	Repo       string `json:"repo,omitempty"`
 	CommitSHA  string `json:"commit_sha,omitempty"`
 	Path       string `json:"path"`
 	LinesStart int    `json:"lines_start,omitempty"`
@@ -241,7 +244,7 @@ func summarizeBody(body string) string {
 
 func loadPins(ctx context.Context, deps Deps, artifactID string) ([]PinRef, error) {
 	rows, err := deps.DB.Query(ctx, `
-		SELECT repo, commit_sha, path, lines_start, lines_end
+		SELECT kind, repo, commit_sha, path, lines_start, lines_end
 		FROM artifact_pins
 		WHERE artifact_id = $1
 		ORDER BY id
@@ -256,7 +259,7 @@ func loadPins(ctx context.Context, deps Deps, artifactID string) ([]PinRef, erro
 		var p PinRef
 		var commitSHA *string
 		var linesStart, linesEnd *int
-		if err := rows.Scan(&p.Repo, &commitSHA, &p.Path, &linesStart, &linesEnd); err != nil {
+		if err := rows.Scan(&p.Kind, &p.Repo, &commitSHA, &p.Path, &linesStart, &linesEnd); err != nil {
 			return nil, err
 		}
 		if commitSHA != nil {
