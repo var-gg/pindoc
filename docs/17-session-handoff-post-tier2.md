@@ -258,6 +258,6 @@ Step 3  — Tier 3 착수 or 추가 handoff — docs/17 §Step 3
 
 ## 기록
 
-- 이 세션 커밋: `<이번 커밋 해시>` Phase 17 follow-up d — threshold 재조정
+- 이 세션 커밋: `b502411` Phase 17 follow-up d — threshold 재조정 + docs/17 handoff
 - 이전 handoff 체인: [13](./13-session-handoff-2026-04-22.md) → [15](./15-session-handoff-dogfood.md) → **17** (현재)
 - docs/16은 Tier 2 발행 프리플라이트 + Part C 실측 데이터로 유지 (aging ok)
