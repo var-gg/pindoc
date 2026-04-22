@@ -431,6 +431,10 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "q is required")
 		return
 	}
+	// include_templates=true surfaces _template_* artifacts. Default false
+	// matches MCP artifact.search / context.for_task / artifact list for
+	// the "sidebar count == list.length" invariant per the Phase 17 follow-up.
+	includeTemplates := r.URL.Query().Get("include_templates") == "true"
 	if d.Embedder == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"query": q, "hits": []any{}, "notice": "embedder not configured"})
 		return
@@ -451,7 +455,9 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 			FROM artifact_chunks c
 			JOIN artifacts a ON a.id = c.artifact_id
 			JOIN projects p ON p.id = a.project_id
-			WHERE p.slug = $2 AND a.status <> 'archived'
+			WHERE p.slug = $2
+			  AND a.status <> 'archived'
+			  AND ($3::bool OR NOT starts_with(a.slug, '_template_'))
 			ORDER BY c.artifact_id, distance
 		)
 		SELECT
@@ -462,7 +468,7 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 		JOIN areas     ar ON ar.id = a.area_id
 		ORDER BY s.distance
 		LIMIT 10
-	`, qVec, slug)
+	`, qVec, slug, includeTemplates)
 	if err != nil {
 		d.Logger.Error("search", "err", err)
 		writeError(w, http.StatusInternalServerError, "search failed")
@@ -492,10 +498,16 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, h)
 	}
+	info := d.Embedder.Info()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"query":        q,
 		"project_slug": slug,
 		"hits":         out,
+		"embedder_used": map[string]any{
+			"name":      info.Name,
+			"model_id":  info.ModelID,
+			"dimension": info.Dimension,
+		},
 	})
 }
 
