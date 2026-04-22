@@ -179,6 +179,22 @@ warnings 관찰:
 - Archived: `pindoc-m1-phase-chain-1-17` + `_test_preflight_smoke` = 2
 - Template: 4 (`_template_*`)
 
+### 5th pass (Author identity dual — 2026-04-23)
+
+저자 지적: "협업이 되려면 사용자 식별이 필요한데 `author_id=claude-code`로 뭉쳐져 있음. MCP 인증 생성 시 식별 이름 물어보는 것 말고 길이 안 보임." 이어 "E안(git config + prompt fallback) + 언제든 이름 수정 가능한 툴" 확정.
+
+**발행 결과**:
+
+| slug | 타입 | 핵심 |
+|---|---|---|
+| `decision-author-identity-dual` | Decision | `users` 테이블 + `artifacts.author_user_id` nullable. 수집 Opt E(git config 자동 + prompt fallback + env var 우선순위). `display_name` mutable via 신규 MCP tool `user.current`·`user.update`. Live FK(이름 변경 시 과거 artifact byline 자동 반영) + events audit. Agent-only write 원칙과 공존(operator metadata 예외) |
+| `task-author-user-schema` | Task (p1) | users migration + MCP tool 2개 + harness install prompt + Reader byline + pindoc-admin CLI. Phase 18 locale Task와 병렬 가능, 권장 순서 user→locale. pins=6, edges=3, warnings=[RECOMMEND_READ_BEFORE_CREATE] (Decision과 0.38 advisory) |
+
+**이 세션 최종 artifact 상태** (5th pass 시점):
+- Active non-template: 5 Tier1 + 7 Tier2 + 1 scope-summary + **10 Decision** + **8 Task**(Phase 18 + UI 6 + author user) = **31**
+- Archived: 2 (동일)
+- Template: 4
+
 ---
 
 ## 3. 다음 세션 착수 (Tier 3 잔여 + 관측)
