@@ -39,7 +39,7 @@ export function useReaderData(projectSlug: string, slug?: string, includeTemplat
       try {
         const [project, areasResp, listResp] = await Promise.all([
           api.project(projectSlug),
-          api.areas(projectSlug),
+          api.areas(projectSlug, { includeTemplates }),
           api.artifacts(projectSlug, { includeTemplates }),
         ]);
         // Only load detail when a slug is explicitly requested. The

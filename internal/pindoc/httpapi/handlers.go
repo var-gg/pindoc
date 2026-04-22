@@ -165,13 +165,20 @@ type areaRow struct {
 
 func (d Deps) handleAreas(w http.ResponseWriter, r *http.Request) {
 	slug := projectSlugFrom(r)
+	// include_templates=true counts _template_* artifacts in artifact_count.
+	// Must stay in lockstep with handleArtifactList's filter so Sidebar
+	// counts == list cardinality. Fixing the Phase 13 regression where
+	// counts included templates but the list excluded them.
+	includeTemplates := r.URL.Query().Get("include_templates") == "true"
 	rows, err := d.DB.Query(r.Context(), `
 		WITH p AS (SELECT id FROM projects WHERE slug = $1)
 		SELECT
 			a.id::text, a.slug, a.name, a.description,
 			parent.slug, a.is_cross_cutting,
 			(SELECT count(*) FROM artifacts x
-			  WHERE x.area_id = a.id AND x.status <> 'archived'),
+			  WHERE x.area_id = a.id
+			    AND x.status <> 'archived'
+			    AND ($2::bool OR NOT starts_with(x.slug, '_template_'))),
 			COALESCE(ARRAY(
 			  SELECT c.slug FROM areas c
 			  WHERE c.parent_id = a.id
@@ -181,7 +188,7 @@ func (d Deps) handleAreas(w http.ResponseWriter, r *http.Request) {
 		JOIN p ON a.project_id = p.id
 		LEFT JOIN areas parent ON parent.id = a.parent_id
 		ORDER BY a.is_cross_cutting, a.slug
-	`, slug)
+	`, slug, includeTemplates)
 	if err != nil {
 		d.Logger.Error("areas query", "err", err)
 		writeError(w, http.StatusInternalServerError, "query failed")

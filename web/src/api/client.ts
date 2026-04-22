@@ -180,8 +180,14 @@ export const api = {
 
   // Project-scoped
   project: (project: string) => j<Project>(p(project)),
-  areas: (project: string) =>
-    j<{ project_slug: string; areas: Area[] }>(`${p(project)}/areas`),
+  areas: (project: string, params?: { includeTemplates?: boolean }) => {
+    const qs = new URLSearchParams();
+    if (params?.includeTemplates) qs.set("include_templates", "true");
+    const q = qs.toString();
+    return j<{ project_slug: string; areas: Area[] }>(
+      `${p(project)}/areas${q ? `?${q}` : ""}`,
+    );
+  },
   artifacts: (project: string, params?: { area?: string; type?: string; includeTemplates?: boolean }) => {
     const qs = new URLSearchParams();
     if (params?.area) qs.set("area", params.area);

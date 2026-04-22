@@ -12,6 +12,12 @@ type areaListInput struct {
 	// flow for areas lands. Shipping the field shape early so agents don't
 	// need to relearn a new schema later.
 	IncludeArchived bool `json:"include_archived,omitempty" jsonschema:"reserved; has no effect yet"`
+	// IncludeTemplates controls whether _template_* artifacts are counted
+	// in artifact_count. Default false keeps counts aligned with the
+	// artifact list (which also hides templates by default). Flip true
+	// only when the caller already intends to fetch artifacts with
+	// include_templates=true, so the two responses stay in sync.
+	IncludeTemplates bool `json:"include_templates,omitempty" jsonschema:"count _template_* artifacts in artifact_count; default false matches artifact.search/list defaults"`
 }
 
 type AreaRef struct {
@@ -39,7 +45,7 @@ func RegisterAreaList(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.area.list",
 			Description: "List every Area in the current project. Use this to pick the right area_slug before pindoc.artifact.propose. Every artifact must live in exactly one Area (use 'misc' if nothing else fits, 'cross-cutting' for concerns that span all areas).",
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, _ areaListInput) (*sdk.CallToolResult, areaListOutput, error) {
+		func(ctx context.Context, _ *sdk.CallToolRequest, in areaListInput) (*sdk.CallToolResult, areaListOutput, error) {
 			rows, err := deps.DB.Query(ctx, `
 				WITH p AS (SELECT id FROM projects WHERE slug = $1)
 				SELECT
@@ -50,7 +56,9 @@ func RegisterAreaList(server *sdk.Server, deps Deps) {
 					parent.slug,
 					a.is_cross_cutting,
 					(SELECT count(*) FROM artifacts x
-					  WHERE x.area_id = a.id AND x.status <> 'archived'),
+					  WHERE x.area_id = a.id
+					    AND x.status <> 'archived'
+					    AND ($2::bool OR NOT starts_with(x.slug, '_template_'))),
 					COALESCE(ARRAY(
 					  SELECT c.slug FROM areas c
 					  WHERE c.parent_id = a.id
@@ -60,7 +68,7 @@ func RegisterAreaList(server *sdk.Server, deps Deps) {
 				JOIN p ON a.project_id = p.id
 				LEFT JOIN areas parent ON parent.id = a.parent_id
 				ORDER BY a.is_cross_cutting, a.slug
-			`, deps.ProjectSlug)
+			`, deps.ProjectSlug, in.IncludeTemplates)
 			if err != nil {
 				return nil, areaListOutput{}, fmt.Errorf("query areas: %w", err)
 			}
