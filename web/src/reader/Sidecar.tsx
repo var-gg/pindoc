@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { ArrowUpRight, History as HistoryIcon } from "lucide-react";
-import { api, type Artifact, type RevisionRow } from "../api/client";
+import { api, type Artifact, type EdgeRef, type RevisionRow } from "../api/client";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
 
@@ -77,20 +77,13 @@ export function Sidecar({ projectSlug, detail }: Props) {
         </div>
       </div>
 
-      <div className="relations">
-        {!hasSupersedes && (
-          <div className="relations__empty">{t("sidecar.no_relations")}</div>
-        )}
-        {hasSupersedes && (
-          <div className="relation">
-            <span className="relation__label">{t("sidecar.rel_supersedes")}</span>
-            <span className="relation__target">
-              <ArrowUpRight className="lucide" />
-              {detail.superseded_by}
-            </span>
-          </div>
-        )}
-      </div>
+      <ConnectedArtifacts
+        projectSlug={projectSlug}
+        relates={detail.relates_to ?? []}
+        relatedBy={detail.related_by ?? []}
+        hasSupersedes={hasSupersedes}
+        supersededBy={detail.superseded_by ?? ""}
+      />
 
       <RecentChanges projectSlug={projectSlug} slug={detail.slug} />
 
@@ -199,6 +192,125 @@ function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: strin
           {t("history.more_revisions", remainder)}
         </Link>
       )}
+    </div>
+  );
+}
+
+// ConnectedArtifacts renders typed edges (relates_to / related_by) as
+// clickable cards. This is the "Task hub → Wiki spoke" navigation layer
+// — a user viewing a Task sees every Decision / Analysis / Debug it
+// points to (or is pointed to by) one click away. Supersede relationship
+// still uses the dedicated field since it has product meaning beyond a
+// plain edge.
+function ConnectedArtifacts({
+  projectSlug,
+  relates,
+  relatedBy,
+  hasSupersedes,
+  supersededBy,
+}: {
+  projectSlug: string;
+  relates: EdgeRef[];
+  relatedBy: EdgeRef[];
+  hasSupersedes: boolean;
+  supersededBy: string;
+}) {
+  const { t } = useI18n();
+  const nothing = !hasSupersedes && relates.length === 0 && relatedBy.length === 0;
+
+  if (nothing) {
+    return (
+      <div className="relations">
+        <div className="relations__empty">{t("sidecar.no_relations")}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relations" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {hasSupersedes && (
+        <div className="relation">
+          <span className="relation__label">{t("sidecar.rel_supersedes")}</span>
+          <span className="relation__target">
+            <ArrowUpRight className="lucide" />
+            {supersededBy}
+          </span>
+        </div>
+      )}
+      {relates.length > 0 && (
+        <EdgeGroup
+          title={t("sidecar.rel_outgoing")}
+          edges={relates}
+          projectSlug={projectSlug}
+        />
+      )}
+      {relatedBy.length > 0 && (
+        <EdgeGroup
+          title={t("sidecar.rel_incoming")}
+          edges={relatedBy}
+          projectSlug={projectSlug}
+        />
+      )}
+    </div>
+  );
+}
+
+function EdgeGroup({
+  title,
+  edges,
+  projectSlug,
+}: {
+  title: string;
+  edges: EdgeRef[];
+  projectSlug: string;
+}) {
+  return (
+    <div>
+      <div
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          color: "var(--fg-3)",
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+          marginBottom: 4,
+        }}
+      >
+        {title}
+      </div>
+      <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+        {edges.map((e) => (
+          <li key={`${e.relation}-${e.artifact_id}`}>
+            <Link
+              to={`/p/${projectSlug}/wiki/${e.slug}`}
+              style={{
+                display: "flex",
+                gap: 6,
+                alignItems: "baseline",
+                padding: "4px 6px",
+                borderRadius: "var(--r-1)",
+                textDecoration: "none",
+                color: "var(--fg-1)",
+                fontSize: 12,
+              }}
+            >
+              <span
+                className="chip"
+                style={{
+                  fontSize: 9,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.03em",
+                }}
+                title={e.relation}
+              >
+                {e.relation}
+              </span>
+              <span style={{ fontSize: 10, color: "var(--fg-3)", fontFamily: "var(--font-mono)" }}>{e.type}</span>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{e.title}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

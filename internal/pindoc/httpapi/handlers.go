@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -212,17 +214,21 @@ func (d Deps) handleAreas(w http.ResponseWriter, r *http.Request) {
 }
 
 type artifactRow struct {
-	ID           string    `json:"id"`
-	Slug         string    `json:"slug"`
-	Type         string    `json:"type"`
-	Title        string    `json:"title"`
-	AreaSlug     string    `json:"area_slug"`
-	Completeness string    `json:"completeness"`
-	Status       string    `json:"status"`
-	ReviewState  string    `json:"review_state"`
-	AuthorID     string    `json:"author_id"`
-	PublishedAt  time.Time `json:"published_at,omitzero"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           string          `json:"id"`
+	Slug         string          `json:"slug"`
+	Type         string          `json:"type"`
+	Title        string          `json:"title"`
+	AreaSlug     string          `json:"area_slug"`
+	Completeness string          `json:"completeness"`
+	Status       string          `json:"status"`
+	ReviewState  string          `json:"review_state"`
+	AuthorID     string          `json:"author_id"`
+	PublishedAt  time.Time       `json:"published_at,omitzero"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+	// TaskMeta is raw JSONB for Task artifacts (Phase 15b). Pass-through
+	// to the client — Reader parses it to lay out the Tasks view as a
+	// kanban-lite grouped by status. null / omitted for non-Task.
+	TaskMeta json.RawMessage `json:"task_meta,omitempty"`
 }
 
 func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
@@ -237,7 +243,7 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 		SELECT
 			a.id::text, a.slug, a.type, a.title, ar.slug,
 			a.completeness, a.status, a.review_state,
-			a.author_id, a.published_at, a.updated_at
+			a.author_id, a.published_at, a.updated_at, a.task_meta
 		FROM artifacts a
 		JOIN projects p  ON p.id  = a.project_id
 		JOIN areas    ar ON ar.id = a.area_id
@@ -260,16 +266,20 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var a artifactRow
 		var publishedAt *time.Time
+		var taskMeta []byte
 		if err := rows.Scan(
 			&a.ID, &a.Slug, &a.Type, &a.Title, &a.AreaSlug,
 			&a.Completeness, &a.Status, &a.ReviewState,
-			&a.AuthorID, &publishedAt, &a.UpdatedAt,
+			&a.AuthorID, &publishedAt, &a.UpdatedAt, &taskMeta,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan failed")
 			return
 		}
 		if publishedAt != nil {
 			a.PublishedAt = *publishedAt
+		}
+		if len(taskMeta) > 0 {
+			a.TaskMeta = json.RawMessage(taskMeta)
 		}
 		out = append(out, a)
 	}
@@ -285,6 +295,20 @@ type artifactDetail struct {
 	Tags          []string  `json:"tags"`
 	AuthorVersion string    `json:"author_version,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
+	// Relates and RelatedBy (Phase 15b) surface artifact_edges to the
+	// Reader's Sidecar so users opening a Task/Decision see their
+	// connected artifacts as one-click cards instead of hunting through
+	// markdown references.
+	Relates   []edgeRef `json:"relates_to,omitempty"`
+	RelatedBy []edgeRef `json:"related_by,omitempty"`
+}
+
+type edgeRef struct {
+	ArtifactID string `json:"artifact_id"`
+	Slug       string `json:"slug"`
+	Type       string `json:"type"`
+	Title      string `json:"title"`
+	Relation   string `json:"relation"`
 }
 
 func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
@@ -298,12 +322,13 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	var a artifactDetail
 	var publishedAt *time.Time
 	var authorVer *string
+	var taskMeta []byte
 	err := d.DB.QueryRow(r.Context(), `
 		SELECT
 			a.id::text, a.slug, a.type, a.title, ar.slug,
 			a.completeness, a.status, a.review_state,
 			a.author_id, a.published_at, a.updated_at,
-			a.body_markdown, a.tags, a.author_version, a.created_at
+			a.body_markdown, a.tags, a.author_version, a.created_at, a.task_meta
 		FROM artifacts a
 		JOIN projects p  ON p.id  = a.project_id
 		JOIN areas    ar ON ar.id = a.area_id
@@ -313,7 +338,7 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		&a.ID, &a.Slug, &a.Type, &a.Title, &a.AreaSlug,
 		&a.Completeness, &a.Status, &a.ReviewState,
 		&a.AuthorID, &publishedAt, &a.UpdatedAt,
-		&a.BodyMarkdown, &a.Tags, &authorVer, &a.CreatedAt,
+		&a.BodyMarkdown, &a.Tags, &authorVer, &a.CreatedAt, &taskMeta,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "artifact not found")
@@ -330,7 +355,64 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	if authorVer != nil {
 		a.AuthorVersion = *authorVer
 	}
+	if len(taskMeta) > 0 {
+		a.TaskMeta = json.RawMessage(taskMeta)
+	}
+
+	// Load edges (best-effort — failure leaves the slices empty, artifact
+	// still renders). Outgoing (this → others) goes in Relates; incoming
+	// (others → this) in RelatedBy.
+	if outEdges, err := d.loadEdges(r.Context(), a.ID, "out"); err != nil {
+		d.Logger.Warn("edge outgoing lookup failed", "artifact_id", a.ID, "err", err)
+	} else {
+		a.Relates = outEdges
+	}
+	if inEdges, err := d.loadEdges(r.Context(), a.ID, "in"); err != nil {
+		d.Logger.Warn("edge incoming lookup failed", "artifact_id", a.ID, "err", err)
+	} else {
+		a.RelatedBy = inEdges
+	}
+
 	writeJSON(w, http.StatusOK, a)
+}
+
+// loadEdges returns artifact_edges rows from the perspective of the given
+// artifact ID. direction="out" lists outgoing edges (this artifact's
+// relates_to); direction="in" lists incoming (others pointing at this).
+// The target/source join resolves slug+type+title so the Reader can
+// render cards without a second fetch.
+func (d Deps) loadEdges(ctx context.Context, artifactID, direction string) ([]edgeRef, error) {
+	var sql string
+	switch direction {
+	case "out":
+		sql = `SELECT e.target_id::text, a.slug, a.type, a.title, e.relation
+			FROM artifact_edges e
+			JOIN artifacts a ON a.id = e.target_id
+			WHERE e.source_id = $1
+			ORDER BY e.created_at`
+	case "in":
+		sql = `SELECT e.source_id::text, a.slug, a.type, a.title, e.relation
+			FROM artifact_edges e
+			JOIN artifacts a ON a.id = e.source_id
+			WHERE e.target_id = $1
+			ORDER BY e.created_at`
+	default:
+		return nil, errors.New("bad direction")
+	}
+	rows, err := d.DB.Query(ctx, sql, artifactID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []edgeRef
+	for rows.Next() {
+		var e edgeRef
+		if err := rows.Scan(&e.ArtifactID, &e.Slug, &e.Type, &e.Title, &e.Relation); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {

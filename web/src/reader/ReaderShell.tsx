@@ -202,18 +202,22 @@ function Body({
       ? t("reader.empty_filtered", selectedType)
       : t("wiki.empty_list");
 
+  if (view === "tasks") {
+    return <TasksKanban projectSlug={projectSlug} list={list} currentSlug={currentSlug} empty={empty} />;
+  }
+
   return (
     <main className="content">
       <div className="reader-article">
         <div className="side-section" style={{ padding: "0 0 12px" }}>
-          {view === "tasks" ? t("nav.tasks") : t("wiki.section_artifacts")} · {list.length}
+          {t("wiki.section_artifacts")} · {list.length}
         </div>
         {list.length === 0 ? (
           <div style={{ color: "var(--fg-3)", fontSize: 13 }}>{empty}</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {list.map((a) => {
-              const linkBase = `/p/${projectSlug}/${view === "tasks" ? "tasks" : "wiki"}`;
+              const linkBase = `/p/${projectSlug}/wiki`;
               const isActive = currentSlug === a.slug;
               return (
                 <Link
@@ -239,5 +243,184 @@ function Body({
         )}
       </div>
     </main>
+  );
+}
+
+// Kanban-lite grouping: columns by task_meta.status. Artifacts without
+// task_meta fall into a "no status" column so they're still visible and
+// promote-able. Keep vertical list inside each column — full kanban
+// drag-drop is out of scope; Pindoc's write model is agent-only, and
+// users should request status transitions via agent, not mouse.
+const TASK_COLUMNS: Array<{ id: string; labelKey: string }> = [
+  { id: "todo", labelKey: "tasks.col_todo" },
+  { id: "in_progress", labelKey: "tasks.col_in_progress" },
+  { id: "blocked", labelKey: "tasks.col_blocked" },
+  { id: "done", labelKey: "tasks.col_done" },
+];
+
+function TasksKanban({
+  projectSlug,
+  list,
+  currentSlug,
+  empty,
+}: {
+  projectSlug: string;
+  list: ArtifactRef[];
+  currentSlug: string | undefined;
+  empty: string;
+}) {
+  const { t } = useI18n();
+
+  const groups = new Map<string, ArtifactRef[]>();
+  for (const col of TASK_COLUMNS) groups.set(col.id, []);
+  const noStatus: ArtifactRef[] = [];
+  const cancelled: ArtifactRef[] = [];
+
+  for (const a of list) {
+    const s = a.task_meta?.status;
+    if (s === "cancelled") {
+      cancelled.push(a);
+    } else if (s && groups.has(s)) {
+      groups.get(s)!.push(a);
+    } else {
+      noStatus.push(a);
+    }
+  }
+
+  if (list.length === 0) {
+    return (
+      <main className="content">
+        <div className="reader-article">
+          <div style={{ color: "var(--fg-3)", fontSize: 13 }}>{empty}</div>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="content">
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, minmax(220px, 1fr))",
+          gap: 12,
+          padding: "0 16px 24px",
+          overflowX: "auto",
+        }}
+      >
+        {TASK_COLUMNS.map((col) => (
+          <TaskColumn
+            key={col.id}
+            label={t(col.labelKey)}
+            items={groups.get(col.id) ?? []}
+            projectSlug={projectSlug}
+            currentSlug={currentSlug}
+          />
+        ))}
+      </div>
+      {noStatus.length > 0 && (
+        <div style={{ padding: "0 16px 16px" }}>
+          <TaskColumn
+            label={t("tasks.col_no_status")}
+            items={noStatus}
+            projectSlug={projectSlug}
+            currentSlug={currentSlug}
+            subtle
+          />
+        </div>
+      )}
+      {cancelled.length > 0 && (
+        <div style={{ padding: "0 16px 16px" }}>
+          <TaskColumn
+            label={t("tasks.col_cancelled")}
+            items={cancelled}
+            projectSlug={projectSlug}
+            currentSlug={currentSlug}
+            subtle
+          />
+        </div>
+      )}
+    </main>
+  );
+}
+
+function TaskColumn({
+  label,
+  items,
+  projectSlug,
+  currentSlug,
+  subtle,
+}: {
+  label: string;
+  items: ArtifactRef[];
+  projectSlug: string;
+  currentSlug: string | undefined;
+  subtle?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        background: subtle ? "var(--bg-0)" : "var(--bg-1)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--r-2)",
+        padding: "10px 10px 12px",
+        opacity: subtle ? 0.8 : 1,
+      }}
+    >
+      <div
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 11,
+          color: "var(--fg-3)",
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+          marginBottom: 8,
+        }}
+      >
+        {label} · {items.length}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {items.map((a) => {
+          const isActive = currentSlug === a.slug;
+          return (
+            <Link
+              key={a.id}
+              to={`/p/${projectSlug}/tasks/${a.slug}`}
+              className={`backlink${isActive ? " is-active" : ""}`}
+              style={{
+                ...(isActive
+                  ? {
+                      borderColor: "var(--accent)",
+                      background: "color-mix(in oklch, var(--accent) 10%, transparent)",
+                    }
+                  : {}),
+                padding: "8px 10px",
+              }}
+            >
+              <div className="backlink__head" style={{ gap: 6 }}>
+                {a.task_meta?.priority && (
+                  <span
+                    className="chip"
+                    title={`priority ${a.task_meta.priority}`}
+                    style={{ fontSize: 10 }}
+                  >
+                    {a.task_meta.priority.toUpperCase()}
+                  </span>
+                )}
+                <span style={{ fontSize: 13 }}>{a.title}</span>
+              </div>
+              <div className="backlink__excerpt" style={{ fontSize: 11 }}>
+                {a.area_slug}
+                {a.task_meta?.assignee ? ` · ${a.task_meta.assignee}` : ""}
+                {a.task_meta?.due_at ? ` · ~${new Date(a.task_meta.due_at).toLocaleDateString()}` : ""}
+              </div>
+            </Link>
+          );
+        })}
+        {items.length === 0 && (
+          <div style={{ color: "var(--fg-4)", fontSize: 11, fontStyle: "italic", padding: "4px 2px" }}>—</div>
+        )}
+      </div>
+    </div>
   );
 }

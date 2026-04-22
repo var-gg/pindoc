@@ -77,6 +77,20 @@ type artifactProposeInput struct {
 	// Unknown targets fail the whole call with RELATES_TARGET_NOT_FOUND.
 	RelatesTo []ArtifactRelationInput `json:"relates_to,omitempty" jsonschema:"typed edges to other artifacts"`
 
+	// TaskMeta carries typed tracker dimensions for type=Task artifacts
+	// (Phase 15b). Ignored for any other type. All fields optional:
+	//
+	//   status      — todo | in_progress | blocked | done | cancelled
+	//   priority    — p0 | p1 | p2 | p3
+	//   assignee    — free-form string; e.g. "@alice", "agent:claude-code"
+	//   due_at      — RFC3339 timestamp
+	//   parent_slug — another Task artifact's slug (for epic→task→subtask)
+	//
+	// On update_of path, TaskMeta (when present) REPLACES the previous
+	// task_meta entirely — there is no merge. Agents that want to change
+	// one field must include the full desired state.
+	TaskMeta *TaskMetaInput `json:"task_meta,omitempty" jsonschema:"tracker dims for Task artifacts"`
+
 	// Basis records the evidence the agent gathered before proposing.
 	// Phase 11b makes basis.search_receipt REQUIRED on the create path
 	// (new artifact, no update_of, no supersede_of): the server refuses
@@ -121,6 +135,23 @@ type ArtifactPinInput struct {
 
 var validPinKinds = map[string]struct{}{
 	"code": {}, "resource": {}, "url": {},
+}
+
+// TaskMetaInput is the agent-facing shape for a Task artifact's tracker
+// dimensions. Every field is optional; the server stores what's provided.
+type TaskMetaInput struct {
+	Status     string `json:"status,omitempty" jsonschema:"todo | in_progress | blocked | done | cancelled"`
+	Priority   string `json:"priority,omitempty" jsonschema:"p0 | p1 | p2 | p3"`
+	Assignee   string `json:"assignee,omitempty"`
+	DueAt      string `json:"due_at,omitempty" jsonschema:"RFC3339 timestamp"`
+	ParentSlug string `json:"parent_slug,omitempty" jsonschema:"slug of parent Task artifact"`
+}
+
+var validTaskStatuses = map[string]struct{}{
+	"todo": {}, "in_progress": {}, "blocked": {}, "done": {}, "cancelled": {},
+}
+var validTaskPriorities = map[string]struct{}{
+	"p0": {}, "p1": {}, "p2": {}, "p3": {},
 }
 
 // ArtifactRelationInput is the agent-facing shape for one edge.
@@ -484,17 +515,18 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			finalSlug := baseSlug
 			var newID string
 			var publishedAt time.Time
+			taskMetaJSON := taskMetaToJSON(in.Type, in.TaskMeta)
 			for attempt := 0; attempt < 10; attempt++ {
 				err = tx.QueryRow(ctx, `
 					INSERT INTO artifacts (
 						project_id, area_id, slug, type, title, body_markdown, tags,
 						completeness, status, review_state,
 						author_kind, author_id, author_version,
-						published_at
-					) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'published', 'auto_published', 'agent', $9, $10, now())
+						task_meta, published_at
+					) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'published', 'auto_published', 'agent', $9, $10, $11, now())
 					RETURNING id::text, published_at
 				`, projectID, areaID, finalSlug, in.Type, in.Title, in.BodyMarkdown, in.Tags,
-					completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion)).Scan(&newID, &publishedAt)
+					completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), taskMetaJSON).Scan(&newID, &publishedAt)
 				if err == nil {
 					break
 				}
@@ -774,6 +806,11 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 
 	var publishedAt time.Time
 	var slug string
+	// Decide whether to overwrite task_meta. Only overwrite when the
+	// caller explicitly sent a new TaskMeta — omitting it preserves the
+	// prior value so you can revise a Task's body without re-specifying
+	// status/priority every time.
+	taskMetaPatch := taskMetaToJSON(in.Type, in.TaskMeta)
 	err = tx.QueryRow(ctx, `
 		UPDATE artifacts
 		   SET title          = $2,
@@ -782,11 +819,12 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		       completeness   = $5,
 		       author_id      = $6,
 		       author_version = $7,
+		       task_meta      = COALESCE($8, task_meta),
 		       updated_at     = now()
 		 WHERE id = $1
 		RETURNING slug, COALESCE(published_at, now())
 	`, artifactID, in.Title, in.BodyMarkdown, in.Tags, completeness,
-		in.AuthorID, nullIfEmpty(in.AuthorVersion),
+		in.AuthorID, nullIfEmpty(in.AuthorVersion), taskMetaPatch,
 	).Scan(&slug, &publishedAt)
 	if err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("update head: %w", err)
@@ -994,6 +1032,32 @@ func preflight(in *artifactProposeInput, lang string) (checklist []string, faile
 		push(i18n.T(lang, "preflight.expected_version_negative"), "VER_INVALID")
 	}
 
+	// Phase 15b: task_meta shape. Only validated when provided and only
+	// meaningful on type=Task. Non-Task with task_meta earns a soft
+	// rejection so agents don't accidentally attach tracker dims to
+	// Decision/Analysis/etc. — that would make retrieval confusing.
+	if in.TaskMeta != nil {
+		if in.Type != "Task" {
+			push(i18n.T(lang, "preflight.task_meta_wrong_type"), "TASK_META_WRONG_TYPE")
+		}
+		tm := in.TaskMeta
+		if s := strings.TrimSpace(tm.Status); s != "" {
+			if _, ok := validTaskStatuses[s]; !ok {
+				push(fmt.Sprintf(i18n.T(lang, "preflight.task_status_invalid"), tm.Status), "TASK_STATUS_INVALID")
+			}
+		}
+		if p := strings.TrimSpace(tm.Priority); p != "" {
+			if _, ok := validTaskPriorities[p]; !ok {
+				push(fmt.Sprintf(i18n.T(lang, "preflight.task_priority_invalid"), tm.Priority), "TASK_PRIORITY_INVALID")
+			}
+		}
+		if d := strings.TrimSpace(tm.DueAt); d != "" {
+			if _, err := time.Parse(time.RFC3339, d); err != nil {
+				push(fmt.Sprintf(i18n.T(lang, "preflight.task_due_at_invalid"), tm.DueAt), "TASK_DUE_AT_INVALID")
+			}
+		}
+	}
+
 	return checklist, failed, code
 }
 
@@ -1170,6 +1234,8 @@ func patchFieldsFor(code string) []string {
 		return []string{"type"}
 	case "PIN_PATH_EMPTY", "PIN_LINES_INVALID", "PIN_KIND_INVALID", "PIN_URL_INVALID":
 		return []string{"pins"}
+	case "TASK_META_WRONG_TYPE", "TASK_STATUS_INVALID", "TASK_PRIORITY_INVALID", "TASK_DUE_AT_INVALID":
+		return []string{"task_meta"}
 	case "REL_TARGET_EMPTY", "REL_INVALID":
 		return []string{"relates_to"}
 	default:
@@ -1291,6 +1357,39 @@ func nullIfZero(n int) any {
 		return nil
 	}
 	return n
+}
+
+// taskMetaToJSON serialises input into JSONB for the artifacts.task_meta
+// column. Returns nil (= no overwrite) when the caller didn't send
+// task_meta at all. Returns '{}'-level empty object when all fields are
+// empty — lets the agent explicitly "clear" a Task's tracker dims.
+// Returns nil when the artifact isn't a Task so we never store task_meta
+// on, say, a Decision row.
+func taskMetaToJSON(artifactType string, tm *TaskMetaInput) any {
+	if tm == nil || artifactType != "Task" {
+		return nil
+	}
+	payload := map[string]any{}
+	if s := strings.TrimSpace(tm.Status); s != "" {
+		payload["status"] = s
+	}
+	if p := strings.TrimSpace(tm.Priority); p != "" {
+		payload["priority"] = p
+	}
+	if a := strings.TrimSpace(tm.Assignee); a != "" {
+		payload["assignee"] = a
+	}
+	if d := strings.TrimSpace(tm.DueAt); d != "" {
+		payload["due_at"] = d
+	}
+	if ps := strings.TrimSpace(tm.ParentSlug); ps != "" {
+		payload["parent_slug"] = ps
+	}
+	buf, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return string(buf)
 }
 
 // semanticConflictThreshold is the cosine-distance ceiling below which we

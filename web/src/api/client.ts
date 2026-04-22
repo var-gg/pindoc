@@ -53,6 +53,22 @@ export type Area = {
   children_slugs?: string[];
 };
 
+export type TaskMeta = {
+  status?: "todo" | "in_progress" | "blocked" | "done" | "cancelled";
+  priority?: "p0" | "p1" | "p2" | "p3";
+  assignee?: string;
+  due_at?: string;
+  parent_slug?: string;
+};
+
+export type EdgeRef = {
+  artifact_id: string;
+  slug: string;
+  type: string;
+  title: string;
+  relation: string;
+};
+
 export type ArtifactRef = {
   id: string;
   slug: string;
@@ -65,6 +81,7 @@ export type ArtifactRef = {
   author_id: string;
   published_at?: string;
   updated_at: string;
+  task_meta?: TaskMeta;
 };
 
 export type Artifact = ArtifactRef & {
@@ -73,6 +90,8 @@ export type Artifact = ArtifactRef & {
   author_version?: string;
   superseded_by?: string;
   created_at: string;
+  relates_to?: EdgeRef[];
+  related_by?: EdgeRef[];
 };
 
 export type SearchHit = {
