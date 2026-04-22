@@ -29,6 +29,14 @@
 - UI: `/wiki/:slug/history`, `/wiki/:slug/diff?from=&to=` (이후 Phase 8에서 `/p/:project/wiki/...`)
 - PINDOC.md 템플릿에 update flow 문서화
 
+### Phase 15 — Dogfood-driven UX 완결 (2026-04-22 완료)
+저자가 1호 사용자 관점에서 "지금 필요한" 네 가지 묶음. "V1.x 미루기" 패턴을 명시적으로 거부.
+
+- **15D**: [harness_install.go](../internal/pindoc/mcp/tools/harness_install.go) PINDOC.md 템플릿에 "Task auto-proposal heuristic" 섹션 — imperative 표현 / Decision 후속 / Debug regression test / Analysis open questions 등 capture signals + code-derived vs design Task 구분 + anti-patterns.
+- **15A**: Migration 0008 `architecture` 하위 `embedding-layer` / `mcp-surface` sub-area seed. [Sidebar.tsx](../web/src/reader/Sidebar.tsx) 재귀 `AreaTreeNode` + chevron toggle. DB parent_id schema는 0001부터 있던 것 — UI만 보완.
+- **15C**: Migration 0009 `artifact_pins.kind` enum (`code | resource | url`). 인프라/URL 참조 artifact가 path에 억지 string 안 넣어도 됨. Preflight + PinRef 응답 필드 확장.
+- **15B**: Migration 0010 `artifacts.task_meta JSONB` + 부분 인덱스. TaskMetaInput (status/priority/assignee/due_at/parent_slug). Preflight 검증 + 4 stable codes. HTTP list/detail에 task_meta + edges 노출. Reader Tasks → kanban-lite (4 column + no_status/cancelled) + Sidecar `ConnectedArtifacts` (outgoing/incoming edges 카드). Drag-drop 의도적 미구현 (agent-only write 원칙).
+
 ### Phase 14 — Operator settings + contract hardening (2026-04-22 완료)
 3차 피어리뷰 반영. 수용 8 / 반려 10 / 놓침 3 — [docs/14 §9](./14-peer-review-response.md) 참조.
 
@@ -108,18 +116,24 @@
 
 ---
 
-## 2. 다음 작업 — M1 안정화 + 외부 peer review 3차
+## 2. 다음 작업 — 실 dogfood + V1.5 auth
 
-Phase 8~13 전부 완료. M1 구현 블록 끝. 다음 큰 선택지:
+Phase 8~15 전부 완료. M1 구현 + 3차 peer review + 1호 사용자 dogfood readiness 모두 마감. 다음 큰 선택지:
 
-### 옵션 A: 외부 3차 peer review 받기
-현재 repo 상태로 다시 외부 고급추론 리포트 돌려 반영. 1차·2차 리포트 반영 결과 검증.
+### 옵션 A: 실 dogfood 시작 (저자가 pindoc을 pindoc으로 관리)
+- 기존 wikijs + OpenProject 흐름을 pindoc MCP로 전환
+- 실사용 중 발견되는 UX/bug/gap 수집 → 4차 리뷰 or 직접 반영
+- 관찰할 지표: NO_SRCH / POSSIBLE_DUP / CONFLICT_EXACT_TITLE 빈도, task_meta.status 전환 패턴, Area tree 실제 깊이, pin kind 분포
 
-### 옵션 B: dogfood + 버그 정리
-실제 Pindoc 작업 자체를 pindoc을 통해 하면서 발견되는 UX/버그 정리. Reader UI의 template 표시, stale widget, agent_id 표시 등 세부 폴리싱.
+### 옵션 B: V1.5 인증 착수
+- GitHub OAuth + agent token (per-project scope) + per-project ACL
+- MCP tool 응답에 server-resolved principal 바인딩 (현 `agent_id`를 actor_id 정식화)
+- Settings UI 구현 (현 `pindoc-admin` CLI 대체)
+- Hot reload settings (Phase 14에서 숙제로 남긴 것)
 
-### 옵션 C: V1.5 착수 — 인증
-GitHub OAuth + agent token + per-project ACL. [docs/12 §V1.5 블록](./12-m1-implementation-plan.md).
+### 옵션 C: 4차 외부 peer review
+- Phase 14 + 15 반영 후 상태로 돌려보기
+- Dogfood 전에 받는 의미는 있을지 판단 필요
 
 저자 결정 대기.
 

@@ -232,6 +232,34 @@ claude mcp list           # pindoc 있음
 - **Actor hardening (stdio)**: `author_id`는 표시용 metadata로 재정의. 서버가 session 단위 `agent_id` (UUID) 를 ping 첫 호출 시 발급, propose 감사에 기록. `author_id` spoof 공격 surface 축소.
 - **Mode split은 not_ready 응답에만 한정 (2차 피어리뷰 권고 축소 반영)**: default는 compact (fail codes만), `verbose` 모드에서 자연어 hint 추가. tool 전체에 mode 파라미터 붙이는 건 현 규모에서 과설계 — 반려.
 
+## Phase 15 — Dogfood-driven UX 완결 (완료 · 2026-04-22)
+
+저자가 1호 사용자로 쓰기 시작할 때 당장 막힐 지점을 좁혀 해소. "V1.x로 미루지 말고 지금 가치 있는 것" 관점.
+
+**15D — Task auto-proposal heuristic**:
+- `harness_install.go` PINDOC.md 템플릿에 "Task 제안 조건" 섹션 추가. Capture signals (imperative 표현 / Decision 후속 / Debug 후속 / Analysis open questions / 3+ step plans), source 분리 (code-derived vs design/idea), 포함할 것, anti-patterns.
+
+**15A — Area hierarchy UI**:
+- DB schema는 `parent_id` 이미 있었음 (0001). Seed가 flat이라 UI가 flat으로 보였던 것.
+- Migration 0008에서 `architecture` 하위 `embedding-layer`, `mcp-surface` seed (예시).
+- Reader Sidebar가 재귀 `AreaTreeNode` 컴포넌트로 전환. Chevron toggle (접기/펼치기), 들여쓰기 (`paddingLeft = 8 + level*14`), 기본 전개. Cross-cutting area는 트리 밖 유지.
+
+**15C — Pin kind enum**:
+- Migration 0009에서 `artifact_pins.kind TEXT DEFAULT 'code'` 추가. Enum: `code | resource | url`.
+- AWS 인프라 스냅샷 같은 Analysis artifact가 `path`에 "aws://vpc-..." 억지로 넣지 않아도 됨.
+- `kind=code`: 기존 schema 그대로. `kind=resource`: path가 typed resource ref. `kind=url`: path가 절대 URL.
+- Preflight 검증: `PIN_KIND_INVALID`, `PIN_URL_INVALID` 추가.
+- `artifact.read` PinRef에 `kind` 필드 노출.
+
+**15B — Task meta + Kanban-lite + Sidecar 연결 카드**:
+- Migration 0010에서 `artifacts.task_meta JSONB` + `idx_artifacts_task_status` 부분 인덱스.
+- `TaskMetaInput`: status / priority / assignee / due_at / parent_slug (모두 optional).
+- `artifact.propose` 검증: status/priority enum, due_at RFC3339, non-Task + task_meta = 거절. 새 stable codes 4개.
+- HTTP API: list + detail 응답에 task_meta. Detail에 `relates_to` / `related_by` edges.
+- Reader Tasks view → kanban-lite: 4 column (To do / In progress / Blocked / Done) + "No status" / "Cancelled" 하위 섹션. Priority chip + assignee + due date 카드에 표시.
+- Sidecar `ConnectedArtifacts`: outgoing/incoming edges를 one-click 카드로 렌더 — "Task hub → Wiki spoke" 네비게이션 완결.
+- Drag-drop 미구현 (의도적): write 모델이 agent-only, 사용자는 agent에게 상태 전환 요청.
+
 ## Phase 14 — Operator settings + contract hardening (완료 · 2026-04-22)
 
 3차 외부 피어리뷰 반영. 수용 목록은 [docs/14 §9](./14-peer-review-response.md) 참조.
