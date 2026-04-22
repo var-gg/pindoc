@@ -24,6 +24,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	pmcp "github.com/var-gg/pindoc/internal/pindoc/mcp"
+	"github.com/var-gg/pindoc/internal/pindoc/settings"
 )
 
 // Build-time variables. Set via -ldflags in release builds.
@@ -85,6 +86,25 @@ func main() {
 		logger.Warn("using stub embedder — retrieval quality is hash-based, not semantic. Set PINDOC_EMBED_PROVIDER=http + PINDOC_EMBED_ENDPOINT=... to enable real embeddings.")
 	}
 
+	// Phase 14a: operator-editable settings, loaded from DB with one-time
+	// env seed for first-boot convenience. docker-compose can pass
+	// PINDOC_PUBLIC_BASE_URL; after first successful write the DB value
+	// is authoritative and env changes are ignored (Ghost / Plausible
+	// pattern — avoids the "UI change silently overridden by env" trap).
+	ssStore, err := settings.New(ctx, pool)
+	if err != nil {
+		logger.Error("settings load failed", "err", err)
+		os.Exit(1)
+	}
+	if seeded, err := ssStore.SeedFromEnv(ctx, "public_base_url", os.Getenv("PINDOC_PUBLIC_BASE_URL")); err != nil {
+		logger.Warn("settings seed from env failed", "err", err)
+	} else if seeded {
+		logger.Info("settings seeded from env", "key", "public_base_url")
+	}
+	logger.Info("settings ready",
+		"public_base_url", ssStore.Get().PublicBaseURL,
+	)
+
 	// Phase 12c: server-issued agent identity for this stdio subprocess.
 	// Takes the env value when set (so a wrapper script can pin an agent
 	// to a stable id across restarts), otherwise mints a fresh random one.
@@ -106,6 +126,7 @@ func main() {
 		DB:       pool,
 		Embedder: embedder,
 		AgentID:  agentID,
+		Settings: ssStore,
 	})
 
 	err = server.Run(ctx, &sdk.StdioTransport{})

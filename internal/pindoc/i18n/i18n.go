@@ -49,6 +49,7 @@ var bundle = Bundle{
 		"preflight.rel_target_missing":       "✗ relates_to[%d] target %q not found in this project",
 		"preflight.expected_version_negative": "✗ expected_version cannot be negative",
 		"preflight.ver_conflict":             "✗ expected_version=%d but current head is %d — re-read and retry",
+		"preflight.need_ver":                 "✗ expected_version is required on the update path (current head = %d). Pass it back via artifact.propose input.",
 		"preflight.update_supersede_exclusive": "✗ update_of and supersede_of are mutually exclusive; pick one",
 		"preflight.supersede_target_missing":   "✗ supersede_of target %q not found in this project",
 
@@ -102,6 +103,7 @@ var bundle = Bundle{
 		"preflight.rel_target_missing":       "✗ relates_to[%d] 대상 %q 를 이 프로젝트에서 찾을 수 없음",
 		"preflight.expected_version_negative": "✗ expected_version은 음수일 수 없음",
 		"preflight.ver_conflict":             "✗ expected_version=%d 이지만 현재 head는 %d — 다시 읽고 재시도",
+		"preflight.need_ver":                 "✗ update 경로에는 expected_version 필수 (현재 head=%d). artifact.propose 입력에 포함하세요.",
 		"preflight.update_supersede_exclusive": "✗ update_of와 supersede_of는 동시 사용 불가 — 하나만 선택",
 		"preflight.supersede_target_missing":   "✗ supersede_of 대상 %q 를 이 프로젝트에서 찾을 수 없음",
 

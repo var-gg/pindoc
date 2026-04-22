@@ -21,6 +21,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/httpapi"
+	"github.com/var-gg/pindoc/internal/pindoc/settings"
 )
 
 var (
@@ -55,6 +56,26 @@ func main() {
 	}
 	defer pool.Close()
 
+	// Apply migrations — keeps pindoc-api startable even if pindoc-server
+	// hasn't run yet (operator-first self-host deploys often hit the HTTP
+	// path before any agent session). Migrations are idempotent per
+	// schema_migrations row.
+	if err := db.Migrate(ctx, pool.Pool); err != nil {
+		logger.Error("db migrate", "err", err)
+		os.Exit(1)
+	}
+
+	ssStore, err := settings.New(ctx, pool)
+	if err != nil {
+		logger.Error("settings load", "err", err)
+		os.Exit(1)
+	}
+	if seeded, err := ssStore.SeedFromEnv(ctx, "public_base_url", os.Getenv("PINDOC_PUBLIC_BASE_URL")); err != nil {
+		logger.Warn("settings seed from env failed", "err", err)
+	} else if seeded {
+		logger.Info("settings seeded from env", "key", "public_base_url")
+	}
+
 	embedder, err := embed.Build(cfg.Embed)
 	if err != nil {
 		logger.Error("embed build", "err", err)
@@ -67,6 +88,7 @@ func main() {
 		DefaultProjectSlug: cfg.ProjectSlug,
 		MultiProject:       cfg.MultiProject,
 		Embedder:           embedder,
+		Settings:           ssStore,
 		Version:            version,
 		BuildCommit:        commit,
 	})

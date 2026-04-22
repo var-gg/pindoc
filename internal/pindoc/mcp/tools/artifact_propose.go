@@ -138,7 +138,12 @@ type artifactProposeOutput struct {
 	// HumanURL is the /p/:project/wiki/:slug path an agent pastes into
 	// chat so the user can open the Reader in a browser. Relative because
 	// the external origin belongs to the user's deployment.
-	HumanURL       string    `json:"human_url,omitempty"`
+	HumanURL string `json:"human_url,omitempty"`
+	// HumanURLAbs is the absolute URL when server_settings.public_base_url
+	// is configured. Empty otherwise. Agents should prefer HumanURLAbs
+	// for out-of-context shares (chat / PR / email) and fall back to
+	// HumanURL only for same-origin contexts.
+	HumanURLAbs    string    `json:"human_url_abs,omitempty"`
 	PublishedAt    time.Time `json:"published_at,omitzero"`
 	Created        bool      `json:"created"`         // false on updates
 	RevisionNumber int       `json:"revision_number"` // 1 on create, N+1 on update
@@ -157,19 +162,30 @@ type artifactProposeOutput struct {
 	// natural language.
 	NextTools []string     `json:"next_tools,omitempty"`
 	Related   []RelatedRef `json:"related,omitempty"`
+	// PatchableFields (Phase 14b) tells the agent which input fields to
+	// change for the retry. Empty = full input needs rework. Maps stable
+	// fail codes to the minimum patch surface so agents don't resend
+	// entire propose bodies they didn't need to touch.
+	PatchableFields []string `json:"patchable_fields,omitempty"`
+	// Warnings (Phase 14b) surface advisory flags on otherwise-accepted
+	// writes. Current set: RECOMMEND_READ_BEFORE_CREATE when a create
+	// passed but a semantic close match existed — the agent did not read
+	// it. Agents should log/surface; not a block.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // RelatedRef is a compact pointer to another artifact the caller should
 // read. Both agent_ref and human_url are always populated so the agent
 // re-feeds one and shares the other with the user.
 type RelatedRef struct {
-	ID       string `json:"id,omitempty"`
-	Slug     string `json:"slug"`
-	Type     string `json:"type,omitempty"`
-	Title    string `json:"title,omitempty"`
-	AgentRef string `json:"agent_ref"`
-	HumanURL string `json:"human_url"`
-	Reason   string `json:"reason,omitempty"`
+	ID          string `json:"id,omitempty"`
+	Slug        string `json:"slug"`
+	Type        string `json:"type,omitempty"`
+	Title       string `json:"title,omitempty"`
+	AgentRef    string `json:"agent_ref"`
+	HumanURL    string `json:"human_url"`
+	HumanURLAbs string `json:"human_url_abs,omitempty"`
+	Reason      string `json:"reason,omitempty"`
 }
 
 // RegisterArtifactPropose wires pindoc.artifact.propose — the only write
@@ -201,7 +217,8 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						i18n.T(lang, "suggested.confirm_types"),
 						i18n.T(lang, "suggested.use_misc"),
 					},
-					NextTools: defaultNextTools(code),
+					NextTools:       defaultNextTools(code),
+					PatchableFields: patchFieldsFor(code),
 				}, nil
 			}
 
@@ -215,6 +232,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 					Checklist:        []string{i18n.T(lang, "preflight.update_supersede_exclusive")},
 					SuggestedActions: []string{i18n.T(lang, "suggested.pick_one_mode")},
 					NextTools:        defaultNextTools("UPDATE_SUPERSEDE_EXCLUSIVE"),
+					PatchableFields:  patchFieldsFor("UPDATE_SUPERSEDE_EXCLUSIVE"),
 				}, nil
 			}
 
@@ -249,7 +267,8 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						i18n.T(lang, "suggested.list_areas"),
 						i18n.T(lang, "suggested.area_or_misc"),
 					},
-					NextTools: defaultNextTools("AREA_NOT_FOUND"),
+					NextTools:       defaultNextTools("AREA_NOT_FOUND"),
+					PatchableFields: patchFieldsFor("AREA_NOT_FOUND"),
 				}, nil
 			}
 			if err != nil {
@@ -275,6 +294,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						Checklist:        []string{i18n.T(lang, "preflight.no_search_receipt")},
 						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
 						NextTools:        defaultNextTools("NO_SRCH"),
+						PatchableFields:  patchFieldsFor("NO_SRCH"),
 					}, nil
 				}
 				res := deps.Receipts.Verify(receipt, deps.ProjectSlug)
@@ -287,6 +307,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						Checklist:        []string{i18n.T(lang, "preflight.receipt_unknown")},
 						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
 						NextTools:        defaultNextTools("RECEIPT_UNKNOWN"),
+						PatchableFields:  patchFieldsFor("RECEIPT_UNKNOWN"),
 					}, nil
 				case res.Expired:
 					return nil, artifactProposeOutput{
@@ -296,6 +317,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						Checklist:        []string{i18n.T(lang, "preflight.receipt_expired")},
 						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
 						NextTools:        defaultNextTools("RECEIPT_EXPIRED"),
+						PatchableFields:  patchFieldsFor("RECEIPT_EXPIRED"),
 					}, nil
 				case res.WrongProject:
 					return nil, artifactProposeOutput{
@@ -305,6 +327,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						Checklist:        []string{i18n.T(lang, "preflight.receipt_wrong_project")},
 						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
 						NextTools:        defaultNextTools("RECEIPT_WRONG_PROJECT"),
+						PatchableFields:  patchFieldsFor("RECEIPT_WRONG_PROJECT"),
 					}, nil
 				}
 			}
@@ -332,7 +355,8 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						Checklist: []string{
 							fmt.Sprintf(i18n.T(lang, "preflight.supersede_target_missing"), in.SupersedeOf),
 						},
-						NextTools: defaultNextTools("SUPERSEDE_TARGET_NOT_FOUND"),
+						NextTools:       defaultNextTools("SUPERSEDE_TARGET_NOT_FOUND"),
+						PatchableFields: patchFieldsFor("SUPERSEDE_TARGET_NOT_FOUND"),
 					}, nil
 				}
 				if err != nil {
@@ -366,9 +390,10 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 							fmt.Sprintf(i18n.T(lang, "suggested.read_existing"), existingSlug),
 							i18n.T(lang, "suggested.pick_title"),
 						},
-						NextTools: defaultNextTools("CONFLICT_EXACT_TITLE"),
+						NextTools:       defaultNextTools("CONFLICT_EXACT_TITLE"),
+						PatchableFields: patchFieldsFor("CONFLICT_EXACT_TITLE"),
 						Related: []RelatedRef{
-							makeRelated(deps.ProjectSlug, existingSlug, existingID, "", in.Title, "exact title match"),
+							makeRelated(deps, existingSlug, existingID, "", in.Title, "exact title match"),
 						},
 					}, nil
 				}
@@ -393,7 +418,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						for _, c := range candidates {
 							rel = append(rel, fmt.Sprintf("[%s] %s — /p/%s/wiki/%s (distance %.3f)", c.Type, c.Title, deps.ProjectSlug, c.Slug, c.Distance))
 							related = append(related, makeRelated(
-								deps.ProjectSlug, c.Slug, c.ArtifactID, c.Type, c.Title,
+								deps, c.Slug, c.ArtifactID, c.Type, c.Title,
 								fmt.Sprintf("cosine distance %.3f", c.Distance),
 							))
 						}
@@ -408,8 +433,9 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 								[]string{i18n.T(lang, "suggested.read_similar")},
 								rel...,
 							),
-							NextTools: defaultNextTools("POSSIBLE_DUP"),
-							Related:   related,
+							NextTools:       defaultNextTools("POSSIBLE_DUP"),
+							PatchableFields: patchFieldsFor("POSSIBLE_DUP"),
+							Related:         related,
 						}, nil
 					}
 				}
@@ -553,18 +579,21 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 					"artifact_id", newID, "err", err)
 			}
 
+			warnings := createWarnings(ctx, deps, projectID, in.Title, in.BodyMarkdown)
 			return nil, artifactProposeOutput{
 				Status:         "accepted",
 				ArtifactID:     newID,
 				Slug:           finalSlug,
 				AgentRef:       "pindoc://" + finalSlug,
 				HumanURL:       HumanURL(deps.ProjectSlug, finalSlug),
+				HumanURLAbs:    AbsHumanURL(deps.Settings, deps.ProjectSlug, finalSlug),
 				PublishedAt:    publishedAt,
 				Created:        true,
 				RevisionNumber: 1,
 				PinsStored:     pinsStored,
 				EdgesStored:    edgesStored,
 				Superseded:     supersededFlag,
+				Warnings:       warnings,
 			}, nil
 		},
 	)
@@ -583,6 +612,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 			SuggestedActions: []string{
 				i18n.T(lang, "suggested.commit_msg_hint"),
 			},
+			PatchableFields: patchFieldsFor("MISSING_COMMIT_MSG"),
 		}, nil
 	}
 
@@ -609,17 +639,40 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 			SuggestedActions: []string{
 				i18n.T(lang, "suggested.list_areas"),
 			},
-			NextTools: defaultNextTools("UPDATE_TARGET_NOT_FOUND"),
+			NextTools:       defaultNextTools("UPDATE_TARGET_NOT_FOUND"),
+			PatchableFields: patchFieldsFor("UPDATE_TARGET_NOT_FOUND"),
 		}, nil
 	}
 	if err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("resolve update target: %w", err)
 	}
 
-	// Optimistic lock: if the agent asserted a version, fail fast when
-	// another writer has already advanced the head. Unset = trust whatever
-	// head is (legacy behaviour).
-	if in.ExpectedVersion > 0 && in.ExpectedVersion != lastRev {
+	// Phase 14b: expected_version is HARD REQUIRED on the update path.
+	// Absence = NEED_VER. Rationale: reading the artifact to discover the
+	// current version is an implicit "agent read this target before
+	// updating it" gate. Without the requirement an over-confident agent
+	// can overwrite stale context.
+	if in.ExpectedVersion == 0 {
+		return nil, artifactProposeOutput{
+			Status:    "not_ready",
+			ErrorCode: "NEED_VER",
+			Failed:    []string{"NEED_VER"},
+			Checklist: []string{
+				fmt.Sprintf(i18n.T(lang, "preflight.need_ver"), lastRev),
+			},
+			SuggestedActions: []string{
+				i18n.T(lang, "suggested.reread_before_update"),
+			},
+			NextTools:       defaultNextTools("UPDATE_TARGET_NOT_FOUND"), // artifact.revisions / artifact.search
+			PatchableFields: patchFieldsFor("NEED_VER"),
+			Related: []RelatedRef{
+				makeRelated(deps, ref, artifactID, "", currentTitle, fmt.Sprintf("current revision = %d; pass expected_version = %d", lastRev, lastRev)),
+			},
+		}, nil
+	}
+
+	// Optimistic lock: version provided but stale → VER_CONFLICT.
+	if in.ExpectedVersion != lastRev {
 		return nil, artifactProposeOutput{
 			Status:    "not_ready",
 			ErrorCode: "VER_CONFLICT",
@@ -630,7 +683,11 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 			SuggestedActions: []string{
 				i18n.T(lang, "suggested.reread_before_update"),
 			},
-			NextTools: defaultNextTools("VER_CONFLICT"),
+			NextTools:       defaultNextTools("VER_CONFLICT"),
+			PatchableFields: patchFieldsFor("VER_CONFLICT"),
+			Related: []RelatedRef{
+				makeRelated(deps, ref, artifactID, "", currentTitle, fmt.Sprintf("current revision = %d, not %d", lastRev, in.ExpectedVersion)),
+			},
 		}, nil
 	}
 
@@ -645,6 +702,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 			SuggestedActions: []string{
 				i18n.T(lang, "suggested.verify_diff"),
 			},
+			PatchableFields: []string{"body_markdown", "title"},
 		}, nil
 	}
 
@@ -663,7 +721,8 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 			Checklist: []string{
 				fmt.Sprintf(i18n.T(lang, "preflight.area_not_found"), in.AreaSlug, deps.ProjectSlug),
 			},
-			NextTools: defaultNextTools("AREA_NOT_FOUND"),
+			NextTools:       defaultNextTools("AREA_NOT_FOUND"),
+			PatchableFields: patchFieldsFor("AREA_NOT_FOUND"),
 		}, nil
 	}
 
@@ -767,6 +826,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		Slug:           slug,
 		AgentRef:       "pindoc://" + slug,
 		HumanURL:       HumanURL(deps.ProjectSlug, slug),
+		HumanURLAbs:    AbsHumanURL(deps.Settings, deps.ProjectSlug, slug),
 		PublishedAt:    publishedAt,
 		Created:        false,
 		RevisionNumber: newRev,
@@ -1030,15 +1090,63 @@ func defaultNextTools(code string) []string {
 // makeRelated builds a RelatedRef from the minimal fields most not_ready
 // sites have on hand. Empty ID is fine — slug alone is stable for URL
 // construction.
-func makeRelated(projectSlug, slug, id, artType, title, reason string) RelatedRef {
+func makeRelated(deps Deps, slug, id, artType, title, reason string) RelatedRef {
 	return RelatedRef{
-		ID:       id,
-		Slug:     slug,
-		Type:     artType,
-		Title:    title,
-		AgentRef: "pindoc://" + slug,
-		HumanURL: HumanURL(projectSlug, slug),
-		Reason:   reason,
+		ID:          id,
+		Slug:        slug,
+		Type:        artType,
+		Title:       title,
+		AgentRef:    "pindoc://" + slug,
+		HumanURL:    HumanURL(deps.ProjectSlug, slug),
+		HumanURLAbs: AbsHumanURL(deps.Settings, deps.ProjectSlug, slug),
+		Reason:      reason,
+	}
+}
+
+// patchFieldsFor maps a stable fail code to the minimum set of input
+// fields an agent should change to pass the retry. Empty set means
+// "rework the whole submission" (schema problems, etc.). Mirrors the 3rd
+// peer review's `patchable_fields[]` proposal.
+func patchFieldsFor(code string) []string {
+	switch code {
+	case "NO_SRCH", "RECEIPT_UNKNOWN", "RECEIPT_EXPIRED", "RECEIPT_WRONG_PROJECT":
+		return []string{"basis.search_receipt"}
+	case "NEED_VER":
+		return []string{"expected_version"}
+	case "VER_CONFLICT":
+		return []string{"expected_version", "body_markdown", "title"}
+	case "MISSING_COMMIT_MSG":
+		return []string{"commit_msg"}
+	case "POSSIBLE_DUP":
+		return []string{"update_of", "title"}
+	case "CONFLICT_EXACT_TITLE":
+		return []string{"title", "update_of"}
+	case "REL_TARGET_NOT_FOUND":
+		return []string{"relates_to"}
+	case "SUPERSEDE_TARGET_NOT_FOUND":
+		return []string{"supersede_of"}
+	case "UPDATE_SUPERSEDE_EXCLUSIVE":
+		return []string{"update_of", "supersede_of"}
+	case "UPDATE_TARGET_NOT_FOUND":
+		return []string{"update_of"}
+	case "AREA_NOT_FOUND", "AREA_EMPTY":
+		return []string{"area_slug"}
+	case "TASK_NO_ACCEPTANCE", "DEC_NO_SECTIONS", "DBG_NO_REPRO", "DBG_NO_RESOLUTION":
+		return []string{"body_markdown"}
+	case "TITLE_EMPTY":
+		return []string{"title"}
+	case "BODY_EMPTY":
+		return []string{"body_markdown"}
+	case "AUTHOR_EMPTY":
+		return []string{"author_id"}
+	case "TYPE_INVALID":
+		return []string{"type"}
+	case "PIN_PATH_EMPTY", "PIN_LINES_INVALID":
+		return []string{"pins"}
+	case "REL_TARGET_EMPTY", "REL_INVALID":
+		return []string{"relates_to"}
+	default:
+		return nil
 	}
 }
 
@@ -1083,7 +1191,8 @@ func resolveRelatesTo(ctx context.Context, tx pgx.Tx, projectSlug string, relate
 				SuggestedActions: []string{
 					i18n.T(lang, "suggested.read_existing_rel"),
 				},
-				NextTools: defaultNextTools("REL_TARGET_NOT_FOUND"),
+				NextTools:       defaultNextTools("REL_TARGET_NOT_FOUND"),
+				PatchableFields: patchFieldsFor("REL_TARGET_NOT_FOUND"),
 			}
 		}
 		resolved[i] = id
@@ -1152,6 +1261,13 @@ func nullIfZero(n int) any {
 // when false positives bite; lower when real dupes slip through.
 const semanticConflictThreshold = 0.18
 
+// semanticAdvisoryThreshold is the softer ceiling: hits between this and
+// semanticConflictThreshold earn a RECOMMEND_READ_BEFORE_CREATE warning on
+// the accepted response but don't block. Gives the "maybe similar but not
+// dupe" signal the 3rd peer review asked for without the false-positive
+// block rate of a hard gate.
+const semanticAdvisoryThreshold = 0.25
+
 // semanticConflictLimit caps how many near-matches we surface in the
 // POSSIBLE_DUP response. Two is usually enough — the top hit is the main
 // suspect, the runner-up is a tiebreak. More would bloat the response.
@@ -1163,6 +1279,74 @@ type semanticCandidate struct {
 	Type       string
 	Title      string
 	Distance   float64
+}
+
+// createWarnings runs a best-effort advisory vector check after an accepted
+// create and returns any soft warnings. Non-blocking — failure here never
+// rejects the write, since the hard gate (findSemanticConflicts) already
+// ran before insert. We only report when a close-but-not-dupe neighbour
+// exists, to nudge "you might want to supersede this next time".
+func createWarnings(ctx context.Context, deps Deps, projectID, title, body string) []string {
+	if deps.Embedder == nil || deps.Embedder.Info().Name == "stub" {
+		return nil
+	}
+	cands, err := findSemanticAdvisories(ctx, deps, projectID, title, body)
+	if err != nil || len(cands) == 0 {
+		return nil
+	}
+	return []string{"RECOMMEND_READ_BEFORE_CREATE"}
+}
+
+// findSemanticAdvisories is findSemanticConflicts' soft cousin: returns
+// hits in the [semanticConflictThreshold, semanticAdvisoryThreshold)
+// band — close enough to be worth mentioning, far enough not to block.
+func findSemanticAdvisories(ctx context.Context, deps Deps, projectID, title, body string) ([]semanticCandidate, error) {
+	probe := title
+	if trimmed := strings.TrimSpace(body); trimmed != "" {
+		cut := 800
+		if len(trimmed) < cut {
+			cut = len(trimmed)
+		}
+		probe = probe + "\n\n" + trimmed[:cut]
+	}
+	res, err := deps.Embedder.Embed(ctx, embed.Request{
+		Texts: []string{probe},
+		Kind:  embed.KindQuery,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(res.Vectors) != 1 {
+		return nil, fmt.Errorf("embed probe: got %d vectors", len(res.Vectors))
+	}
+	qVec := embed.VectorString(embed.PadTo768(res.Vectors[0]))
+	rows, err := deps.DB.Query(ctx, `
+		SELECT DISTINCT ON (c.artifact_id)
+			c.artifact_id::text, a.slug, a.type, a.title,
+			c.embedding <=> $1::vector AS distance
+		FROM artifact_chunks c
+		JOIN artifacts a ON a.id = c.artifact_id
+		WHERE a.project_id = $2 AND a.status <> 'archived'
+		ORDER BY c.artifact_id, distance
+	`, qVec, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []semanticCandidate
+	for rows.Next() {
+		var c semanticCandidate
+		if err := rows.Scan(&c.ArtifactID, &c.Slug, &c.Type, &c.Title, &c.Distance); err != nil {
+			return nil, err
+		}
+		if c.Distance >= semanticConflictThreshold && c.Distance < semanticAdvisoryThreshold {
+			out = append(out, c)
+			if len(out) >= 2 {
+				break
+			}
+		}
+	}
+	return out, rows.Err()
 }
 
 // findSemanticConflicts embeds (title + first ~800 chars of body) and runs

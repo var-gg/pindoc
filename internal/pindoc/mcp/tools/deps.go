@@ -6,6 +6,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/receipts"
+	"github.com/var-gg/pindoc/internal/pindoc/settings"
 )
 
 // Deps is the shared context every tool handler needs. Keeping this tiny on
@@ -46,6 +47,29 @@ type Deps struct {
 	// than agent-asserted. `author_id` in propose input remains a
 	// client-reported display label.
 	AgentID string
+
+	// Settings is the operator-editable config store (Phase 14a). Nil-
+	// safe: capability reporting falls back to defaults, and human_url_abs
+	// is simply omitted when PublicBaseURL is empty.
+	Settings *settings.Store
+}
+
+// AbsHumanURL builds an absolute share URL from the current settings. Empty
+// when PublicBaseURL isn't configured — callers should treat absence as
+// "operator hasn't set a base URL yet; fall back to human_url relative
+// path".
+func AbsHumanURL(s *settings.Store, projectSlug, artifactSlug string) string {
+	if s == nil {
+		return ""
+	}
+	base := s.Get().PublicBaseURL
+	if base == "" {
+		return ""
+	}
+	for len(base) > 0 && base[len(base)-1] == '/' {
+		base = base[:len(base)-1]
+	}
+	return base + HumanURL(projectSlug, artifactSlug)
 }
 
 // HumanURL returns the canonical /p/:project/wiki/:slug relative URL used

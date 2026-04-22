@@ -28,9 +28,11 @@ type SearchHit struct {
 	Snippet      string  `json:"snippet"`
 	Distance     float64 `json:"distance"`
 	// AgentRef + HumanURL: agent feeds AgentRef into artifact.read, shares
-	// HumanURL in chat. Both always populated on a hit.
-	AgentRef string `json:"agent_ref"`
-	HumanURL string `json:"human_url"`
+	// HumanURL in chat. Both always populated on a hit. HumanURLAbs is
+	// populated only when server_settings.public_base_url is configured.
+	AgentRef    string `json:"agent_ref"`
+	HumanURL    string `json:"human_url"`
+	HumanURLAbs string `json:"human_url_abs,omitempty"`
 }
 
 type artifactSearchOutput struct {
@@ -152,6 +154,7 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 				h.Snippet = trimSnippet(h.Snippet, 400)
 				h.AgentRef = "pindoc://" + h.Slug
 				h.HumanURL = HumanURL(deps.ProjectSlug, h.Slug)
+				h.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, h.Slug)
 				out.Hits = append(out.Hits, h)
 			}
 

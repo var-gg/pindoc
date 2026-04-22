@@ -27,10 +27,12 @@ import (
 	"time"
 )
 
-// DefaultTTL is how long a receipt stays usable after issue. 10 minutes
-// balances "agent takes a few turns to compose a propose" against "corpus
-// may have meaningfully changed during a long coffee break".
-const DefaultTTL = 10 * time.Minute
+// DefaultTTL is how long a receipt stays usable after issue. 30 minutes
+// balances "agent takes a coding loop of many tool calls" against "corpus
+// may have meaningfully changed during a long pause". Extended from the
+// original 10 minutes after 3rd-round peer review feedback that the
+// shorter window forced re-search at the end of most real coding loops.
+const DefaultTTL = 30 * time.Minute
 
 type entry struct {
 	project   string

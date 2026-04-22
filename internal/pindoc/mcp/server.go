@@ -16,6 +16,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/mcp/tools"
 	"github.com/var-gg/pindoc/internal/pindoc/receipts"
+	"github.com/var-gg/pindoc/internal/pindoc/settings"
 )
 
 type Options struct {
@@ -31,6 +32,9 @@ type Options struct {
 	// "unassigned" which still lets writes proceed but flags the gap in
 	// audit logs.
 	AgentID string
+
+	// Settings is the operator-editable config store (Phase 14a).
+	Settings *settings.Store
 }
 
 type Server struct {
@@ -60,8 +64,9 @@ func NewServer(opts Options) *Server {
 		UserLanguage: opts.Config.UserLanguage,
 		Embedder:     opts.Embedder,
 		MultiProject: opts.Config.MultiProject,
-		Receipts:     receipts.New(0), // DefaultTTL = 10 min
+		Receipts:     receipts.New(0), // DefaultTTL applies
 		AgentID:      opts.AgentID,
+		Settings:     opts.Settings,
 	}
 	tools.RegisterProjectCurrent(s, deps)
 	tools.RegisterProjectCreate(s, deps)

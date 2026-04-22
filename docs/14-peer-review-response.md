@@ -194,8 +194,63 @@ Phase 9 (`human_url`/`agent_ref` 분리 + capabilities + spec drift 표) 커밋 
 
 1차 때 wedge 정체성은 확정됐고, 2차는 그 wedge를 지탱할 **MCP contract의 teeth (search_receipt, stable codes, candidate_updates)** 를 구체화했다. 포지셔닝 이슈는 반복 제기됐지만 저자 원안 유지 — 외부 리뷰어가 흔드는 축이 아니라 저자가 고정한 축.
 
+## 9. 3차 리포트 (2026-04-22 post-Phase 13) 판단 요약
+
+Phase 13 (template artifact seed) 커밋 이후 받은 3차 고급추론 리포트. signal-to-noise가 2차 대비 낮음 (이미 해결된 것 재지적 多), 하지만 8개는 실제 흡수 가치 높음.
+
+### 3차 리포트가 새로 제시한 것 (수용)
+
+| 항목 | 판단 | 반영 |
+|---|---|---|
+| `project.create` 응답에 `reconnect_required` 명시 | 수용. "create는 되지만 active project는 안 바뀜"이 응답 구조에 없었음 → onboarding dead-end. | Phase 14b |
+| `capabilities` 확장 (scope_mode, new_project_requires_reconnect, receipt_ttl_sec, public_base_url) | 수용. 기존 capabilities를 machine-readable source of truth로 승격. | Phase 14a |
+| `human_url_abs` (absolute URL) | 수용. 상대경로만으론 외부 chat/PR에서 안 열림. 저자 주도로 `PINDOC_PUBLIC_BASE_URL`을 DB로 풀기로 결정 — Ghost/Plausible 패턴 채택. | Phase 14a/b |
+| `update_of` 경로에 `expected_version` **hard enforce** | 수용 (저자 재결정). 1차의 soft 결정 뒤집음 — `expected_version` 필수화 = "update 전 read" 간접 강제. | Phase 14b |
+| `patchable_fields[]` in not_ready | 수용. 전체 body 재전송 비용 절감. Stable code → 수정할 필드 매핑. | Phase 14b |
+| Receipt TTL 10분 → 30분 연장 | 수용. 긴 코딩 루프와 마찰 해소. | Phase 14a |
+| `auth_mode` rename `none` → `trusted_local` | 수용. 실제 보안 모델을 정확히 반영. | Phase 14a |
+| candidate warning (`RECOMMEND_READ_BEFORE_CREATE`) | 축소 수용. Hard block은 false positive 부담 + 우회 유인. advisory threshold 0.25 soft warning. | Phase 14b |
+
+### 3차 리포트 반려
+
+| 항목 | 반려 이유 |
+|---|---|
+| README를 "agent-only, write-regulated, Git-pinned artifacts 3축"으로 좁히기 | 저자 원안 유지 — 1/2/3차 반복 반려 |
+| `project.create` / `area.propose` / `tc.*`를 "experimental"로 숨기기 | [docs/10](./10-mcp-tools-spec.md) Implementation Status에 상태 분리 이미 있음 |
+| body_json 강제 section parser | Phase 13 template artifact 경로 유지 — evolving format 원칙 |
+| stale pin-diff 구현 | V1.x (git 연동 필요) 유지 |
+| resume/draft token 시스템 | 과설계 — `patchable_fields`만 축소 수용 |
+| area.propose V1 도입 | V1.x 유지 |
+| review queue V1 구현 | `capabilities.review_queue_supported: false` + 카피 V1.5+ 유지 |
+| `context.for_task` 입력에 `area_hint/type_hint/mode=update_bias` | 과설계 |
+| Tool 전체 short/verbose/debug mode split | `not_ready`에만 한정 — 2/3차 반복 반려 |
+| `read_receipts[]` hard requirement | advisory warning으로만 축소 수용. Hard block은 agent 우회 유인 (가짜 receipt 낼 수 있음) |
+
+### 이미 해소됐는데 3차 리포트가 놓친 것
+
+- `agent_id` provenance — Phase 12c 완료. 리포트가 한 섹션에선 강점으로 언급하고 다른 섹션에선 재지적 (일관성 결여).
+- template artifact로 포맷 진화 — Phase 13 완료, 리포트 전혀 언급 없음.
+- spec↔runtime drift 가시화 — [docs/10 Implementation Status](./10-mcp-tools-spec.md) 표로 Phase 9 완료.
+
+### env vs DB 저장소 결정 (저자 주도)
+
+3차 리포트는 `PINDOC_PUBLIC_BASE_URL`을 env로 제안. 저자가 "UI에서 설정한 게 env에 의해 무시되면 UX 망함"을 지적하며 오픈소스 패턴 검토. 결정: **Ghost/Plausible 패턴 — env는 first-boot seed, DB가 source of truth**.
+
+**원칙 정리**: 
+- infra config (DB URL, ports, TLS): env/file, 재시작 필요
+- operational config (base_url, branding, 정책): DB, hot-editable
+- `server_settings` 테이블 + `pindoc-admin` CLI로 Phase 14a 구현
+
+### 3차 판단 요약
+
+- **수용 8개** — Phase 14a/b 코드 반영
+- **반려 10개** — 포지셔닝/과설계/이미 해결
+- **놓친 것 3개** — 리포트 읽기 결함
+
+3차의 진짜 가치는 **agent onboarding의 machine-readable contract** (`reconnect_required`, `expected_version` hard, `patchable_fields`, `capabilities` 확장)에 있었음. 나머지는 1/2차 반복이거나 과설계.
+
 ## 참고
 
-- [Phase 9-13 계획](./12-m1-implementation-plan.md)
+- [Phase 9-14 계획](./12-m1-implementation-plan.md)
 - [MCP Tools 구현 상태](./10-mcp-tools-spec.md)
 - [Phase 8 세션 핸드오프](./13-session-handoff-2026-04-22.md)

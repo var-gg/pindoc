@@ -48,9 +48,14 @@ var pindocRenderingCaps = RenderingCaps{
 }
 
 func (d Deps) handleConfig(w http.ResponseWriter, r *http.Request) {
+	publicBase := ""
+	if d.Settings != nil {
+		publicBase = d.Settings.Get().PublicBaseURL
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"default_project_slug": d.DefaultProjectSlug,
 		"multi_project":        d.MultiProject,
+		"public_base_url":      publicBase,
 		"version":              d.Version,
 	})
 }

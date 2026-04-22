@@ -29,6 +29,25 @@
 - UI: `/wiki/:slug/history`, `/wiki/:slug/diff?from=&to=` (이후 Phase 8에서 `/p/:project/wiki/...`)
 - PINDOC.md 템플릿에 update flow 문서화
 
+### Phase 14 — Operator settings + contract hardening (2026-04-22 완료)
+3차 피어리뷰 반영. 수용 8 / 반려 10 / 놓침 3 — [docs/14 §9](./14-peer-review-response.md) 참조.
+
+**14A — settings infra**:
+- Migration 0007 `server_settings` 단일 row 테이블. env는 first-boot seed만, DB가 source of truth (Ghost/Plausible 패턴).
+- `internal/pindoc/settings/` package, `cmd/pindoc-admin` CLI (list/get/set).
+- pindoc-server + pindoc-api 둘 다 Settings 로드 + env seed.
+- `capabilities` 블록 확장: `scope_mode: "fixed_session"`, `new_project_requires_reconnect: true`, `receipt_ttl_sec: 1800`, `requires_expected_version: true`, `public_base_url`.
+- `auth_mode: "none"` → `"trusted_local"` rename. Receipt TTL 10분 → 30분.
+- HTTP `/api/config`에 `public_base_url` 노출.
+
+**14B — contract hardening**:
+- `human_url_abs` 필드: 4개 MCP tool + RelatedRef/EdgeRef/CandidateUpdate/SearchHit/ContextLanding 응답에 (DB public_base_url 있을 때만).
+- `project.create` 응답에 `reconnect_required: true`, `activation: "not_in_this_session"`, `next_steps[]` — onboarding dead-end machine-readable로 해결.
+- `artifact.propose(update_of=…)` **expected_version hard enforce**: 미제공 시 `NEED_VER` + current head 정보 포함. 1차 때 soft였던 결정 뒤집음.
+- 모든 not_ready 응답에 `patchable_fields[]` 추가 — stable code → 수정 필드 매핑 (`patchFieldsFor`).
+- Accepted create 응답에 `warnings[]` 추가 — `RECOMMEND_READ_BEFORE_CREATE` (semantic distance 0.18-0.25 band 이웃 존재 시).
+- `harness.install` 템플릿 강화: "create 전 context.for_task/artifact.search 필수", "update path는 expected_version 필수", `failed[] + patchable_fields[]` 중심 대응.
+
 ### Phase 13 — Template artifact seed (2026-04-22 완료)
 - Migration 0006: `_template_debug`, `_template_decision`, `_template_analysis`, `_template_task` 4개 artifact를 pindoc 프로젝트 `misc` area에 seed. 각 body에 권장 섹션 구조 (Debug: 증상/재현/가설/원인/해결/검증/Open questions, Decision: Context/Decision/Rationale/Alternatives/Consequences, Analysis: TL;DR/Scope/Findings/조사시점/재조회방법/Open, Task: 목적/범위/TODO(acceptance)/리소스/TC/DoD/Open). 모두 `tags: ['_template']`.
 - `pindoc.project.create` tool도 신규 프로젝트 생성 시 template 4개 자동 seed — migration과 template body 동기화는 `internal/pindoc/mcp/tools/templates.go`의 `templateSeeds` slice 기준.

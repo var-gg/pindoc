@@ -25,9 +25,12 @@ type ContextLanding struct {
 	AreaSlug   string `json:"area_slug"`
 	Rationale  string `json:"rationale"` // why this is relevant — picked from best chunk heading/text
 	// AgentRef for re-feeding into artifact.read; HumanURL for chat share.
-	AgentRef string  `json:"agent_ref"`
-	HumanURL string  `json:"human_url"`
-	Distance float64 `json:"distance"`
+	// HumanURLAbs is populated only when server_settings.public_base_url
+	// is configured.
+	AgentRef    string  `json:"agent_ref"`
+	HumanURL    string  `json:"human_url"`
+	HumanURLAbs string  `json:"human_url_abs,omitempty"`
+	Distance    float64 `json:"distance"`
 }
 
 // CandidateUpdate is a landing-shaped hint that an existing artifact is
@@ -36,14 +39,15 @@ type ContextLanding struct {
 // candidateUpdateThreshold). Agents should artifact.read → decide →
 // propose(update_of=...) rather than creating a near-duplicate.
 type CandidateUpdate struct {
-	ArtifactID string  `json:"artifact_id"`
-	Slug       string  `json:"slug"`
-	Type       string  `json:"type"`
-	Title      string  `json:"title"`
-	AgentRef   string  `json:"agent_ref"`
-	HumanURL   string  `json:"human_url"`
-	Distance   float64 `json:"distance"`
-	Reason     string  `json:"reason"`
+	ArtifactID  string  `json:"artifact_id"`
+	Slug        string  `json:"slug"`
+	Type        string  `json:"type"`
+	Title       string  `json:"title"`
+	AgentRef    string  `json:"agent_ref"`
+	HumanURL    string  `json:"human_url"`
+	HumanURLAbs string  `json:"human_url_abs,omitempty"`
+	Distance    float64 `json:"distance"`
+	Reason      string  `json:"reason"`
 }
 
 // StaleSignal flags a landing as potentially out-of-date. Phase 11c
@@ -168,6 +172,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 				}
 				l.AgentRef = "pindoc://" + l.Slug
 				l.HumanURL = HumanURL(deps.ProjectSlug, l.Slug)
+				l.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, l.Slug)
 				if bestHeading != "" {
 					l.Rationale = "Best-matching section: " + bestHeading
 				} else {
@@ -180,14 +185,15 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 				// embedder to avoid flooding the list with false signals.
 				if deps.Embedder.Info().Name != "stub" && l.Distance < candidateUpdateThreshold {
 					out.CandidateUpdates = append(out.CandidateUpdates, CandidateUpdate{
-						ArtifactID: l.ArtifactID,
-						Slug:       l.Slug,
-						Type:       l.Type,
-						Title:      l.Title,
-						AgentRef:   l.AgentRef,
-						HumanURL:   l.HumanURL,
-						Distance:   l.Distance,
-						Reason:     fmt.Sprintf("cosine distance %.3f is below update threshold %.2f — consider update_of before creating new", l.Distance, candidateUpdateThreshold),
+						ArtifactID:  l.ArtifactID,
+						Slug:        l.Slug,
+						Type:        l.Type,
+						Title:       l.Title,
+						AgentRef:    l.AgentRef,
+						HumanURL:    l.HumanURL,
+						HumanURLAbs: l.HumanURLAbs,
+						Distance:    l.Distance,
+						Reason:      fmt.Sprintf("cosine distance %.3f is below update threshold %.2f — consider update_of before creating new", l.Distance, candidateUpdateThreshold),
 					})
 				}
 

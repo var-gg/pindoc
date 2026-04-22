@@ -124,11 +124,31 @@ Before calling pindoc.artifact.propose:
 1. Call pindoc.project.current once per session to pin scope.
 2. Call pindoc.area.list and pick an existing area_slug; use 'misc' if
    nothing fits. Never invent an area_slug.
-3. Assemble title (concise, unique), body_markdown, type, area_slug,
+3. **Call pindoc.context.for_task (or pindoc.artifact.search) BEFORE
+   create.** The server rejects create-path propose with NO_SRCH when the
+   request has no valid basis.search_receipt. Receipts are the opaque
+   token returned by either of those tools in the SAME MCP session and
+   expire after 30 minutes. Pass it back in propose input as
+   basis.search_receipt.
+4. **If the context/search response carries candidate_updates[], read
+   the top candidate with pindoc.artifact.read before deciding
+   create-vs-update.** Skipping this earns a RECOMMEND_READ_BEFORE_CREATE
+   warning on the accepted response — not a block, but a signal to the
+   next session that the artifact might be a near-duplicate.
+5. Assemble title (concise, unique), body_markdown, type, area_slug,
    author_id (your agent ID).
-4. If propose returns Status=not_ready, read the checklist and the
-   suggested_actions, fix every ✗ item, then retry. Do not surface the
-   raw error to the user without attempting the suggested_actions first.
+6. If propose returns Status=not_ready, read failed[] (stable codes),
+   apply patchable_fields[] changes, and retry. Do not surface the raw
+   error to the user without attempting the suggested_actions first.
+
+### Update path
+
+- pindoc.artifact.propose with update_of REQUIRES expected_version
+  (server returns NEED_VER otherwise). Get the current revision number
+  via pindoc.artifact.revisions or pindoc.artifact.read, pass it as
+  expected_version. Mismatch → VER_CONFLICT; re-read and retry with the
+  new head.
+- update_of and supersede_of are mutually exclusive.
 
 ## Referenced Confirmation protocol (M0.6)
 

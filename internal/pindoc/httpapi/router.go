@@ -20,6 +20,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
+	"github.com/var-gg/pindoc/internal/pindoc/settings"
 )
 
 type Deps struct {
@@ -37,6 +38,7 @@ type Deps struct {
 	MultiProject bool
 
 	Embedder    embed.Provider
+	Settings    *settings.Store
 	Version     string
 	BuildCommit string
 }

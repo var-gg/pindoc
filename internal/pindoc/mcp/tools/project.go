@@ -32,18 +32,44 @@ type Capabilities struct {
 	// switcher? MCP tool calls are still scoped per-subprocess to the
 	// PINDOC_PROJECT env; this flag is advisory for chat UX only.
 	MultiProject bool `json:"multi_project"`
+	// ScopeMode describes how an MCP session maps to projects.
+	// "fixed_session" = one subprocess binds to one project for life.
+	// Agents must not try switching project inside a session; new
+	// project = new MCP connection.
+	ScopeMode string `json:"scope_mode"`
+	// NewProjectRequiresReconnect advertises the runtime fact that
+	// pindoc.project.create makes a row but does NOT change the active
+	// scope of the current MCP subprocess. Paired with project.create's
+	// `reconnect_required` field in the response body.
+	NewProjectRequiresReconnect bool `json:"new_project_requires_reconnect"`
 	// RetrievalQuality: "stub" → hash-based (dev only), "http" → real
 	// embedder backing pindoc.artifact.search / context.for_task.
 	RetrievalQuality string `json:"retrieval_quality"`
-	// AuthMode: "none" in M1 self-host local. "github_oauth" lands in V1.5.
+	// AuthMode: "trusted_local" (M1 self-host local subprocess, no token),
+	// "project_token" (V1.5+ per-project agent tokens),
+	// "oauth" (V2+ hosted). Renamed from "none" — "none" implied "no
+	// security at all" but the actual model is "trust the local
+	// subprocess".
 	AuthMode string `json:"auth_mode"`
 	// UpdateVia: name of the propose field that triggers a revision append.
 	// Agents can grep for this token so a future rename doesn't silently
 	// reroute update flows to "create a new artifact".
 	UpdateVia string `json:"update_via"`
+	// RequiresExpectedVersion: when true, pindoc.artifact.propose with
+	// update_of requires expected_version (optimistic lock). Surfaces
+	// the Phase 14b decision so agents don't discover it via not_ready.
+	RequiresExpectedVersion bool `json:"requires_expected_version"`
 	// ReviewQueueSupported: sensitive-op confirm mode with pending_review
 	// state routing. False in M1; comes with auth in V1.5.
 	ReviewQueueSupported bool `json:"review_queue_supported"`
+	// ReceiptTTLSec is the search_receipt TTL (seconds). Agents can use
+	// this to decide whether to renew mid-loop.
+	ReceiptTTLSec int `json:"receipt_ttl_sec"`
+	// PublicBaseURL comes from server_settings.public_base_url. Empty
+	// when the operator hasn't configured one — agents should fall back
+	// to the relative human_url in that case. When present, tool
+	// responses also include human_url_abs.
+	PublicBaseURL string `json:"public_base_url,omitempty"`
 }
 
 // RenderingCaps mirrors the HTTP API shape so MCP callers get the same
@@ -123,11 +149,25 @@ func buildCapabilities(deps Deps) Capabilities {
 			quality = name
 		}
 	}
+	publicBase := ""
+	if deps.Settings != nil {
+		publicBase = deps.Settings.Get().PublicBaseURL
+	}
 	return Capabilities{
-		MultiProject:         deps.MultiProject,
-		RetrievalQuality:     quality,
-		AuthMode:             "none",
-		UpdateVia:            "update_of",
-		ReviewQueueSupported: false,
+		MultiProject:                deps.MultiProject,
+		ScopeMode:                   "fixed_session",
+		NewProjectRequiresReconnect: true,
+		RetrievalQuality:            quality,
+		AuthMode:                    "trusted_local",
+		UpdateVia:                   "update_of",
+		RequiresExpectedVersion:     true,
+		ReviewQueueSupported:        false,
+		ReceiptTTLSec:               int(receiptTTLSeconds),
+		PublicBaseURL:               publicBase,
 	}
 }
+
+// receiptTTLSeconds mirrors receipts.DefaultTTL. Kept as a constant here
+// so capability reporting doesn't need an import cycle via the receipts
+// package at call sites.
+const receiptTTLSeconds = 30 * 60

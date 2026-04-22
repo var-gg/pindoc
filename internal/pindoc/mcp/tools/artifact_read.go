@@ -45,6 +45,7 @@ type artifactReadOutput struct {
 	SupersededBy  string   `json:"superseded_by,omitempty"`
 	AgentRef      string   `json:"agent_ref"`
 	HumanURL      string   `json:"human_url"`
+	HumanURLAbs   string   `json:"human_url_abs,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 	PublishedAt   time.Time `json:"published_at,omitzero"`
@@ -83,13 +84,14 @@ type RevisionSummaryRef struct {
 // For "relates_to" view the target's ID/slug is filled; for "related_by"
 // the source is.
 type EdgeRef struct {
-	ArtifactID string `json:"artifact_id"`
-	Slug       string `json:"slug"`
-	Type       string `json:"type"`
-	Title      string `json:"title"`
-	Relation   string `json:"relation"`
-	AgentRef   string `json:"agent_ref"`
-	HumanURL   string `json:"human_url"`
+	ArtifactID  string `json:"artifact_id"`
+	Slug        string `json:"slug"`
+	Type        string `json:"type"`
+	Title       string `json:"title"`
+	Relation    string `json:"relation"`
+	AgentRef    string `json:"agent_ref"`
+	HumanURL    string `json:"human_url"`
+	HumanURLAbs string `json:"human_url_abs,omitempty"`
 }
 
 // RegisterArtifactRead wires pindoc.artifact.read.
@@ -166,6 +168,7 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			}
 			out.AgentRef = "pindoc://" + out.Slug
 			out.HumanURL = HumanURL(out.ProjectSlug, out.Slug)
+			out.HumanURLAbs = AbsHumanURL(deps.Settings, out.ProjectSlug, out.Slug)
 			out.View = view
 
 			// view=brief / continuation: drop the heavy body, add summary.
@@ -335,6 +338,7 @@ func loadEdges(ctx context.Context, deps Deps, artifactID string) ([]EdgeRef, []
 		}
 		e.AgentRef = "pindoc://" + e.Slug
 		e.HumanURL = HumanURL(deps.ProjectSlug, e.Slug)
+		e.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, e.Slug)
 		out = append(out, e)
 	}
 	rows.Close()
@@ -358,6 +362,7 @@ func loadEdges(ctx context.Context, deps Deps, artifactID string) ([]EdgeRef, []
 		}
 		e.AgentRef = "pindoc://" + e.Slug
 		e.HumanURL = HumanURL(deps.ProjectSlug, e.Slug)
+		e.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, e.Slug)
 		outBy = append(outBy, e)
 	}
 

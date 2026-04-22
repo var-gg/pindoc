@@ -232,6 +232,43 @@ claude mcp list           # pindoc 있음
 - **Actor hardening (stdio)**: `author_id`는 표시용 metadata로 재정의. 서버가 session 단위 `agent_id` (UUID) 를 ping 첫 호출 시 발급, propose 감사에 기록. `author_id` spoof 공격 surface 축소.
 - **Mode split은 not_ready 응답에만 한정 (2차 피어리뷰 권고 축소 반영)**: default는 compact (fail codes만), `verbose` 모드에서 자연어 hint 추가. tool 전체에 mode 파라미터 붙이는 건 현 규모에서 과설계 — 반려.
 
+## Phase 14 — Operator settings + contract hardening (완료 · 2026-04-22)
+
+3차 외부 피어리뷰 반영. 수용 목록은 [docs/14 §9](./14-peer-review-response.md) 참조.
+
+**14A — settings infra**:
+- Migration 0007 `server_settings` 단일 row 테이블 (typed columns). env는 first-boot seed만, DB가 source of truth (Ghost/Plausible 패턴).
+- `internal/pindoc/settings/` package: Store + Reload/Get/Set/SeedFromEnv. atomic pointer로 lock-free read.
+- `cmd/pindoc-admin` CLI: list/get/set. 재시작 필요 명시 (hot-reload는 V1.x).
+- Server startup 시 `PINDOC_PUBLIC_BASE_URL` 있고 DB row 비었으면 1회 seed.
+- pindoc-api도 `db.Migrate` + settings 로드 추가.
+
+**14A — capabilities 확장**:
+- `pindoc.project.current.capabilities`에 `scope_mode: "fixed_session"`, `new_project_requires_reconnect: true`, `receipt_ttl_sec: 1800`, `requires_expected_version: true`, `public_base_url` (DB 값) 추가.
+- `auth_mode: "none"` → `"trusted_local"` rename (보안 모델을 정확히 반영).
+- `receipts.DefaultTTL` 10분 → 30분.
+
+**14B — human_url_abs**:
+- `artifact.{read,search,propose}` + `context.for_task` 응답에 `human_url_abs` 필드 (DB의 public_base_url 있을 때만, 없으면 생략).
+- `RelatedRef`, `EdgeRef`, `CandidateUpdate`, `SearchHit`, `ContextLanding`에도 전파.
+- HTTP `/api/config`에 `public_base_url` 노출.
+
+**14B — project.create onboarding**:
+- 응답에 `reconnect_required: true`, `activation: "not_in_this_session"`, `next_steps[]` 추가. "create했지만 session은 old project에 묶여 있음"을 machine-readable로.
+
+**14B — expected_version hard enforce**:
+- `artifact.propose(update_of=…)`에서 `expected_version` 필수. 미제공 시 `NEED_VER` + `patchable_fields: ["expected_version"]` + `Related[]`에 현재 head 정보. Mismatch면 `VER_CONFLICT`.
+- stale overwrite 방어 + "update 전 read" 간접 강제.
+
+**14B — `patchable_fields[]` + candidate warning**:
+- 모든 not_ready 응답에 `patchable_fields[]` (stable code → 수정할 필드 리스트). Agent가 전체 body 재전송 대신 필드만 바꿔 retry.
+- Accepted create 응답에 `warnings: ["RECOMMEND_READ_BEFORE_CREATE"]` — semantic distance가 conflict block threshold(0.18)와 advisory threshold(0.25) 사이인 이웃이 있을 때.
+
+**14B — harness.install 강화**:
+- Pre-flight Check 섹션에 "create 전 context.for_task/artifact.search로 search_receipt 받기 필수" 명시.
+- Update path 섹션 신규: `expected_version` 필수, `update_of`와 `supersede_of` 배제 관계 명시.
+- `not_ready` 대응에 `failed[] + patchable_fields[]` 중심 언급.
+
 ## Phase 13 — Template artifact seed (완료 · 2026-04-22)
 
 Phase 11에서 body_json 최소 필드로 검증을 좁히는 대신, **각 타입의 "현재 best practice" 구조는 artifact 자체로 관리**. 이것이 "포맷도 evolving artifact"라는 저자 원칙의 코드화.

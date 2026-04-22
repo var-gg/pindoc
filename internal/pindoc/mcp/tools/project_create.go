@@ -28,6 +28,13 @@ type projectCreateOutput struct {
 	URL         string `json:"url" jsonschema:"canonical UI path to the project's wiki — share this, not /wiki/..."`
 	DefaultArea string `json:"default_area" jsonschema:"slug of the 'misc' area auto-created so artifacts can be filed immediately"`
 	Message     string `json:"message"`
+	// ReconnectRequired + Activation + NextSteps advertise the Phase 14b
+	// onboarding contract: project.create writes a row but does NOT
+	// activate the new project in the current MCP session. Agents must
+	// reconnect with PINDOC_PROJECT=<slug> to write into it.
+	ReconnectRequired bool     `json:"reconnect_required"`
+	Activation        string   `json:"activation" jsonschema:"one of: not_in_this_session"`
+	NextSteps         []string `json:"next_steps"`
 }
 
 // projectSlugRe enforces the URL-safe shape we promise downstream routes.
@@ -143,11 +150,17 @@ the new project by launching pindoc-server with PINDOC_PROJECT=<new>.
 			deps.Logger.Info("project created", "slug", slug, "name", name, "lang", lang)
 
 			return nil, projectCreateOutput{
-				ID:          projectID,
-				Slug:        slug,
-				Name:        name,
-				URL:         fmt.Sprintf("/p/%s/wiki", slug),
-				DefaultArea: "misc",
+				ID:                projectID,
+				Slug:              slug,
+				Name:              name,
+				URL:               fmt.Sprintf("/p/%s/wiki", slug),
+				DefaultArea:       "misc",
+				ReconnectRequired: true,
+				Activation:        "not_in_this_session",
+				NextSteps: []string{
+					fmt.Sprintf("Restart pindoc-server with PINDOC_PROJECT=%s to make this MCP session write into the new project.", slug),
+					fmt.Sprintf("Open the Reader at /p/%s/wiki once pindoc-api reloads.", slug),
+				},
 				Message: strings.TrimSpace(fmt.Sprintf(`
 Project %q created. Share this URL with the user: /p/%s/wiki
 Note: this MCP session is still scoped to the old project — to write
