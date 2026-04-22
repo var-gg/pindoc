@@ -195,6 +195,29 @@ warnings 관찰:
 - Archived: 2 (동일)
 - Template: 4
 
+### 6th pass (Artifact 포맷 역유입 완화 — 2026-04-23)
+
+저자의 self-inspection 요청: 이 세션 중반부터 내 사용자-대면 응답이 `A(prompt-only) · B(git-only) · C(immutable name)` 같은 괄호·중점 축약 형태로 기울었다는 관찰. 원인 분석 결과 artifact body의 `Alt A — 설명: 기각 이유` 포맷이 반복 작성 누적으로 응답 생성 분포에 역유입된 것 — 저자가 "리버스 하네싱"으로 명명. Harness Reversal(M0)이 agent 작업 맥락을 artifact로 내보내는 방향이라면, 그 역방향으로 artifact 포맷이 대화 register까지 역류한 현상.
+
+정보량 손실이 아니라 **추론 흐름 소실**이 핵심 해악. 독자 cognitive load 상승 + Pindoc 채택 체감 역효과("이 오픈소스 쓰면 AI가 멍청해져요"). Vision §원칙 1이 만든 세계의 신뢰를 훼손하는 systemic risk.
+
+완화는 두 층으로 실행한다. 첫 번째는 Harness install이 대상 클라이언트의 `CLAUDE.md` / `AGENTS.md`에 register 분리 가이드 snippet을 자동 삽입하는 경로다. Pindoc이 agent 런타임에 개입 가능한 유일한 훅이고 설치 1회로 모든 이후 세션이 영향받는다. 두 번째는 `_template_*` 4종 본문을 prose-first로 재설계해 agent가 artifact를 쓸 때부터 산문 흐름으로 생각하게 만드는 경로. H2 slot은 pre-flight·Reader sticky TOC 의존성 때문에 유지하되 섹션 내부 예시만 narrative로 전환.
+
+**발행 결과**:
+
+| slug | 타입 | 역할 |
+|---|---|---|
+| `decision-artifact-format-leak-mitigation` | Decision | 두 층 방어선 확정 + 대안(완전 prose/ MCP 메타 힌트 단독/ 사용자 문서화만) 기각 근거 |
+| `task-harness-claudemd-style-register-snippet` (p1) | Task | 클라이언트별 target path 매핑 + 마커 idempotent 삽입 + locale 분기 + admin CLI |
+| `task-templates-prose-first-redesign` (p1) | Task | 4 template update_of revision 2, H2 slot 보존, 섹션 내부 narrative 전환, `cmd/pindoc-seed` 동기화 |
+
+이 세 artifact 본문 자체를 narrative-first로 작성해 스타일 drift 억제 실증 사례로도 기능. 이전 pass들의 `Alt A/B/C` 축약 패턴을 의식적으로 피하고 1-2 문단 산문 구성.
+
+**이 세션 최종 artifact 상태** (6th pass 시점):
+- Active non-template: 5 Tier1 + 7 Tier2 + 1 scope-summary + **11 Decision** + **10 Task**(Phase 18 + UI 6 + author user + snippet + template-redesign) = **34**
+- Archived: 2 (동일)
+- Template: 4
+
 ---
 
 ## 3. 다음 세션 착수 (Tier 3 잔여 + 관측)
