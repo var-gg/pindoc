@@ -1,5 +1,12 @@
 # Session Handoff — 2026-04-22
 
+> **Superseded by [docs/15-session-handoff-dogfood.md](./15-session-handoff-dogfood.md).**
+> 이 문서는 Phase 7~16 개발 세션의 누적 로그로 역할을 마쳤다. Dogfood
+> 시작 시점의 깔끔한 state + 다음 세션 프롬프트는 15번 파일을 참조.
+> 아래 내용은 Phase별 변경 이력의 archive로만 유지한다.
+
+---
+
 이 세션 (2026-04-21 심야 ~ 04-22 새벽) 동안 M1 전체 + Phase 7(revision)까지 완료.
 다음 세션이 바로 이어갈 수 있도록 현재 상태 / 다음 작업 / 주의사항 정리.
 
