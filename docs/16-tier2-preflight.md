@@ -200,6 +200,8 @@ Tier 1 + Tier 2 = 13 artifact, C(13,2) = 78 쌍. gemma real embedder 기준.
 
 Threshold 확정은 Tier 3+ 추가 발행 후 재검토. 현 상수는 `internal/pindoc/mcp/tools/artifact_propose.go`의 `semanticConflictThreshold` / `semanticAdvisoryThreshold`.
 
+**변경 반영 2026-04-22** — `semanticConflictThreshold` 0.18 → 0.13, `semanticAdvisoryThreshold` 0.25 → 0.30 적용. 다음 세션의 Decision artifact로 근거 기록 예정 (슬러그 `decision-conflict-threshold-recalibration-tier2`). 빌드된 `bin/pindoc-server.new.exe`에 반영, 다음 세션 시작 시 swap → 재기동.
+
 ### SQL 재현
 
 ```sql

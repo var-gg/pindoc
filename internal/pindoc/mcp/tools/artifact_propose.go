@@ -1436,17 +1436,21 @@ func taskMetaToJSON(artifactType string, tm *TaskMetaInput) any {
 }
 
 // semanticConflictThreshold is the cosine-distance ceiling below which we
-// treat a vector hit as "likely the same artifact". Tuned against
-// multilingual-e5-base + the Phase 6 seed corpus (2026-04-22 smoke). Raise
-// when false positives bite; lower when real dupes slip through.
-const semanticConflictThreshold = 0.18
+// treat a vector hit as "likely the same artifact". Recalibrated 2026-04-22
+// against gemma + 13-artifact Tier 2 corpus (docs/16-tier2-preflight.md
+// Part C). Prior 0.18 was too tight — 4 legitimate near-matches
+// (concept→mechanism→spec, Phase chain→Roadmap) fell in 0.17-0.19 band.
+// 0.13 keeps only genuine duplicates. Raise if real dupes slip through;
+// lower if false positives persist.
+const semanticConflictThreshold = 0.13
 
 // semanticAdvisoryThreshold is the softer ceiling: hits between this and
 // semanticConflictThreshold earn a RECOMMEND_READ_BEFORE_CREATE warning on
-// the accepted response but don't block. Gives the "maybe similar but not
-// dupe" signal the 3rd peer review asked for without the false-positive
-// block rate of a hard gate.
-const semanticAdvisoryThreshold = 0.25
+// the accepted response but don't block. Widened from 0.25 to 0.30 on the
+// same 2026-04-22 calibration — near-match advisory band should catch the
+// 0.17-0.28 "same topic, different depth" cluster a single product's
+// corpus produces.
+const semanticAdvisoryThreshold = 0.30
 
 // semanticConflictLimit caps how many near-matches we surface in the
 // POSSIBLE_DUP response. Two is usually enough — the top hit is the main
