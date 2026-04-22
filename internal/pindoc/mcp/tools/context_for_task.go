@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -29,6 +30,33 @@ type ContextLanding struct {
 	Distance float64 `json:"distance"`
 }
 
+// CandidateUpdate is a landing-shaped hint that an existing artifact is
+// likely the right target for update_of instead of a fresh create. Emitted
+// when the top vector hit is very close (distance <=
+// candidateUpdateThreshold). Agents should artifact.read → decide →
+// propose(update_of=...) rather than creating a near-duplicate.
+type CandidateUpdate struct {
+	ArtifactID string  `json:"artifact_id"`
+	Slug       string  `json:"slug"`
+	Type       string  `json:"type"`
+	Title      string  `json:"title"`
+	AgentRef   string  `json:"agent_ref"`
+	HumanURL   string  `json:"human_url"`
+	Distance   float64 `json:"distance"`
+	Reason     string  `json:"reason"`
+}
+
+// StaleSignal flags a landing as potentially out-of-date. Phase 11c
+// implements the simplest heuristic: `updated_at` older than
+// staleAgeThreshold. Later phases add pin-diff-vs-HEAD and explicit
+// supersede chain checks.
+type StaleSignal struct {
+	ArtifactID string `json:"artifact_id"`
+	Slug       string `json:"slug"`
+	Reason     string `json:"reason"`
+	DaysOld    int    `json:"days_old"`
+}
+
 type contextForTaskOutput struct {
 	TaskDescription string           `json:"task_description"`
 	Landings        []ContextLanding `json:"landings"`
@@ -38,7 +66,23 @@ type contextForTaskOutput struct {
 	// with context.for_task satisfy the search-before-propose gate without
 	// also calling artifact.search.
 	SearchReceipt string `json:"search_receipt,omitempty"`
+	// CandidateUpdates surfaces landings that are close enough to the task
+	// description that the agent should probably update them instead of
+	// creating a new artifact. Empty when nothing is that close.
+	CandidateUpdates []CandidateUpdate `json:"candidate_updates,omitempty"`
+	// Stale flags landings that may be out-of-date. Phase 11c uses a
+	// simple updated_at age heuristic; later phases add pin-diff checks.
+	Stale []StaleSignal `json:"stale,omitempty"`
 }
+
+// candidateUpdateThreshold: landings under this cosine distance prompt an
+// "update instead of create?" hint. Looser than semanticConflictThreshold
+// (0.18) because this is advisory, not a block.
+const candidateUpdateThreshold = 0.22
+
+// staleAgeThreshold: 60 days without an update is our simple "may be
+// stale" proxy. Arbitrary but operational; tune with real dogfood data.
+const staleAgeThreshold = 60 * 24 * time.Hour
 
 // RegisterContextForTask wires pindoc.context.for_task — the Fast Landing
 // mechanism from docs/05 §M6. Call this at the start of a task to get
@@ -93,7 +137,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 				)
 				SELECT
 					s.artifact_id::text, a.slug, a.type, a.title, ar.slug,
-					s.best_heading, s.best_text, s.distance
+					s.best_heading, s.best_text, s.distance, a.updated_at
 				FROM scored s
 				JOIN artifacts a  ON a.id  = s.artifact_id
 				JOIN areas     ar ON ar.id = a.area_id
@@ -111,12 +155,14 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			defer rows.Close()
 
 			out := contextForTaskOutput{TaskDescription: in.TaskDescription, Landings: []ContextLanding{}}
+			now := time.Now()
 			for rows.Next() {
 				var l ContextLanding
 				var bestHeading, bestText string
+				var updatedAt time.Time
 				if err := rows.Scan(
 					&l.ArtifactID, &l.Slug, &l.Type, &l.Title, &l.AreaSlug,
-					&bestHeading, &bestText, &l.Distance,
+					&bestHeading, &bestText, &l.Distance, &updatedAt,
 				); err != nil {
 					return nil, contextForTaskOutput{}, fmt.Errorf("scan: %w", err)
 				}
@@ -128,6 +174,33 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 					l.Rationale = trimSnippet(bestText, 160)
 				}
 				out.Landings = append(out.Landings, l)
+
+				// Flag this landing as a likely update target when the
+				// vector distance says it's very close. Stop before stub
+				// embedder to avoid flooding the list with false signals.
+				if deps.Embedder.Info().Name != "stub" && l.Distance < candidateUpdateThreshold {
+					out.CandidateUpdates = append(out.CandidateUpdates, CandidateUpdate{
+						ArtifactID: l.ArtifactID,
+						Slug:       l.Slug,
+						Type:       l.Type,
+						Title:      l.Title,
+						AgentRef:   l.AgentRef,
+						HumanURL:   l.HumanURL,
+						Distance:   l.Distance,
+						Reason:     fmt.Sprintf("cosine distance %.3f is below update threshold %.2f — consider update_of before creating new", l.Distance, candidateUpdateThreshold),
+					})
+				}
+
+				// Flag stale landings. Phase 11c: simple age heuristic.
+				// Phase V1.x replaces this with pin-diff-vs-HEAD.
+				if age := now.Sub(updatedAt); age > staleAgeThreshold {
+					out.Stale = append(out.Stale, StaleSignal{
+						ArtifactID: l.ArtifactID,
+						Slug:       l.Slug,
+						DaysOld:    int(age.Hours() / 24),
+						Reason:     fmt.Sprintf("not updated in %d days — verify pins/facts before reuse", int(age.Hours()/24)),
+					})
+				}
 			}
 			if deps.Embedder.Info().Name == "stub" {
 				out.Notice = "stub embedder active — landings are hash-ranked, not semantic."

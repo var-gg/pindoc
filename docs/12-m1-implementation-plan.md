@@ -190,7 +190,7 @@ claude mcp list           # pindoc 있음
   - "agent 쓰기 규율" → architecture 원칙 1. Agent-only Write Surface 1순위 (0.14)
 - `capabilities.retrieval_quality` 자동으로 `"http"`로 전환 (Phase 9 capabilities 블록 반영).
 
-## Phase 11 — Write contract 강화 + semantic conflict (핵심 블록, 2차 피어리뷰 후 확장)
+## Phase 11 — Write contract 강화 + semantic conflict (완료 · 2026-04-22)
 
 피어리뷰 1차+2차 공통 P0 + 저자 확정 범위. "typed section schema 확정은 out-of-scope" — 스키마 최소 필드 + 진화형 template artifact 구조만.
 

@@ -29,6 +29,16 @@
 - UI: `/wiki/:slug/history`, `/wiki/:slug/diff?from=&to=` (이후 Phase 8에서 `/p/:project/wiki/...`)
 - PINDOC.md 템플릿에 update flow 문서화
 
+### Phase 11 — Write contract 강화 + semantic conflict (2026-04-22 완료)
+- Migration 0005: `artifact_pins`, `artifact_edges` (relation ∈ implements/references/blocks/relates_to), `_unsorted` area seed. `pindoc.project.create` tool도 `misc` + `_unsorted` 둘 다 seed하게 업데이트.
+- `artifact.propose` 입력 확장: `pins[]`, `relates_to[]`, `expected_version`, `supersede_of`, `basis{search_receipt, source_session}`. update/supersede/create 세 경로 + 상호 배제 검증.
+- **search_receipt hard enforce (11b)**: `internal/pindoc/receipts/` — in-memory TTL 10분 ledger. `artifact.search`/`context.for_task` 응답에 receipt 포함. `artifact.propose(create)`에서 필수 — 없으면 `NO_SRCH`, 만료면 `RECEIPT_EXPIRED`, 다른 프로젝트면 `RECEIPT_WRONG_PROJECT`.
+- **Semantic conflict block (11b)**: exact-title 통과 후, title+body 첫 800자 embed → top 근접 artifact distance < 0.18이면 `POSSIBLE_DUP` 차단. stub provider일 땐 비활성 (false-positive 방지).
+- **context.for_task 확장 (11c)**: `candidate_updates[]` (distance < 0.22인 landings), `stale[]` (60일+ updated_at 없는 landings, 추후 pin-diff로 교체), `search_receipt` 발급.
+- **Preflight stable codes**: 기존 자연어 checklist와 병행해서 `Failed[]` 배열 (stable code). Phase 12에서 primary로 승격 예정. 추가 코드: `TYPE_INVALID`, `TITLE_EMPTY`, `BODY_EMPTY`, `AREA_EMPTY`, `AUTHOR_EMPTY`, `COMPLETENESS_INVALID`, `TASK_NO_ACCEPTANCE`, `DEC_NO_SECTIONS`, `DBG_NO_REPRO`, `DBG_NO_RESOLUTION`, `PIN_PATH_EMPTY`, `PIN_LINES_INVALID`, `REL_TARGET_EMPTY`, `REL_INVALID`, `REL_TARGET_NOT_FOUND`, `VER_INVALID`, `VER_CONFLICT`, `UPDATE_SUPERSEDE_EXCLUSIVE`, `SUPERSEDE_TARGET_NOT_FOUND`, `NO_SRCH`, `RECEIPT_UNKNOWN`, `RECEIPT_EXPIRED`, `RECEIPT_WRONG_PROJECT`, `POSSIBLE_DUP`, `CONFLICT_EXACT_TITLE`, `UPDATE_TARGET_NOT_FOUND`.
+- **Debug 타입 keyword 강화**: `DBG_NO_REPRO` / `DBG_NO_RESOLUTION` — "Debug body에 증상/해결 정보 필요" (ko/en 키워드 모두 커버).
+- Propose 응답에 `pins_stored`, `edges_stored`, `superseded` 카운트 추가 → agent가 재-read 없이 저장 확인.
+
 ### Phase 10 — Real embedder dogfood (2026-04-22 완료)
 - Docker TEI (`intfloat/multilingual-e5-base`, 768 dim, `--auto-truncate`) compose 서비스 추가.
 - `embed/http.go`에 E5 prefix (`query: ` / `passage: `) 로직, config/registry에 wiring.
@@ -62,20 +72,16 @@
 
 ---
 
-## 2. 다음 작업 — Phase 11 write contract 강화 (Phase 10 완료 후 다음)
+## 2. 다음 작업 — Phase 12 agent ergonomics (Phase 11 완료 후 다음)
 
-Phase 8 (URL) + Phase 9 (human_url/capabilities/spec drift) + Phase 10 (real embedder) 완료. 다음 큰 블록:
+Phase 8 (URL) + Phase 9 (human_url/capabilities/spec drift) + Phase 10 (real embedder) + Phase 11 (write contract + semantic conflict + receipt) 완료. 다음 큰 블록:
 
-### Phase 11 — Write contract 강화
-- `search_receipt` 서버 발급 (artifact.search / context.for_task) + propose에서 요구 (hard enforce)
-- `artifact.propose` 입력 확장: `pins[]`, `expected_version`, `supersede_of`, `relates_to[]`
-- `artifact_edges` 테이블 신규
-- `body_json` 최소 필드 검증 (Debug/Decision/Analysis/Task 4 타입)
-- Semantic conflict block (Phase 10 real embedder 위에서 이제 가능)
-- `context.for_task`에 `candidate_updates[]`, `stale[]`
-- `_unsorted` area auto-seed
+### Phase 12 — Agent ergonomics
+- **Machine-readable `not_ready`**: Phase 11에서 `Failed[]` stable code array는 이미 반환 중. Phase 12에서 자연어 `Checklist`를 optional로 내리고 `Failed`를 primary로 승격. `suggested_actions`도 code+link 구조로 전환.
+- **`artifact.read(view=brief|full|continuation)`**: brief=title/summary/pins/stale, continuation=brief + 최근 revision delta + relates_to neighbors.
+- **Actor hardening (stdio)**: session 단위 `agent_id` (UUID) 서버 발급. `author_id`는 표시용 metadata로.
 
-상세: [docs/12-m1-implementation-plan.md](./12-m1-implementation-plan.md) Phase 11 섹션.
+상세: [docs/12-m1-implementation-plan.md](./12-m1-implementation-plan.md) Phase 12 섹션.
 리뷰 판단 근거: [docs/14-peer-review-response.md](./14-peer-review-response.md).
 
 ### 실행 환경 재개 체크리스트 (Phase 10 이후)

@@ -61,6 +61,8 @@ var bundle = Bundle{
 		"preflight.receipt_expired":      "✗ basis.search_receipt is expired (TTL 10 minutes) — re-run search/context and retry",
 		"preflight.receipt_wrong_project": "✗ basis.search_receipt belongs to a different project",
 		"preflight.possible_dup":         "✗ a near-duplicate artifact %q already exists (cosine distance %.3f) — read it and either update_of or prove the new one is distinct",
+		"preflight.debug_no_repro":       "✗ Debug body should include reproduction or symptom info (keywords: reproduction / repro / symptom / 재현 / 증상)",
+		"preflight.debug_no_resolution":  "✗ Debug body should include resolution or root cause (keywords: resolution / root cause / 원인 / 해결)",
 
 		"suggested.call_search_first":    "Call pindoc.artifact.search or pindoc.context.for_task (same project, same session) first; pass the returned search_receipt as basis.search_receipt.",
 		"suggested.read_similar":         "Read the near-duplicate candidate(s) and either (a) update_of/supersede_of it, or (b) narrow the new artifact's scope so it isn't semantically covered.",
@@ -112,6 +114,8 @@ var bundle = Bundle{
 		"preflight.receipt_expired":      "✗ basis.search_receipt 만료 (TTL 10분) — search/context 재호출 후 재시도",
 		"preflight.receipt_wrong_project": "✗ basis.search_receipt가 다른 프로젝트의 것임",
 		"preflight.possible_dup":         "✗ 유사한 기존 artifact %q 존재 (cosine distance %.3f) — 읽어본 뒤 update_of 하거나 새 artifact가 다르다는 근거를 제시",
+		"preflight.debug_no_repro":       "✗ Debug body에 재현/증상 정보 필요 (키워드: reproduction / repro / symptom / 재현 / 증상)",
+		"preflight.debug_no_resolution":  "✗ Debug body에 해결/원인 정보 필요 (키워드: resolution / root cause / 원인 / 해결)",
 
 		"suggested.call_search_first":    "먼저 pindoc.artifact.search 또는 pindoc.context.for_task를 (같은 프로젝트, 같은 세션) 호출하고 반환된 search_receipt를 basis.search_receipt로 전달하세요.",
 		"suggested.read_similar":         "유사 후보를 읽어본 뒤 (a) update_of/supersede_of 하거나 (b) 새 artifact의 범위를 좁혀 기존 것에 포괄되지 않도록 하세요.",

@@ -765,7 +765,9 @@ func preflight(in *artifactProposeInput, lang string) (checklist []string, faile
 		}
 	}
 
-	// Type-specific guardrails.
+	// Type-specific guardrails. Minimal keyword checks — Phase 13 brings
+	// in template artifacts so agents get structured exemplars instead of
+	// these ad-hoc tripwires.
 	switch in.Type {
 	case "Task":
 		if !strings.Contains(strings.ToLower(in.BodyMarkdown), "acceptance") {
@@ -775,6 +777,22 @@ func preflight(in *artifactProposeInput, lang string) (checklist []string, faile
 		lower := strings.ToLower(in.BodyMarkdown)
 		if !strings.Contains(lower, "decision") || !strings.Contains(lower, "context") {
 			push(i18n.T(lang, "preflight.adr_sections"), "DEC_NO_SECTIONS")
+		}
+	case "Debug":
+		// Expect at least one of the repro/cause anchors so debug artifacts
+		// don't devolve into summaries. Korean + English keywords to match
+		// both user languages; lowercasing Korean is a no-op but harmless.
+		lower := strings.ToLower(in.BodyMarkdown)
+		hasRepro := strings.Contains(lower, "reproduction") || strings.Contains(lower, "repro") ||
+			strings.Contains(lower, "재현") || strings.Contains(lower, "증상") ||
+			strings.Contains(lower, "symptom")
+		if !hasRepro {
+			push(i18n.T(lang, "preflight.debug_no_repro"), "DBG_NO_REPRO")
+		}
+		hasResolution := strings.Contains(lower, "resolution") || strings.Contains(lower, "root cause") ||
+			strings.Contains(lower, "원인") || strings.Contains(lower, "해결")
+		if !hasResolution {
+			push(i18n.T(lang, "preflight.debug_no_resolution"), "DBG_NO_RESOLUTION")
 		}
 	}
 
