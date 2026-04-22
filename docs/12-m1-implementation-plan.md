@@ -324,6 +324,27 @@ Phase 10에서 저자 dev 환경 편의로 `http` + Docker TEI sidecar로 임시
 
 **배포 영향**: `docker-compose.yml`의 `embed` 서비스(TEI)는 **V1 release에서 선택적**. 기본 배포는 `pindoc-api` + Postgres 2개 컨테이너로 감축 가능 (V1.5 docker-compose slim variant 예정).
 
+## Phase 17 follow-up — Dogfood marks (완료 · 2026-04-22)
+
+Tier 1 5개 artifact를 MCP로 발행한 뒤 실제로 부딪혔던 마찰을 한 배치로 정리. Phase 18 (dogfood Tier 2) 진입 전 기본기 보강.
+
+**Tier 1 pairwise semantic distance (gemma real embedder 기준)**:
+- Title pair: 0.45–0.57 전부 HARD BLOCK(0.15) / SOFT band(0.18–0.25)의 **바깥**. duplicate 없음 확인.
+- Min body pair: Vision↔Architecture 0.2016, Data model↔Mechanisms 0.2022 등 6 쌍이 SOFT band 안. 같은 제품의 aspect 문서라 인접함이 합당 — false positive 우려 기록, Tier 2 이후 calibration 재검토.
+
+**변경 5건**:
+1. `slugify`가 Hangul/CJK 등 Unicode letter 보존 (`[^a-z0-9]+` → `[^\p{L}\p{N}]+` + rune-based 60자 cap). 이전 정책의 "pindoc-url" 같은 의미 손실 제거.
+2. `context.for_task` + `artifact.search`에 `include_templates bool` (기본 false). 전 tool의 template 처리 통일 — list / count / landings 불변식.
+3. 공통 응답에 `embedder_used: {name, model_id, dimension}` 필드. Silent stub fallback 조기 탐지 통로.
+4. `PINDOC_REPO_ROOT` 설정 시 pin path server-side stat — `PIN_PATH_NOT_FOUND` / `PIN_PATH_REJECTED` warning. Non-blocking. V1.5 git-pinner로 교체 예정.
+5. Decision artifact 3건 발행(slug·include_templates·embedder_used·pin path)는 다음 세션 첫 작업 — MCP subprocess를 새 바이너리로 올려야 새 기능이 실제 파이프라인에 반영되기 때문.
+
+**관찰된 잔존 이슈** (후속 Phase 후보):
+- HTTP `/api/search` 응답에도 `embedder_used` 노출 필요 (현재 MCP 전용).
+- Slug collision 자동 suffix는 기존대로 `-2`, `-3` — Unicode slug에서도 동일 동작하는지 smoke test 필요.
+- `candidate_updates[]` threshold 0.22가 한 제품 내 aspect 문서 corpus에 과민할 수 있음 — 실데이터 calibration.
+- `tokenizer.json`은 download하지만 현재 사용 안 함 (sentencepiece.model만 씀). 용량 ~20MB 절약 가능.
+
 ## V1.5 — 인증 + 멀티프로젝트 권한 (다음 큰 블록)
 
 URL 구조는 이미 준비됨. V1.5에서 그 위에:

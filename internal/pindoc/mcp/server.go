@@ -67,6 +67,7 @@ func NewServer(opts Options) *Server {
 		Receipts:     receipts.New(0), // DefaultTTL applies
 		AgentID:      opts.AgentID,
 		Settings:     opts.Settings,
+		RepoRoot:     opts.Config.RepoRoot,
 	}
 	tools.RegisterProjectCurrent(s, deps)
 	tools.RegisterProjectCreate(s, deps)

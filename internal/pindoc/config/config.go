@@ -40,6 +40,14 @@ type Config struct {
 
 	// Embed controls which embedding provider is built at startup.
 	Embed embed.Config
+
+	// RepoRoot is the absolute filesystem path of the working tree the
+	// agent pins against. Optional; set via PINDOC_REPO_ROOT. When
+	// populated, artifact.propose statically verifies each kind="code"
+	// pin's path against the tree and returns a PIN_PATH_NOT_FOUND
+	// warning on any missing files. Empty disables the check — the V1.5
+	// git-pinner will replace this with a real repo-aware validator.
+	RepoRoot string
 }
 
 // Load builds a Config from process env vars. It never fails for Phase 1
@@ -52,6 +60,7 @@ func Load() (*Config, error) {
 		UserLanguage: strings.ToLower(env("PINDOC_USER_LANGUAGE", "en")),
 		ProjectSlug:  env("PINDOC_PROJECT", "pindoc"),
 		MultiProject: envBool("PINDOC_MULTI_PROJECT", false),
+		RepoRoot:     env("PINDOC_REPO_ROOT", ""),
 		Embed: embed.Config{
 			// Empty default → gemma (bundled on-device embeddinggemma-300m).
 			// Set explicitly to "stub" for offline unit tests, "http" for

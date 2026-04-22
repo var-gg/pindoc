@@ -52,6 +52,14 @@ type Deps struct {
 	// safe: capability reporting falls back to defaults, and human_url_abs
 	// is simply omitted when PublicBaseURL is empty.
 	Settings *settings.Store
+
+	// RepoRoot is the absolute path to the working-tree root the agent is
+	// pinning against. Optional; loaded from PINDOC_REPO_ROOT. When set,
+	// artifact.propose statically verifies each kind="code" pin's path and
+	// emits a PIN_PATH_NOT_FOUND warning on accepted responses if the file
+	// is missing at HEAD. Empty = validation disabled (V1.5 git-pinner
+	// takes over). Pure warning, never blocks.
+	RepoRoot string
 }
 
 // AbsHumanURL builds an absolute share URL from the current settings. Empty

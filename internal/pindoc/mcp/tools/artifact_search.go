@@ -11,10 +11,22 @@ import (
 )
 
 type artifactSearchInput struct {
-	Query  string   `json:"query" jsonschema:"user's natural-language question"`
-	TopK   int      `json:"top_k,omitempty" jsonschema:"default 5, max 20"`
-	Types  []string `json:"types,omitempty" jsonschema:"filter by artifact type (Decision, Debug, ...)"`
-	Areas  []string `json:"areas,omitempty" jsonschema:"filter by area slug"`
+	Query            string   `json:"query" jsonschema:"user's natural-language question"`
+	TopK             int      `json:"top_k,omitempty" jsonschema:"default 5, max 20"`
+	Types            []string `json:"types,omitempty" jsonschema:"filter by artifact type (Decision, Debug, ...)"`
+	Areas            []string `json:"areas,omitempty" jsonschema:"filter by area slug"`
+	IncludeTemplates bool     `json:"include_templates,omitempty" jsonschema:"surface _template_* artifacts in hits; default false matches artifact list + context.for_task defaults"`
+}
+
+// EmbedderInfo is a compact descriptor of which embedder served a response.
+// Emitted on every search/context.for_task/propose so agents can tell whether
+// semantic retrieval is actually running — prevents the "silent stub
+// fallback" failure mode that shipped in Phase 10 and hid behind all tool
+// responses until Phase 17.
+type EmbedderInfo struct {
+	Name      string `json:"name"`
+	ModelID   string `json:"model_id,omitempty"`
+	Dimension int    `json:"dimension"`
 }
 
 type SearchHit struct {
@@ -43,6 +55,9 @@ type artifactSearchOutput struct {
 	// pass it back as basis.search_receipt on the next artifact.propose
 	// to satisfy Phase 11b's server-enforced "search before write" rule.
 	SearchReceipt string `json:"search_receipt,omitempty"`
+	// EmbedderUsed lets the agent verify that ranking came from a real
+	// semantic model (not stub). Added Phase 17 follow-up.
+	EmbedderUsed EmbedderInfo `json:"embedder_used"`
 }
 
 // RegisterArtifactSearch wires pindoc.artifact.search. Does a vector
@@ -102,6 +117,7 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 					  AND a.status <> 'archived'
 					  AND ($3::text[] IS NULL OR a.type   = ANY($3))
 					  AND ($4::text[] IS NULL OR ar.slug  = ANY($4))
+					  AND ($6::bool OR NOT starts_with(a.slug, '_template_'))
 					ORDER BY c.artifact_id, distance
 				)
 				SELECT
@@ -129,7 +145,7 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 				areasArg = in.Areas
 			}
 
-			rows, err := deps.DB.Query(ctx, sql, qVec, deps.ProjectSlug, typesArg, areasArg, in.TopK)
+			rows, err := deps.DB.Query(ctx, sql, qVec, deps.ProjectSlug, typesArg, areasArg, in.TopK, in.IncludeTemplates)
 			if err != nil {
 				return nil, artifactSearchOutput{}, fmt.Errorf("search query: %w", err)
 			}
@@ -158,7 +174,9 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 				out.Hits = append(out.Hits, h)
 			}
 
-			if deps.Embedder.Info().Name == "stub" {
+			info := deps.Embedder.Info()
+			out.EmbedderUsed = EmbedderInfo{Name: info.Name, ModelID: info.ModelID, Dimension: info.Dimension}
+			if info.Name == "stub" {
 				out.Notice = "stub embedder — ranking is hash-based, not semantic. Swap to a real embedding provider to get meaningful results."
 			}
 			if deps.Receipts != nil {

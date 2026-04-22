@@ -115,26 +115,34 @@ Dogfood는 **빈 캔버스 + 양식 4개** 상태에서 시작.
 
 ## 3. 재개 체크리스트
 
-### 다음 세션 시작 시
+### 다음 세션 시작 시 (Phase 17 + follow-up 반영)
 
 ```bash
 cd A:/vargg-workspace/pindoc
 
-# 1. DB + embed 기동
-docker compose up -d db embed
+# 0. (한 번만) pindoc-server.exe swap — 이전 세션의 .new.exe 반영
+#    Phase 17 이후 첫 시작 전 필수. MCP가 gemma default로 뜨기 위한 전제.
+mv bin/pindoc-server.exe bin/pindoc-server.exe~  # 구 바이너리 백업
+mv bin/pindoc-server.new.exe bin/pindoc-server.exe
 
-# 2. pindoc-api 기동 (http embedder env 포함) — 백그라운드
-make api-run-http &
+# 1. DB 기동 (embed 컨테이너는 더 이상 필요 없음 — gemma bundled)
+docker compose up -d db
+
+# 2. pindoc-api 기동 — 환경변수 최소 세팅
+#    PINDOC_REPO_ROOT: pin path server-side 검증 활성화 (Phase 17 follow-up)
+#    embedder env는 생략 → PINDOC_EMBED_PROVIDER="" 기본값으로 gemma 자동
+PINDOC_REPO_ROOT="$PWD" ./bin/pindoc-api.exe &
 
 # 3. Vite dev (웹 UI 확인 원할 때)
 cd web && pnpm dev
 # → http://localhost:5830/p/pindoc/wiki 접속
 
-# 4. health check
+# 4. health check — embedder.name == "embeddinggemma" 확인
 curl -s http://127.0.0.1:5831/api/health
 curl -s http://127.0.0.1:5831/api/config
-curl -s http://127.0.0.1:5831/api/p/pindoc | head -c 300
 ```
+
+**최초 cold start**: onnxruntime shared lib + 모델 가중치 ~500MB 자동 download, ~12초 소요. 이후 실행은 cache hit으로 즉시.
 
 ### MCP 연결 확인
 

@@ -7,9 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -218,6 +221,11 @@ type artifactProposeOutput struct {
 	// passed but a semantic close match existed — the agent did not read
 	// it. Agents should log/surface; not a block.
 	Warnings []string `json:"warnings,omitempty"`
+	// EmbedderUsed (Phase 17 follow-up) echoes which provider served the
+	// semantic-conflict check + chunk embedding so the agent can detect
+	// silent stub fallback. Empty when the embedder wasn't touched (e.g.
+	// pure not_ready on schema validation).
+	EmbedderUsed *EmbedderInfo `json:"embedder_used,omitempty"`
 }
 
 // RelatedRef is a compact pointer to another artifact the caller should
@@ -627,6 +635,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			}
 
 			warnings := createWarnings(ctx, deps, projectID, in.Title, in.BodyMarkdown)
+			warnings = append(warnings, pinPathWarnings(deps, in.Pins)...)
 			return nil, artifactProposeOutput{
 				Status:         "accepted",
 				ArtifactID:     newID,
@@ -641,6 +650,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				EdgesStored:    edgesStored,
 				Superseded:     supersededFlag,
 				Warnings:       warnings,
+				EmbedderUsed:   embedderInfo(deps),
 			}, nil
 		},
 	)
@@ -885,7 +895,22 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		RevisionNumber: newRev,
 		PinsStored:     pinsStored,
 		EdgesStored:    edgesStored,
+		Warnings:       pinPathWarnings(deps, in.Pins),
+		EmbedderUsed:   embedderInfo(deps),
 	}, nil
+}
+
+// embedderInfo returns a pointer-typed EmbedderInfo ready for the propose
+// response. Pointer-typed so omitempty drops the field entirely when the
+// propose path never touched the embedder (pure schema not_ready). Called
+// only on accepted paths after chunks are computed, which is where the
+// field carries real information.
+func embedderInfo(deps Deps) *EmbedderInfo {
+	if deps.Embedder == nil {
+		return nil
+	}
+	info := deps.Embedder.Info()
+	return &EmbedderInfo{Name: info.Name, ModelID: info.ModelID, Dimension: info.Dimension}
 }
 
 func bodyHash(body string) string {
@@ -1061,19 +1086,37 @@ func preflight(in *artifactProposeInput, lang string) (checklist []string, faile
 	return checklist, failed, code
 }
 
-var slugRegex = regexp.MustCompile(`[^a-z0-9]+`)
+// slugRegex replaces any run of characters that are NOT Unicode letters
+// or numbers with a single hyphen. This preserves Hangul / Kana / CJK /
+// Latin-ext / Cyrillic / Arabic verbatim — URL path components accept
+// all of these when percent-encoded, browsers show the decoded form in
+// the address bar, and our pgvector-based lookup is byte-exact.
+var slugRegex = regexp.MustCompile(`[^\p{L}\p{N}]+`)
 
-// slugify lowercases, replaces runs of non-alnum with '-', trims dashes,
-// and caps at 60 chars. Keeps ASCII only — Korean characters drop out,
-// which is fine because slug is a URL/path component and the real human
-// label lives in title. If the title has no ASCII letters the caller
-// falls back to a type+timestamp slug.
+// slugify produces a URL-safe, human-legible slug from a title.
+//
+// Policy (revised 2026-04-22 Phase 17 follow-up):
+//   - ASCII letters lowercased.
+//   - Unicode letters (Hangul, Kana, CJK, Cyrillic, Arabic, …) preserved
+//     as-is. The earlier policy stripped them, which turned Korean titles
+//     like "Pindoc 시스템 아키텍처 — URL 스코프" into "pindoc-url" — 2
+//     tokens of meaning lost.
+//   - Any run of non-letter/non-digit characters collapses to a single "-".
+//   - Trimmed of leading/trailing hyphens.
+//   - Capped at 60 runes (not bytes) so UTF-8 doesn't get chopped mid-
+//     character; then re-trimmed in case the cut left a trailing hyphen.
+//   - Still empty after all that (e.g. title was only punctuation) → the
+//     caller falls back to a type+timestamp slug.
+//
+// Agents that want full control can pass an explicit `slug` on propose;
+// this function only runs when `slug` is omitted.
 func slugify(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	s = slugRegex.ReplaceAllString(s, "-")
 	s = strings.Trim(s, "-")
-	if len(s) > 60 {
-		s = strings.Trim(s[:60], "-")
+	if utf8.RuneCountInString(s) > 60 {
+		runes := []rune(s)
+		s = strings.Trim(string(runes[:60]), "-")
 	}
 	return s
 }
@@ -1432,6 +1475,42 @@ func createWarnings(ctx context.Context, deps Deps, projectID, title, body strin
 		return nil
 	}
 	return []string{"RECOMMEND_READ_BEFORE_CREATE"}
+}
+
+// pinPathWarnings checks every kind="code" pin path against the configured
+// repo root and returns one PIN_PATH_NOT_FOUND:<path> warning per miss.
+// No-op when deps.RepoRoot is empty (V1 default — the V1.5 git-pinner
+// takes over once it lands). Traversal-escape attempts (..) are rejected
+// as warnings too; the current commit_sha-less pin flow is trust-on-report
+// from the agent, and this validation is the cheapest defence we can run
+// without a git checkout on hand.
+func pinPathWarnings(deps Deps, pins []ArtifactPinInput) []string {
+	if strings.TrimSpace(deps.RepoRoot) == "" || len(pins) == 0 {
+		return nil
+	}
+	var out []string
+	for _, p := range pins {
+		kind := strings.TrimSpace(p.Kind)
+		if kind != "" && kind != "code" {
+			// Non-code kinds (resource, url) don't point at a local path.
+			continue
+		}
+		path := strings.TrimSpace(p.Path)
+		if path == "" {
+			continue
+		}
+		// Refuse traversal. Pin paths are repo-relative; absolute or parent-
+		// escaping paths are a mistake the agent should see.
+		if strings.Contains(path, "..") || filepath.IsAbs(path) {
+			out = append(out, "PIN_PATH_REJECTED:"+path)
+			continue
+		}
+		full := filepath.Join(deps.RepoRoot, filepath.FromSlash(path))
+		if _, err := os.Stat(full); err != nil {
+			out = append(out, "PIN_PATH_NOT_FOUND:"+path)
+		}
+	}
+	return out
 }
 
 // findSemanticAdvisories is findSemanticConflicts' soft cousin: returns

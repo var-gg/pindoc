@@ -15,6 +15,12 @@ type contextForTaskInput struct {
 	TaskDescription string   `json:"task_description" jsonschema:"free-form natural language description of what the agent is about to do"`
 	TopK            int      `json:"top_k,omitempty" jsonschema:"number of artifacts to return; default 3, max 10"`
 	Areas           []string `json:"areas,omitempty" jsonschema:"optional area_slug filter"`
+	// IncludeTemplates surfaces _template_* artifacts in landings. Default
+	// false — templates are meta-docs meant to be read via artifact.read
+	// before proposing, not Fast-Landing candidates. The previous default
+	// (templates always surfaced) let an empty "연관" section in a template
+	// outrank real content on short task descriptions.
+	IncludeTemplates bool `json:"include_templates,omitempty" jsonschema:"surface _template_* artifacts in landings; default false matches artifact.search/list and the Reader UI"`
 }
 
 type ContextLanding struct {
@@ -77,6 +83,9 @@ type contextForTaskOutput struct {
 	// Stale flags landings that may be out-of-date. Phase 11c uses a
 	// simple updated_at age heuristic; later phases add pin-diff checks.
 	Stale []StaleSignal `json:"stale,omitempty"`
+	// EmbedderUsed echoes which provider/model served the landings. Added
+	// Phase 17 follow-up so agents detect the silent stub-fallback case.
+	EmbedderUsed EmbedderInfo `json:"embedder_used"`
 }
 
 // candidateUpdateThreshold: landings under this cosine distance prompt an
@@ -137,6 +146,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 					WHERE p.slug = $2
 					  AND a.status <> 'archived'
 					  AND ($3::text[] IS NULL OR ar.slug = ANY($3))
+					  AND ($5::bool OR NOT starts_with(a.slug, '_template_'))
 					ORDER BY c.artifact_id, distance
 				)
 				SELECT
@@ -152,7 +162,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			if len(in.Areas) > 0 {
 				areasArg = in.Areas
 			}
-			rows, err := deps.DB.Query(ctx, sql, qVec, deps.ProjectSlug, areasArg, in.TopK)
+			rows, err := deps.DB.Query(ctx, sql, qVec, deps.ProjectSlug, areasArg, in.TopK, in.IncludeTemplates)
 			if err != nil {
 				return nil, contextForTaskOutput{}, fmt.Errorf("query: %w", err)
 			}
@@ -208,7 +218,9 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 					})
 				}
 			}
-			if deps.Embedder.Info().Name == "stub" {
+			info := deps.Embedder.Info()
+			out.EmbedderUsed = EmbedderInfo{Name: info.Name, ModelID: info.ModelID, Dimension: info.Dimension}
+			if info.Name == "stub" {
 				out.Notice = "stub embedder active — landings are hash-ranked, not semantic."
 			}
 			if deps.Receipts != nil {
