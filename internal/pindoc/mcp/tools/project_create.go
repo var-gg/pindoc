@@ -110,6 +110,32 @@ the new project by launching pindoc-server with PINDOC_PROJECT=<new>.
 				return nil, projectCreateOutput{}, fmt.Errorf("seed default areas: %w", err)
 			}
 
+			// Seed the template artifacts under 'misc' so they participate
+			// in the regular lifecycle (revisions, UI, search). Keep in
+			// sync with migration 0006_template_artifacts.sql which does
+			// the same for pre-existing projects.
+			var miscID string
+			if err := tx.QueryRow(ctx, `
+				SELECT id::text FROM areas WHERE project_id = $1::uuid AND slug = 'misc'
+			`, projectID).Scan(&miscID); err != nil {
+				return nil, projectCreateOutput{}, fmt.Errorf("resolve misc area: %w", err)
+			}
+			for _, t := range templateSeeds {
+				if _, err := tx.Exec(ctx, `
+					INSERT INTO artifacts (
+						project_id, area_id, slug, type, title, body_markdown, tags,
+						completeness, status, review_state,
+						author_kind, author_id, author_version, published_at
+					) VALUES (
+						$1::uuid, $2::uuid, $3, $4, $5, $6, ARRAY['_template'],
+						'partial', 'published', 'auto_published',
+						'system', 'pindoc-seed', '0.0.1', now()
+					)
+				`, projectID, miscID, t.Slug, t.Type, t.Title, t.Body); err != nil {
+					return nil, projectCreateOutput{}, fmt.Errorf("seed template %s: %w", t.Slug, err)
+				}
+			}
+
 			if err := tx.Commit(ctx); err != nil {
 				return nil, projectCreateOutput{}, fmt.Errorf("commit: %w", err)
 			}

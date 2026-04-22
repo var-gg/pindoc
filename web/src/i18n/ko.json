@@ -19,6 +19,9 @@
 
   "sidebar.types": "Type",
   "sidebar.agents": "Agent",
+  "sidebar.view": "보기 옵션",
+  "sidebar.templates": "템플릿 표시",
+  "sidebar.templates_hint": "타입별 권장 섹션 구조(_template_ prefix) artifact를 목록에 포함/제외",
 
   "sidecar.this_artifact": "이 아티팩트",
   "sidecar.no_selection": "선택된 아티팩트가 없음",

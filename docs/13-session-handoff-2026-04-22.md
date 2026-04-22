@@ -29,6 +29,14 @@
 - UI: `/wiki/:slug/history`, `/wiki/:slug/diff?from=&to=` (이후 Phase 8에서 `/p/:project/wiki/...`)
 - PINDOC.md 템플릿에 update flow 문서화
 
+### Phase 13 — Template artifact seed (2026-04-22 완료)
+- Migration 0006: `_template_debug`, `_template_decision`, `_template_analysis`, `_template_task` 4개 artifact를 pindoc 프로젝트 `misc` area에 seed. 각 body에 권장 섹션 구조 (Debug: 증상/재현/가설/원인/해결/검증/Open questions, Decision: Context/Decision/Rationale/Alternatives/Consequences, Analysis: TL;DR/Scope/Findings/조사시점/재조회방법/Open, Task: 목적/범위/TODO(acceptance)/리소스/TC/DoD/Open). 모두 `tags: ['_template']`.
+- `pindoc.project.create` tool도 신규 프로젝트 생성 시 template 4개 자동 seed — migration과 template body 동기화는 `internal/pindoc/mcp/tools/templates.go`의 `templateSeeds` slice 기준.
+- **HTTP API filter**: `/api/p/:project/artifacts` 기본 응답에서 `_template_` prefix 제외 (NOT starts_with). `?include_templates=true` 쿼리 시 포함.
+- **Reader UI "Show templates" 토글**: Sidebar에 새 section. LayoutTemplate 아이콘. `showTemplates` state → `useReaderData(project, slug, includeTemplates)` → `api.artifacts(project, {includeTemplates})` 파이프라인. i18n ko/en 추가 (`sidebar.view`, `sidebar.templates`, `sidebar.templates_hint`).
+- **PINDOC.md 템플릿 ("Template-first propose")**: 신규 Debug/Decision/Analysis/Task propose 전 `pindoc.artifact.read(_template_<type>)` 먼저 호출, 섹션 구조를 skeleton으로 사용하라는 규약. Template 자체는 `update_of`로 evolving.
+- Template 4개 real embedder로 재-embed → `context.for_task` / `search` 결과에 포함되므로 agent가 자연스럽게 발견 가능.
+
 ### Phase 12 — Agent ergonomics (2026-04-22 완료)
 - **12a `not_ready` envelope primacy**: `artifact.propose` 응답에 `NextTools[]` (fail code → 다음 호출 매핑) + `Related[]` (RelatedRef: id/slug/type/title + agent_ref/human_url + reason) 필드 추가. `CONFLICT_EXACT_TITLE` / `POSSIBLE_DUP`에 실제 related refs 채움. 기존 `Checklist` / `SuggestedActions` (자연어)는 backward-compat 유지.
 - **12b `artifact.read(view=brief|full|continuation)`**:
@@ -81,20 +89,21 @@
 
 ---
 
-## 2. 다음 작업 — Phase 13 template artifact seed (Phase 12 완료 후 다음)
+## 2. 다음 작업 — M1 안정화 + 외부 peer review 3차
 
-Phase 8~12 완료. 다음 큰 블록:
+Phase 8~13 전부 완료. M1 구현 블록 끝. 다음 큰 선택지:
 
-### Phase 13 — Template artifact seed
-"포맷 베스트프랙티스도 pindoc 자체의 dogfood 산물" 원칙의 코드화.
+### 옵션 A: 외부 3차 peer review 받기
+현재 repo 상태로 다시 외부 고급추론 리포트 돌려 반영. 1차·2차 리포트 반영 결과 검증.
 
-- Seed migration 신규 — `_template_debug`, `_template_decision`, `_template_analysis`, `_template_task` 4개 artifact 생성.
-- 각 template body는 현 시점 권장 섹션 구조 + 작성 예시.
-- PINDOC.md 템플릿에 "신규 artifact propose 전에 `artifact.read(_template_<type>)` 로 구조 참고" 규약 추가.
-- Template 자체도 일반 artifact — `update_of`로 계속 revision. 외부 리서치 + 실 dogfood 결과에 따라 포맷이 evolving.
-- Reader UI: template artifact는 기본 목록에서 숨김 (slug prefix `_template_` 필터), "템플릿" 전용 탭에서 노출.
+### 옵션 B: dogfood + 버그 정리
+실제 Pindoc 작업 자체를 pindoc을 통해 하면서 발견되는 UX/버그 정리. Reader UI의 template 표시, stale widget, agent_id 표시 등 세부 폴리싱.
 
-상세: [docs/12-m1-implementation-plan.md](./12-m1-implementation-plan.md) Phase 13 섹션.
+### 옵션 C: V1.5 착수 — 인증
+GitHub OAuth + agent token + per-project ACL. [docs/12 §V1.5 블록](./12-m1-implementation-plan.md).
+
+저자 결정 대기.
+
 리뷰 판단 근거: [docs/14-peer-review-response.md](./14-peer-review-response.md).
 
 ### 실행 환경 재개 체크리스트 (Phase 10 이후)

@@ -30,7 +30,7 @@ export type LoadState =
   | { kind: "error"; message: string }
   | { kind: "ready"; data: ReaderData };
 
-export function useReaderData(projectSlug: string, slug?: string): LoadState {
+export function useReaderData(projectSlug: string, slug?: string, includeTemplates = false): LoadState {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
 
   useEffect(() => {
@@ -40,7 +40,7 @@ export function useReaderData(projectSlug: string, slug?: string): LoadState {
         const [project, areasResp, listResp] = await Promise.all([
           api.project(projectSlug),
           api.areas(projectSlug),
-          api.artifacts(projectSlug),
+          api.artifacts(projectSlug, { includeTemplates }),
         ]);
         // Only load detail when a slug is explicitly requested. The
         // handoff's intended navigation is ⌘K-first; auto-loading the
@@ -72,7 +72,7 @@ export function useReaderData(projectSlug: string, slug?: string): LoadState {
     return () => {
       cancelled = true;
     };
-  }, [projectSlug, slug]);
+  }, [projectSlug, slug, includeTemplates]);
 
   return state;
 }

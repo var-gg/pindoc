@@ -175,6 +175,28 @@ To start a new project, call pindoc.project.create with a kebab-case slug,
 a display name, and primary_language=en|ko. It returns the canonical
 /p/<new-slug>/wiki URL for the user to bookmark.
 
+## Template-first propose (Phase 13)
+
+Every project has four template artifacts seeded by the server:
+
+    _template_debug      — Debug body structure
+    _template_decision   — Decision (ADR-style) body structure
+    _template_analysis   — Analysis body structure
+    _template_task       — Task body structure
+
+**Before proposing a new artifact of those types, call
+pindoc.artifact.read on the matching _template_<type> slug** and use its
+section structure as the skeleton for your body. Keep section names in
+the house language (ko/en mix allowed — see the template). The template
+itself is an ordinary artifact that evolves via update_of, so the
+"current best practice structure" lives inside Pindoc, not in this
+harness doc.
+
+Templates are hidden from the Reader's default list; users see them
+behind a "Show templates" toggle. Agents always see them because the
+HTTP list filter only applies to the Reader; artifact.read / search /
+context.for_task return them unconditionally.
+
 ## Artifact hygiene
 
 - Body language: %s.

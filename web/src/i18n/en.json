@@ -19,6 +19,9 @@
 
   "sidebar.types": "Types",
   "sidebar.agents": "Agents",
+  "sidebar.view": "View options",
+  "sidebar.templates": "Show templates",
+  "sidebar.templates_hint": "Toggle inclusion of _template_ artifacts (per-type recommended structure) in the list",
 
   "sidecar.this_artifact": "This artifact",
   "sidecar.no_selection": "No artifact selected",

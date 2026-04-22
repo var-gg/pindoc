@@ -224,6 +224,9 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 	slug := projectSlugFrom(r)
 	areaSlug := r.URL.Query().Get("area")
 	typeFilter := r.URL.Query().Get("type")
+	// include_templates=true surfaces _template_* artifacts (Phase 13).
+	// Default hides them so the reader list stays focused on real docs.
+	includeTemplates := r.URL.Query().Get("include_templates") == "true"
 
 	rows, err := d.DB.Query(r.Context(), `
 		SELECT
@@ -237,9 +240,10 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 		  AND a.status <> 'archived'
 		  AND ($2 = '' OR ar.slug = $2)
 		  AND ($3 = '' OR a.type  = $3)
+		  AND ($4::bool OR NOT starts_with(a.slug, '_template_'))
 		ORDER BY a.updated_at DESC
 		LIMIT 200
-	`, slug, areaSlug, typeFilter)
+	`, slug, areaSlug, typeFilter, includeTemplates)
 	if err != nil {
 		d.Logger.Error("artifact list", "err", err)
 		writeError(w, http.StatusInternalServerError, "query failed")

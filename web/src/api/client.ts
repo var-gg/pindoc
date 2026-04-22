@@ -163,10 +163,11 @@ export const api = {
   project: (project: string) => j<Project>(p(project)),
   areas: (project: string) =>
     j<{ project_slug: string; areas: Area[] }>(`${p(project)}/areas`),
-  artifacts: (project: string, params?: { area?: string; type?: string }) => {
+  artifacts: (project: string, params?: { area?: string; type?: string; includeTemplates?: boolean }) => {
     const qs = new URLSearchParams();
     if (params?.area) qs.set("area", params.area);
     if (params?.type) qs.set("type", params.type);
+    if (params?.includeTemplates) qs.set("include_templates", "true");
     const q = qs.toString();
     return j<{ project_slug: string; artifacts: ArtifactRef[] }>(
       `${p(project)}/artifacts${q ? `?${q}` : ""}`,

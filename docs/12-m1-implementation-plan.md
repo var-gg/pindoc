@@ -232,7 +232,7 @@ claude mcp list           # pindoc 있음
 - **Actor hardening (stdio)**: `author_id`는 표시용 metadata로 재정의. 서버가 session 단위 `agent_id` (UUID) 를 ping 첫 호출 시 발급, propose 감사에 기록. `author_id` spoof 공격 surface 축소.
 - **Mode split은 not_ready 응답에만 한정 (2차 피어리뷰 권고 축소 반영)**: default는 compact (fail codes만), `verbose` 모드에서 자연어 hint 추가. tool 전체에 mode 파라미터 붙이는 건 현 규모에서 과설계 — 반려.
 
-## Phase 13 — Template artifact seed
+## Phase 13 — Template artifact seed (완료 · 2026-04-22)
 
 Phase 11에서 body_json 최소 필드로 검증을 좁히는 대신, **각 타입의 "현재 best practice" 구조는 artifact 자체로 관리**. 이것이 "포맷도 evolving artifact"라는 저자 원칙의 코드화.
 

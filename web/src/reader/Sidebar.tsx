@@ -1,4 +1,4 @@
-import { Folder, FolderOpen, FileText, Zap, Bug, Book, BookOpen, Hash, Check, Code } from "lucide-react";
+import { Folder, FolderOpen, FileText, Zap, Bug, Book, BookOpen, Hash, Check, Code, LayoutTemplate } from "lucide-react";
 import type { ComponentType } from "react";
 import type { Area } from "../api/client";
 import { useI18n } from "../i18n";
@@ -14,6 +14,8 @@ type Props = {
   selectedType: string | null;
   onSelectType: (t: string | null) => void;
   open: boolean;
+  showTemplates: boolean;
+  onToggleTemplates: () => void;
 };
 // Sidebar click behavior: selecting an area or type clears any open
 // artifact so the filter effect is immediately visible in the list.
@@ -42,6 +44,8 @@ export function Sidebar({
   selectedType,
   onSelectType,
   open,
+  showTemplates,
+  onToggleTemplates,
 }: Props) {
   const { t } = useI18n();
 
@@ -111,6 +115,19 @@ export function Sidebar({
           })}
         </>
       )}
+
+      <div className="side-section" style={{ marginTop: 12 }}>
+        {t("sidebar.view")}
+      </div>
+      <button
+        type="button"
+        className={`side-item${showTemplates ? " active" : ""}`}
+        onClick={onToggleTemplates}
+        title={t("sidebar.templates_hint")}
+      >
+        <LayoutTemplate className="lucide" />
+        <span>{t("sidebar.templates")}</span>
+      </button>
 
       {agents.length > 0 && (
         <>

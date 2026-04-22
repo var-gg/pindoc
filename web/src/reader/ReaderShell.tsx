@@ -21,7 +21,8 @@ export function ReaderShell({ view }: Props) {
   const { project = "", slug } = useParams<{ project: string; slug?: string }>();
   const { t } = useI18n();
   const navigate = useNavigate();
-  const state = useReaderData(project, slug);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const state = useReaderData(project, slug, showTemplates);
   const [theme, setThemeState] = useState<Theme>(() => initTheme());
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -121,6 +122,8 @@ export function ReaderShell({ view }: Props) {
           selectedType={selectedType}
           onSelectType={handleSelectType}
           open={menuOpen}
+          showTemplates={showTemplates}
+          onToggleTemplates={() => setShowTemplates((v) => !v)}
         />
         <Body
           view={view}
