@@ -55,6 +55,15 @@ var bundle = Bundle{
 		"suggested.pick_one_mode":       "update_of appends a revision to the same artifact; supersede_of archives the old one and creates a replacement.",
 		"suggested.read_existing_rel":   "Call pindoc.artifact.read on each relates_to target to confirm it exists and belongs to this project.",
 		"suggested.reread_before_update": "Call pindoc.artifact.revisions, find the current max revision_number, and re-submit with expected_version set to it (or omit to disable optimistic lock).",
+
+		"preflight.no_search_receipt":    "✗ basis.search_receipt is missing — a create path requires a valid receipt from pindoc.artifact.search or pindoc.context.for_task in the current session",
+		"preflight.receipt_unknown":      "✗ basis.search_receipt is not recognised — the token may have been issued by a different MCP session or has been swept",
+		"preflight.receipt_expired":      "✗ basis.search_receipt is expired (TTL 10 minutes) — re-run search/context and retry",
+		"preflight.receipt_wrong_project": "✗ basis.search_receipt belongs to a different project",
+		"preflight.possible_dup":         "✗ a near-duplicate artifact %q already exists (cosine distance %.3f) — read it and either update_of or prove the new one is distinct",
+
+		"suggested.call_search_first":    "Call pindoc.artifact.search or pindoc.context.for_task (same project, same session) first; pass the returned search_receipt as basis.search_receipt.",
+		"suggested.read_similar":         "Read the near-duplicate candidate(s) and either (a) update_of/supersede_of it, or (b) narrow the new artifact's scope so it isn't semantically covered.",
 	},
 	"ko": {
 		"preflight.title_empty":       "✗ title이 비어 있음",
@@ -97,6 +106,15 @@ var bundle = Bundle{
 		"suggested.pick_one_mode":       "update_of는 같은 artifact에 revision 추가; supersede_of는 기존 artifact를 archive하고 새 artifact를 생성.",
 		"suggested.read_existing_rel":   "각 relates_to 대상에 대해 pindoc.artifact.read를 호출해 이 프로젝트에 존재하는지 확인하세요.",
 		"suggested.reread_before_update": "pindoc.artifact.revisions로 현재 max revision_number를 확인한 뒤 expected_version에 그 값을 넣고 재시도 (optimistic lock 비활성화하려면 필드 자체를 생략).",
+
+		"preflight.no_search_receipt":    "✗ basis.search_receipt가 없음 — create 경로는 현재 세션에서 발급된 pindoc.artifact.search 또는 pindoc.context.for_task의 receipt 필수",
+		"preflight.receipt_unknown":      "✗ basis.search_receipt를 인식하지 못함 — 다른 MCP 세션에서 발급됐거나 이미 sweep됨",
+		"preflight.receipt_expired":      "✗ basis.search_receipt 만료 (TTL 10분) — search/context 재호출 후 재시도",
+		"preflight.receipt_wrong_project": "✗ basis.search_receipt가 다른 프로젝트의 것임",
+		"preflight.possible_dup":         "✗ 유사한 기존 artifact %q 존재 (cosine distance %.3f) — 읽어본 뒤 update_of 하거나 새 artifact가 다르다는 근거를 제시",
+
+		"suggested.call_search_first":    "먼저 pindoc.artifact.search 또는 pindoc.context.for_task를 (같은 프로젝트, 같은 세션) 호출하고 반환된 search_receipt를 basis.search_receipt로 전달하세요.",
+		"suggested.read_similar":         "유사 후보를 읽어본 뒤 (a) update_of/supersede_of 하거나 (b) 새 artifact의 범위를 좁혀 기존 것에 포괄되지 않도록 하세요.",
 	},
 }
 

@@ -33,6 +33,11 @@ type contextForTaskOutput struct {
 	TaskDescription string           `json:"task_description"`
 	Landings        []ContextLanding `json:"landings"`
 	Notice          string           `json:"notice,omitempty"`
+	// SearchReceipt mirrors artifact.search — same opaque token, same TTL,
+	// same downstream effect on artifact.propose. Agents that Fast-Land
+	// with context.for_task satisfy the search-before-propose gate without
+	// also calling artifact.search.
+	SearchReceipt string `json:"search_receipt,omitempty"`
 }
 
 // RegisterContextForTask wires pindoc.context.for_task — the Fast Landing
@@ -126,6 +131,9 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			}
 			if deps.Embedder.Info().Name == "stub" {
 				out.Notice = "stub embedder active — landings are hash-ranked, not semantic."
+			}
+			if deps.Receipts != nil {
+				out.SearchReceipt = deps.Receipts.Issue(deps.ProjectSlug, in.TaskDescription)
 			}
 			return nil, out, rows.Err()
 		},

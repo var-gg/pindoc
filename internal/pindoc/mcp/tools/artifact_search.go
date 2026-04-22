@@ -34,9 +34,13 @@ type SearchHit struct {
 }
 
 type artifactSearchOutput struct {
-	Query   string      `json:"query"`
-	Hits    []SearchHit `json:"hits"`
-	Notice  string      `json:"notice,omitempty"`
+	Query  string      `json:"query"`
+	Hits   []SearchHit `json:"hits"`
+	Notice string      `json:"notice,omitempty"`
+	// SearchReceipt is a short-lived opaque token (TTL 10 min). Agents
+	// pass it back as basis.search_receipt on the next artifact.propose
+	// to satisfy Phase 11b's server-enforced "search before write" rule.
+	SearchReceipt string `json:"search_receipt,omitempty"`
 }
 
 // RegisterArtifactSearch wires pindoc.artifact.search. Does a vector
@@ -153,6 +157,9 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 
 			if deps.Embedder.Info().Name == "stub" {
 				out.Notice = "stub embedder — ranking is hash-based, not semantic. Swap to a real embedding provider to get meaningful results."
+			}
+			if deps.Receipts != nil {
+				out.SearchReceipt = deps.Receipts.Issue(deps.ProjectSlug, in.Query)
 			}
 			return nil, out, rows.Err()
 		},

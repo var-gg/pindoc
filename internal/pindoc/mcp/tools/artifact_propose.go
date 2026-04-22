@@ -75,6 +75,25 @@ type artifactProposeInput struct {
 	// Target may be id, slug, or pindoc:// URL — resolved server-side.
 	// Unknown targets fail the whole call with RELATES_TARGET_NOT_FOUND.
 	RelatesTo []ArtifactRelationInput `json:"relates_to,omitempty" jsonschema:"typed edges to other artifacts"`
+
+	// Basis records the evidence the agent gathered before proposing.
+	// Phase 11b makes basis.search_receipt REQUIRED on the create path
+	// (new artifact, no update_of, no supersede_of): the server refuses
+	// the write with NO_SRCH if a valid receipt from artifact.search or
+	// context.for_task isn't provided. Update/supersede paths skip the
+	// gate because reading/targeting an existing artifact is already
+	// proof of context.
+	Basis *artifactProposeBasis `json:"basis,omitempty"`
+}
+
+type artifactProposeBasis struct {
+	// SearchReceipt is the opaque token returned by artifact.search or
+	// context.for_task in the same session. TTL 10 minutes.
+	SearchReceipt string `json:"search_receipt,omitempty" jsonschema:"receipt from artifact.search or context.for_task"`
+	// SourceSession is a free-form string identifying the agent session
+	// that produced this artifact — stored on the revision row for
+	// audit. Not validated.
+	SourceSession string `json:"source_session,omitempty"`
 }
 
 // ArtifactPinInput is the agent-facing shape for a single code pin. `path`
@@ -210,6 +229,55 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				return nil, artifactProposeOutput{}, fmt.Errorf("resolve scope: %w", err)
 			}
 
+			// --- search_receipt gate (Phase 11b) -------------------------
+			// Create path requires a valid receipt. Update/supersede bypass
+			// the gate because they already depend on an existing artifact
+			// (read/target proves context). Unset receipts store disables
+			// the gate entirely (test fixtures).
+			isCreatePath := strings.TrimSpace(in.UpdateOf) == "" && strings.TrimSpace(in.SupersedeOf) == ""
+			if isCreatePath && deps.Receipts != nil {
+				receipt := ""
+				if in.Basis != nil {
+					receipt = strings.TrimSpace(in.Basis.SearchReceipt)
+				}
+				if receipt == "" {
+					return nil, artifactProposeOutput{
+						Status:           "not_ready",
+						ErrorCode:        "NO_SRCH",
+						Failed:           []string{"NO_SRCH"},
+						Checklist:        []string{i18n.T(lang, "preflight.no_search_receipt")},
+						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
+					}, nil
+				}
+				res := deps.Receipts.Verify(receipt, deps.ProjectSlug)
+				switch {
+				case res.Unknown:
+					return nil, artifactProposeOutput{
+						Status:           "not_ready",
+						ErrorCode:        "RECEIPT_UNKNOWN",
+						Failed:           []string{"RECEIPT_UNKNOWN"},
+						Checklist:        []string{i18n.T(lang, "preflight.receipt_unknown")},
+						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
+					}, nil
+				case res.Expired:
+					return nil, artifactProposeOutput{
+						Status:           "not_ready",
+						ErrorCode:        "RECEIPT_EXPIRED",
+						Failed:           []string{"RECEIPT_EXPIRED"},
+						Checklist:        []string{i18n.T(lang, "preflight.receipt_expired")},
+						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
+					}, nil
+				case res.WrongProject:
+					return nil, artifactProposeOutput{
+						Status:           "not_ready",
+						ErrorCode:        "RECEIPT_WRONG_PROJECT",
+						Failed:           []string{"RECEIPT_WRONG_PROJECT"},
+						Checklist:        []string{i18n.T(lang, "preflight.receipt_wrong_project")},
+						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
+					}, nil
+				}
+			}
+
 			// --- Resolve supersede_of target first (if set) --------------
 			// The supersede path creates a new artifact and flips the old
 			// one's status to 'superseded'. We resolve the target upfront
@@ -270,6 +338,37 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				}
 				if !errors.Is(err, pgx.ErrNoRows) {
 					return nil, artifactProposeOutput{}, fmt.Errorf("conflict check: %w", err)
+				}
+
+				// --- Semantic conflict (Phase 11b) ------------------------
+				// Embed the proposed title + first body slice, vector-search
+				// the existing corpus, block if top hit is suspiciously close.
+				// Threshold 0.18 cosine distance roughly corresponds to "this
+				// is a near-duplicate of an existing artifact in the same
+				// embedding space". Only gates when provider is non-stub —
+				// stub hash-ranking would false-positive everything.
+				if deps.Embedder != nil && deps.Embedder.Info().Name != "stub" {
+					candidates, err := findSemanticConflicts(ctx, deps, projectID, in.Title, in.BodyMarkdown)
+					if err != nil {
+						deps.Logger.Warn("semantic conflict check failed — skipping gate", "err", err)
+					} else if len(candidates) > 0 {
+						rel := make([]string, 0, len(candidates))
+						for _, c := range candidates {
+							rel = append(rel, fmt.Sprintf("[%s] %s — /p/%s/wiki/%s (distance %.3f)", c.Type, c.Title, deps.ProjectSlug, c.Slug, c.Distance))
+						}
+						return nil, artifactProposeOutput{
+							Status:    "not_ready",
+							ErrorCode: "POSSIBLE_DUP",
+							Failed:    []string{"POSSIBLE_DUP"},
+							Checklist: []string{
+								fmt.Sprintf(i18n.T(lang, "preflight.possible_dup"), candidates[0].Slug, candidates[0].Distance),
+							},
+							SuggestedActions: append(
+								[]string{i18n.T(lang, "suggested.read_similar")},
+								rel...,
+							),
+						}, nil
+					}
 				}
 			}
 
@@ -902,4 +1001,103 @@ func nullIfZero(n int) any {
 		return nil
 	}
 	return n
+}
+
+// semanticConflictThreshold is the cosine-distance ceiling below which we
+// treat a vector hit as "likely the same artifact". Tuned against
+// multilingual-e5-base + the Phase 6 seed corpus (2026-04-22 smoke). Raise
+// when false positives bite; lower when real dupes slip through.
+const semanticConflictThreshold = 0.18
+
+// semanticConflictLimit caps how many near-matches we surface in the
+// POSSIBLE_DUP response. Two is usually enough — the top hit is the main
+// suspect, the runner-up is a tiebreak. More would bloat the response.
+const semanticConflictLimit = 2
+
+type semanticCandidate struct {
+	ArtifactID string
+	Slug       string
+	Type       string
+	Title      string
+	Distance   float64
+}
+
+// findSemanticConflicts embeds (title + first ~800 chars of body) and runs
+// a pgvector distance query against existing (non-archived) artifacts in
+// the same project. Returns the suspects sorted by distance ascending,
+// only if the best one is within semanticConflictThreshold. Empty slice
+// means "no suspect" — caller proceeds to insert.
+func findSemanticConflicts(ctx context.Context, deps Deps, projectID, title, body string) ([]semanticCandidate, error) {
+	// Use a compact "query probe": title + first chunk of body gives the
+	// embedding provider enough signal without being so long the vector
+	// averages toward the corpus mean.
+	probe := title
+	if trimmed := strings.TrimSpace(body); trimmed != "" {
+		cut := 800
+		if len(trimmed) < cut {
+			cut = len(trimmed)
+		}
+		probe = probe + "\n\n" + trimmed[:cut]
+	}
+	res, err := deps.Embedder.Embed(ctx, embed.Request{
+		Texts: []string{probe},
+		Kind:  embed.KindQuery,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("embed probe: %w", err)
+	}
+	if len(res.Vectors) != 1 {
+		return nil, fmt.Errorf("embed probe: got %d vectors", len(res.Vectors))
+	}
+	qVec := embed.VectorString(embed.PadTo768(res.Vectors[0]))
+
+	// DISTINCT ON picks the best chunk per artifact; we then filter by
+	// threshold and limit in Go. Keeps the SQL simple and lets us tune
+	// the threshold without redeploying a query.
+	rows, err := deps.DB.Query(ctx, `
+		SELECT DISTINCT ON (c.artifact_id)
+			c.artifact_id::text, a.slug, a.type, a.title,
+			c.embedding <=> $1::vector AS distance
+		FROM artifact_chunks c
+		JOIN artifacts a ON a.id = c.artifact_id
+		WHERE a.project_id = $2 AND a.status <> 'archived'
+		ORDER BY c.artifact_id, distance
+	`, qVec, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("vector query: %w", err)
+	}
+	defer rows.Close()
+
+	var all []semanticCandidate
+	for rows.Next() {
+		var c semanticCandidate
+		if err := rows.Scan(&c.ArtifactID, &c.Slug, &c.Type, &c.Title, &c.Distance); err != nil {
+			return nil, err
+		}
+		all = append(all, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Sort ascending by distance; keep only those under the threshold.
+	// The DISTINCT ON didn't give a stable global ordering.
+	for i := range all {
+		for j := i + 1; j < len(all); j++ {
+			if all[j].Distance < all[i].Distance {
+				all[i], all[j] = all[j], all[i]
+			}
+		}
+	}
+	var out []semanticCandidate
+	for _, c := range all {
+		if c.Distance >= semanticConflictThreshold {
+			break
+		}
+		out = append(out, c)
+		if len(out) >= semanticConflictLimit {
+			break
+		}
+	}
+	return out, nil
 }

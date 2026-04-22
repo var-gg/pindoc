@@ -15,6 +15,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/mcp/tools"
+	"github.com/var-gg/pindoc/internal/pindoc/receipts"
 )
 
 type Options struct {
@@ -53,6 +54,7 @@ func NewServer(opts Options) *Server {
 		UserLanguage: opts.Config.UserLanguage,
 		Embedder:     opts.Embedder,
 		MultiProject: opts.Config.MultiProject,
+		Receipts:     receipts.New(0), // DefaultTTL = 10 min
 	}
 	tools.RegisterProjectCurrent(s, deps)
 	tools.RegisterProjectCreate(s, deps)

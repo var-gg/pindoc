@@ -5,6 +5,7 @@ import (
 
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
+	"github.com/var-gg/pindoc/internal/pindoc/receipts"
 )
 
 // Deps is the shared context every tool handler needs. Keeping this tiny on
@@ -32,6 +33,11 @@ type Deps struct {
 	// whether the instance expects a Project Switcher UI. Independent of
 	// the URL scope model.
 	MultiProject bool
+
+	// Receipts is the in-memory search-receipt store used to enforce
+	// search-before-propose (Phase 11b). Nil-safe: every call site checks
+	// before dereferencing, and nil disables the gate (useful for tests).
+	Receipts *receipts.Store
 }
 
 // HumanURL returns the canonical /p/:project/wiki/:slug relative URL used
