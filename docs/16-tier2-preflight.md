@@ -200,7 +200,36 @@ Tier 1 + Tier 2 = 13 artifact, C(13,2) = 78 쌍. gemma real embedder 기준.
 
 Threshold 확정은 Tier 3+ 추가 발행 후 재검토. 현 상수는 `internal/pindoc/mcp/tools/artifact_propose.go`의 `semanticConflictThreshold` / `semanticAdvisoryThreshold`.
 
-**변경 반영 2026-04-22 커밋 `b502411`** — `semanticConflictThreshold` 0.18 → 0.13, `semanticAdvisoryThreshold` 0.25 → 0.30 적용. 다음 세션의 Decision artifact로 근거 기록 예정 (슬러그 `decision-conflict-threshold-recalibration-tier2`). 빌드된 `bin/pindoc-server.new.exe`에 반영, 다음 세션 시작 시 swap → 재기동.
+**변경 반영 2026-04-22 커밋 `b502411`** — `semanticConflictThreshold` 0.18 → 0.13, `semanticAdvisoryThreshold` 0.25 → 0.30 적용. 근거 Decision artifact [`decision-conflict-threshold-recalibration-tier2`](/p/pindoc/wiki/decision-conflict-threshold-recalibration-tier2) 발행 완료.
+
+---
+
+## Part E — 발행 후 재측정 (19 artifact, NEW threshold)
+
+Step 1 D1-D4 + Step 2b threshold Decision + Step 3a Apache 2.0 Decision = 6 신규 → 총 19 non-template artifact. C(19,2) = 171 쌍.
+
+**Band 분포** (NEW threshold 기준):
+
+| Band | 쌍 수 | 비율 | 의미 |
+|---|---|---|---|
+| HARD (<0.13) | **0** | 0% | Conflict block 완전 제거 — 과잉 보호 해소 확인 |
+| 구 HARD (0.13–0.18) | 4 | 2% | 이전 block 대상 → advisory로 강등. 의미 보존 |
+| 구 advisory (0.18–0.25) | 22 | 13% | 기존 band 유지 |
+| 신규 advisory (0.25–0.30) | 31 | 18% | 확대된 하위 band |
+| **Advisory 총** | **57** | **33%** | — |
+
+**신규 Decision 6건의 advisory band 진입**:
+
+- `decision-pin-path-warn` ↔ `pindoc-3-tier-a-b-types-pin-vs-resourceref`: 0.2828 (의미: implements — pin 구현 vs pin 정의, 정당한 관계)
+- `decision-pin-path-warn` ↔ `pindoc-m0-m7-harness-reversal-6`: 0.2905 (pin 관련 M3 언급으로 인한 간접 유사)
+- 그 외 4건(D1 slug, D2 templates, D3 embedder_used, threshold Decision, Apache Decision)은 전부 **advisory band 바깥(>0.30)** — Decision artifact가 기존 Analysis corpus와 의미적으로 충분히 differentiated.
+
+**관측 결론**:
+1. **NEW HARD 0.13은 conservative**: 현 corpus에서 block 쌍 0. V1 기간 중 duplicate가 실제 발생하면 관측되는지 지켜볼 포인트.
+2. **Advisory 33%는 적정 밀도**: agent가 새 propose 시 대부분 relates_to 선택을 고민하게 됨. 과하면 noise, 부족하면 놓침 — 현 비율은 신호 밀도로 합리적.
+3. **Decision이 Analysis와 구분됨**: D1-D3 / threshold / Apache Decision은 advisory band 밖. Decision artifact가 analysis와는 다른 의미 공간을 점유 — 타입별 semantic niche 존재.
+
+**HARD 재진입 후보**: Tier 3에서 decisions.md row → Decision artifact 분해 시, 기존 Decision과의 distance가 HARD(<0.13)에 진입할 가능성. 본 Decision row 표기 같은 Rationale 서술이 중복되면 발생. Tier 3 진입 시 재측정 필요.
 
 ### SQL 재현
 
