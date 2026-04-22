@@ -218,6 +218,26 @@ warnings 관찰:
 - Archived: 2 (동일)
 - Template: 4
 
+### 7th pass (Reader IA 위계 정립 — 2026-04-23)
+
+저자가 Reader UI를 실제 사용하다 관찰한 탐색 구조 혼란이 발단이다. 상단 Surface 탭(Wiki/Inbox/Graph/Task), 좌측 Area 계층, 좌측 Type 종류 세 축이 독립 상태로 노출되는데 축 간 의미 위계가 선언돼 있지 않아서, Task 탭을 누른 뒤 UI area를 선택하면 본문은 6개 Task를 보여주는데 사이드바 Area counter는 여전히 "UI 8"을 표시한다. 즉 필터는 적용되는데 카운터가 그 필터를 모른다. 더 근본적으로 Surface의 "Task"와 Type의 "Task"가 의미상 동의어라는 점, Surface "Wiki"가 암묵적으로 "그 외 전부"를 뜻한다는 점이 겹쳐 IA가 불투명해진다.
+
+해결은 IA 원칙 수준에서 위계를 선언하는 방향으로 잡았다. Surface는 **뷰 모드 전용**으로 축소하고(Wiki는 list reader, Task는 kanban, Inbox는 draft queue, Graph는 node view), Type과 Area는 Surface 위에 얹히는 보조 필터로 위치시킨다. Counter는 항상 현재 Surface + 다른 필터 조합의 결과 수를 표시한다 — Linear와 GitHub Issues의 관습과 동일한 패턴이다. 검토한 대안으로는 counter만 고치고 축 구성을 유지하는 Path 1과 Type 축을 제거해 Surface로 흡수하는 Path 3가 있었지만, 전자는 Wiki·Task 의미 중복을 미해결로 남기고 후자는 cross-area Decision 탐색 use case를 손상시켜 둘 다 기각했다.
+
+**발행 결과**:
+
+| slug | 타입 | 역할 |
+|---|---|---|
+| `decision-reader-ia-hierarchy` | Decision | 세 축 위계 확정 + 대안 Path 1·3 기각 근거 + Surface별 자연 집합 정의 + counter 계산 파이프라인 규칙 |
+| `task-reader-ia-refactor` (p0) | Task | ReaderShell·Sidebar·TopNav 상태 구조 재편, URL 동기화, Surface 전환 시 필터 정책. `blocks` relation으로 UI-G/D/E/F 선행 |
+
+본 refactor Task는 기존 UI Task 5건(UI-D/E/F/G)의 `blocks` 관계를 명시해 graph에 의존성을 박아뒀다. 구현 순서상 IA refactor가 base를 정돈한 뒤 다른 UI Task들이 그 위에 얹혀야 merge conflict가 줄어든다.
+
+**이 세션 최종 artifact 상태** (7th pass 시점):
+- Active non-template: 5 Tier1 + 7 Tier2 + 1 scope-summary + **12 Decision** + **11 Task**(Phase 18 + UI 6 + author user + snippet + template-redesign + IA refactor) = **36**
+- Archived: 2 (동일)
+- Template: 4
+
 ---
 
 ## 3. 다음 세션 착수 (Tier 3 잔여 + 관측)
