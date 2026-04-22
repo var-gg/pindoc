@@ -53,7 +53,14 @@ func Load() (*Config, error) {
 		ProjectSlug:  env("PINDOC_PROJECT", "pindoc"),
 		MultiProject: envBool("PINDOC_MULTI_PROJECT", false),
 		Embed: embed.Config{
-			Provider:       env("PINDOC_EMBED_PROVIDER", "stub"),
+			// Empty default → gemma (bundled on-device embeddinggemma-300m).
+			// Set explicitly to "stub" for offline unit tests, "http" for
+			// external TEI / OpenAI / bge-m3, or "gemma" for clarity.
+			Provider:       env("PINDOC_EMBED_PROVIDER", ""),
+			GemmaVariant:   env("PINDOC_EMBED_GEMMA_VARIANT", ""),
+			ModelDir:       env("PINDOC_EMBED_MODEL_DIR", ""),
+			RuntimeDir:     env("PINDOC_EMBED_RUNTIME_DIR", ""),
+			RuntimeLib:     env("PINDOC_ONNX_RUNTIME_LIB", ""),
 			Endpoint:       env("PINDOC_EMBED_ENDPOINT", ""),
 			APIKey:         env("PINDOC_EMBED_API_KEY", ""),
 			Model:          env("PINDOC_EMBED_MODEL", ""),

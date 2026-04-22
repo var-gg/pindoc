@@ -7,10 +7,19 @@ import (
 )
 
 // Config picks which Provider to construct. Loaded from env by the server
-// entrypoint. The default (empty Provider name) is the stub.
+// entrypoint. An empty Provider name resolves to gemma — the product
+// default per docs/03's EC2-medium footprint target. stub is accepted
+// only when set explicitly (PINDOC_EMBED_PROVIDER=stub) so missing envs
+// can't silently downgrade semantic search to hash-ranked placeholders.
 type Config struct {
-	// Provider: "stub" (default) | "http"
+	// Provider: "" (→ gemma default) | "gemma" | "embeddinggemma" | "http" | "stub"
 	Provider string
+
+	// Gemma-specific fields. Optional; empty triggers the default path.
+	GemmaVariant string // "q4" (default) | "q4f16" | "quantized" | "fp16"
+	ModelDir     string // override ~/.cache/pindoc/models/embeddinggemma-300m
+	RuntimeDir   string // override ~/.cache/pindoc/runtime
+	RuntimeLib   string // explicit onnxruntime.so/.dll/.dylib path
 
 	// HTTP-specific fields (ignored for other providers).
 	Endpoint     string
@@ -28,22 +37,28 @@ type Config struct {
 	PrefixDocument string
 }
 
+// Build returns the configured Provider.
+//
+// No silent fallback: an unknown provider name errors out immediately
+// rather than downgrading to stub. stub itself is only built when the
+// operator has explicitly opted in (useful for unit tests without any
+// model assets on disk).
 func Build(cfg Config) (Provider, error) {
-	switch strings.ToLower(strings.TrimSpace(cfg.Provider)) {
-	case "", "stub":
-		// Default dim 384 matches paraphrase-multilingual-MiniLM-L12-v2,
-		// the Python sidecar's default model.
-		dim := cfg.Dimension
-		if dim == 0 {
-			dim = 384
-		}
-		return NewStub(dim), nil
+	name := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	switch name {
+	case "", "gemma", "embeddinggemma":
+		return NewGemma(GemmaConfig{
+			Variant:    variantFromEnv(cfg.GemmaVariant),
+			ModelDir:   cfg.ModelDir,
+			RuntimeDir: cfg.RuntimeDir,
+			RuntimeLib: cfg.RuntimeLib,
+		})
 	case "http":
 		if cfg.Endpoint == "" {
-			return nil, fmt.Errorf("http embedding provider requires endpoint")
+			return nil, fmt.Errorf("http embedding provider requires PINDOC_EMBED_ENDPOINT")
 		}
 		if cfg.Dimension == 0 {
-			return nil, fmt.Errorf("http embedding provider requires dimension (model-specific)")
+			return nil, fmt.Errorf("http embedding provider requires PINDOC_EMBED_DIM (model-specific)")
 		}
 		if cfg.Model == "" {
 			cfg.Model = "default"
@@ -62,7 +77,17 @@ func Build(cfg Config) (Provider, error) {
 			PrefixQuery:    cfg.PrefixQuery,
 			PrefixDocument: cfg.PrefixDocument,
 		}), nil
+	case "stub":
+		// Explicit opt-in only — used by unit tests and offline envs that
+		// don't want to touch the network. Search quality is hash-based,
+		// not semantic; artifact.propose's 0.85 conflict threshold is
+		// meaningless under stub.
+		dim := cfg.Dimension
+		if dim == 0 {
+			dim = 384
+		}
+		return NewStub(dim), nil
 	default:
-		return nil, fmt.Errorf("unknown embedding provider %q (valid: stub, http)", cfg.Provider)
+		return nil, fmt.Errorf("unknown embedding provider %q (valid: gemma, http, stub)", cfg.Provider)
 	}
 }

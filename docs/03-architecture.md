@@ -209,28 +209,51 @@ type Info struct {
 }
 ```
 
-**2. V1 내장 구현 3종 + Config swap**
+**2. 4가지 Provider 분류 (배포 경제학 기준)**
 
-| Provider | 용도 | RAM | 기본 여부 |
-|---|---|---|---|
-| `embeddinggemma` | On-device dev/small-team default | ~200MB | ✅ default |
-| `bge-m3` | 고품질 self-host (GPU or 8GB+ RAM) | 3-5GB | 옵션 |
-| `http` | Ollama / TEI / OpenAI / Cohere / Vertex 등 외부 | N/A | 옵션 |
+| 분류 | Provider | 모델 예 | RAM | 기본 여부 | V1 상태 |
+|---|---|---|---|---|---|
+| **Bundled on-device** | `gemma` / `embeddinggemma` | google/embeddinggemma-300m (Q4, 768 dim) | ~200MB | ✅ **default** | Phase 17 구현 완료 |
+| Bundled on-device (premium) | `bge-m3` | bge-m3 내장 | 3-5GB | 옵션 | V1.5 |
+| **Sidecar local** (http 어댑터) | `http` | HuggingFace TEI / Ollama / llama.cpp server | 별도 프로세스 | 옵션 | http 구현 완료 |
+| **Cloud** (http 어댑터) | `http` | OpenAI / Cohere / Vertex / Anthropic | 0 (원격) | 옵션 | http 구현 완료 |
+| (테스트용) | `stub` | 해시 기반 pseudo-vec | 0 | ❌ (명시적 opt-in만) | 테스트 전용 |
 
-Swap은 `pindoc.config.yaml` or PINDOC.md frontmatter:
+**배포 경제학 근거**: AWS t3.medium / Hetzner CX22 같은 ~$5/월 tier에서 Postgres + Pindoc + 임베딩까지 **한 인스턴스**에 돌아가는 footprint가 목표. `gemma` Q4 variant는 그 예산 안에 들어가도록 고른 유일한 기본값. TEI·bge-m3는 더 큰 박스나 별도 GPU 머신을 가진 operator의 선택지.
 
+**Sidecar vs Cloud는 동일 계약**: 둘 다 `http` provider로 흡수 — operator가 OpenAI-shape 호환 endpoint를 가리키는 한 code 변경 없이 swap. TEI는 `http://localhost:5860/v1/embeddings`, OpenAI는 `https://api.openai.com/v1/embeddings`.
+
+**Bundled 구현 (Phase 17, 2026-04-22)**:
+- **런타임**: [yalue/onnxruntime_go v1.27](https://github.com/yalue/onnxruntime_go) — onnxruntime C API 1.24.1 shared lib을 런타임에 동적 로드
+- **ONNX 모델**: [onnx-community/embeddinggemma-300m-ONNX](https://huggingface.co/onnx-community/embeddinggemma-300m-ONNX) Q4 variant (가중치 ~197MB)
+- **Tokenizer**: [eliben/go-sentencepiece](https://github.com/eliben/go-sentencepiece) — Gemma용 pure Go BPE 구현
+- **자동 download**: 첫 run 시 onnxruntime shared lib + 모델 assets를 `<user cache>/pindoc/{runtime,models/embeddinggemma-300m}/`에 download (Windows/Linux/macOS amd64+arm64). 이후 cache hit.
+- **Matryoshka truncation**: 현재 전체 768 dim 유지 (pgvector column 호환). V1.5에 512/256/128 Matryoshka 옵션 추가 검토.
+- **Variant override**: `PINDOC_EMBED_GEMMA_VARIANT=q4f16|quantized|fp16`
+
+**Swap 예**:
 ```yaml
+# Bundled gemma 그대로 (아무 설정 없음 = 기본)
+
+# TEI sidecar (로컬 Docker)
+embedding:
+  provider: http
+  endpoint: http://localhost:5860/v1/embeddings
+  model: multilingual-e5-base
+  dimension: 768
+
+# OpenAI cloud
 embedding:
   provider: http
   endpoint: https://api.openai.com/v1/embeddings
   model: text-embedding-3-large
   api_key_env: OPENAI_API_KEY
-  info:
-    dimension: 3072
-    max_tokens: 8191
+  dimension: 3072
 ```
 
-설치 시 모델 선택 화면 없음 (default + `pindoc init --embedding=<name>` flag). [06 Flow 0 §onboarding](06-ui-flows.md).
+설치 시 모델 선택 화면 없음 — default (gemma) 자동. [06 Flow 0 §onboarding](06-ui-flows.md).
+
+**Silent fallback 금지** (Phase 17): `PINDOC_EMBED_PROVIDER`가 알 수 없는 값이면 기동 실패. 과거 stub으로 조용히 떨어지던 동작은 제거 — 임베딩은 product의 **필수 기능**이고 누락을 warn으로 처리하지 않는다. stub은 `PINDOC_EMBED_PROVIDER=stub`으로 명시한 unit test 환경에서만 허용.
 
 **3. Automatic Chunking (V1 필수)**
 
