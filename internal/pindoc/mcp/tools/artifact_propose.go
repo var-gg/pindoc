@@ -30,15 +30,15 @@ var validArtifactTypes = map[string]struct{}{
 }
 
 type artifactProposeInput struct {
-	Type         string   `json:"type" jsonschema:"one of Decision|Analysis|Debug|Flow|Task|TC|Glossary|Feature|APIEndpoint|Screen|DataModel"`
-	AreaSlug     string   `json:"area_slug" jsonschema:"slug from pindoc.area.list; use 'misc' if unsure"`
-	Title        string   `json:"title"`
-	BodyMarkdown string   `json:"body_markdown" jsonschema:"main content in markdown"`
-	Slug         string   `json:"slug,omitempty" jsonschema:"optional; auto-generated from title if absent"`
-	Tags         []string `json:"tags,omitempty"`
-	Completeness string   `json:"completeness,omitempty" jsonschema:"draft|partial|settled; default partial"`
-	AuthorID     string   `json:"author_id" jsonschema:"'claude-code', 'cursor', 'codex', etc."`
-	AuthorVersion string  `json:"author_version,omitempty" jsonschema:"e.g. 'opus-4.7'"`
+	Type          string   `json:"type" jsonschema:"one of Decision|Analysis|Debug|Flow|Task|TC|Glossary|Feature|APIEndpoint|Screen|DataModel"`
+	AreaSlug      string   `json:"area_slug" jsonschema:"slug from pindoc.area.list; use 'misc' or '_unsorted' if unsure"`
+	Title         string   `json:"title"`
+	BodyMarkdown  string   `json:"body_markdown" jsonschema:"main content in markdown"`
+	Slug          string   `json:"slug,omitempty" jsonschema:"optional; auto-generated from title if absent"`
+	Tags          []string `json:"tags,omitempty"`
+	Completeness  string   `json:"completeness,omitempty" jsonschema:"draft|partial|settled; default partial"`
+	AuthorID      string   `json:"author_id" jsonschema:"'claude-code', 'cursor', 'codex', etc."`
+	AuthorVersion string   `json:"author_version,omitempty" jsonschema:"e.g. 'opus-4.7'"`
 
 	// UpdateOf switches this call from "create a new artifact" to "append a
 	// revision to an existing one". Accepts artifact UUID, project-scoped
@@ -50,11 +50,61 @@ type artifactProposeInput struct {
 	// views and history lists can explain why the body changed. Required
 	// when update_of is set; ignored otherwise.
 	CommitMsg string `json:"commit_msg,omitempty" jsonschema:"required for updates; one line rationale"`
+
+	// ExpectedVersion gates an update_of call against concurrent revision
+	// writers. If set, the server compares against the artifact's current
+	// max(revision_number); mismatch → not_ready with VER_CONFLICT. Leave
+	// unset to accept whatever head is (legacy, optimistic-lock off).
+	ExpectedVersion int `json:"expected_version,omitempty" jsonschema:"optional optimistic lock for update_of"`
+
+	// SupersedeOf marks the target artifact as superseded by this new one.
+	// Creates a NEW artifact (like a no-update_of call), then flips the
+	// target's status to 'superseded' and sets superseded_by to the new id.
+	// Different from update_of: update appends a revision to the same
+	// artifact; supersede creates a replacement and archives the old one.
+	SupersedeOf string `json:"supersede_of,omitempty" jsonschema:"id, slug, or pindoc:// URL of the artifact being replaced"`
+
+	// Pins attach code references to the artifact. All optional — the
+	// server stores whatever is provided. path is the only required field
+	// in each pin (enforced by DB check). Phase 11a stores them; stale
+	// detection (comparing commit_sha to current HEAD) lands V1.x.
+	Pins []ArtifactPinInput `json:"pins,omitempty" jsonschema:"code references tying this artifact to files/commits"`
+
+	// RelatesTo records typed edges to other artifacts in the same project.
+	// Valid relations: implements | references | blocks | relates_to.
+	// Target may be id, slug, or pindoc:// URL — resolved server-side.
+	// Unknown targets fail the whole call with RELATES_TARGET_NOT_FOUND.
+	RelatesTo []ArtifactRelationInput `json:"relates_to,omitempty" jsonschema:"typed edges to other artifacts"`
+}
+
+// ArtifactPinInput is the agent-facing shape for a single code pin. `path`
+// is mandatory (enforced at DB level); everything else is optional because
+// agents frequently don't know the commit or lines precisely at write time.
+type ArtifactPinInput struct {
+	Repo       string `json:"repo,omitempty" jsonschema:"'origin' default; named remote when multi-repo"`
+	CommitSHA  string `json:"commit_sha,omitempty"`
+	Path       string `json:"path"`
+	LinesStart int    `json:"lines_start,omitempty"`
+	LinesEnd   int    `json:"lines_end,omitempty"`
+}
+
+// ArtifactRelationInput is the agent-facing shape for one edge.
+type ArtifactRelationInput struct {
+	TargetID string `json:"target_id" jsonschema:"id, slug, or pindoc:// URL of the related artifact"`
+	Relation string `json:"relation" jsonschema:"one of implements|references|blocks|relates_to"`
+}
+
+var validRelations = map[string]struct{}{
+	"implements": {}, "references": {}, "blocks": {}, "relates_to": {},
 }
 
 type artifactProposeOutput struct {
-	Status           string   `json:"status"` // "accepted" | "not_ready"
-	ErrorCode        string   `json:"error_code,omitempty"`
+	Status    string `json:"status"` // "accepted" | "not_ready"
+	ErrorCode string `json:"error_code,omitempty"`
+	// Failed is the Phase 12-style stable code list. Populated alongside
+	// the legacy natural-language Checklist during Phase 11a so agents can
+	// start branching on codes now; Checklist becomes optional in Phase 12.
+	Failed           []string `json:"failed,omitempty"`
 	Checklist        []string `json:"checklist,omitempty"`
 	SuggestedActions []string `json:"suggested_actions,omitempty"`
 
@@ -72,6 +122,12 @@ type artifactProposeOutput struct {
 	PublishedAt    time.Time `json:"published_at,omitzero"`
 	Created        bool      `json:"created"`         // false on updates
 	RevisionNumber int       `json:"revision_number"` // 1 on create, N+1 on update
+
+	// Phase 11a: surface what was actually persisted so agents get
+	// confirmation of edge/pin storage without a second read.
+	PinsStored   int  `json:"pins_stored,omitempty"`
+	EdgesStored  int  `json:"edges_stored,omitempty"`
+	Superseded   bool `json:"superseded,omitempty"` // true if supersede_of was processed
 }
 
 // RegisterArtifactPropose wires pindoc.artifact.propose — the only write
@@ -91,11 +147,12 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 		func(ctx context.Context, _ *sdk.CallToolRequest, in artifactProposeInput) (*sdk.CallToolResult, artifactProposeOutput, error) {
 			// --- Pre-flight ----------------------------------------------
 			lang := deps.UserLanguage
-			checklist, code := preflight(&in, lang)
+			checklist, failed, code := preflight(&in, lang)
 			if len(checklist) > 0 {
 				return nil, artifactProposeOutput{
 					Status:    "not_ready",
 					ErrorCode: code,
+					Failed:    failed,
 					Checklist: checklist,
 					SuggestedActions: []string{
 						i18n.T(lang, "suggested.fix_all"),
@@ -105,10 +162,28 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				}, nil
 			}
 
+			// Mutual exclusion: update_of and supersede_of are two different
+			// revisions-of-truth paths. Agent must pick one.
+			if strings.TrimSpace(in.UpdateOf) != "" && strings.TrimSpace(in.SupersedeOf) != "" {
+				return nil, artifactProposeOutput{
+					Status:           "not_ready",
+					ErrorCode:        "UPDATE_SUPERSEDE_EXCLUSIVE",
+					Failed:           []string{"UPDATE_SUPERSEDE_EXCLUSIVE"},
+					Checklist:        []string{i18n.T(lang, "preflight.update_supersede_exclusive")},
+					SuggestedActions: []string{i18n.T(lang, "suggested.pick_one_mode")},
+				}, nil
+			}
+
 			// --- Update path (update_of set) -----------------------------
 			if strings.TrimSpace(in.UpdateOf) != "" {
 				return handleUpdate(ctx, deps, in, lang)
 			}
+
+			// --- Supersede path (supersede_of set) -----------------------
+			// Creates a fresh artifact via the same insert flow as "new",
+			// then flips the target artifact's status to 'superseded' and
+			// writes superseded_by. We reuse the create path below and do
+			// the supersede bookkeeping just before commit.
 
 			// --- Resolve area + project ----------------------------------
 			var projectID, areaID string
@@ -135,31 +210,67 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				return nil, artifactProposeOutput{}, fmt.Errorf("resolve scope: %w", err)
 			}
 
-			// --- Exact-title conflict check (embedding-based lands Phase 3) ---
-			var existingID, existingSlug string
-			err = deps.DB.QueryRow(ctx, `
-				SELECT id::text, slug FROM artifacts
-				WHERE project_id = $1
-				  AND lower(title) = lower($2)
-				  AND status <> 'archived'
-				LIMIT 1
-			`, projectID, in.Title).Scan(&existingID, &existingSlug)
-			if err == nil {
-				return nil, artifactProposeOutput{
-					Status:    "not_ready",
-					ErrorCode: "CONFLICT_EXACT_TITLE",
-					Checklist: []string{
-						fmt.Sprintf(i18n.T(lang, "preflight.conflict_exact"), existingID, existingSlug),
-					},
-					SuggestedActions: []string{
-						fmt.Sprintf(i18n.T(lang, "suggested.update_of_hint"), existingSlug),
-						fmt.Sprintf(i18n.T(lang, "suggested.read_existing"), existingSlug),
-						i18n.T(lang, "suggested.pick_title"),
-					},
-				}, nil
+			// --- Resolve supersede_of target first (if set) --------------
+			// The supersede path creates a new artifact and flips the old
+			// one's status to 'superseded'. We resolve the target upfront
+			// so we can skip the exact-title conflict check when the
+			// replacement keeps the same title (common pattern).
+			var supersedeTargetID string
+			if strings.TrimSpace(in.SupersedeOf) != "" {
+				ref := normalizeRef(in.SupersedeOf)
+				err := deps.DB.QueryRow(ctx, `
+					SELECT a.id::text FROM artifacts a
+					JOIN projects p ON p.id = a.project_id
+					WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
+					  AND a.status <> 'archived'
+					LIMIT 1
+				`, deps.ProjectSlug, ref).Scan(&supersedeTargetID)
+				if errors.Is(err, pgx.ErrNoRows) {
+					return nil, artifactProposeOutput{
+						Status:    "not_ready",
+						ErrorCode: "SUPERSEDE_TARGET_NOT_FOUND",
+						Failed:    []string{"SUPERSEDE_TARGET_NOT_FOUND"},
+						Checklist: []string{
+							fmt.Sprintf(i18n.T(lang, "preflight.supersede_target_missing"), in.SupersedeOf),
+						},
+					}, nil
+				}
+				if err != nil {
+					return nil, artifactProposeOutput{}, fmt.Errorf("resolve supersede target: %w", err)
+				}
 			}
-			if !errors.Is(err, pgx.ErrNoRows) {
-				return nil, artifactProposeOutput{}, fmt.Errorf("conflict check: %w", err)
+
+			// --- Exact-title conflict check (embedding-based lands Phase 3) ---
+			// Skipped when superseding: the replacement commonly keeps the
+			// same title; the old one is about to be archived anyway, so it
+			// would no longer match status<>'archived' either.
+			if supersedeTargetID == "" {
+				var existingID, existingSlug string
+				err = deps.DB.QueryRow(ctx, `
+					SELECT id::text, slug FROM artifacts
+					WHERE project_id = $1
+					  AND lower(title) = lower($2)
+					  AND status <> 'archived'
+					LIMIT 1
+				`, projectID, in.Title).Scan(&existingID, &existingSlug)
+				if err == nil {
+					return nil, artifactProposeOutput{
+						Status:    "not_ready",
+						ErrorCode: "CONFLICT_EXACT_TITLE",
+						Failed:    []string{"CONFLICT_EXACT_TITLE"},
+						Checklist: []string{
+							fmt.Sprintf(i18n.T(lang, "preflight.conflict_exact"), existingID, existingSlug),
+						},
+						SuggestedActions: []string{
+							fmt.Sprintf(i18n.T(lang, "suggested.update_of_hint"), existingSlug),
+							fmt.Sprintf(i18n.T(lang, "suggested.read_existing"), existingSlug),
+							i18n.T(lang, "suggested.pick_title"),
+						},
+					}, nil
+				}
+				if !errors.Is(err, pgx.ErrNoRows) {
+					return nil, artifactProposeOutput{}, fmt.Errorf("conflict check: %w", err)
+				}
 			}
 
 			// --- Slug: either the explicit one or a generated one. Retry on
@@ -237,6 +348,46 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				}
 			}
 
+			// --- relates_to: resolve targets, then insert edges ----------
+			relTargets, relErr := resolveRelatesTo(ctx, tx, deps.ProjectSlug, in.RelatesTo, lang)
+			if relErr != nil {
+				return nil, *relErr, nil
+			}
+			edgesStored, err := insertEdges(ctx, tx, newID, relTargets, in.RelatesTo)
+			if err != nil {
+				return nil, artifactProposeOutput{}, err
+			}
+
+			// --- pins ---------------------------------------------------
+			pinsStored, err := insertPins(ctx, tx, newID, in.Pins)
+			if err != nil {
+				return nil, artifactProposeOutput{}, err
+			}
+
+			// --- supersede bookkeeping: archive target + record edge ----
+			supersededFlag := false
+			if supersedeTargetID != "" {
+				if _, err := tx.Exec(ctx, `
+					UPDATE artifacts
+					   SET status         = 'superseded',
+					       superseded_by  = $2::uuid,
+					       updated_at     = now()
+					 WHERE id = $1
+				`, supersedeTargetID, newID); err != nil {
+					return nil, artifactProposeOutput{}, fmt.Errorf("supersede update: %w", err)
+				}
+				if _, err := tx.Exec(ctx, `
+					INSERT INTO events (project_id, kind, subject_id, payload)
+					VALUES ($1, 'artifact.superseded', $2::uuid, jsonb_build_object(
+						'superseded_by', $3::text,
+						'author_id', $4::text
+					))
+				`, projectID, supersedeTargetID, newID, in.AuthorID); err != nil {
+					return nil, artifactProposeOutput{}, fmt.Errorf("supersede event: %w", err)
+				}
+				supersededFlag = true
+			}
+
 			if err := tx.Commit(ctx); err != nil {
 				return nil, artifactProposeOutput{}, fmt.Errorf("commit: %w", err)
 			}
@@ -266,6 +417,9 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				PublishedAt:    publishedAt,
 				Created:        true,
 				RevisionNumber: 1,
+				PinsStored:     pinsStored,
+				EdgesStored:    edgesStored,
+				Superseded:     supersededFlag,
 			}, nil
 		},
 	)
@@ -302,6 +456,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		return nil, artifactProposeOutput{
 			Status:    "not_ready",
 			ErrorCode: "UPDATE_TARGET_NOT_FOUND",
+			Failed:    []string{"UPDATE_TARGET_NOT_FOUND"},
 			Checklist: []string{
 				fmt.Sprintf(i18n.T(lang, "preflight.update_target_missing"), in.UpdateOf),
 			},
@@ -312,6 +467,23 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 	}
 	if err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("resolve update target: %w", err)
+	}
+
+	// Optimistic lock: if the agent asserted a version, fail fast when
+	// another writer has already advanced the head. Unset = trust whatever
+	// head is (legacy behaviour).
+	if in.ExpectedVersion > 0 && in.ExpectedVersion != lastRev {
+		return nil, artifactProposeOutput{
+			Status:    "not_ready",
+			ErrorCode: "VER_CONFLICT",
+			Failed:    []string{"VER_CONFLICT"},
+			Checklist: []string{
+				fmt.Sprintf(i18n.T(lang, "preflight.ver_conflict"), in.ExpectedVersion, lastRev),
+			},
+			SuggestedActions: []string{
+				i18n.T(lang, "suggested.reread_before_update"),
+			},
+		}, nil
 	}
 
 	// No-op detection: identical body + title → reject so history stays
@@ -416,6 +588,22 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		return nil, artifactProposeOutput{}, fmt.Errorf("event: %w", err)
 	}
 
+	// pins and edges are additive on update (append new pins; edges are
+	// idempotent on (source, target, relation)). If an agent needs to
+	// "replace" all pins they should supersede rather than update.
+	relTargets, relErr := resolveRelatesTo(ctx, tx, deps.ProjectSlug, in.RelatesTo, lang)
+	if relErr != nil {
+		return nil, *relErr, nil
+	}
+	edgesStored, err := insertEdges(ctx, tx, artifactID, relTargets, in.RelatesTo)
+	if err != nil {
+		return nil, artifactProposeOutput{}, err
+	}
+	pinsStored, err := insertPins(ctx, tx, artifactID, in.Pins)
+	if err != nil {
+		return nil, artifactProposeOutput{}, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("commit: %w", err)
 	}
@@ -429,6 +617,8 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		PublishedAt:    publishedAt,
 		Created:        false,
 		RevisionNumber: newRev,
+		PinsStored:     pinsStored,
+		EdgesStored:    edgesStored,
 	}, nil
 }
 
@@ -438,50 +628,41 @@ func bodyHash(body string) string {
 }
 
 // preflight runs the cheap synchronous checks. Returns a list of ✗-prefixed
-// lines the agent should address, plus a short error code. Empty list +
-// empty code means clean. Strings pulled from i18n bundle.
-func preflight(in *artifactProposeInput, lang string) ([]string, string) {
-	var checklist []string
-	code := ""
+// lines (legacy natural-language) + parallel stable-code list + short
+// ErrorCode for the first failure. Empty lists mean clean.
+//
+// Phase 11a change: every check now emits both a natural-language line
+// (legacy) AND a stable code (Phase 12-style). Phase 12 will make codes
+// primary and prose optional.
+func preflight(in *artifactProposeInput, lang string) (checklist []string, failed []string, code string) {
+	push := func(line, failCode string) {
+		checklist = append(checklist, line)
+		failed = append(failed, failCode)
+		if code == "" {
+			code = failCode
+		}
+	}
 
 	if _, ok := validArtifactTypes[in.Type]; !ok {
-		checklist = append(checklist,
-			fmt.Sprintf(i18n.T(lang, "preflight.type_invalid"), in.Type))
-		code = "INVALID_TYPE"
+		push(fmt.Sprintf(i18n.T(lang, "preflight.type_invalid"), in.Type), "TYPE_INVALID")
 	}
 	if strings.TrimSpace(in.Title) == "" {
-		checklist = append(checklist, i18n.T(lang, "preflight.title_empty"))
-		if code == "" {
-			code = "MISSING_FIELD"
-		}
+		push(i18n.T(lang, "preflight.title_empty"), "TITLE_EMPTY")
 	}
 	if strings.TrimSpace(in.BodyMarkdown) == "" {
-		checklist = append(checklist, i18n.T(lang, "preflight.body_empty"))
-		if code == "" {
-			code = "MISSING_FIELD"
-		}
+		push(i18n.T(lang, "preflight.body_empty"), "BODY_EMPTY")
 	}
 	if strings.TrimSpace(in.AreaSlug) == "" {
-		checklist = append(checklist, i18n.T(lang, "preflight.area_empty"))
-		if code == "" {
-			code = "MISSING_FIELD"
-		}
+		push(i18n.T(lang, "preflight.area_empty"), "AREA_EMPTY")
 	}
 	if strings.TrimSpace(in.AuthorID) == "" {
-		checklist = append(checklist, i18n.T(lang, "preflight.author_empty"))
-		if code == "" {
-			code = "MISSING_FIELD"
-		}
+		push(i18n.T(lang, "preflight.author_empty"), "AUTHOR_EMPTY")
 	}
 	if in.Completeness != "" {
 		switch in.Completeness {
 		case "draft", "partial", "settled":
 		default:
-			checklist = append(checklist,
-				fmt.Sprintf(i18n.T(lang, "preflight.completeness_invalid"), in.Completeness))
-			if code == "" {
-				code = "INVALID_FIELD"
-			}
+			push(fmt.Sprintf(i18n.T(lang, "preflight.completeness_invalid"), in.Completeness), "COMPLETENESS_INVALID")
 		}
 	}
 
@@ -489,22 +670,43 @@ func preflight(in *artifactProposeInput, lang string) ([]string, string) {
 	switch in.Type {
 	case "Task":
 		if !strings.Contains(strings.ToLower(in.BodyMarkdown), "acceptance") {
-			checklist = append(checklist, i18n.T(lang, "preflight.task_acceptance"))
-			if code == "" {
-				code = "TYPE_GUARDRAIL"
-			}
+			push(i18n.T(lang, "preflight.task_acceptance"), "TASK_NO_ACCEPTANCE")
 		}
 	case "Decision":
 		lower := strings.ToLower(in.BodyMarkdown)
 		if !strings.Contains(lower, "decision") || !strings.Contains(lower, "context") {
-			checklist = append(checklist, i18n.T(lang, "preflight.adr_sections"))
-			if code == "" {
-				code = "TYPE_GUARDRAIL"
-			}
+			push(i18n.T(lang, "preflight.adr_sections"), "DEC_NO_SECTIONS")
 		}
 	}
 
-	return checklist, code
+	// Phase 11a: shape-check pins + relates_to. Hard-blocks only on
+	// structurally invalid input (empty path, unknown relation). Missing
+	// entirely = soft (Phase 11b will escalate NEED_PIN for code-linked
+	// types once search_receipt is in place).
+	for i, p := range in.Pins {
+		if strings.TrimSpace(p.Path) == "" {
+			push(fmt.Sprintf(i18n.T(lang, "preflight.pin_path_empty"), i), "PIN_PATH_EMPTY")
+		}
+		if p.LinesStart < 0 || p.LinesEnd < 0 {
+			push(fmt.Sprintf(i18n.T(lang, "preflight.pin_lines_invalid"), i), "PIN_LINES_INVALID")
+		}
+		if p.LinesStart > 0 && p.LinesEnd > 0 && p.LinesEnd < p.LinesStart {
+			push(fmt.Sprintf(i18n.T(lang, "preflight.pin_lines_range"), i), "PIN_LINES_INVALID")
+		}
+	}
+	for i, r := range in.RelatesTo {
+		if strings.TrimSpace(r.TargetID) == "" {
+			push(fmt.Sprintf(i18n.T(lang, "preflight.rel_target_empty"), i), "REL_TARGET_EMPTY")
+		}
+		if _, ok := validRelations[strings.TrimSpace(r.Relation)]; !ok {
+			push(fmt.Sprintf(i18n.T(lang, "preflight.rel_invalid"), i, r.Relation), "REL_INVALID")
+		}
+	}
+	if in.ExpectedVersion < 0 {
+		push(i18n.T(lang, "preflight.expected_version_negative"), "VER_INVALID")
+	}
+
+	return checklist, failed, code
 }
 
 var slugRegex = regexp.MustCompile(`[^a-z0-9]+`)
@@ -609,4 +811,95 @@ func isUniqueViolation(err error, constraint string) bool {
 	}
 	return strings.Contains(err.Error(), "23505") &&
 		(constraint == "" || strings.Contains(err.Error(), constraint))
+}
+
+// resolveRelatesTo looks up each relates_to target (by id, slug, or
+// pindoc:// URL) inside the given project and returns the resolved UUIDs
+// aligned with the input order. Returns (nil, notReadyOutput, true) when
+// a target can't be found — the caller surfaces it as REL_TARGET_NOT_FOUND.
+func resolveRelatesTo(ctx context.Context, tx pgx.Tx, projectSlug string, relates []ArtifactRelationInput, lang string) ([]string, *artifactProposeOutput) {
+	if len(relates) == 0 {
+		return nil, nil
+	}
+	resolved := make([]string, len(relates))
+	for i, r := range relates {
+		ref := normalizeRef(r.TargetID)
+		var id string
+		err := tx.QueryRow(ctx, `
+			SELECT a.id::text FROM artifacts a
+			JOIN projects p ON p.id = a.project_id
+			WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
+			LIMIT 1
+		`, projectSlug, ref).Scan(&id)
+		if err != nil {
+			return nil, &artifactProposeOutput{
+				Status:    "not_ready",
+				ErrorCode: "REL_TARGET_NOT_FOUND",
+				Failed:    []string{"REL_TARGET_NOT_FOUND"},
+				Checklist: []string{
+					fmt.Sprintf(i18n.T(lang, "preflight.rel_target_missing"), i, r.TargetID),
+				},
+				SuggestedActions: []string{
+					i18n.T(lang, "suggested.read_existing_rel"),
+				},
+			}
+		}
+		resolved[i] = id
+	}
+	return resolved, nil
+}
+
+// insertPins writes each validated pin to artifact_pins. Returns how many
+// rows landed (caller echoes this in the output).
+func insertPins(ctx context.Context, tx pgx.Tx, artifactID string, pins []ArtifactPinInput) (int, error) {
+	n := 0
+	for _, p := range pins {
+		repo := strings.TrimSpace(p.Repo)
+		if repo == "" {
+			repo = "origin"
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO artifact_pins (artifact_id, repo, commit_sha, path, lines_start, lines_end)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`, artifactID, repo, nullIfEmpty(p.CommitSHA), p.Path,
+			nullIfZero(p.LinesStart), nullIfZero(p.LinesEnd),
+		); err != nil {
+			return n, fmt.Errorf("pin insert: %w", err)
+		}
+		n++
+	}
+	return n, nil
+}
+
+// insertEdges writes artifact_edges rows for each resolved (target, relation)
+// pair. Idempotent on (source, target, relation) via UNIQUE index; duplicates
+// are silently treated as success so re-propose with the same relates_to
+// list doesn't blow up.
+func insertEdges(ctx context.Context, tx pgx.Tx, sourceID string, targetIDs []string, relates []ArtifactRelationInput) (int, error) {
+	n := 0
+	for i, tgt := range targetIDs {
+		if tgt == sourceID {
+			// DB check also catches this, but skip silently to give a
+			// cleaner error path.
+			continue
+		}
+		rel := strings.TrimSpace(relates[i].Relation)
+		tag, err := tx.Exec(ctx, `
+			INSERT INTO artifact_edges (source_id, target_id, relation)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (source_id, target_id, relation) DO NOTHING
+		`, sourceID, tgt, rel)
+		if err != nil {
+			return n, fmt.Errorf("edge insert: %w", err)
+		}
+		n += int(tag.RowsAffected())
+	}
+	return n, nil
+}
+
+func nullIfZero(n int) any {
+	if n == 0 {
+		return nil
+	}
+	return n
 }

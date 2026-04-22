@@ -102,10 +102,12 @@ the new project by launching pindoc-server with PINDOC_PROJECT=<new>.
 
 			_, err = tx.Exec(ctx, `
 				INSERT INTO areas (project_id, slug, name, description, is_cross_cutting)
-				VALUES ($1::uuid, 'misc', 'Miscellaneous', 'Catch-all area for artifacts without a better home. Promote to a real area via pindoc.area.propose once a pattern emerges.', false)
+				VALUES
+				  ($1::uuid, 'misc', 'Miscellaneous', 'Catch-all area for artifacts without a better home. Promote to a real area via pindoc.area.propose once a pattern emerges.', false),
+				  ($1::uuid, '_unsorted', '_Unsorted', 'Quarantine queue — artifacts the agent couldn''t classify. Reader UI surfaces them for reclassification.', false)
 			`, projectID)
 			if err != nil {
-				return nil, projectCreateOutput{}, fmt.Errorf("seed misc area: %w", err)
+				return nil, projectCreateOutput{}, fmt.Errorf("seed default areas: %w", err)
 			}
 
 			if err := tx.Commit(ctx); err != nil {

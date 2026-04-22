@@ -40,6 +40,21 @@ var bundle = Bundle{
 		"preflight.update_needs_commit":   "✗ commit_msg is required when update_of is set",
 		"preflight.update_target_missing": "✗ update_of target %q not found in this project",
 		"preflight.no_changes":            "✗ the submitted body and title match the current head — nothing to record",
+
+		"preflight.pin_path_empty":           "✗ pins[%d].path is empty — every pin must reference a file path",
+		"preflight.pin_lines_invalid":        "✗ pins[%d] lines_start/lines_end must be >= 1 when set",
+		"preflight.pin_lines_range":          "✗ pins[%d] lines_end must be >= lines_start",
+		"preflight.rel_target_empty":         "✗ relates_to[%d].target_id is empty",
+		"preflight.rel_invalid":              "✗ relates_to[%d].relation %q is not one of implements|references|blocks|relates_to",
+		"preflight.rel_target_missing":       "✗ relates_to[%d] target %q not found in this project",
+		"preflight.expected_version_negative": "✗ expected_version cannot be negative",
+		"preflight.ver_conflict":             "✗ expected_version=%d but current head is %d — re-read and retry",
+		"preflight.update_supersede_exclusive": "✗ update_of and supersede_of are mutually exclusive; pick one",
+		"preflight.supersede_target_missing":   "✗ supersede_of target %q not found in this project",
+
+		"suggested.pick_one_mode":       "update_of appends a revision to the same artifact; supersede_of archives the old one and creates a replacement.",
+		"suggested.read_existing_rel":   "Call pindoc.artifact.read on each relates_to target to confirm it exists and belongs to this project.",
+		"suggested.reread_before_update": "Call pindoc.artifact.revisions, find the current max revision_number, and re-submit with expected_version set to it (or omit to disable optimistic lock).",
 	},
 	"ko": {
 		"preflight.title_empty":       "✗ title이 비어 있음",
@@ -67,6 +82,21 @@ var bundle = Bundle{
 		"preflight.update_needs_commit":   "✗ update_of 지정 시 commit_msg 필수",
 		"preflight.update_target_missing": "✗ update_of 대상 %q 를 이 프로젝트에서 찾을 수 없음",
 		"preflight.no_changes":            "✗ 제출된 body와 title이 현재 head와 동일 — 기록할 변경 없음",
+
+		"preflight.pin_path_empty":           "✗ pins[%d].path가 비어 있음 — 모든 pin은 파일 경로가 필요함",
+		"preflight.pin_lines_invalid":        "✗ pins[%d] lines_start/lines_end는 1 이상이어야 함",
+		"preflight.pin_lines_range":          "✗ pins[%d] lines_end는 lines_start보다 크거나 같아야 함",
+		"preflight.rel_target_empty":         "✗ relates_to[%d].target_id가 비어 있음",
+		"preflight.rel_invalid":              "✗ relates_to[%d].relation %q 는 implements|references|blocks|relates_to 중 하나여야 함",
+		"preflight.rel_target_missing":       "✗ relates_to[%d] 대상 %q 를 이 프로젝트에서 찾을 수 없음",
+		"preflight.expected_version_negative": "✗ expected_version은 음수일 수 없음",
+		"preflight.ver_conflict":             "✗ expected_version=%d 이지만 현재 head는 %d — 다시 읽고 재시도",
+		"preflight.update_supersede_exclusive": "✗ update_of와 supersede_of는 동시 사용 불가 — 하나만 선택",
+		"preflight.supersede_target_missing":   "✗ supersede_of 대상 %q 를 이 프로젝트에서 찾을 수 없음",
+
+		"suggested.pick_one_mode":       "update_of는 같은 artifact에 revision 추가; supersede_of는 기존 artifact를 archive하고 새 artifact를 생성.",
+		"suggested.read_existing_rel":   "각 relates_to 대상에 대해 pindoc.artifact.read를 호출해 이 프로젝트에 존재하는지 확인하세요.",
+		"suggested.reread_before_update": "pindoc.artifact.revisions로 현재 max revision_number를 확인한 뒤 expected_version에 그 값을 넣고 재시도 (optimistic lock 비활성화하려면 필드 자체를 생략).",
 	},
 }
 
