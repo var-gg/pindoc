@@ -145,10 +145,39 @@ warnings 관찰:
 - `decision-plan-concept-mcp-blind`·`pindoc-m1-scope-summary` 발행 모두 `RECOMMEND_READ_BEFORE_CREATE` 발동(상호 distance 0.36-0.39, 정상 advisory)
 - `_test_preflight_smoke` 후 추가 archive: 기존 `pindoc-m1-phase-chain-1-17` (supersede로 자동)
 
-**이 세션 누적 artifact 변화**:
+**이 세션 누적 artifact 변화** (3rd pass 시점):
 - 신규(active): Decision 9 (D1-D4 + threshold + Apache + locale + title-rule + plan-blind) + Task 1 + scope-summary 1 = 11
 - Superseded/archived: `pindoc-m1-phase-chain-1-17` (Tier 2 분) + `_test_preflight_smoke` (smoke test) = 2
 - Revision 2 진입: D-title-heading-rule + Phase 18 Task
+
+### 4th pass (UI UX Task 6건 등록 — 2026-04-23 진입)
+
+저자 분류대로 **UI/UX 개선은 구현하지 않고 Task artifact로 등록만** — MCP 사용 모드 전환 결과. 전부 `area=ui`, 필수 H2(Purpose/Scope/Acceptance criteria) 포함해 pre-flight 통과.
+
+| slug | 제목 | priority | pins | edges |
+|---|---|---|---|---|
+| `task-area-description-tooltip` | Reader 사이드바 Area description hover tooltip 바인딩 | p2 | 2 | 1 |
+| `task-area-name-i18n` | Area name i18n layer — ko/en 번역 display (locale interim) | p2 | 3 | 2 |
+| `task-reader-width-modes` | Reader 본문 폭 narrow/default/wide 3-mode 토글 + 기본 폭 확대 | p1 | 3 | 2 |
+| `task-type-palette-binding` | Type 배지 OKLCH palette 바인딩 (Decision/Analysis/Task/Debug 색상 분리) | p1 | 4 | 2 |
+| `task-reader-sticky-toc` | Reader sticky TOC 컴포넌트 — H2 기반 네비게이터 + scroll-spy | p1 | 3 | 3 |
+| `task-kanban-design-system-mapping` | Task kanban view design system 매핑 (prio·status pill·blocked banner) | **p0** | 5 | 3 |
+
+**관찰**:
+- 6건 전부 accepted, warnings 없음 (기존 UI Analysis와 distance 0.44-0.60 범위, advisory 0.30 밖)
+- UI-G(p0) = 저자가 방금 관측한 kanban surface 시안 미적용 상태. 시안·토큰은 이미 `web/public/design-system/`에 완성 — **브리지 미연결**이 root cause. 본 artifact에 상세 pin 5개로 시안 reference fixture
+- UI-D/E/F는 동일 `reader.css` layer 건드림 — 구현 시 한 PR로 묶는 게 효율적 (각 Task Dependencies 섹션에 상호 연관 명시)
+- UI-A/B는 sidebar 전용, 독립 PR 가능
+
+**다음 세션 예상 workflow**:
+- UI-G 먼저(p0, 사용자 가시적 imminent), 이어서 UI-E → UI-D → UI-F 순 묶어 `reader.css` 재정비
+- UI-A/B는 별도 sidebar PR
+- 각 Task 완료 시 `task_meta.status` `todo` → `in_progress` → `done` 전환 `update_of`로 기록
+
+**이 세션 최종 artifact 상태** (4th pass 시점):
+- Active non-template: 5 Tier1 + 7 Tier2(m1-phase-chain 제외) + 1 scope-summary + 9 Decision + 7 Task(Phase 18 + UI 6) = 29
+- Archived: `pindoc-m1-phase-chain-1-17` + `_test_preflight_smoke` = 2
+- Template: 4 (`_template_*`)
 
 ---
 
