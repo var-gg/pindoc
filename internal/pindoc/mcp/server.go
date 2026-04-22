@@ -25,6 +25,12 @@ type Options struct {
 	Config   *config.Config
 	DB       *db.Pool
 	Embedder embed.Provider
+
+	// AgentID is the server-issued identity for this subprocess (Phase
+	// 12c). Set by the binary entrypoint at startup; empty falls back to
+	// "unassigned" which still lets writes proceed but flags the gap in
+	// audit logs.
+	AgentID string
 }
 
 type Server struct {
@@ -55,6 +61,7 @@ func NewServer(opts Options) *Server {
 		Embedder:     opts.Embedder,
 		MultiProject: opts.Config.MultiProject,
 		Receipts:     receipts.New(0), // DefaultTTL = 10 min
+		AgentID:      opts.AgentID,
 	}
 	tools.RegisterProjectCurrent(s, deps)
 	tools.RegisterProjectCreate(s, deps)

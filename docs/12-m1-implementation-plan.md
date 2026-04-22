@@ -215,7 +215,7 @@ claude mcp list           # pindoc 있음
 - **Semantic conflict block** — `artifact.propose(new)` 시 `artifact.search`로 top-K 유사도 distance가 임계치 이하면 `not_ready` + `next_tools: [artifact.read]` + `related: [...]`. exact-title만 막는 현재 guard 상향.
 - **`_unsorted` area auto-seed (2차 피어리뷰 반영)** — area 판단 불가 시 agent가 쓸 fallback. `misc`와 구분 (misc는 의도된 area, _unsorted는 "분류 필요" 큐). Reader UI에 "분류 필요" 위젯, 주기적으로 agent가 재분류.
 
-## Phase 12 — Agent ergonomics (envelope + view + actor)
+## Phase 12 — Agent ergonomics (완료 · 2026-04-22)
 
 피어리뷰 1차+2차 P1 블록 통합.
 

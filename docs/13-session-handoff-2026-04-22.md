@@ -29,6 +29,15 @@
 - UI: `/wiki/:slug/history`, `/wiki/:slug/diff?from=&to=` (이후 Phase 8에서 `/p/:project/wiki/...`)
 - PINDOC.md 템플릿에 update flow 문서화
 
+### Phase 12 — Agent ergonomics (2026-04-22 완료)
+- **12a `not_ready` envelope primacy**: `artifact.propose` 응답에 `NextTools[]` (fail code → 다음 호출 매핑) + `Related[]` (RelatedRef: id/slug/type/title + agent_ref/human_url + reason) 필드 추가. `CONFLICT_EXACT_TITLE` / `POSSIBLE_DUP`에 실제 related refs 채움. 기존 `Checklist` / `SuggestedActions` (자연어)는 backward-compat 유지.
+- **12b `artifact.read(view=brief|full|continuation)`**:
+  - `brief`: body_markdown 제외, `summary` (첫 paragraph/240자) + `pins[]` + `stale` 플래그. 스캔용.
+  - `full`: 기존 동작 (default, backward-compat).
+  - `continuation`: brief + `recent_revisions[]` (최근 3개) + `relates_to[]` / `related_by[]` edges.
+  - 응답에 `view` 필드로 현재 모드 echo.
+- **12c actor hardening (stdio)**: server startup 시 `PINDOC_AGENT_ID` env 또는 random `ag_<hex>` 생성 → `Deps.AgentID`. `artifact_revisions.source_session_ref` JSONB에 `{agent_id, reported_author_id, source_session}` 저장. `author_id`는 client-reported 표시용, `agent_id`는 server-trusted provenance.
+
 ### Phase 11 — Write contract 강화 + semantic conflict (2026-04-22 완료)
 - Migration 0005: `artifact_pins`, `artifact_edges` (relation ∈ implements/references/blocks/relates_to), `_unsorted` area seed. `pindoc.project.create` tool도 `misc` + `_unsorted` 둘 다 seed하게 업데이트.
 - `artifact.propose` 입력 확장: `pins[]`, `relates_to[]`, `expected_version`, `supersede_of`, `basis{search_receipt, source_session}`. update/supersede/create 세 경로 + 상호 배제 검증.
@@ -72,16 +81,20 @@
 
 ---
 
-## 2. 다음 작업 — Phase 12 agent ergonomics (Phase 11 완료 후 다음)
+## 2. 다음 작업 — Phase 13 template artifact seed (Phase 12 완료 후 다음)
 
-Phase 8 (URL) + Phase 9 (human_url/capabilities/spec drift) + Phase 10 (real embedder) + Phase 11 (write contract + semantic conflict + receipt) 완료. 다음 큰 블록:
+Phase 8~12 완료. 다음 큰 블록:
 
-### Phase 12 — Agent ergonomics
-- **Machine-readable `not_ready`**: Phase 11에서 `Failed[]` stable code array는 이미 반환 중. Phase 12에서 자연어 `Checklist`를 optional로 내리고 `Failed`를 primary로 승격. `suggested_actions`도 code+link 구조로 전환.
-- **`artifact.read(view=brief|full|continuation)`**: brief=title/summary/pins/stale, continuation=brief + 최근 revision delta + relates_to neighbors.
-- **Actor hardening (stdio)**: session 단위 `agent_id` (UUID) 서버 발급. `author_id`는 표시용 metadata로.
+### Phase 13 — Template artifact seed
+"포맷 베스트프랙티스도 pindoc 자체의 dogfood 산물" 원칙의 코드화.
 
-상세: [docs/12-m1-implementation-plan.md](./12-m1-implementation-plan.md) Phase 12 섹션.
+- Seed migration 신규 — `_template_debug`, `_template_decision`, `_template_analysis`, `_template_task` 4개 artifact 생성.
+- 각 template body는 현 시점 권장 섹션 구조 + 작성 예시.
+- PINDOC.md 템플릿에 "신규 artifact propose 전에 `artifact.read(_template_<type>)` 로 구조 참고" 규약 추가.
+- Template 자체도 일반 artifact — `update_of`로 계속 revision. 외부 리서치 + 실 dogfood 결과에 따라 포맷이 evolving.
+- Reader UI: template artifact는 기본 목록에서 숨김 (slug prefix `_template_` 필터), "템플릿" 전용 탭에서 노출.
+
+상세: [docs/12-m1-implementation-plan.md](./12-m1-implementation-plan.md) Phase 13 섹션.
 리뷰 판단 근거: [docs/14-peer-review-response.md](./14-peer-review-response.md).
 
 ### 실행 환경 재개 체크리스트 (Phase 10 이후)

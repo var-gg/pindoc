@@ -17,31 +17,79 @@ type artifactReadInput struct {
 	// https://pindoc.org/a/<id>) are accepted here too and normalized
 	// server-side — agents shouldn't have to parse Pindoc's URL shape.
 	IDOrSlug string `json:"id_or_slug" jsonschema:"artifact UUID, slug, or share URL (pindoc://... or https://.../a/ID)"`
+
+	// View controls how much the server returns. Default "full" matches
+	// Phase 1–11 behaviour for backward compat. "brief" omits
+	// body_markdown and adds a short summary + pins + stale flag; useful
+	// when scanning many artifacts. "continuation" = brief + recent
+	// revision delta + typed edges so the next session can land quickly
+	// without pulling full bodies for neighbours.
+	View string `json:"view,omitempty" jsonschema:"brief | full | continuation; default full"`
 }
 
 type artifactReadOutput struct {
-	ID            string `json:"id"`
-	ProjectSlug   string `json:"project_slug"`
-	AreaSlug      string `json:"area_slug"`
-	Slug          string `json:"slug"`
-	Type          string `json:"type"`
-	Title         string `json:"title"`
-	BodyMarkdown  string `json:"body_markdown"`
+	ID            string   `json:"id"`
+	ProjectSlug   string   `json:"project_slug"`
+	AreaSlug      string   `json:"area_slug"`
+	Slug          string   `json:"slug"`
+	Type          string   `json:"type"`
+	Title         string   `json:"title"`
+	BodyMarkdown  string   `json:"body_markdown,omitempty"` // omitted on view=brief
 	Tags          []string `json:"tags"`
-	Completeness  string `json:"completeness"`
-	Status        string `json:"status"`
-	ReviewState   string `json:"review_state"`
-	AuthorKind    string `json:"author_kind"`
-	AuthorID      string `json:"author_id"`
-	AuthorVersion string `json:"author_version,omitempty"`
-	SupersededBy  string `json:"superseded_by,omitempty"`
-	// AgentRef is the pindoc://<slug> form for embedding in other artifact
-	// bodies. HumanURL is the /p/:project/wiki/:slug path for chat shares.
-	AgentRef    string    `json:"agent_ref"`
-	HumanURL    string    `json:"human_url"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	PublishedAt time.Time `json:"published_at,omitzero"`
+	Completeness  string   `json:"completeness"`
+	Status        string   `json:"status"`
+	ReviewState   string   `json:"review_state"`
+	AuthorKind    string   `json:"author_kind"`
+	AuthorID      string   `json:"author_id"`
+	AuthorVersion string   `json:"author_version,omitempty"`
+	SupersededBy  string   `json:"superseded_by,omitempty"`
+	AgentRef      string   `json:"agent_ref"`
+	HumanURL      string   `json:"human_url"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	PublishedAt   time.Time `json:"published_at,omitzero"`
+
+	// View: populated on brief + continuation.
+	View    string       `json:"view"`
+	Summary string       `json:"summary,omitempty"`
+	Pins    []PinRef     `json:"pins,omitempty"`
+	Stale   *StaleSignal `json:"stale,omitempty"`
+
+	// View: populated on continuation only.
+	RecentRevisions []RevisionSummaryRef `json:"recent_revisions,omitempty"`
+	RelatesTo       []EdgeRef            `json:"relates_to,omitempty"`
+	RelatedBy       []EdgeRef            `json:"related_by,omitempty"`
+}
+
+// PinRef mirrors artifact_pins rows. Empty repo defaults to "origin" in
+// the migration, so we always have a non-empty value here.
+type PinRef struct {
+	Repo       string `json:"repo"`
+	CommitSHA  string `json:"commit_sha,omitempty"`
+	Path       string `json:"path"`
+	LinesStart int    `json:"lines_start,omitempty"`
+	LinesEnd   int    `json:"lines_end,omitempty"`
+}
+
+// RevisionSummaryRef is a trimmed revision row for continuation view.
+type RevisionSummaryRef struct {
+	RevisionNumber int       `json:"revision_number"`
+	CommitMsg      string    `json:"commit_msg,omitempty"`
+	AuthorID       string    `json:"author_id"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// EdgeRef describes one artifact_edges row from the target's perspective.
+// For "relates_to" view the target's ID/slug is filled; for "related_by"
+// the source is.
+type EdgeRef struct {
+	ArtifactID string `json:"artifact_id"`
+	Slug       string `json:"slug"`
+	Type       string `json:"type"`
+	Title      string `json:"title"`
+	Relation   string `json:"relation"`
+	AgentRef   string `json:"agent_ref"`
+	HumanURL   string `json:"human_url"`
 }
 
 // RegisterArtifactRead wires pindoc.artifact.read.
@@ -49,12 +97,19 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 	sdk.AddTool(server,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.read",
-			Description: "Fetch a single artifact by UUID, project-scoped slug, or share URL. Use this after pindoc.artifact.search hits to pull the full body, or when a user pastes a Pindoc URL into chat and you need the canonical content.",
+			Description: "Fetch an artifact by UUID, slug, or share URL. view=brief returns title/summary/pins/stale without the full body; view=continuation adds recent revisions and typed edges; view=full (default) returns everything.",
 		},
 		func(ctx context.Context, _ *sdk.CallToolRequest, in artifactReadInput) (*sdk.CallToolResult, artifactReadOutput, error) {
 			idOrSlug := normalizeRef(in.IDOrSlug)
 			if idOrSlug == "" {
 				return nil, artifactReadOutput{}, errors.New("id_or_slug is required")
+			}
+			view := strings.ToLower(strings.TrimSpace(in.View))
+			if view == "" {
+				view = "full"
+			}
+			if view != "brief" && view != "full" && view != "continuation" {
+				return nil, artifactReadOutput{}, fmt.Errorf("view %q invalid; use brief | full | continuation", in.View)
 			}
 
 			var out artifactReadOutput
@@ -111,9 +166,202 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			}
 			out.AgentRef = "pindoc://" + out.Slug
 			out.HumanURL = HumanURL(out.ProjectSlug, out.Slug)
+			out.View = view
+
+			// view=brief / continuation: drop the heavy body, add summary.
+			if view == "brief" || view == "continuation" {
+				out.Summary = summarizeBody(out.BodyMarkdown)
+				if view == "brief" {
+					out.BodyMarkdown = ""
+				}
+			}
+
+			// pins + stale are cheap; attach on brief and continuation.
+			if view == "brief" || view == "continuation" {
+				pins, err := loadPins(ctx, deps, out.ID)
+				if err != nil {
+					deps.Logger.Warn("pin lookup failed", "artifact_id", out.ID, "err", err)
+				}
+				out.Pins = pins
+
+				if stale := staleFromAge(out.Slug, out.UpdatedAt); stale != nil {
+					out.Stale = stale
+				}
+			}
+
+			// continuation: recent revisions + edges.
+			if view == "continuation" {
+				revs, err := loadRecentRevisions(ctx, deps, out.ID, 3)
+				if err != nil {
+					deps.Logger.Warn("revisions lookup failed", "artifact_id", out.ID, "err", err)
+				}
+				out.RecentRevisions = revs
+
+				rel, relBy, err := loadEdges(ctx, deps, out.ID)
+				if err != nil {
+					deps.Logger.Warn("edges lookup failed", "artifact_id", out.ID, "err", err)
+				}
+				out.RelatesTo = rel
+				out.RelatedBy = relBy
+			}
+
 			return nil, out, nil
 		},
 	)
+}
+
+// summarizeBody returns up to ~240 chars, preferring the first paragraph
+// break. Agents rarely need more than that to decide "is this the artifact
+// I want?" before calling view=full.
+func summarizeBody(body string) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return ""
+	}
+	// Prefer first paragraph.
+	if idx := strings.Index(body, "\n\n"); idx >= 0 && idx < 400 {
+		return strings.TrimSpace(body[:idx])
+	}
+	if len(body) <= 240 {
+		return body
+	}
+	// Word boundary trim.
+	cut := 240
+	for cut > 0 && body[cut] != ' ' && body[cut] != '\n' {
+		cut--
+	}
+	if cut == 0 {
+		cut = 240
+	}
+	return strings.TrimSpace(body[:cut]) + "…"
+}
+
+func loadPins(ctx context.Context, deps Deps, artifactID string) ([]PinRef, error) {
+	rows, err := deps.DB.Query(ctx, `
+		SELECT repo, commit_sha, path, lines_start, lines_end
+		FROM artifact_pins
+		WHERE artifact_id = $1
+		ORDER BY id
+	`, artifactID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []PinRef
+	for rows.Next() {
+		var p PinRef
+		var commitSHA *string
+		var linesStart, linesEnd *int
+		if err := rows.Scan(&p.Repo, &commitSHA, &p.Path, &linesStart, &linesEnd); err != nil {
+			return nil, err
+		}
+		if commitSHA != nil {
+			p.CommitSHA = *commitSHA
+		}
+		if linesStart != nil {
+			p.LinesStart = *linesStart
+		}
+		if linesEnd != nil {
+			p.LinesEnd = *linesEnd
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// staleFromAge reuses the Phase 11c heuristic: over 60 days without an
+// update → stale. Later phases swap in pin-diff-vs-HEAD.
+func staleFromAge(slug string, updatedAt time.Time) *StaleSignal {
+	age := time.Since(updatedAt)
+	if age <= staleAgeThreshold {
+		return nil
+	}
+	return &StaleSignal{
+		Slug:    slug,
+		DaysOld: int(age.Hours() / 24),
+		Reason:  fmt.Sprintf("not updated in %d days", int(age.Hours()/24)),
+	}
+}
+
+func loadRecentRevisions(ctx context.Context, deps Deps, artifactID string, limit int) ([]RevisionSummaryRef, error) {
+	rows, err := deps.DB.Query(ctx, `
+		SELECT revision_number, commit_msg, author_id, created_at
+		FROM artifact_revisions
+		WHERE artifact_id = $1
+		ORDER BY revision_number DESC
+		LIMIT $2
+	`, artifactID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RevisionSummaryRef
+	for rows.Next() {
+		var r RevisionSummaryRef
+		var msg *string
+		if err := rows.Scan(&r.RevisionNumber, &msg, &r.AuthorID, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		if msg != nil {
+			r.CommitMsg = *msg
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func loadEdges(ctx context.Context, deps Deps, artifactID string) ([]EdgeRef, []EdgeRef, error) {
+	out := []EdgeRef{}
+	outBy := []EdgeRef{}
+
+	// Outgoing: this artifact → others.
+	rows, err := deps.DB.Query(ctx, `
+		SELECT e.target_id::text, a.slug, a.type, a.title, e.relation
+		FROM artifact_edges e
+		JOIN artifacts a ON a.id = e.target_id
+		WHERE e.source_id = $1
+		ORDER BY e.created_at
+	`, artifactID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var e EdgeRef
+		if err := rows.Scan(&e.ArtifactID, &e.Slug, &e.Type, &e.Title, &e.Relation); err != nil {
+			return nil, nil, err
+		}
+		e.AgentRef = "pindoc://" + e.Slug
+		e.HumanURL = HumanURL(deps.ProjectSlug, e.Slug)
+		out = append(out, e)
+	}
+	rows.Close()
+
+	// Incoming: others → this artifact.
+	rows2, err := deps.DB.Query(ctx, `
+		SELECT e.source_id::text, a.slug, a.type, a.title, e.relation
+		FROM artifact_edges e
+		JOIN artifacts a ON a.id = e.source_id
+		WHERE e.target_id = $1
+		ORDER BY e.created_at
+	`, artifactID)
+	if err != nil {
+		return out, nil, err
+	}
+	defer rows2.Close()
+	for rows2.Next() {
+		var e EdgeRef
+		if err := rows2.Scan(&e.ArtifactID, &e.Slug, &e.Type, &e.Title, &e.Relation); err != nil {
+			return out, nil, err
+		}
+		e.AgentRef = "pindoc://" + e.Slug
+		e.HumanURL = HumanURL(deps.ProjectSlug, e.Slug)
+		outBy = append(outBy, e)
+	}
+
+	return out, outBy, nil
 }
 
 // normalizeRef strips a Pindoc share URL down to the ID/slug the caller

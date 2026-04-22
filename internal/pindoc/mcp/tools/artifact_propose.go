@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -144,9 +145,31 @@ type artifactProposeOutput struct {
 
 	// Phase 11a: surface what was actually persisted so agents get
 	// confirmation of edge/pin storage without a second read.
-	PinsStored   int  `json:"pins_stored,omitempty"`
-	EdgesStored  int  `json:"edges_stored,omitempty"`
-	Superseded   bool `json:"superseded,omitempty"` // true if supersede_of was processed
+	PinsStored  int  `json:"pins_stored,omitempty"`
+	EdgesStored int  `json:"edges_stored,omitempty"`
+	Superseded  bool `json:"superseded,omitempty"` // true if supersede_of was processed
+
+	// Phase 12a: machine-readable continuation hints. NextTools lists the
+	// MCP tools the agent should call next to satisfy the failing gate;
+	// Related lists artifacts/resources the agent should read to understand
+	// why the gate fired. Populated alongside the legacy Checklist/
+	// SuggestedActions pair so agents can branch on codes without parsing
+	// natural language.
+	NextTools []string     `json:"next_tools,omitempty"`
+	Related   []RelatedRef `json:"related,omitempty"`
+}
+
+// RelatedRef is a compact pointer to another artifact the caller should
+// read. Both agent_ref and human_url are always populated so the agent
+// re-feeds one and shares the other with the user.
+type RelatedRef struct {
+	ID       string `json:"id,omitempty"`
+	Slug     string `json:"slug"`
+	Type     string `json:"type,omitempty"`
+	Title    string `json:"title,omitempty"`
+	AgentRef string `json:"agent_ref"`
+	HumanURL string `json:"human_url"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 // RegisterArtifactPropose wires pindoc.artifact.propose — the only write
@@ -178,6 +201,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						i18n.T(lang, "suggested.confirm_types"),
 						i18n.T(lang, "suggested.use_misc"),
 					},
+					NextTools: defaultNextTools(code),
 				}, nil
 			}
 
@@ -190,6 +214,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 					Failed:           []string{"UPDATE_SUPERSEDE_EXCLUSIVE"},
 					Checklist:        []string{i18n.T(lang, "preflight.update_supersede_exclusive")},
 					SuggestedActions: []string{i18n.T(lang, "suggested.pick_one_mode")},
+					NextTools:        defaultNextTools("UPDATE_SUPERSEDE_EXCLUSIVE"),
 				}, nil
 			}
 
@@ -216,6 +241,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				return nil, artifactProposeOutput{
 					Status:    "not_ready",
 					ErrorCode: "AREA_NOT_FOUND",
+					Failed:    []string{"AREA_NOT_FOUND"},
 					Checklist: []string{
 						fmt.Sprintf(i18n.T(lang, "preflight.area_not_found"), in.AreaSlug, deps.ProjectSlug),
 					},
@@ -223,6 +249,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						i18n.T(lang, "suggested.list_areas"),
 						i18n.T(lang, "suggested.area_or_misc"),
 					},
+					NextTools: defaultNextTools("AREA_NOT_FOUND"),
 				}, nil
 			}
 			if err != nil {
@@ -247,6 +274,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						Failed:           []string{"NO_SRCH"},
 						Checklist:        []string{i18n.T(lang, "preflight.no_search_receipt")},
 						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
+						NextTools:        defaultNextTools("NO_SRCH"),
 					}, nil
 				}
 				res := deps.Receipts.Verify(receipt, deps.ProjectSlug)
@@ -258,6 +286,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						Failed:           []string{"RECEIPT_UNKNOWN"},
 						Checklist:        []string{i18n.T(lang, "preflight.receipt_unknown")},
 						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
+						NextTools:        defaultNextTools("RECEIPT_UNKNOWN"),
 					}, nil
 				case res.Expired:
 					return nil, artifactProposeOutput{
@@ -266,6 +295,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						Failed:           []string{"RECEIPT_EXPIRED"},
 						Checklist:        []string{i18n.T(lang, "preflight.receipt_expired")},
 						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
+						NextTools:        defaultNextTools("RECEIPT_EXPIRED"),
 					}, nil
 				case res.WrongProject:
 					return nil, artifactProposeOutput{
@@ -274,6 +304,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						Failed:           []string{"RECEIPT_WRONG_PROJECT"},
 						Checklist:        []string{i18n.T(lang, "preflight.receipt_wrong_project")},
 						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
+						NextTools:        defaultNextTools("RECEIPT_WRONG_PROJECT"),
 					}, nil
 				}
 			}
@@ -301,6 +332,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						Checklist: []string{
 							fmt.Sprintf(i18n.T(lang, "preflight.supersede_target_missing"), in.SupersedeOf),
 						},
+						NextTools: defaultNextTools("SUPERSEDE_TARGET_NOT_FOUND"),
 					}, nil
 				}
 				if err != nil {
@@ -334,6 +366,10 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 							fmt.Sprintf(i18n.T(lang, "suggested.read_existing"), existingSlug),
 							i18n.T(lang, "suggested.pick_title"),
 						},
+						NextTools: defaultNextTools("CONFLICT_EXACT_TITLE"),
+						Related: []RelatedRef{
+							makeRelated(deps.ProjectSlug, existingSlug, existingID, "", in.Title, "exact title match"),
+						},
 					}, nil
 				}
 				if !errors.Is(err, pgx.ErrNoRows) {
@@ -353,8 +389,13 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						deps.Logger.Warn("semantic conflict check failed — skipping gate", "err", err)
 					} else if len(candidates) > 0 {
 						rel := make([]string, 0, len(candidates))
+						related := make([]RelatedRef, 0, len(candidates))
 						for _, c := range candidates {
 							rel = append(rel, fmt.Sprintf("[%s] %s — /p/%s/wiki/%s (distance %.3f)", c.Type, c.Title, deps.ProjectSlug, c.Slug, c.Distance))
+							related = append(related, makeRelated(
+								deps.ProjectSlug, c.Slug, c.ArtifactID, c.Type, c.Title,
+								fmt.Sprintf("cosine distance %.3f", c.Distance),
+							))
 						}
 						return nil, artifactProposeOutput{
 							Status:    "not_ready",
@@ -367,6 +408,8 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 								[]string{i18n.T(lang, "suggested.read_similar")},
 								rel...,
 							),
+							NextTools: defaultNextTools("POSSIBLE_DUP"),
+							Related:   related,
 						}, nil
 					}
 				}
@@ -499,10 +542,13 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			if _, err := deps.DB.Exec(ctx, `
 				INSERT INTO artifact_revisions (
 					artifact_id, revision_number, title, body_markdown, body_hash, tags,
-					completeness, author_kind, author_id, author_version, commit_msg
-				) VALUES ($1, 1, $2, $3, $4, $5, $6, 'agent', $7, $8, 'initial')
+					completeness, author_kind, author_id, author_version, commit_msg,
+					source_session_ref
+				) VALUES ($1, 1, $2, $3, $4, $5, $6, 'agent', $7, $8, 'initial', $9)
 			`, newID, in.Title, in.BodyMarkdown, bodyHash(in.BodyMarkdown), in.Tags,
-				completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion)); err != nil {
+				completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion),
+				buildSourceSessionRef(deps, in),
+			); err != nil {
 				deps.Logger.Warn("initial revision insert failed — head row still present",
 					"artifact_id", newID, "err", err)
 			}
@@ -532,6 +578,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		return nil, artifactProposeOutput{
 			Status:    "not_ready",
 			ErrorCode: "MISSING_COMMIT_MSG",
+			Failed:    []string{"MISSING_COMMIT_MSG"},
 			Checklist: []string{i18n.T(lang, "preflight.update_needs_commit")},
 			SuggestedActions: []string{
 				i18n.T(lang, "suggested.commit_msg_hint"),
@@ -562,6 +609,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 			SuggestedActions: []string{
 				i18n.T(lang, "suggested.list_areas"),
 			},
+			NextTools: defaultNextTools("UPDATE_TARGET_NOT_FOUND"),
 		}, nil
 	}
 	if err != nil {
@@ -582,6 +630,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 			SuggestedActions: []string{
 				i18n.T(lang, "suggested.reread_before_update"),
 			},
+			NextTools: defaultNextTools("VER_CONFLICT"),
 		}, nil
 	}
 
@@ -591,6 +640,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		return nil, artifactProposeOutput{
 			Status:    "not_ready",
 			ErrorCode: "NO_CHANGES",
+			Failed:    []string{"NO_CHANGES"},
 			Checklist: []string{i18n.T(lang, "preflight.no_changes")},
 			SuggestedActions: []string{
 				i18n.T(lang, "suggested.verify_diff"),
@@ -609,9 +659,11 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		return nil, artifactProposeOutput{
 			Status:    "not_ready",
 			ErrorCode: "AREA_NOT_FOUND",
+			Failed:    []string{"AREA_NOT_FOUND"},
 			Checklist: []string{
 				fmt.Sprintf(i18n.T(lang, "preflight.area_not_found"), in.AreaSlug, deps.ProjectSlug),
 			},
+			NextTools: defaultNextTools("AREA_NOT_FOUND"),
 		}, nil
 	}
 
@@ -634,11 +686,13 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 	err = tx.QueryRow(ctx, `
 		INSERT INTO artifact_revisions (
 			artifact_id, revision_number, title, body_markdown, body_hash, tags,
-			completeness, author_kind, author_id, author_version, commit_msg
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'agent', $8, $9, $10)
+			completeness, author_kind, author_id, author_version, commit_msg,
+			source_session_ref
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'agent', $8, $9, $10, $11)
 		RETURNING id::text
 	`, artifactID, newRev, in.Title, in.BodyMarkdown, bodyHash(in.BodyMarkdown),
 		in.Tags, completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), in.CommitMsg,
+		buildSourceSessionRef(deps, in),
 	).Scan(&revID)
 	if err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("insert revision: %w", err)
@@ -724,6 +778,36 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 func bodyHash(body string) string {
 	sum := sha256.Sum256([]byte(body))
 	return hex.EncodeToString(sum[:])
+}
+
+// buildSourceSessionRef assembles the JSONB payload stored on
+// artifact_revisions.source_session_ref. Fields:
+//   - agent_id: server-issued identity (Phase 12c) — trusted
+//   - reported_author_id: client-reported string — untrusted label
+//   - source_session: agent-supplied free-form session id (basis)
+// Returns nil when there's nothing useful to record so the column stays
+// NULL rather than storing {} everywhere.
+func buildSourceSessionRef(deps Deps, in artifactProposeInput) any {
+	payload := map[string]any{}
+	if strings.TrimSpace(deps.AgentID) != "" {
+		payload["agent_id"] = deps.AgentID
+	}
+	if strings.TrimSpace(in.AuthorID) != "" {
+		payload["reported_author_id"] = in.AuthorID
+	}
+	if in.Basis != nil {
+		if s := strings.TrimSpace(in.Basis.SourceSession); s != "" {
+			payload["source_session"] = s
+		}
+	}
+	if len(payload) == 0 {
+		return nil
+	}
+	buf, err := json.Marshal(payload)
+	if err != nil {
+		return nil
+	}
+	return string(buf)
 }
 
 // preflight runs the cheap synchronous checks. Returns a list of ✗-prefixed
@@ -918,6 +1002,46 @@ func embedAndStoreChunks(ctx context.Context, tx pgx.Tx, provider embed.Provider
 	return nil
 }
 
+// defaultNextTools maps a stable fail code to the MCP tools an agent
+// should call next to unblock itself. Returning nil means "no suggestion;
+// agent should re-read the checklist" — schema-level failures mostly fall
+// into that bucket because the fix is "fill in the missing field".
+func defaultNextTools(code string) []string {
+	switch code {
+	case "NO_SRCH", "RECEIPT_UNKNOWN", "RECEIPT_EXPIRED", "RECEIPT_WRONG_PROJECT":
+		return []string{"pindoc.artifact.search", "pindoc.context.for_task"}
+	case "CONFLICT_EXACT_TITLE", "POSSIBLE_DUP":
+		return []string{"pindoc.artifact.read", "pindoc.artifact.propose"}
+	case "VER_CONFLICT":
+		return []string{"pindoc.artifact.revisions", "pindoc.artifact.diff"}
+	case "UPDATE_TARGET_NOT_FOUND", "SUPERSEDE_TARGET_NOT_FOUND", "REL_TARGET_NOT_FOUND":
+		return []string{"pindoc.artifact.search", "pindoc.area.list"}
+	case "AREA_NOT_FOUND", "AREA_EMPTY":
+		return []string{"pindoc.area.list"}
+	case "TASK_NO_ACCEPTANCE", "DEC_NO_SECTIONS", "DBG_NO_REPRO", "DBG_NO_RESOLUTION":
+		return []string{"pindoc.harness.install"}
+	case "UPDATE_SUPERSEDE_EXCLUSIVE":
+		return []string{"pindoc.artifact.read"}
+	default:
+		return nil
+	}
+}
+
+// makeRelated builds a RelatedRef from the minimal fields most not_ready
+// sites have on hand. Empty ID is fine — slug alone is stable for URL
+// construction.
+func makeRelated(projectSlug, slug, id, artType, title, reason string) RelatedRef {
+	return RelatedRef{
+		ID:       id,
+		Slug:     slug,
+		Type:     artType,
+		Title:    title,
+		AgentRef: "pindoc://" + slug,
+		HumanURL: HumanURL(projectSlug, slug),
+		Reason:   reason,
+	}
+}
+
 // isUniqueViolation is a best-effort check against pgx's error message.
 // The typed error route requires importing pgconn; until we add that we
 // string-match on the known constraint name. Good enough for one retry
@@ -959,6 +1083,7 @@ func resolveRelatesTo(ctx context.Context, tx pgx.Tx, projectSlug string, relate
 				SuggestedActions: []string{
 					i18n.T(lang, "suggested.read_existing_rel"),
 				},
+				NextTools: defaultNextTools("REL_TARGET_NOT_FOUND"),
 			}
 		}
 		resolved[i] = id

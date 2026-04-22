@@ -8,6 +8,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"io"
 	"log/slog"
@@ -83,6 +85,19 @@ func main() {
 		logger.Warn("using stub embedder — retrieval quality is hash-based, not semantic. Set PINDOC_EMBED_PROVIDER=http + PINDOC_EMBED_ENDPOINT=... to enable real embeddings.")
 	}
 
+	// Phase 12c: server-issued agent identity for this stdio subprocess.
+	// Takes the env value when set (so a wrapper script can pin an agent
+	// to a stable id across restarts), otherwise mints a fresh random one.
+	// Persisted on every artifact_revisions row via source_session_ref so
+	// audit trails don't depend on the agent's self-reported author_id.
+	agentID := os.Getenv("PINDOC_AGENT_ID")
+	if strings.TrimSpace(agentID) == "" {
+		buf := make([]byte, 12)
+		_, _ = rand.Read(buf)
+		agentID = "ag_" + hex.EncodeToString(buf)
+	}
+	logger.Info("agent identity", "agent_id", agentID, "source", agentIDSource())
+
 	server := pmcp.NewServer(pmcp.Options{
 		Name:     "pindoc",
 		Version:  version,
@@ -90,6 +105,7 @@ func main() {
 		Config:   cfg,
 		DB:       pool,
 		Embedder: embedder,
+		AgentID:  agentID,
 	})
 
 	err = server.Run(ctx, &sdk.StdioTransport{})
@@ -115,4 +131,11 @@ func errReason(err error) string {
 		return "context done"
 	}
 	return err.Error()
+}
+
+func agentIDSource() string {
+	if strings.TrimSpace(os.Getenv("PINDOC_AGENT_ID")) != "" {
+		return "env"
+	}
+	return "generated"
 }

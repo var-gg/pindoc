@@ -38,6 +38,14 @@ type Deps struct {
 	// search-before-propose (Phase 11b). Nil-safe: every call site checks
 	// before dereferencing, and nil disables the gate (useful for tests).
 	Receipts *receipts.Store
+
+	// AgentID is the server-issued identity for this MCP subprocess
+	// (Phase 12c). Set once at startup from PINDOC_AGENT_ID env, or
+	// generated fresh if unset. Persisted on every artifact_revisions
+	// row via source_session_ref so provenance is server-trusted rather
+	// than agent-asserted. `author_id` in propose input remains a
+	// client-reported display label.
+	AgentID string
 }
 
 // HumanURL returns the canonical /p/:project/wiki/:slug relative URL used

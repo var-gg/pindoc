@@ -73,7 +73,7 @@ Agent Session ── checkpoint ──▶ Promote ──▶ Artifact ──▶ G
 - ✅ Phase 9 — `human_url`/`agent_ref` 분리 + `capabilities` 블록 + spec↔runtime drift 가시화
 - ✅ Phase 10 — real embedder dogfood (Docker TEI + `multilingual-e5-base` + pindoc-reembed CLI)
 - ✅ Phase 11 — write contract 강화 (`search_receipt` hard enforce + `pins[]` + `expected_version` + `supersede_of` + `relates_to[]` + semantic conflict block + `_unsorted` area)
-- ⏳ Phase 12 — `not_ready` machine-readable envelope + `artifact.read(view=…)` + actor hardening
+- ✅ Phase 12 — agent ergonomics (`not_ready`에 `Failed[]`/`NextTools[]`/`Related[]` + `artifact.read(view=brief|full|continuation)` + server-issued `agent_id` + revision `source_session_ref`)
 - ⏳ Phase 13 — template artifact seed (포맷도 evolving artifact)
 
 상세: [docs/12-m1-implementation-plan.md](docs/12-m1-implementation-plan.md) · 외부 피어리뷰 판단: [docs/14-peer-review-response.md](docs/14-peer-review-response.md)
