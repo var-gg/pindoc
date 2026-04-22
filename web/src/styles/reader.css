@@ -55,12 +55,12 @@
 /* Sidebar */
 .sidebar { background: var(--bg-0); border-right: 1px solid var(--border); overflow-y: auto; padding: 12px 0; }
 .side-section { padding: 12px 12px 4px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-3); }
-.side-item { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: center; padding: 6px 12px; color: var(--fg-1); font-size: 13px; cursor: pointer; border-left: 2px solid transparent; background: transparent; border-top: 0; border-right: 0; border-bottom: 0; width: 100%; font-family: inherit; text-align: left; text-decoration: none; }
-.side-item .lucide { width: 14px; height: 14px; color: var(--fg-3); }
+.side-item { display: flex; align-items: center; gap: 8px; padding: 6px 12px; color: var(--fg-1); font-size: 13px; cursor: pointer; border-left: 2px solid transparent; background: transparent; border-top: 0; border-right: 0; border-bottom: 0; width: 100%; font-family: inherit; text-align: left; text-decoration: none; }
+.side-item .lucide { width: 14px; height: 14px; color: var(--fg-3); flex: 0 0 auto; }
 .side-item:hover { background: var(--bg-2); }
 .side-item.active { background: var(--bg-2); color: var(--fg-0); border-left-color: var(--accent); }
 .side-item.active .lucide { color: var(--fg-1); }
-.side-item__count { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+.side-item__count { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); margin-left: auto; flex: 0 0 auto; }
 .side-sub .side-item { padding-left: 28px; }
 
 /* Content */
