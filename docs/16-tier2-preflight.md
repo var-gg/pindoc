@@ -56,7 +56,35 @@ embedder + ASCII-only slugify 문제 때문이었음. 새 MCP에서 **explicit s
 
 ---
 
-## Part B — Tier 2 본편 8개
+## Part B — Tier 2 본편 8개 (완료 · 2026-04-22)
+
+> 실행 완료. MCP 경로는 구 바이너리(stub embedder + ASCII slugify) 상태였
+> 으나 **explicit `slug` 지정**으로 한글 보존, 발행 후 `pindoc-reembed`로
+> gemma 벡터 in-place 교체. 17/17 (4 template + 5 Tier 1 + 8 Tier 2)
+> reembed ok, stub embedding 잔여 없음.
+
+**실제 발행 결과**:
+
+| # | Title | Slug | Edges | Pins |
+|---|---|---|---|---|
+| T2-1 | 실패 모드 F1-F6 | `pindoc-문제-f1-f6-실패-모드` | 2 | 2 |
+| T2-2 | Non-goals 헌법 | `pindoc-non-goals-헌법` | 2 | 2 |
+| T2-3 | 5 Primitive | `pindoc-5-primitive-개념` | 3 | 2 |
+| T2-4 | PINDOC.md 스펙 | `pindoc-md-harness-spec` | 2 | 2 |
+| T2-5 | V1 Roadmap + BM | `pindoc-v1-로드맵-bm-phase` | 3 | 2 |
+| T2-6 | M1 Phase 1-17 | `pindoc-m1-phase-chain-1-17` | 3 | 2 |
+| T2-7 | UI Wiki Reader + Cmd+K | `pindoc-ui-wiki-reader-cmdk-flow` | 3 | 4 |
+| T2-8 | Design System v0 | `pindoc-design-system-v0-handoff` | 2 | 3 |
+
+관찰:
+- 모든 한글 slug explicit 지정 — 8/8 accepted, collision 0건
+- 구 MCP 응답에 `embedder_used` 필드 없음 확인 (예상대로)
+- `warnings[]` 전부 빈 배열 — stub embedder라 `RECOMMEND_READ_BEFORE_CREATE` 판정 무의미
+- 본 HARD/SOFT 판정은 **reembed 후 재측정** (Part C)
+
+---
+
+### 원래 계획 (historical)
 
 ### 발행 순서 (dependency 기반)
 
@@ -145,9 +173,34 @@ validation 결과(`PIN_PATH_NOT_FOUND` 없는지) 체크.
 
 ---
 
-## Part C — Pairwise distance 2차 실측 (Tier 2 발행 후)
+## Part C — Pairwise distance 2차 실측 (Tier 2 발행 후 · 완료 2026-04-22)
 
-Tier 1 + Tier 2 = 13 artifact 기준 C(13,2)=78 쌍. Tier 1 때와 같은 SQL 쿼리로:
+Tier 1 + Tier 2 = 13 artifact, C(13,2) = 78 쌍. gemma real embedder 기준.
+
+**SOFT band (<0.25) 안 비율**:
+- Tier 1만: 6/10 (60%)
+- Tier 1 + Tier 2 (13): 30/78 (38%) — 희석되긴 했지만 여전히 상당 비율
+
+**HARD band (<0.18) 진입 4 쌍 (Tier 1 때는 0건)**:
+
+| a | b | min body dist | 의미 |
+|---|---|---|---|
+| `pindoc-m0-m7-harness-reversal-6` | `pindoc-md-harness-spec` | **0.1705** | M0 메커니즘 ↔ 그 구현 포맷 spec |
+| `pindoc-m1-phase-chain-1-17` | `pindoc-v1-로드맵-bm-phase` | 0.1721 | Phase 체인 ↔ 상위 Roadmap |
+| `pindoc-5-primitive-개념` | `pindoc-md-harness-spec` | 0.1742 | Concepts(Harness primitive) ↔ 실 스펙 |
+| `pindoc-5-primitive-개념` | `pindoc-m0-m7-harness-reversal-6` | 0.1913 | Concepts(Harness) ↔ M0 메커니즘 |
+
+**판정**: 4 쌍 전부 의미적으로 **정당한 near-match** — 중복 아님. 한 제품의 서로 다른 깊이에서 같은 주제를 논함(개념 → 메커니즘 → 스펙). 즉 **현 HARD 0.18 threshold가 한 제품 corpus에 너무 빡빡**.
+
+**Threshold 재조정 제안 (V1.x calibration)**:
+- `semanticConflictThreshold` (HARD BLOCK): **0.18 → 0.12-0.15**. 진짜 duplicate(거의 동일 내용)만 차단.
+- `semanticAdvisoryThreshold` (RECOMMEND_READ_BEFORE_CREATE): **0.25 → 0.30**. Near-match advisory 범위 확대.
+- 또는: threshold를 title + 첫 문단 한정으로 signature 비교 (body 전체가 아닌)
+- 또는: 같은 Area / 같은 Type 내에서만 HARD 발동하고 cross-Area는 SOFT only
+
+Threshold 확정은 Tier 3+ 추가 발행 후 재검토. 현 상수는 `internal/pindoc/mcp/tools/artifact_propose.go`의 `semanticConflictThreshold` / `semanticAdvisoryThreshold`.
+
+### SQL 재현
 
 ```sql
 SELECT a1.slug AS a, a2.slug AS b,
@@ -161,13 +214,6 @@ GROUP BY a1.slug, a2.slug
 HAVING MIN(c1.embedding <=> c2.embedding) < 0.30
 ORDER BY min_body_dist ASC;
 ```
-
-관찰 포인트:
-- SOFT band (0.18–0.25) 안 비율 — Tier 1만 때는 6/10. Tier 2 추가로 희석되는
-  지 vs 비슷하게 유지되는지 → `candidate_updates[]` threshold 0.22 재검토의
-  직접 근거.
-- HARD BLOCK (<0.15) 등장 여부 — 있다면 진짜 duplicate 의심 → 기존 artifact
-  하나 supersede 검토.
 
 ---
 
