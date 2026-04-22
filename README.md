@@ -7,8 +7,10 @@
 모든 쓰기는 코딩 에이전트(Claude Code / Cursor / Cline / Codex)를 통해 일어나고,
 사람은 승인·거절·방향 제시만 합니다. 모든 문서는 코드 커밋·파일 경로에 **핀(pin)** 됩니다.
 
-`var.gg` 생태계의 첫 플래그십 제품.
-공개 인스턴스: **pindoc.org** (V1 공개 시 오픈 예정).
+`var.gg` 생태계의 첫 플래그십 제품. Self-host first — `docker compose up`
+한 번이면 Postgres + pgvector + TEI + MCP 서버가 전부 로컬에서 뜹니다.
+
+Apache License 2.0. 기여 가이드와 CLA는 [CONTRIBUTING.md](CONTRIBUTING.md) 참조.
 
 ---
 

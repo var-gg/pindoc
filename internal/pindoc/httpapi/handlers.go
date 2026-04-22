@@ -16,6 +16,7 @@ type projectInfo struct {
 	ID              string        `json:"id"`
 	Slug            string        `json:"slug"`
 	Name            string        `json:"name"`
+	OwnerID         string        `json:"owner_id"`
 	Description     string        `json:"description,omitempty"`
 	Color           string        `json:"color,omitempty"`
 	PrimaryLanguage string        `json:"primary_language"`
@@ -66,6 +67,7 @@ type projectListRow struct {
 	ID              string    `json:"id"`
 	Slug            string    `json:"slug"`
 	Name            string    `json:"name"`
+	OwnerID         string    `json:"owner_id"`
 	Description     string    `json:"description,omitempty"`
 	Color           string    `json:"color,omitempty"`
 	PrimaryLanguage string    `json:"primary_language"`
@@ -76,7 +78,7 @@ type projectListRow struct {
 func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
 	rows, err := d.DB.Query(r.Context(), `
 		SELECT
-			p.id::text, p.slug, p.name, p.description, p.color,
+			p.id::text, p.slug, p.name, p.owner_id, p.description, p.color,
 			p.primary_language, p.created_at,
 			(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
 		FROM projects p
@@ -94,7 +96,7 @@ func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
 		var p projectListRow
 		var desc, color *string
 		if err := rows.Scan(
-			&p.ID, &p.Slug, &p.Name, &desc, &color,
+			&p.ID, &p.Slug, &p.Name, &p.OwnerID, &desc, &color,
 			&p.PrimaryLanguage, &p.CreatedAt, &p.ArtifactsCount,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan failed")
@@ -121,13 +123,13 @@ func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
 	var desc, color *string
 	err := d.DB.QueryRow(r.Context(), `
 		SELECT
-			p.id::text, p.slug, p.name, p.description, p.color,
+			p.id::text, p.slug, p.name, p.owner_id, p.description, p.color,
 			p.primary_language, p.created_at,
 			(SELECT count(*) FROM areas     WHERE project_id = p.id),
 			(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
 		FROM projects p WHERE p.slug = $1
 	`, slug).Scan(
-		&out.ID, &out.Slug, &out.Name, &desc, &color,
+		&out.ID, &out.Slug, &out.Name, &out.OwnerID, &desc, &color,
 		&out.PrimaryLanguage, &out.CreatedAt,
 		&out.AreasCount, &out.ArtifactsCount,
 	)

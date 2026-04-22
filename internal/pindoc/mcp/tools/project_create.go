@@ -14,11 +14,33 @@ import (
 )
 
 type projectCreateInput struct {
-	Slug            string `json:"slug" jsonschema:"lowercase kebab-case slug, 2-40 chars, unique within this Pindoc instance"`
+	Slug            string `json:"slug" jsonschema:"lowercase kebab-case slug, 2-40 chars, unique per owner"`
 	Name            string `json:"name" jsonschema:"human-readable display name"`
 	PrimaryLanguage string `json:"primary_language" jsonschema:"en | ko (M1 support); other languages land in V1.5"`
 	Description     string `json:"description,omitempty" jsonschema:"one-line description shown on the project switcher; optional"`
 	Color           string `json:"color,omitempty" jsonschema:"CSS color string (hex or oklch) used for the sidebar accent; optional"`
+	// OwnerID is optional; defaults to 'default' for single-owner self-
+	// host deployments. Larger deployments (multiple users sharing one
+	// instance) set this to the logical owner identifier. Not a user
+	// table reference today — just a string the server stores so future
+	// permission scopes have something to hang off.
+	OwnerID string `json:"owner_id,omitempty" jsonschema:"optional owner identifier; defaults to 'default'"`
+}
+
+// reservedProjectSlugs blocks slugs that would collide with routing,
+// future sub-domains, or common admin paths on a self-host or hosted
+// deployment. Kept conservative: anything an operator plausibly wants
+// at /:slug on a typical web app.
+var reservedProjectSlugs = map[string]struct{}{
+	"admin": {}, "api": {}, "app": {}, "www": {}, "blog": {},
+	"docs": {}, "help": {}, "mail": {}, "support": {}, "status": {},
+	"billing": {}, "login": {}, "signup": {}, "logout": {},
+	"dashboard": {}, "settings": {}, "public": {}, "static": {},
+	"assets": {}, "auth": {}, "health": {}, "new": {},
+	"about": {}, "terms": {}, "privacy": {}, "security": {},
+	"pricing": {}, "contact": {}, "home": {}, "index": {},
+	"p": {}, "wiki": {}, "tasks": {}, "graph": {}, "inbox": {},
+	"design": {}, "ui": {}, "preview": {},
 }
 
 type projectCreateOutput struct {
@@ -72,6 +94,9 @@ the new project by launching pindoc-server with PINDOC_PROJECT=<new>.
 			if !projectSlugRe.MatchString(slug) {
 				return nil, projectCreateOutput{}, fmt.Errorf("slug must be lowercase kebab-case (2-40 chars, starts with a letter): got %q", in.Slug)
 			}
+			if _, reserved := reservedProjectSlugs[slug]; reserved {
+				return nil, projectCreateOutput{}, fmt.Errorf("slug %q is reserved (conflicts with common routes like /admin, /api, /docs, /wiki, ...). Pick something specific to this project", slug)
+			}
 			if name == "" {
 				return nil, projectCreateOutput{}, fmt.Errorf("name is required")
 			}
@@ -93,16 +118,21 @@ the new project by launching pindoc-server with PINDOC_PROJECT=<new>.
 			}
 			defer func() { _ = tx.Rollback(ctx) }()
 
+			ownerID := strings.TrimSpace(in.OwnerID)
+			if ownerID == "" {
+				ownerID = "default"
+			}
+
 			var projectID string
 			err = tx.QueryRow(ctx, `
-				INSERT INTO projects (slug, name, description, color, primary_language)
-				VALUES ($1, $2, $3, $4, $5)
+				INSERT INTO projects (owner_id, slug, name, description, color, primary_language)
+				VALUES ($1, $2, $3, $4, $5, $6)
 				RETURNING id::text
-			`, slug, name, descPtr, colorPtr, lang).Scan(&projectID)
+			`, ownerID, slug, name, descPtr, colorPtr, lang).Scan(&projectID)
 			if err != nil {
 				var pgErr *pgconn.PgError
 				if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-					return nil, projectCreateOutput{}, fmt.Errorf("project slug %q already exists — pick a different slug", slug)
+					return nil, projectCreateOutput{}, fmt.Errorf("project slug %q already exists under owner %q — pick a different slug", slug, ownerID)
 				}
 				return nil, projectCreateOutput{}, fmt.Errorf("project insert: %w", err)
 			}

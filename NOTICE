@@ -1,0 +1,58 @@
+Pindoc
+Copyright 2026 var.gg contributors
+
+This product includes software developed by the var.gg community.
+Licensed under the Apache License, Version 2.0 (the "License"); see the
+LICENSE file for details.
+
+============================================================
+Third-party components
+============================================================
+
+This project depends on the following open-source components. Each
+component is distributed under its own license; the NOTICE entries
+below track attribution only.
+
+Go dependencies (see go.mod for full list):
+
+- github.com/modelcontextprotocol/go-sdk — MIT License.
+  The official Go SDK for the Model Context Protocol.
+- github.com/jackc/pgx/v5 — MIT License.
+  PostgreSQL driver and toolkit for Go.
+- pgvector (PostgreSQL extension) — PostgreSQL License.
+  Vector similarity search for Postgres. Included via the
+  pgvector/pgvector Docker image referenced in docker-compose.yml.
+
+Web dependencies (see web/package.json for full list):
+
+- React — MIT License. Copyright (c) Meta Platforms, Inc. and affiliates.
+- Vite — MIT License. Copyright (c) 2019-present, VoidZero Inc. and Vite contributors.
+- react-router — MIT License. Copyright (c) React Training LLC, Remix Software Inc., Shopify Inc.
+- lucide-react — ISC License. Copyright (c) for portions from Feather (c) Cole Bemis.
+- remark / rehype — MIT License.
+- mermaid — MIT License. Copyright (c) 2014 - 2022 Knut Sveidqvist.
+
+Runtime services (operator-installed, not bundled):
+
+- Text Embeddings Inference (text-embeddings-inference) —
+  Apache License 2.0. Copyright (c) 2023 Nicolas Patry.
+  Referenced via the ghcr.io/huggingface/text-embeddings-inference
+  Docker image in docker-compose.yml. The image itself is pulled at
+  install time and is not redistributed with this source tree.
+
+- intfloat/multilingual-e5-base (default embedding model) —
+  MIT License.
+  The weights are downloaded by Text Embeddings Inference at first
+  boot and are not bundled with this repository. Operators may swap
+  in other models via PINDOC_EMBED_MODEL; attribution obligations
+  for any replacement model rest with the operator.
+
+============================================================
+Notes
+============================================================
+
+The default install uses the multilingual-e5-base weights at runtime.
+If an operator configures a different embedding provider (e.g.
+OpenAI, Cohere, Voyage, or a self-hosted alternative), that
+provider's terms apply to their use of the service and are outside
+the scope of this NOTICE.

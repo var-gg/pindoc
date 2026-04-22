@@ -14,6 +14,7 @@ type projectCurrentOutput struct {
 	ID              string        `json:"id"`
 	Slug            string        `json:"slug"`
 	Name            string        `json:"name"`
+	OwnerID         string        `json:"owner_id"`
 	Description     string        `json:"description,omitempty"`
 	Color           string        `json:"color,omitempty"`
 	PrimaryLanguage string        `json:"primary_language"`
@@ -112,6 +113,7 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 					p.id::text,
 					p.slug,
 					p.name,
+					p.owner_id,
 					p.description,
 					p.color,
 					p.primary_language,
@@ -121,7 +123,7 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 				FROM projects p
 				WHERE p.slug = $1
 			`, deps.ProjectSlug).Scan(
-				&out.ID, &out.Slug, &out.Name,
+				&out.ID, &out.Slug, &out.Name, &out.OwnerID,
 				&desc, &color,
 				&out.PrimaryLanguage, &out.CreatedAt,
 				&out.AreasCount, &out.ArtifactsCount,
