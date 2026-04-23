@@ -3,6 +3,7 @@ import type { Artifact, ArtifactRef } from "../api/client";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
 import { PindocMarkdown } from "./Markdown";
+import { TrustCard } from "./TrustCard";
 
 type Props = {
   detail: Artifact | null;
@@ -39,6 +40,12 @@ export function ReaderSurface({ detail, emptyMessage }: Props) {
         </div>
 
         <h1 className="art-title">{detail.title}</h1>
+
+        <TrustCard
+          meta={detail.artifact_meta}
+          pins={detail.pins}
+          taskStatus={detail.type === "Task" ? detail.task_meta?.status : undefined}
+        />
 
         <div className="art-meta">
           <span className={`chip chip--${detail.status}`}>

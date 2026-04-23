@@ -54,11 +54,51 @@ export type Area = {
 };
 
 export type TaskMeta = {
-  status?: "todo" | "in_progress" | "blocked" | "done" | "cancelled";
+  // Task lifecycle v2 (migration 0013). `verified` is reserved for
+  // pindoc.artifact.verify — direct transition via artifact.propose is
+  // rejected server-side (VER_VIA_VERIFY_TOOL_ONLY). `claimed_done`
+  // requires 100% acceptance checkboxes.
+  status?: "open" | "claimed_done" | "verified" | "blocked" | "cancelled";
   priority?: "p0" | "p1" | "p2" | "p3";
   assignee?: string;
   due_at?: string;
   parent_slug?: string;
+};
+
+// ArtifactMeta carries the epistemic axes persisted via migration 0012
+// (artifact_meta JSONB). Every field is optional — the server omits axes
+// the resolver didn't set, and legacy rows arrive as an empty object.
+// Union-typed string fields mirror the server enums so Reader code can
+// switch/narrow without re-parsing strings at every call site.
+export type ArtifactMeta = {
+  source_type?: "code" | "artifact" | "user_chat" | "external" | "mixed";
+  consent_state?: "not_needed" | "requested" | "granted" | "denied";
+  confidence?: "low" | "medium" | "high";
+  audience?: "owner_only" | "approvers" | "project_readers";
+  next_context_policy?: "default" | "opt_in" | "excluded";
+  verification_state?: "verified" | "partially_verified" | "unverified";
+};
+
+// SourceSessionRef is the pass-through of the JSONB column by the same name.
+// agent_id is server-issued and trusted; reported_author_id is the client
+// string; source_session is free-form. All optional depending on whether
+// the latest propose supplied basis.source_session.
+export type SourceSessionRef = {
+  agent_id?: string;
+  reported_author_id?: string;
+  source_session?: string;
+};
+
+// PinRef mirrors artifact_pins rows for the Reader Sidecar. repo defaults
+// to "origin" in the DB, commit_sha + line range only meaningful on
+// kind="code".
+export type PinRef = {
+  kind: "code" | "resource" | "url";
+  repo?: string;
+  commit_sha?: string;
+  path: string;
+  lines_start?: number;
+  lines_end?: number;
 };
 
 export type EdgeRef = {
@@ -82,6 +122,7 @@ export type ArtifactRef = {
   published_at?: string;
   updated_at: string;
   task_meta?: TaskMeta;
+  artifact_meta?: ArtifactMeta;
 };
 
 export type Artifact = ArtifactRef & {
@@ -92,6 +133,8 @@ export type Artifact = ArtifactRef & {
   created_at: string;
   relates_to?: EdgeRef[];
   related_by?: EdgeRef[];
+  pins?: PinRef[];
+  source_session_ref?: SourceSessionRef;
 };
 
 export type SearchHit = {

@@ -1,7 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { ArrowUpRight, History as HistoryIcon } from "lucide-react";
-import { api, type Artifact, type EdgeRef, type RevisionRow } from "../api/client";
+import {
+  api,
+  type Artifact,
+  type ArtifactMeta,
+  type EdgeRef,
+  type PinRef,
+  type RevisionRow,
+  type SourceSessionRef,
+} from "../api/client";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
 
@@ -83,6 +91,13 @@ export function Sidecar({ projectSlug, detail }: Props) {
         relatedBy={detail.related_by ?? []}
         hasSupersedes={hasSupersedes}
         supersededBy={detail.superseded_by ?? ""}
+      />
+
+      <ProvenanceBlock
+        meta={detail.artifact_meta}
+        pins={detail.pins}
+        sourceSession={detail.source_session_ref}
+        updatedAt={detail.updated_at}
       />
 
       <RecentChanges projectSlug={projectSlug} slug={detail.slug} />
@@ -253,6 +268,164 @@ function ConnectedArtifacts({
       )}
     </div>
   );
+}
+
+// ProvenanceBlock renders the epistemic + evidence data the Trust Card
+// alludes to: pins list grouped by kind, source_session_ref summary, stale
+// signal, and next_context_policy rationale. Section is skipped entirely
+// when none of the signals carry information — legacy artifacts without
+// artifact_meta keep the old sidecar layout untouched.
+function ProvenanceBlock({
+  meta,
+  pins,
+  sourceSession,
+  updatedAt,
+}: {
+  meta?: ArtifactMeta;
+  pins?: PinRef[];
+  sourceSession?: SourceSessionRef;
+  updatedAt: string;
+}) {
+  const { t } = useI18n();
+  const hasPins = (pins?.length ?? 0) > 0;
+  const hasSource = Boolean(sourceSession && (sourceSession.agent_id || sourceSession.source_session));
+  const hasMetaContent = meta && Object.keys(meta).length > 0;
+  const stale = staleFromAge(updatedAt);
+  if (!hasPins && !hasSource && !hasMetaContent && !stale) {
+    return null;
+  }
+
+  return (
+    <div className="provenance" style={{ display: "flex", flexDirection: "column", gap: 10, paddingBottom: 6 }}>
+      <div
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          color: "var(--fg-3)",
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+        }}
+      >
+        {t("sidecar.provenance") || "Provenance"}
+      </div>
+
+      {hasPins && <PinsList pins={pins!} />}
+      {hasSource && <SourceSessionLine session={sourceSession!} />}
+      {hasMetaContent && <NextContextLine meta={meta!} />}
+      {stale && <StaleLine reason={stale.reason} days={stale.days} />}
+    </div>
+  );
+}
+
+function PinsList({ pins }: { pins: PinRef[] }) {
+  const groups = new Map<string, PinRef[]>();
+  for (const p of pins) {
+    const key = p.kind || "code";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(p);
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ fontSize: 11, color: "var(--fg-2)" }}>Pins · {pins.length}</div>
+      <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+        {Array.from(groups.entries()).flatMap(([kind, items]) =>
+          items.map((p, idx) => (
+            <li
+              key={`${kind}-${idx}-${p.path}`}
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+                color: "var(--fg-1)",
+                display: "flex",
+                gap: 6,
+                alignItems: "baseline",
+              }}
+              title={`${kind} pin`}
+            >
+              <span className="chip" style={{ fontSize: 9, textTransform: "uppercase", padding: "1px 5px" }}>
+                {kind}
+              </span>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {p.path}
+                {p.lines_start
+                  ? `:${p.lines_start}${p.lines_end && p.lines_end !== p.lines_start ? `-${p.lines_end}` : ""}`
+                  : ""}
+              </span>
+            </li>
+          )),
+        )}
+      </ul>
+    </div>
+  );
+}
+
+function SourceSessionLine({ session }: { session: SourceSessionRef }) {
+  const agent = session.agent_id || session.reported_author_id;
+  return (
+    <div style={{ fontSize: 11, color: "var(--fg-2)" }}>
+      <span style={{ color: "var(--fg-3)" }}>Session: </span>
+      {agent ? (
+        <span style={{ fontFamily: "var(--font-mono)" }}>{agent}</span>
+      ) : (
+        <span style={{ color: "var(--fg-3)" }}>ephemeral — not recorded</span>
+      )}
+      {session.source_session ? (
+        <span
+          style={{ color: "var(--fg-3)", fontFamily: "var(--font-mono)", marginLeft: 6 }}
+          title={session.source_session}
+        >
+          · {session.source_session.slice(0, 10)}…
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function NextContextLine({ meta }: { meta: ArtifactMeta }) {
+  const policy = meta.next_context_policy ?? "default";
+  const label =
+    policy === "excluded"
+      ? "Excluded from next session"
+      : policy === "opt_in"
+      ? "Next session: opt-in only"
+      : "Next session: default";
+  const why =
+    policy === "excluded"
+      ? "Agents won't see this in Fast Landing."
+      : policy === "opt_in"
+      ? "Surfaces only on direct retrieval."
+      : "Eligible for default Fast Landing bundle.";
+  return (
+    <div style={{ fontSize: 11, color: "var(--fg-2)" }}>
+      <span style={{ color: "var(--fg-3)" }}>Context: </span>
+      {label}
+      <span style={{ color: "var(--fg-3)", marginLeft: 6 }}>· {why}</span>
+    </div>
+  );
+}
+
+function StaleLine({ reason, days }: { reason: string; days: number }) {
+  return (
+    <div style={{ fontSize: 11, color: "var(--fg-2)" }}>
+      <span style={{ color: "var(--fg-3)" }}>Stale signal: </span>
+      <span>{reason}</span>
+      <span style={{ color: "var(--fg-3)", marginLeft: 6 }}>({days}d)</span>
+    </div>
+  );
+}
+
+// staleFromAge mirrors the server's Phase 11c age heuristic so the
+// Sidecar can surface the signal without a second HTTP round-trip.
+// Threshold is 60 days — matches staleAgeThreshold in
+// internal/pindoc/mcp/tools/context_for_task.go. When the server eventually
+// emits a richer stale_reason enum (pin_changed, ia_migration, etc.) this
+// helper becomes a renderer and the enum wins.
+function staleFromAge(updatedAt: string): { reason: string; days: number } | null {
+  const t = new Date(updatedAt).getTime();
+  if (!Number.isFinite(t)) return null;
+  const days = Math.floor((Date.now() - t) / (1000 * 60 * 60 * 24));
+  if (days <= 60) return null;
+  return { reason: `not updated in ${days} days`, days };
 }
 
 function EdgeGroup({
