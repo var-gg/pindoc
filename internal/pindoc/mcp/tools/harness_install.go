@@ -27,6 +27,27 @@ type harnessInstallOutput struct {
 	// CLAUDE.md (or AGENTS.md) so every future session auto-loads PINDOC.md.
 	ClaudeMdIncludeLine string `json:"claude_md_include_line"`
 
+	// StyleSnippet is the register-separation block the agent drops into
+	// CLAUDE.md / AGENTS.md / .cursorrules (Task task-harness-claudemd-
+	// style-register-snippet). Wrapped in marker comments so the same
+	// block can be located and replaced on version upgrades.
+	// Implements Decision `decision-artifact-format-leak-mitigation`
+	// first defence layer (agent conversation register).
+	StyleSnippet string `json:"style_snippet"`
+
+	// StyleSnippetTargets lists the agent-settings files the snippet
+	// typically belongs in, ordered by preference. The agent reads its
+	// own environment to pick the right one (Claude Code → CLAUDE.md,
+	// Codex/OpenAI → AGENTS.md, Cursor → .cursorrules). If none exist
+	// the agent creates the first entry.
+	StyleSnippetTargets []string `json:"style_snippet_targets"`
+
+	// StyleSnippetMarker is the opening marker substring the agent looks
+	// for when deciding whether to append (none found), replace (same
+	// version found), or warn (different version / user-edited body).
+	// The matching close marker is the same string with " BEGIN " → " END ".
+	StyleSnippetMarker string `json:"style_snippet_marker"`
+
 	// Message gives the agent a plain-English summary of what to do next.
 	Message string `json:"message"`
 
@@ -34,6 +55,29 @@ type harnessInstallOutput struct {
 	// choices to the user.
 	RenderedFor RenderedFor `json:"rendered_for"`
 }
+
+// styleSnippetVersion is bumped whenever the snippet body changes in a
+// way worth re-propagating to existing installs. Agents compare the
+// marker suffix when deciding whether to replace an existing block.
+const styleSnippetVersion = "v1"
+
+// Marker templates — keep them literal so a grep for "pindoc:register-
+// separation" finds every spot in the agent-settings file.
+const (
+	styleSnippetMarkerBegin = "<!-- pindoc:register-separation:" + styleSnippetVersion + " BEGIN -->"
+	styleSnippetMarkerEnd   = "<!-- pindoc:register-separation:" + styleSnippetVersion + " END -->"
+)
+
+// styleSnippetBodyEN / styleSnippetBodyKO are deliberately short (3-5
+// sentences). Longer bodies compete with the user's own CLAUDE.md
+// content for session-prompt real estate.
+const styleSnippetBodyEN = `### Register separation — user chat vs Pindoc artifacts
+
+Pindoc artifact bodies (Context / Decision / Rationale / Alternatives / Consequences sections) live in a structural register that welcomes tables, bullets, and ADR-style shorthand. Your user-facing replies live in a conversational register that should read as connected prose. Do not let artifact shorthand — "Alt A(...) · B(...)", parenthesised one-word reject reasons, middle-dot enumerations, or telegraphic phrases — leak into messages you send the user. When you are uncertain, rewrite your reply as two or three sentences that expose the reasoning rather than compressing it.`
+
+const styleSnippetBodyKO = `### Register 분리 — 사용자 대화와 Pindoc artifact
+
+Pindoc artifact 본문(Context / Decision / Rationale / Alternatives / Consequences 같은 섹션)은 구조화된 register에 속해서 표·bullet·ADR 스타일 축약이 자연스럽다. 반면 사용자 대면 응답은 추론 흐름이 연결된 산문 register에 속한다. "Alt A(...) · B(...)" 같은 축약, 괄호 안 한 단어 기각 이유, 중점(·)으로 나열한 짧은 구절이 artifact 본문에서 대화로 역류하지 않게 한다. 애매할 때는 응답을 두세 문장 산문으로 다시 쓰며 추론을 압축이 아닌 서술로 노출한다.`
 
 type RenderedFor struct {
 	ProjectSlug     string `json:"project_slug"`
@@ -67,19 +111,34 @@ func RegisterHarnessInstall(server *sdk.Server, deps Deps) {
 
 			body := renderPindocMD(projName, deps.ProjectSlug, lang, deps.Version)
 
+			var snippetBody string
+			if lang == "ko" {
+				snippetBody = styleSnippetBodyKO
+			} else {
+				snippetBody = styleSnippetBodyEN
+			}
+			styleSnippet := styleSnippetMarkerBegin + "\n" + snippetBody + "\n" + styleSnippetMarkerEnd
+
 			return nil, harnessInstallOutput{
 				SuggestedPath:       "PINDOC.md",
 				Body:                body,
 				ClaudeMdIncludeLine: "@PINDOC.md",
+				StyleSnippet:        styleSnippet,
+				StyleSnippetTargets: []string{"CLAUDE.md", "AGENTS.md", ".cursorrules"},
+				StyleSnippetMarker:  styleSnippetMarkerBegin,
 				Message: strings.TrimSpace(fmt.Sprintf(`
 Write the returned body to PINDOC.md at the repo root. Then append this
 exact line to the end of CLAUDE.md (or AGENTS.md if you use that):
     @PINDOC.md
-Future Claude Code sessions will auto-load PINDOC.md and follow the
-Pindoc Harness rules (Pre-flight Check before writes, Referenced
-Confirmation when asking the user for approval, agent-only write
-surface).
-`)),
+In the same CLAUDE.md / AGENTS.md file, also ensure the register-separation
+block is present (see style_snippet). If a block with the marker
+"%s" already exists, replace the whole BEGIN…END region with the
+new body. If none exists, append it near the top of the agent-guidance
+section. Keep anything outside the markers untouched.
+Future sessions will auto-load PINDOC.md and follow the Pindoc Harness
+rules (Pre-flight Check before writes, Referenced Confirmation when
+asking the user for approval, agent-only write surface).
+`, styleSnippetMarkerBegin)),
 				RenderedFor: RenderedFor{
 					ProjectSlug:     deps.ProjectSlug,
 					PrimaryLanguage: lang,
