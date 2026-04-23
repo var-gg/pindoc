@@ -223,3 +223,203 @@
 .content::-webkit-scrollbar-thumb:hover,
 .sidebar::-webkit-scrollbar-thumb:hover,
 .sidecar::-webkit-scrollbar-thumb:hover { background: var(--bg-4); }
+
+/* ===========================================================
+ * Kanban — Task board (Task kanban-design-system-mapping)
+ *
+ * Ported from web/public/design-system/ui_kits/reader/tasks.html
+ * class names preserved verbatim so design-system exports diff
+ * cleanly. Tokens live in colors_and_type.css (globally imported
+ * via index.html) — do not redefine here.
+ *
+ * Status-pill ↔ Task lifecycle v2 mapping (migration 0013):
+ *   open          → status-pill--todo        (draft amber tone)
+ *   claimed_done  → status-pill--in_progress (task-prog indigo + pulse)
+ *   verified      → status-pill--done        (live emerald)
+ *   blocked       → status-pill--blocked     (prio-p0 red — warning)
+ *   cancelled     → status-pill--archived    (archived neutral)
+ * Pulse on claimed_done signals "verifier action pending."
+ * =========================================================== */
+
+.kanban {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  gap: 12px;
+  padding: 0 16px 24px;
+  overflow-x: auto;
+}
+.kanban__extra {
+  padding: 0 16px 16px;
+}
+.kanban-col {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  padding: 10px 10px 12px;
+}
+.kanban-col--subtle { background: var(--bg-0); opacity: 0.85; }
+.kanban-col__head {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 10px;
+}
+.kanban-col__count {
+  margin-left: auto;
+  background: var(--bg-3);
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.kanban-col__list { display: flex; flex-direction: column; gap: 6px; }
+.kanban-col__empty {
+  color: var(--fg-4);
+  font-size: 11px;
+  font-style: italic;
+  padding: 4px 2px;
+}
+
+/* Task card */
+.task-card {
+  display: block;
+  padding: 10px 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  background: var(--bg-0);
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.task-card:hover { background: var(--bg-2); }
+.task-card.is-active {
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 10%, transparent);
+}
+.task-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.task-card__title {
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--fg-0);
+  margin: 0;
+}
+.task-card__foot {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  flex-wrap: wrap;
+}
+
+/* Status-pill — task lifecycle v2 */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 11px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid transparent;
+}
+.status-pill .p-dot { width: 7px; height: 7px; border-radius: 50%; }
+.status-pill--todo         { background: var(--draft-bg);     color: var(--draft);     border-color: var(--draft-border); }
+.status-pill--in_progress  { background: var(--task-prog-bg); color: var(--task-prog); border-color: var(--task-prog-border); }
+.status-pill--done         { background: var(--live-bg);      color: var(--live);      border-color: var(--live-border); }
+.status-pill--blocked      { background: var(--prio-p0-bg);   color: var(--prio-p0);   border-color: var(--prio-p0-border); }
+.status-pill--archived     { background: var(--archived-bg);  color: var(--fg-2);      border-color: var(--archived-border); }
+.status-pill--todo         .p-dot { background: var(--draft); }
+.status-pill--in_progress  .p-dot { background: var(--task-prog); animation: p-pulse 1.4s var(--ease-out) infinite; }
+.status-pill--done         .p-dot { background: var(--live); }
+.status-pill--blocked      .p-dot { background: var(--prio-p0); }
+.status-pill--archived     .p-dot { background: var(--archived); }
+
+@keyframes p-pulse {
+  50% { opacity: 0.4; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .status-pill--in_progress .p-dot { animation: none; }
+}
+
+/* Priority chip */
+.prio {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: var(--r-1);
+  border: 1px solid;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.prio .dot { width: 5px; height: 5px; border-radius: 50%; }
+.prio--p0 { background: var(--prio-p0-bg); color: var(--prio-p0); border-color: var(--prio-p0-border); }
+.prio--p1 { background: var(--prio-p1-bg); color: var(--prio-p1); border-color: var(--prio-p1-border); }
+.prio--p2 { background: var(--prio-p2-bg); color: var(--prio-p2); border-color: var(--prio-p2-border); }
+.prio--p3 { background: var(--prio-p3-bg); color: var(--prio-p3); border-color: var(--prio-p3-border); }
+.prio--p0 .dot { background: var(--prio-p0); }
+.prio--p1 .dot { background: var(--prio-p1); }
+.prio--p2 .dot { background: var(--prio-p2); }
+.prio--p3 .dot { background: var(--prio-p3); }
+
+/* Area chip */
+.chip-area {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--fg-2);
+}
+
+/* Blocked banner — shown on cards whose task_meta.status=blocked.
+ * Full relates_to:blocks target lookup stays in the artifact detail
+ * Sidecar for now (N+1 fetch avoided on the kanban list view). */
+.blocked-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: var(--prio-p0-bg);
+  border: 1px solid var(--prio-p0-border);
+  border-radius: var(--r-1);
+  color: var(--prio-p0);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.blocked-banner .lucide { width: 13px; height: 13px; flex-shrink: 0; margin-top: 1px; }
+.blocked-banner__body { flex: 1; color: var(--fg-1); }
+.blocked-banner__head {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--prio-p0);
+  margin-bottom: 2px;
+}

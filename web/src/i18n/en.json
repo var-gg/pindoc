@@ -40,6 +40,8 @@
   "tasks.col_verified": "Verified",
   "tasks.col_no_status": "No status",
   "tasks.col_cancelled": "Cancelled",
+  "tasks.blocked_head": "Blocked",
+  "tasks.blocked_hint": "This Task is blocked by another artifact. Open it to see the blocking edge.",
   "sidecar.prov_author": "author",
   "sidecar.prov_area": "area",
   "sidecar.prov_status": "status",

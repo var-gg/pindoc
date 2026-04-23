@@ -354,14 +354,29 @@ function Body({
 // cancelled enum with a two-phase completion lifecycle: open → claimed_done
 // (implementer self-attest) → verified (different agent files a
 // VerificationReport). Cancelled and blocked remain as lateral states.
-// i18n keys follow the same renaming — `tasks.col_open` etc — and fall
-// back to the column id if a key is missing.
-const TASK_COLUMNS: Array<{ id: string; labelKey: string }> = [
-  { id: "open", labelKey: "tasks.col_open" },
-  { id: "claimed_done", labelKey: "tasks.col_claimed_done" },
-  { id: "verified", labelKey: "tasks.col_verified" },
-  { id: "blocked", labelKey: "tasks.col_blocked" },
+// Each column header carries a status-pill variant — the CSS sits in
+// reader.css and the visual language follows the design system kit
+// `ui_kits/reader/tasks.html`. `pill` is the status-pill modifier class
+// (todo/in_progress/done/blocked/archived) — *not* the enum id, because
+// the design kit was authored before the Jira→two-phase rename.
+type TaskColumnSpec = {
+  id: string;
+  labelKey: string;
+  pill: "todo" | "in_progress" | "done" | "blocked" | "archived";
+};
+const TASK_COLUMNS: TaskColumnSpec[] = [
+  { id: "open", labelKey: "tasks.col_open", pill: "todo" },
+  { id: "claimed_done", labelKey: "tasks.col_claimed_done", pill: "in_progress" },
+  { id: "verified", labelKey: "tasks.col_verified", pill: "done" },
+  { id: "blocked", labelKey: "tasks.col_blocked", pill: "blocked" },
 ];
+
+const PRIORITY_CLASS: Record<string, string> = {
+  p0: "prio prio--p0",
+  p1: "prio prio--p1",
+  p2: "prio prio--p2",
+  p3: "prio prio--p3",
+};
 
 function TasksKanban({
   projectSlug,
@@ -404,19 +419,12 @@ function TasksKanban({
 
   return (
     <main className="content">
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(4, minmax(220px, 1fr))",
-          gap: 12,
-          padding: "0 16px 24px",
-          overflowX: "auto",
-        }}
-      >
+      <div className="kanban">
         {TASK_COLUMNS.map((col) => (
           <TaskColumn
             key={col.id}
             label={t(col.labelKey)}
+            pill={col.pill}
             items={groups.get(col.id) ?? []}
             projectSlug={projectSlug}
             currentSlug={currentSlug}
@@ -424,9 +432,10 @@ function TasksKanban({
         ))}
       </div>
       {noStatus.length > 0 && (
-        <div style={{ padding: "0 16px 16px" }}>
+        <div className="kanban__extra">
           <TaskColumn
             label={t("tasks.col_no_status")}
+            pill="todo"
             items={noStatus}
             projectSlug={projectSlug}
             currentSlug={currentSlug}
@@ -435,9 +444,10 @@ function TasksKanban({
         </div>
       )}
       {cancelled.length > 0 && (
-        <div style={{ padding: "0 16px 16px" }}>
+        <div className="kanban__extra">
           <TaskColumn
             label={t("tasks.col_cancelled")}
+            pill="archived"
             items={cancelled}
             projectSlug={projectSlug}
             currentSlug={currentSlug}
@@ -451,81 +461,97 @@ function TasksKanban({
 
 function TaskColumn({
   label,
+  pill,
   items,
   projectSlug,
   currentSlug,
   subtle,
 }: {
   label: string;
+  pill: TaskColumnSpec["pill"];
   items: ArtifactRef[];
   projectSlug: string;
   currentSlug: string | undefined;
   subtle?: boolean;
 }) {
   return (
-    <div
-      style={{
-        background: subtle ? "var(--bg-0)" : "var(--bg-1)",
-        border: "1px solid var(--border)",
-        borderRadius: "var(--r-2)",
-        padding: "10px 10px 12px",
-        opacity: subtle ? 0.8 : 1,
-      }}
-    >
-      <div
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          color: "var(--fg-3)",
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          marginBottom: 8,
-        }}
-      >
-        {label} · {items.length}
+    <div className={`kanban-col${subtle ? " kanban-col--subtle" : ""}`}>
+      <div className="kanban-col__head">
+        <span className={`status-pill status-pill--${pill}`}>
+          <span className="p-dot" />
+          {label}
+        </span>
+        <span className="kanban-col__count">{items.length}</span>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {items.map((a) => {
-          const isActive = currentSlug === a.slug;
-          return (
-            <Link
-              key={a.id}
-              to={`/p/${projectSlug}/tasks/${a.slug}`}
-              className={`backlink${isActive ? " is-active" : ""}`}
-              style={{
-                ...(isActive
-                  ? {
-                      borderColor: "var(--accent)",
-                      background: "color-mix(in oklch, var(--accent) 10%, transparent)",
-                    }
-                  : {}),
-                padding: "8px 10px",
-              }}
-            >
-              <div className="backlink__head" style={{ gap: 6 }}>
-                {a.task_meta?.priority && (
-                  <span
-                    className="chip"
-                    title={`priority ${a.task_meta.priority}`}
-                    style={{ fontSize: 10 }}
-                  >
-                    {a.task_meta.priority.toUpperCase()}
-                  </span>
-                )}
-                <span style={{ fontSize: 13 }}>{a.title}</span>
-              </div>
-              <div className="backlink__excerpt" style={{ fontSize: 11 }}>
-                {a.area_slug}
-                {a.task_meta?.assignee ? ` · ${a.task_meta.assignee}` : ""}
-                {a.task_meta?.due_at ? ` · ~${new Date(a.task_meta.due_at).toLocaleDateString()}` : ""}
-              </div>
-            </Link>
-          );
-        })}
-        {items.length === 0 && (
-          <div style={{ color: "var(--fg-4)", fontSize: 11, fontStyle: "italic", padding: "4px 2px" }}>—</div>
-        )}
+      <div className="kanban-col__list">
+        {items.map((a) => (
+          <TaskCard
+            key={a.id}
+            artifact={a}
+            projectSlug={projectSlug}
+            isActive={currentSlug === a.slug}
+          />
+        ))}
+        {items.length === 0 && <div className="kanban-col__empty">—</div>}
       </div>
     </div>
+  );
+}
+
+// TaskCard renders a single artifact tile in the kanban. Priority chip
+// (P0-P3 OKLCH palette) is the primary left-rail marker; area-chip sits
+// below the title so the area taxonomy reads as metadata rather than
+// competing with priority. task_meta.status=blocked adds a blocked-banner
+// across the card top — the detailed blocks-target list lives in the
+// Sidecar on the artifact detail page to avoid an N+1 fetch here.
+function TaskCard({
+  artifact: a,
+  projectSlug,
+  isActive,
+}: {
+  artifact: ArtifactRef;
+  projectSlug: string;
+  isActive: boolean;
+}) {
+  const { t } = useI18n();
+  const priority = a.task_meta?.priority;
+  const prioClass = priority ? PRIORITY_CLASS[priority] : undefined;
+  const blocked = a.task_meta?.status === "blocked";
+  return (
+    <Link
+      to={`/p/${projectSlug}/tasks/${a.slug}`}
+      className={`task-card${isActive ? " is-active" : ""}`}
+    >
+      {blocked && (
+        <div className="blocked-banner">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide" aria-hidden="true">
+            <path d="M12 9v4" />
+            <path d="M12 17h.01" />
+            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+          </svg>
+          <div className="blocked-banner__body">
+            <div className="blocked-banner__head">{t("tasks.blocked_head")}</div>
+            {t("tasks.blocked_hint")}
+          </div>
+        </div>
+      )}
+      <div className="task-card__meta">
+        {prioClass && (
+          <span className={prioClass} title={`priority ${priority}`}>
+            <span className="dot" />
+            {priority?.toUpperCase()}
+          </span>
+        )}
+        <span className="chip-area">{a.area_slug}</span>
+      </div>
+      <div className="task-card__title">{a.title}</div>
+      <div className="task-card__foot">
+        {a.task_meta?.assignee && <span>{a.task_meta.assignee}</span>}
+        {a.task_meta?.due_at && (
+          <span>~{new Date(a.task_meta.due_at).toLocaleDateString()}</span>
+        )}
+        <span>{new Date(a.updated_at).toLocaleDateString()}</span>
+      </div>
+    </Link>
   );
 }

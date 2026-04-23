@@ -40,6 +40,8 @@
   "tasks.col_verified": "검증 완료",
   "tasks.col_no_status": "상태 미지정",
   "tasks.col_cancelled": "취소됨",
+  "tasks.blocked_head": "블록됨",
+  "tasks.blocked_hint": "이 Task는 다른 artifact에 의해 블록되어 있습니다. Task를 열면 blocking edge를 확인할 수 있습니다.",
   "sidecar.prov_author": "작성자",
   "sidecar.prov_area": "영역",
   "sidecar.prov_status": "상태",
