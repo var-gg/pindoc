@@ -10,7 +10,7 @@
 //   - No interactivity here — filtering by trust lives on the Sidebar
 //     (separate Task). This component is display-only.
 
-import type { ArtifactMeta, PinRef, TaskMeta } from "../api/client";
+import type { ArtifactMeta, PinRef, RecentWarning, TaskMeta } from "../api/client";
 
 type Props = {
   meta?: ArtifactMeta;
@@ -20,6 +20,12 @@ type Props = {
   // verified shows as "agent-verified" neutral tone. Non-Task artifacts
   // pass undefined and the chip is skipped.
   taskStatus?: TaskMeta["status"];
+  // recentWarnings are events.artifact.warning_raised rows served by
+  // /api/p/:project/artifacts/:slug (Task propose-경로-warning-영속화).
+  // Only codes from the latest revision render as chips — older-
+  // revision codes stay in the history but don't clutter the card for
+  // an artifact whose current revision is clean.
+  recentWarnings?: RecentWarning[];
 };
 
 type ChipTone = "neutral" | "warning" | "danger";
@@ -30,11 +36,14 @@ type Chip = {
   title: string;
 };
 
-export function TrustCard({ meta, pins, taskStatus }: Props) {
+export function TrustCard({ meta, pins, taskStatus, recentWarnings }: Props) {
   const chips = buildChips(meta, pins);
   const taskChip = taskStatusChip(taskStatus);
   if (taskChip) {
     chips.unshift(taskChip);
+  }
+  for (const warnChip of warningChips(recentWarnings)) {
+    chips.push(warnChip);
   }
   if (chips.length === 0) {
     return null;
@@ -234,6 +243,64 @@ function taskStatusChip(status: TaskMeta["status"]): Chip | null {
     default:
       return null;
   }
+}
+
+// warningChips maps events.artifact.warning_raised codes onto Trust Card
+// chips. We only render codes from the latest revision so the card
+// reflects the artifact's *current* state — an old revision that raised
+// a warning now resolved in the head revision shouldn't keep spooking
+// readers. Table kept narrow: unknown codes are skipped rather than
+// producing a cryptic "code: FOO" chip. Task propose-경로-warning-
+// 영속화 §Trust Card 매핑.
+function warningChips(recent: RecentWarning[] | undefined): Chip[] {
+  if (!recent || recent.length === 0) return [];
+  // Find the max revision_number among delivered events. The server
+  // already orders by created_at DESC and caps at 5, which usually
+  // means the first row *is* the latest revision's — but an older-
+  // revision event inserted after a newer one would break that
+  // assumption, so we re-derive the max explicitly.
+  let latest = 0;
+  for (const w of recent) {
+    if (w.revision_number > latest) latest = w.revision_number;
+  }
+  const codes = new Set<string>();
+  for (const w of recent) {
+    if (w.revision_number !== latest) continue;
+    for (const c of w.codes) codes.add(c);
+  }
+  const chips: Chip[] = [];
+  if (codes.has("CANONICAL_REWRITE_WITHOUT_EVIDENCE")) {
+    chips.push({
+      label: "Uncertain rewrite",
+      tone: "warning",
+      title:
+        "Canonical section changed on this revision without new evidence (pins, verification bump, or evidence-keyword commit_msg).",
+    });
+  }
+  if (codes.has("CONSENT_REQUIRED_FOR_USER_CHAT")) {
+    chips.push({
+      label: "Consent pending",
+      tone: "warning",
+      title:
+        "source_type=user_chat without explicit consent_state. Author needs to classify before canonicalising.",
+    });
+  }
+  if (codes.has("SOURCE_TYPE_UNCLASSIFIED")) {
+    chips.push({
+      label: "Unclassified source",
+      tone: "neutral",
+      title: "No code pins and user-chat quote pattern detected — classify source_type on next revision.",
+    });
+  }
+  if (codes.has("RECOMMEND_READ_BEFORE_CREATE")) {
+    chips.push({
+      label: "Near-duplicate candidate",
+      tone: "neutral",
+      title:
+        "Semantic search found a near-neighbour (distance 0.18-0.25). Consider update_of on the existing artifact.",
+    });
+  }
+  return chips;
 }
 
 function nextSessionChip(meta: ArtifactMeta): Chip {

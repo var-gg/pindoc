@@ -136,6 +136,17 @@ export type ArtifactRef = {
   author_user?: AuthorUserRef;
 };
 
+// RecentWarning mirrors one events.artifact.warning_raised row for the
+// Reader Trust Card (Task propose-경로-warning-영속화). The server emits
+// up to 5 rows per artifact detail, newest first.
+export type RecentWarning = {
+  codes: string[];
+  revision_number: number;
+  author_id?: string;
+  canonical_rewrite_without_evidence?: boolean;
+  created_at: string;
+};
+
 export type Artifact = ArtifactRef & {
   body_markdown: string;
   tags: string[];
@@ -146,6 +157,7 @@ export type Artifact = ArtifactRef & {
   related_by?: EdgeRef[];
   pins?: PinRef[];
   source_session_ref?: SourceSessionRef;
+  recent_warnings?: RecentWarning[];
 };
 
 export type SearchHit = {

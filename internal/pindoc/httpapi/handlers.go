@@ -353,6 +353,28 @@ type artifactDetail struct {
 	// session.
 	Pins             []pinRow        `json:"pins,omitempty"`
 	SourceSessionRef json.RawMessage `json:"source_session_ref,omitempty"`
+
+	// RecentWarnings projects events.artifact.warning_raised rows for
+	// the Reader Trust Card (Task propose-경로-warning-영속화). The
+	// server returns up to 5 most-recent warning events so the Trust
+	// Card can highlight the latest-revision advisories and older ones
+	// stay accessible via the revision history. Empty when the artifact
+	// has never raised a warning.
+	RecentWarnings []recentWarningRow `json:"recent_warnings,omitempty"`
+}
+
+// recentWarningRow is the Reader-facing projection of one
+// events.artifact.warning_raised row. `Codes` carries the raw stable
+// codes ("CANONICAL_REWRITE_WITHOUT_EVIDENCE" etc.) so the client can
+// decide which chip tone to render; RevisionNumber lets the Trust Card
+// suppress badges from older revisions when the latest revision is
+// clean.
+type recentWarningRow struct {
+	Codes                          []string  `json:"codes"`
+	RevisionNumber                 int       `json:"revision_number"`
+	AuthorID                       string    `json:"author_id,omitempty"`
+	CanonicalRewriteWithoutEvidence bool     `json:"canonical_rewrite_without_evidence,omitempty"`
+	CreatedAt                      time.Time `json:"created_at"`
 }
 
 type edgeRef struct {
@@ -460,8 +482,62 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	} else {
 		a.Pins = pins
 	}
+	if warnings, err := d.loadRecentWarnings(r.Context(), a.ID); err != nil {
+		d.Logger.Warn("recent warnings lookup failed", "artifact_id", a.ID, "err", err)
+	} else {
+		a.RecentWarnings = warnings
+	}
 
 	writeJSON(w, http.StatusOK, a)
+}
+
+// loadRecentWarnings returns up to 5 most-recent
+// `events.artifact.warning_raised` rows for an artifact, newest first.
+// Reader Trust Card renders badges from this list (Task propose-경로-
+// warning-영속화). Missing events.subject_id ↔ artifact.id join is
+// expected for artifacts created before the persistence hook landed —
+// the slice just comes back empty.
+func (d Deps) loadRecentWarnings(ctx context.Context, artifactID string) ([]recentWarningRow, error) {
+	rows, err := d.DB.Query(ctx, `
+		SELECT payload, created_at
+		  FROM events
+		 WHERE subject_id = $1 AND kind = 'artifact.warning_raised'
+		 ORDER BY created_at DESC
+		 LIMIT 5
+	`, artifactID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []recentWarningRow
+	for rows.Next() {
+		var payload []byte
+		var createdAt time.Time
+		if err := rows.Scan(&payload, &createdAt); err != nil {
+			return nil, err
+		}
+		var parsed struct {
+			Codes                          []string `json:"codes"`
+			RevisionNumber                 int      `json:"revision_number"`
+			AuthorID                       string   `json:"author_id"`
+			CanonicalRewriteWithoutEvidence bool    `json:"canonical_rewrite_without_evidence"`
+		}
+		if err := json.Unmarshal(payload, &parsed); err != nil {
+			// Skip malformed rows rather than 500 — an older payload
+			// shape shouldn't break the whole artifact detail call.
+			d.Logger.Warn("warning event payload unmarshal failed",
+				"artifact_id", artifactID, "err", err)
+			continue
+		}
+		out = append(out, recentWarningRow{
+			Codes:                          parsed.Codes,
+			RevisionNumber:                 parsed.RevisionNumber,
+			AuthorID:                       parsed.AuthorID,
+			CanonicalRewriteWithoutEvidence: parsed.CanonicalRewriteWithoutEvidence,
+			CreatedAt:                      createdAt,
+		})
+	}
+	return out, nil
 }
 
 // loadArtifactPins returns artifact_pins rows sorted by insertion order.

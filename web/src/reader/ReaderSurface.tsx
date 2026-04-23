@@ -58,6 +58,7 @@ export function ReaderSurface({ detail, emptyMessage }: Props) {
           meta={detail.artifact_meta}
           pins={detail.pins}
           taskStatus={detail.type === "Task" ? detail.task_meta?.status : undefined}
+          recentWarnings={detail.recent_warnings}
         />
 
         <div className="art-meta">

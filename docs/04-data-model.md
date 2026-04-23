@@ -466,6 +466,7 @@ EventType (V1):
   - artifact.stale_detected
   - artifact.superseded
   - artifact.archived
+  - artifact.warning_raised    # Task propose-경로-warning-영속화
   
   # Pin / Git
   - pin.changed
@@ -501,6 +502,27 @@ EventSubscription {
 
 **V1**: Event Bus (Postgres LISTEN/NOTIFY 또는 outbox) + UI Inbox + 간단 Webhook.
 **V1.1+**: Email, Slack/Discord, smart filter UI.
+
+### `artifact.warning_raised` payload
+
+Accepted-path warnings(`CANONICAL_REWRITE_WITHOUT_EVIDENCE`, `CONSENT_REQUIRED_FOR_USER_CHAT`, `SOURCE_TYPE_UNCLASSIFIED`, `RECOMMEND_READ_BEFORE_CREATE` 등)는 propose 응답에만 존재했다. Reader Trust Card와 미래 agent 세션이 소급 인지 가능하도록 `artifact.warning_raised` kind 이벤트에 기록한다(Task `propose-경로-warning-영속화`).
+
+```jsonc
+{
+  "project_id": "<uuid>",
+  "kind": "artifact.warning_raised",
+  "subject_id": "<artifact uuid>",
+  "payload": {
+    "codes": ["CANONICAL_REWRITE_WITHOUT_EVIDENCE", "SOURCE_TYPE_UNCLASSIFIED"],
+    "revision_number": 3,
+    "author_id": "claude-code",
+    "canonical_rewrite_without_evidence": true  // 선택, canonical guard 발동 시
+  },
+  "created_at": "..."
+}
+```
+
+삽입은 create / update accepted 반환 직전 best-effort(실패 시 warn log + artifact 저장은 유지). Reader는 `/api/p/:project/artifacts/:slug` 응답의 `recent_warnings[]` (최근 5 row) 중 **최신 revision** 값만 Trust Card 뱃지로 렌더하고 이전 revision warning은 revision history에서 열람.
 
 ---
 

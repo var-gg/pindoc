@@ -746,6 +746,12 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			// up the template's meta comment.
 			invalidateValidatorHints(deps.ProjectSlug, finalSlug)
 
+			// Task propose-경로-warning-영속화: persist the accepted-path
+			// warnings into events so Reader Trust Card and future
+			// sessions can surface them. Best-effort — event failure
+			// doesn't roll back the artifact.
+			recordWarningEvent(ctx, deps, projectID, newID, 1, warnings, in.AuthorID, false)
+
 			metaOut := resolvedMeta
 			return nil, artifactProposeOutput{
 				Status:         "accepted",
@@ -1063,6 +1069,12 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 			"If this is wording cleanup only, mention 'wording cleanup' (or 'verified') in commit_msg so the warning stays quiet next time.",
 		}
 	}
+
+	// Task propose-경로-warning-영속화: persist update-path warnings +
+	// canonical-rewrite flag into events so Reader Trust Card and future
+	// sessions can surface them. Best-effort — event failure doesn't
+	// roll back the revision.
+	recordWarningEvent(ctx, deps, projectID, artifactID, newRev, warnings, in.AuthorID, canonicalRewriteFlag)
 
 	return nil, artifactProposeOutput{
 		Status:                          "accepted",
@@ -2624,6 +2636,44 @@ func normaliseSectionKey(s string) string {
 	// strip markdown emphasis / heading-id suffix if present
 	s = strings.TrimSuffix(s, " #")
 	return s
+}
+
+// recordWarningEvent writes a best-effort events.artifact.warning_raised
+// row whenever an accepted propose returns a non-empty warnings slice
+// (Task propose-경로-warning-영속화). The Reader Trust Card queries these
+// events per-artifact to surface "Uncertain rewrite" / "Consent pending"
+// etc. so both the author reviewing the artifact and a future agent
+// session can see advisories that previously lived only in the propose
+// response. Insert failures are logged and swallowed — we never roll
+// back a successful revision because the audit event couldn't land.
+func recordWarningEvent(ctx context.Context, deps Deps, projectID, artifactID string, revision int, warnings []string, authorID string, canonicalFlag bool) {
+	if len(warnings) == 0 {
+		return
+	}
+	payload := map[string]any{
+		"codes":           warnings,
+		"revision_number": revision,
+		"author_id":       authorID,
+	}
+	if canonicalFlag {
+		payload["canonical_rewrite_without_evidence"] = true
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		if deps.Logger != nil {
+			deps.Logger.Warn("warning event payload marshal failed",
+				"artifact_id", artifactID, "err", err)
+		}
+		return
+	}
+	_, err = deps.DB.Exec(ctx, `
+		INSERT INTO events (project_id, kind, subject_id, payload)
+		VALUES ($1, 'artifact.warning_raised', $2, $3::jsonb)
+	`, projectID, artifactID, raw)
+	if err != nil && deps.Logger != nil {
+		deps.Logger.Warn("warning event insert failed — artifact saved without audit row",
+			"artifact_id", artifactID, "err", err)
+	}
 }
 
 // bodyContainsAnyKeyword returns true when at least one keyword substring
