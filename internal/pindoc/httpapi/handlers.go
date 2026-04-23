@@ -243,6 +243,22 @@ type artifactRow struct {
 	// fields it cares about client-side. Empty object for rows that
 	// predate migration 0012.
 	ArtifactMeta json.RawMessage `json:"artifact_meta,omitempty"`
+	// AuthorUser joins the user row pointed at by artifacts.author_user_id
+	// (migration 0014). Null when the artifact predates identity-dual
+	// (D-slug backfill rule: existing rows stay null) or when the MCP
+	// server ran without PINDOC_USER_NAME. Reader falls back to
+	// "(unknown) via {author_id}" byline in that case.
+	AuthorUser *authorUserRef `json:"author_user,omitempty"`
+}
+
+// authorUserRef is the thin join projection of users → artifact list.
+// We intentionally omit email so Pindoc-self publication doesn't leak
+// addresses; display_name + github_handle is what Reader needs for the
+// avatar + byline.
+type authorUserRef struct {
+	ID           string `json:"id"`
+	DisplayName  string `json:"display_name"`
+	GithubHandle string `json:"github_handle,omitempty"`
 }
 
 func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
@@ -257,10 +273,12 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 		SELECT
 			a.id::text, a.slug, a.type, a.title, ar.slug,
 			a.completeness, a.status, a.review_state,
-			a.author_id, a.published_at, a.updated_at, a.task_meta, a.artifact_meta
+			a.author_id, a.published_at, a.updated_at, a.task_meta, a.artifact_meta,
+			u.id::text, u.display_name, u.github_handle
 		FROM artifacts a
 		JOIN projects p  ON p.id  = a.project_id
 		JOIN areas    ar ON ar.id = a.area_id
+		LEFT JOIN users u ON u.id = a.author_user_id
 		WHERE p.slug = $1
 		  AND a.status <> 'archived'
 		  AND ($2 = '' OR ar.slug = $2)
@@ -281,10 +299,12 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 		var a artifactRow
 		var publishedAt *time.Time
 		var taskMeta, artifactMeta []byte
+		var userID, userDisplay, userGithub *string
 		if err := rows.Scan(
 			&a.ID, &a.Slug, &a.Type, &a.Title, &a.AreaSlug,
 			&a.Completeness, &a.Status, &a.ReviewState,
 			&a.AuthorID, &publishedAt, &a.UpdatedAt, &taskMeta, &artifactMeta,
+			&userID, &userDisplay, &userGithub,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan failed")
 			return
@@ -297,6 +317,13 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(artifactMeta) > 0 {
 			a.ArtifactMeta = json.RawMessage(artifactMeta)
+		}
+		if userID != nil && userDisplay != nil {
+			ref := &authorUserRef{ID: *userID, DisplayName: *userDisplay}
+			if userGithub != nil {
+				ref.GithubHandle = *userGithub
+			}
+			a.AuthorUser = ref
 		}
 		out = append(out, a)
 	}
@@ -360,16 +387,19 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	var publishedAt *time.Time
 	var authorVer *string
 	var taskMeta, artifactMeta, sourceSessionRef []byte
+	var userID, userDisplay, userGithub *string
 	err := d.DB.QueryRow(r.Context(), `
 		SELECT
 			a.id::text, a.slug, a.type, a.title, ar.slug,
 			a.completeness, a.status, a.review_state,
 			a.author_id, a.published_at, a.updated_at,
 			a.body_markdown, a.tags, a.author_version, a.created_at,
-			a.task_meta, a.artifact_meta, a.source_session_ref
+			a.task_meta, a.artifact_meta, a.source_session_ref,
+			u.id::text, u.display_name, u.github_handle
 		FROM artifacts a
 		JOIN projects p  ON p.id  = a.project_id
 		JOIN areas    ar ON ar.id = a.area_id
+		LEFT JOIN users u ON u.id = a.author_user_id
 		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 		LIMIT 1
 	`, slug, ref).Scan(
@@ -378,6 +408,7 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		&a.AuthorID, &publishedAt, &a.UpdatedAt,
 		&a.BodyMarkdown, &a.Tags, &authorVer, &a.CreatedAt,
 		&taskMeta, &artifactMeta, &sourceSessionRef,
+		&userID, &userDisplay, &userGithub,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "artifact not found")
@@ -402,6 +433,13 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(sourceSessionRef) > 0 {
 		a.SourceSessionRef = json.RawMessage(sourceSessionRef)
+	}
+	if userID != nil && userDisplay != nil {
+		ref := &authorUserRef{ID: *userID, DisplayName: *userDisplay}
+		if userGithub != nil {
+			ref.GithubHandle = *userGithub
+		}
+		a.AuthorUser = ref
 	}
 
 	// Load edges (best-effort — failure leaves the slices empty, artifact

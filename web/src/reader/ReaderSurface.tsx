@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { ChevronRight } from "lucide-react";
 import type { Artifact, ArtifactRef } from "../api/client";
 import { useI18n } from "../i18n";
-import { agentAvatar } from "./avatars";
+import { ArtifactByline } from "./ArtifactByline";
 import { PindocMarkdown } from "./Markdown";
 import { TrustCard } from "./TrustCard";
 import { typeChipClass } from "./typeChip";
@@ -37,7 +37,6 @@ export function ReaderSurface({ detail, emptyMessage }: Props) {
     );
   }
 
-  const av = agentAvatar(detail.author_id);
   const publishedAt = detail.published_at
     ? new Date(detail.published_at).toLocaleString()
     : "—";
@@ -69,10 +68,7 @@ export function ReaderSurface({ detail, emptyMessage }: Props) {
           <span className={typeChipClass(detail.type)}>{detail.type}</span>
           <span className="chip chip--area">{detail.area_slug}</span>
           <span className="art-meta__sep">·</span>
-          <div className="prov">
-            <span className={av.className}>{av.initials}</span>
-            <span>{t("reader.written_by", detail.author_id)}</span>
-          </div>
+          <ArtifactByline artifact={detail} />
           <span className="art-meta__sep">·</span>
           <span className="prov">{t("reader.published", publishedAt)}</span>
         </div>

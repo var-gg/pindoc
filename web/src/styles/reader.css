@@ -529,3 +529,11 @@
   background: color-mix(in oklch, var(--accent) 8%, transparent);
 }
 :root[data-reader-width="narrow"] .reader-toc { display: none; }
+
+/* Artifact byline — Task task-author-user-schema.
+ * Dual identity: avatar + user display_name + "via {agent} (version)". */
+.byline { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--fg-2); }
+.byline--list { font-size: 11px; }
+.byline__name { color: var(--fg-1); font-weight: 500; }
+.byline__sep { color: var(--fg-4); }
+.byline__agent { color: var(--fg-3); font-family: var(--font-mono); font-size: 11px; }

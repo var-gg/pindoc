@@ -6,7 +6,9 @@
       "env": {
         "PINDOC_DATABASE_URL": "postgres://pindoc:pindoc_dev@localhost:5432/pindoc?sslmode=disable",
         "PINDOC_LOG_LEVEL": "info",
-        "PINDOC_USER_LANGUAGE": "ko"
+        "PINDOC_USER_LANGUAGE": "ko",
+        "PINDOC_USER_NAME": "curioustore",
+        "PINDOC_USER_EMAIL": "rhkdwls750@naver.com"
       }
     }
   }

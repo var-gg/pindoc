@@ -109,6 +109,16 @@ export type EdgeRef = {
   relation: string;
 };
 
+// AuthorUserRef is the thin projection of the `users` row an artifact
+// was authored by (migration 0014 / Decision author-identity-dual).
+// Optional because older artifacts and MCP sessions launched without
+// PINDOC_USER_NAME leave author_user_id NULL.
+export type AuthorUserRef = {
+  id: string;
+  display_name: string;
+  github_handle?: string;
+};
+
 export type ArtifactRef = {
   id: string;
   slug: string;
@@ -123,6 +133,7 @@ export type ArtifactRef = {
   updated_at: string;
   task_meta?: TaskMeta;
   artifact_meta?: ArtifactMeta;
+  author_user?: AuthorUserRef;
 };
 
 export type Artifact = ArtifactRef & {

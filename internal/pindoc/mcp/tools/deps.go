@@ -60,6 +60,14 @@ type Deps struct {
 	// is missing at HEAD. Empty = validation disabled (V1.5 git-pinner
 	// takes over). Pure warning, never blocks.
 	RepoRoot string
+
+	// UserID is the uuid of the `users` row bound to this MCP session
+	// (Decision `decision-author-identity-dual`). Populated at server
+	// startup by upserting on PINDOC_USER_NAME; empty when the operator
+	// skipped identity setup (artifact.propose then leaves
+	// author_user_id NULL). V1.5 OAuth replaces this with a session-
+	// resolved principal rather than an env-anchored single user.
+	UserID string
 }
 
 // AbsHumanURL builds an absolute share URL from the current settings. Empty

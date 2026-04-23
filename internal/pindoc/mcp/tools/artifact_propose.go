@@ -616,12 +616,12 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 					INSERT INTO artifacts (
 						project_id, area_id, slug, type, title, body_markdown, tags,
 						completeness, status, review_state,
-						author_kind, author_id, author_version,
+						author_kind, author_id, author_version, author_user_id,
 						task_meta, artifact_meta, published_at
-					) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'published', 'auto_published', 'agent', $9, $10, $11, $12::jsonb, now())
+					) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'published', 'auto_published', 'agent', $9, $10, NULLIF($11, '')::uuid, $12, $13::jsonb, now())
 					RETURNING id::text, published_at
 				`, projectID, areaID, finalSlug, in.Type, in.Title, in.BodyMarkdown, in.Tags,
-					completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), taskMetaJSON, artifactMetaJSON).Scan(&newID, &publishedAt)
+					completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), deps.UserID, taskMetaJSON, artifactMetaJSON).Scan(&newID, &publishedAt)
 				if err == nil {
 					break
 				}

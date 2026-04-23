@@ -19,6 +19,29 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
 )
 
+// upsertStartupUserID resolves the users.id row this MCP session should
+// bind to (Decision `decision-author-identity-dual`, migration 0014). Any
+// failure to reach the DB or upsert is logged and treated as "no user
+// bound" — the server still boots and artifact.propose then leaves
+// author_user_id NULL. Returning empty on empty env is intentional.
+func upsertStartupUserID(ctx context.Context, logger *slog.Logger, deps tools.Deps, cfg *config.Config) string {
+	id, err := tools.UpsertUserFromEnv(ctx, deps, cfg.UserName, cfg.UserEmail)
+	if err != nil {
+		logger.Warn("user upsert from env failed; MCP session runs without user binding",
+			"error", err,
+			"user_name", cfg.UserName,
+		)
+		return ""
+	}
+	if id != "" {
+		logger.Info("user binding resolved for MCP session",
+			"user_id", id,
+			"display_name", cfg.UserName,
+		)
+	}
+	return id
+}
+
 type Options struct {
 	Name     string
 	Version  string
@@ -69,6 +92,8 @@ func NewServer(opts Options) *Server {
 		Settings:     opts.Settings,
 		RepoRoot:     opts.Config.RepoRoot,
 	}
+	deps.UserID = upsertStartupUserID(context.Background(), opts.Logger, deps, opts.Config)
+
 	tools.RegisterProjectCurrent(s, deps)
 	tools.RegisterProjectCreate(s, deps)
 	tools.RegisterAreaList(s, deps)
@@ -87,6 +112,10 @@ func NewServer(opts Options) *Server {
 
 	// Task status v2 (migration 0013) — agent-to-agent verification.
 	tools.RegisterArtifactVerify(s, deps)
+
+	// Author identity dual (migration 0014) — user row read/update.
+	tools.RegisterUserCurrent(s, deps)
+	tools.RegisterUserUpdate(s, deps)
 
 	return &Server{
 		sdk:    s,
@@ -111,6 +140,9 @@ func (s *Server) Run(ctx context.Context, transport sdk.Transport) error {
 			"pindoc.artifact.revisions",
 			"pindoc.artifact.diff",
 			"pindoc.artifact.summary_since",
+			"pindoc.artifact.verify",
+			"pindoc.user.current",
+			"pindoc.user.update",
 		})
 	return s.sdk.Run(ctx, transport)
 }
