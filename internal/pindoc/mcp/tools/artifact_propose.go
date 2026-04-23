@@ -377,7 +377,7 @@ type RelatedRef struct {
 // Accepted propose calls auto-publish (review_state=auto_published,
 // status=published). Review Queue (sensitive ops) lands in Phase 2.x+.
 func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
-	sdk.AddTool(server,
+	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.propose",
 			Description: "Propose a new artifact (the only write path humans use — always via an agent). Returns Status=accepted + artifact_id on success, or Status=not_ready + checklist + suggested_actions if Pre-flight fails. Always read the checklist; never surface the raw error to the user without trying the suggested actions first.",

@@ -25,6 +25,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	pmcp "github.com/var-gg/pindoc/internal/pindoc/mcp"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
+	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
 )
 
 // Build-time variables. Set via -ldflags in release builds.
@@ -118,15 +119,22 @@ func main() {
 	}
 	logger.Info("agent identity", "agent_id", agentID, "source", agentIDSource())
 
+	// Phase J — async MCP tool-call telemetry. ctx governs the flusher
+	// goroutine; on shutdown we close it so any buffered entries flush
+	// before the process exits.
+	tele := telemetry.New(ctx, pool.Pool, logger, telemetry.Options{})
+	defer tele.Close()
+
 	server := pmcp.NewServer(pmcp.Options{
-		Name:     "pindoc",
-		Version:  version,
-		Logger:   logger,
-		Config:   cfg,
-		DB:       pool,
-		Embedder: embedder,
-		AgentID:  agentID,
-		Settings: ssStore,
+		Name:      "pindoc",
+		Version:   version,
+		Logger:    logger,
+		Config:    cfg,
+		DB:        pool,
+		Embedder:  embedder,
+		AgentID:   agentID,
+		Settings:  ssStore,
+		Telemetry: tele,
 	})
 
 	err = server.Run(ctx, &sdk.StdioTransport{})

@@ -7,6 +7,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/receipts"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
+	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
 )
 
 // Deps is the shared context every tool handler needs. Keeping this tiny on
@@ -75,6 +76,11 @@ type Deps struct {
 	// author_user_id NULL). V1.5 OAuth replaces this with a session-
 	// resolved principal rather than an env-anchored single user.
 	UserID string
+
+	// Telemetry is the async MCP tool-call logger (Phase J). Nil-safe
+	// — Instrument() no-ops when absent, so tests that don't care
+	// about observability can leave it unset.
+	Telemetry *telemetry.Store
 }
 
 // AbsHumanURL builds an absolute share URL from the current settings. Empty

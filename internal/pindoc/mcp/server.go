@@ -17,6 +17,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/mcp/tools"
 	"github.com/var-gg/pindoc/internal/pindoc/receipts"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
+	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
 )
 
 // resolveStartupProjectLocale reads projects.locale for the active
@@ -81,11 +82,18 @@ type Options struct {
 
 	// Settings is the operator-editable config store (Phase 14a).
 	Settings *settings.Store
+
+	// Telemetry is the async MCP tool-call logger (Phase J). When set,
+	// every Register* call wraps its handler with Instrument() so raw
+	// (tool, duration, bytes, tokens) lands in mcp_tool_calls without
+	// impacting response latency.
+	Telemetry *telemetry.Store
 }
 
 type Server struct {
-	sdk    *sdk.Server
-	logger *slog.Logger
+	sdk       *sdk.Server
+	logger    *slog.Logger
+	telemetry *telemetry.Store
 }
 
 func NewServer(opts Options) *Server {
@@ -94,12 +102,6 @@ func NewServer(opts Options) *Server {
 		Version: opts.Version,
 	}
 	s := sdk.NewServer(impl, nil)
-
-	// Phase 1: handshake.
-	tools.RegisterPing(s, tools.PingDeps{
-		Version:      opts.Version,
-		UserLanguage: opts.Config.UserLanguage,
-	})
 
 	// Phase 2 read-side: project context + scope enumeration + artifact fetch.
 	deps := tools.Deps{
@@ -114,9 +116,20 @@ func NewServer(opts Options) *Server {
 		AgentID:      opts.AgentID,
 		Settings:     opts.Settings,
 		RepoRoot:     opts.Config.RepoRoot,
+		Telemetry:    opts.Telemetry,
 	}
 	deps.UserID = upsertStartupUserID(context.Background(), opts.Logger, deps, opts.Config)
 	deps.ProjectLocale = resolveStartupProjectLocale(context.Background(), opts.Logger, deps)
+
+	// Phase 1 handshake (Ping has its own Deps subset — still
+	// instrumented via the shared Telemetry store passed in opts).
+	tools.RegisterPing(s, tools.PingDeps{
+		Version:      opts.Version,
+		UserLanguage: opts.Config.UserLanguage,
+		Telemetry:    opts.Telemetry,
+		AgentID:      opts.AgentID,
+		ProjectSlug:  opts.Config.ProjectSlug,
+	})
 
 	tools.RegisterProjectCurrent(s, deps)
 	tools.RegisterProjectCreate(s, deps)
@@ -145,8 +158,9 @@ func NewServer(opts Options) *Server {
 	tools.RegisterScopeInFlight(s, deps)
 
 	return &Server{
-		sdk:    s,
-		logger: opts.Logger,
+		sdk:       s,
+		logger:    opts.Logger,
+		telemetry: opts.Telemetry,
 	}
 }
 

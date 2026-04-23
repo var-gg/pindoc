@@ -90,7 +90,7 @@ type RenderedFor struct {
 // to persist. Pindoc is write-only via agents even for its own harness —
 // the server never writes filesystem; the agent does.
 func RegisterHarnessInstall(server *sdk.Server, deps Deps) {
-	sdk.AddTool(server,
+	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.harness.install",
 			Description: "Return the PINDOC.md body this project should adopt and the one-line CLAUDE.md include that loads it. Write the returned body to PINDOC.md at the repo root, and append the include line to CLAUDE.md (or AGENTS.md). Re-run to regenerate after upgrading the server — the spec evolves with the server version.",

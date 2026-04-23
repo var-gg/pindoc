@@ -70,7 +70,7 @@ type artifactVerifyOutput struct {
 // Anything unmet → Status=not_ready with stable error codes so agents can
 // branch without parsing prose.
 func RegisterArtifactVerify(server *sdk.Server, deps Deps) {
-	sdk.AddTool(server,
+	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.verify",
 			Description: "Move a Task from claimed_done to verified by linking a VerificationReport filed by a different agent than the Task's implementers. The only way to reach task_meta.status='verified' — artifact.propose rejects that transition directly. Call this once the VerificationReport artifact is already created (via artifact.propose type=VerificationReport).",

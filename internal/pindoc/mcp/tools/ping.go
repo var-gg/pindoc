@@ -13,11 +13,16 @@ import (
 	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
 )
 
 type PingDeps struct {
 	Version      string
 	UserLanguage string
+	Telemetry    *telemetry.Store
+	AgentID      string
+	ProjectSlug  string
 }
 
 type pingInput struct {
@@ -43,23 +48,28 @@ type pingOutput struct {
 // small and fixed: prove the stdio transport works and return a few server
 // facts an agent can surface in a startup log line.
 func RegisterPing(server *sdk.Server, deps PingDeps) {
+	const name = "pindoc.ping"
+	handler := func(ctx context.Context, _ *sdk.CallToolRequest, in pingInput) (*sdk.CallToolResult, pingOutput, error) {
+		echo := "pong"
+		if in.Message != "" {
+			echo = fmt.Sprintf("pong: %s", in.Message)
+		}
+		return nil, pingOutput{
+			Pong:           echo,
+			Version:        deps.Version,
+			ServerTime:     time.Now().UTC(),
+			UserLanguage:   deps.UserLanguage,
+			ToolsetVersion: ToolsetVersion(),
+		}, nil
+	}
+	// Ping carries its own slim Deps subset so the telemetry wrap is
+	// synthesised here rather than reusing the main Deps struct.
+	shimDeps := Deps{AgentID: deps.AgentID, ProjectSlug: deps.ProjectSlug}
 	sdk.AddTool(server,
 		&sdk.Tool{
-			Name:        "pindoc.ping",
+			Name:        name,
 			Description: "Handshake probe. Returns pong + server version + configured user language. Use this to verify the Pindoc MCP connection is live before calling any write tools.",
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in pingInput) (*sdk.CallToolResult, pingOutput, error) {
-			echo := "pong"
-			if in.Message != "" {
-				echo = fmt.Sprintf("pong: %s", in.Message)
-			}
-			return nil, pingOutput{
-				Pong:           echo,
-				Version:        deps.Version,
-				ServerTime:     time.Now().UTC(),
-				UserLanguage:   deps.UserLanguage,
-				ToolsetVersion: ToolsetVersion(),
-			}, nil
-		},
+		Instrument(name, deps.Telemetry, shimDeps, handler),
 	)
 }

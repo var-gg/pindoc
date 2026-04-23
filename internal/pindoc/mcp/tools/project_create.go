@@ -69,7 +69,7 @@ var projectSlugRe = regexp.MustCompile(`^[a-z][a-z0-9-]{1,39}$`)
 // to land. No UI button calls this — per architecture principle 1 (agent-only
 // write surface), the user asks the agent and the agent calls this tool.
 func RegisterProjectCreate(server *sdk.Server, deps Deps) {
-	sdk.AddTool(server,
+	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name: "pindoc.project.create",
 			Description: strings.TrimSpace(`

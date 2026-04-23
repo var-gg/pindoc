@@ -105,7 +105,7 @@ var pindocRenderingCaps = RenderingCaps{
 // project the MCP server is pointed at (by PINDOC_PROJECT env). Agents call
 // this on session start to pin their subsequent write scope.
 func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
-	sdk.AddTool(server,
+	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.project.current",
 			Description: "Return the active Pindoc project (id, slug, name, primary language, area/artifact counts). Call this once per session before any write tool so the agent knows which project scope its propose calls will land in.",

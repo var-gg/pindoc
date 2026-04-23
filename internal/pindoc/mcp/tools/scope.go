@@ -61,7 +61,7 @@ type scopeInFlightOutput struct {
 // area_slug) so agents don't have to grep bodies to answer "what's still
 // owed in this project".
 func RegisterScopeInFlight(server *sdk.Server, deps Deps) {
-	sdk.AddTool(server,
+	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name: "pindoc.scope.in_flight",
 			Description: strings.TrimSpace(`

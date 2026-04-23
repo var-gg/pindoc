@@ -40,7 +40,7 @@ type areaListOutput struct {
 // project with counts an agent uses to route a propose call to the right
 // scope without a second round-trip.
 func RegisterAreaList(server *sdk.Server, deps Deps) {
-	sdk.AddTool(server,
+	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.area.list",
 			Description: "List every Area in the current project. Use this to pick the right area_slug before pindoc.artifact.propose. Every artifact must live in exactly one Area (use 'misc' if nothing else fits, 'cross-cutting' for concerns that span all areas).",

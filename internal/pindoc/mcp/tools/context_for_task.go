@@ -121,7 +121,7 @@ const staleAgeThreshold = 60 * 24 * time.Hour
 // 1–3 artifacts the agent should read before doing anything else. Lower
 // TopK on purpose: Fast Landing is about first-hop precision, not recall.
 func RegisterContextForTask(server *sdk.Server, deps Deps) {
-	sdk.AddTool(server,
+	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.context.for_task",
 			Description: "Given a natural-language task description, return the 1–3 most relevant artifacts in this project. Call this at the start of any non-trivial task before grepping code or writing new artifacts. Tuning: smaller TopK than artifact.search because this optimises for first-hop precision, not recall.",

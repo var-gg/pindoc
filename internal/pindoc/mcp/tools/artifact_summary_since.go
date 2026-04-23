@@ -30,7 +30,7 @@ type summarySinceOutput struct {
 // type (artifact_history.go's SummarySince registration was a placeholder
 // in an iteration; this replaces it).
 func RegisterArtifactSummary(server *sdk.Server, deps Deps) {
-	sdk.AddTool(server,
+	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.summary_since",
 			Description: "List every revision since a reference point (since_rev OR since_time) with per-step section_deltas and aggregate stats. Use this when a user asks 'what changed recently on X?' — the steps array is designed to be read aloud directly.",

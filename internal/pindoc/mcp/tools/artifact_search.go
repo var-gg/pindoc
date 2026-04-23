@@ -70,7 +70,7 @@ type artifactSearchOutput struct {
 // similarity query over artifact_chunks, groups hits per artifact, and
 // returns the best chunk per artifact. Filters on type/area happen in SQL.
 func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
-	sdk.AddTool(server,
+	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.search",
 			Description: "Semantic search over Pindoc artifacts. Returns the best matching chunk per artifact with distance (lower = closer). Use before writing a new artifact to avoid duplicates. Filters on type and area_slug.",

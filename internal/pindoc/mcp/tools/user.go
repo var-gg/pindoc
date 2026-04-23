@@ -59,7 +59,7 @@ type userCurrentOutput struct {
 // PINDOC_USER_NAME so the agent can surface "identity not configured"
 // rather than a silent null.
 func RegisterUserCurrent(server *sdk.Server, deps Deps) {
-	sdk.AddTool(server,
+	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.user.current",
 			Description: "Return the user (display_name / email / github_handle / source) bound to this MCP session. Populated at server startup from PINDOC_USER_NAME / PINDOC_USER_EMAIL; returns USER_NOT_SET when the operator hasn't configured identity yet.",
@@ -113,7 +113,7 @@ type userUpdateOutput struct {
 // the row, and records a `user_rename` event with before/after payload
 // when any field actually changes.
 func RegisterUserUpdate(server *sdk.Server, deps Deps) {
-	sdk.AddTool(server,
+	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.user.update",
 			Description: "Mutate the current session user's display_name / email / github_handle. At least one field required. Validates length and '@' substring on email; unique constraint on email and github_handle. On success returns the new row plus changed_fields[] and previous{} so the agent can echo the diff.",

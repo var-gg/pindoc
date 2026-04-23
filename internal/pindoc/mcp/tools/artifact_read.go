@@ -107,7 +107,7 @@ type EdgeRef struct {
 
 // RegisterArtifactRead wires pindoc.artifact.read.
 func RegisterArtifactRead(server *sdk.Server, deps Deps) {
-	sdk.AddTool(server,
+	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.read",
 			Description: "Fetch an artifact by UUID, slug, or share URL. view=brief returns title/summary/pins/stale without the full body; view=continuation adds recent revisions and typed edges; view=full (default) returns everything.",

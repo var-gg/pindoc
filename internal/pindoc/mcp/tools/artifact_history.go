@@ -40,7 +40,7 @@ type artifactRevisionsOutput struct {
 }
 
 func RegisterArtifactRevisions(server *sdk.Server, deps Deps) {
-	sdk.AddTool(server,
+	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.revisions",
 			Description: "List every revision of an artifact (newest first). Returns metadata only — call pindoc.artifact.diff for actual body diffs. Use this to answer 'how many times has this been edited and why?'",
@@ -132,7 +132,7 @@ type artifactDiffOutput struct {
 }
 
 func RegisterArtifactDiff(server *sdk.Server, deps Deps) {
-	sdk.AddTool(server,
+	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.diff",
 			Description: "Compute the diff between two revisions of an artifact. Returns per-section change summary (section_deltas) first — prefer reading that before consuming the full unified_diff to keep token use low. from_rev defaults to latest-1, to_rev to latest.",
