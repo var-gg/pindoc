@@ -89,6 +89,14 @@ type artifactProposeInput struct {
 	// Unknown targets fail the whole call with RELATES_TARGET_NOT_FOUND.
 	RelatesTo []ArtifactRelationInput `json:"relates_to,omitempty" jsonschema:"typed edges to other artifacts"`
 
+	// BodyPatch is an optional light-weight alternative to re-sending the
+	// entire BodyMarkdown on update_of. Task
+	// artifact-propose-본문-patch-입력-도입 — Decision `mcp-dog-food-1차-
+	// 관찰-6-friction-1-validation` (관찰 2·6). Update path only; create
+	// and supersede reject it because there is nothing to patch against.
+	// Mutually exclusive with BodyMarkdown.
+	BodyPatch *BodyPatchInput `json:"body_patch,omitempty" jsonschema:"lightweight patch against the current body — update_of only, exclusive with body_markdown"`
+
 	// ArtifactMeta carries epistemic axes that classify the artifact's
 	// trustworthiness and memory scope. All fields optional — server
 	// resolves defaults via resolveArtifactMeta based on pins, update path,
@@ -827,6 +835,27 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		}, nil
 	}
 
+	// Body patch materialisation (Task artifact-propose-본문-patch-입력-도입).
+	// Runs before the version check's error path but after currentBody has
+	// been fetched — we need prev body to apply the patch, and the caller
+	// expects the rest of handleUpdate to see the resolved body exactly
+	// as if they had sent body_markdown whole. Warnings (e.g. PATCH_NOOP)
+	// bubble up into the accepted response alongside other advisories.
+	var patchWarnings []string
+	if in.BodyPatch != nil {
+		newBody, w, patchErr := applyBodyPatch(currentBody, in.BodyPatch)
+		if patchErr != "" {
+			return nil, artifactProposeOutput{
+				Status:    "not_ready",
+				ErrorCode: patchErr,
+				Failed:    []string{patchErr},
+				Checklist: []string{patchExplain(patchErr)},
+			}, nil
+		}
+		in.BodyMarkdown = newBody
+		patchWarnings = append(patchWarnings, w...)
+	}
+
 	// Optimistic lock: version provided but stale → VER_CONFLICT.
 	if *in.ExpectedVersion != lastRev {
 		return nil, artifactProposeOutput{
@@ -1003,6 +1032,10 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 	// types that carry a canonical truth claim (Debug, Decision, Analysis)
 	// and require fresh evidence when that section's content shifts.
 	warnings := updatePathWarnings(deps, in)
+	// Body-patch warnings bubble up here so PATCH_NOOP etc. sit alongside
+	// canonical-rewrite / source-type advisories instead of a separate
+	// response field.
+	warnings = append(warnings, patchWarnings...)
 	var suggested []string
 	var prevMeta ResolvedArtifactMeta
 	if len(currentMetaRaw) > 0 {
@@ -1125,7 +1158,19 @@ func preflight(in *artifactProposeInput, lang string) (checklist []string, faile
 	if strings.TrimSpace(in.Title) == "" {
 		push(i18n.T(lang, "preflight.title_empty"), "TITLE_EMPTY")
 	}
-	if strings.TrimSpace(in.BodyMarkdown) == "" {
+	// body_patch / body_markdown mutual exclusion + path gating.
+	// body_patch is an update_of-only convenience — create and supersede
+	// reject it because there's no prior body to patch against. Both
+	// fields together would be ambiguous, so PATCH_EXCLUSIVE.
+	if in.BodyPatch != nil {
+		if strings.TrimSpace(in.BodyMarkdown) != "" {
+			push("body_patch cannot be combined with body_markdown — pick one.", "PATCH_EXCLUSIVE")
+		}
+		if in.UpdateOf == "" || in.SupersedeOf != "" {
+			push("body_patch is only valid with update_of; create and supersede paths require body_markdown.", "PATCH_UPDATE_ONLY")
+		}
+	}
+	if strings.TrimSpace(in.BodyMarkdown) == "" && in.BodyPatch == nil {
 		push(i18n.T(lang, "preflight.body_empty"), "BODY_EMPTY")
 	}
 	if strings.TrimSpace(in.AreaSlug) == "" {
@@ -2361,4 +2406,214 @@ func findSemanticConflicts(ctx context.Context, deps Deps, projectID, title, bod
 		}
 	}
 	return out, nil
+}
+
+// BodyPatchInput is the shape of the light-weight patch an agent can
+// send in place of a full body_markdown on update_of. Three modes:
+//
+//   "section_replace"   — swap one `## heading` section's body with new text
+//   "checkbox_toggle"   — flip one `- [ ]` / `- [x]` item to the target state
+//   "append"            — tack text on the end of the current body
+//
+// applyBodyPatch reads the previous body (already fetched by handleUpdate)
+// and writes the resulting body back into propose input so the rest of
+// the update path — canonical_rewrite guard, embedding, revision insert —
+// runs unchanged.
+type BodyPatchInput struct {
+	Mode           string `json:"mode" jsonschema:"section_replace | checkbox_toggle | append"`
+	SectionHeading string `json:"section_heading,omitempty" jsonschema:"for section_replace: the H2 heading text (fuzzy match) whose body is replaced"`
+	Replacement    string `json:"replacement,omitempty" jsonschema:"for section_replace: new body content for the target section (no H2 line — the heading itself is preserved)"`
+	CheckboxIndex  *int   `json:"checkbox_index,omitempty" jsonschema:"for checkbox_toggle: 0-based index across the whole body, scanning - [ ] and - [x] in document order"`
+	CheckboxState  *bool  `json:"checkbox_state,omitempty" jsonschema:"for checkbox_toggle: target state (true = checked, false = unchecked). Must be explicitly set"`
+	AppendText     string `json:"append_text,omitempty" jsonschema:"for append: literal text appended after a blank line at the end of the body"`
+}
+
+// applyBodyPatch materialises prev + patch into the new body string. On
+// success returns newBody + optional warnings (e.g. PATCH_NOOP) and nil
+// stableCode. On failure returns empty body + nil warnings + a stable
+// error code string the caller wraps into artifactProposeOutput.
+func applyBodyPatch(prevBody string, patch *BodyPatchInput) (string, []string, string) {
+	if patch == nil {
+		return prevBody, nil, ""
+	}
+	switch strings.TrimSpace(patch.Mode) {
+	case "section_replace":
+		return applyBodyPatchSection(prevBody, patch)
+	case "checkbox_toggle":
+		return applyBodyPatchCheckbox(prevBody, patch)
+	case "append":
+		return applyBodyPatchAppend(prevBody, patch)
+	default:
+		return "", nil, "PATCH_MODE_INVALID"
+	}
+}
+
+func applyBodyPatchSection(prev string, patch *BodyPatchInput) (string, []string, string) {
+	heading := strings.TrimSpace(patch.SectionHeading)
+	if heading == "" {
+		return "", nil, "PATCH_HEADING_EMPTY"
+	}
+	// Reuse parseH2Sections's fuzzy matching — same H2 resolver the
+	// canonical-rewrite guard uses, so `## 목적 / Purpose` and `## Purpose`
+	// both point at the same slot.
+	target := normaliseSectionKey(heading)
+	lines := strings.Split(prev, "\n")
+	start, end := -1, -1
+	inFence := false
+	for i, raw := range lines {
+		line := strings.TrimRight(raw, "\r")
+		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		if strings.HasPrefix(line, "## ") {
+			sec := normaliseSectionKey(strings.TrimSpace(strings.TrimPrefix(line, "## ")))
+			if start == -1 && sectionsMatch(sec, target) {
+				start = i
+				continue
+			}
+			if start != -1 {
+				end = i
+				break
+			}
+		}
+	}
+	if start == -1 {
+		return "", nil, "PATCH_SECTION_NOT_FOUND"
+	}
+	if end == -1 {
+		end = len(lines)
+	}
+	// Preserve the heading line at `start`; replace lines (start+1 .. end-1).
+	head := lines[:start+1]
+	tail := lines[end:]
+	replacement := strings.Split(strings.TrimRight(patch.Replacement, "\n"), "\n")
+	// Blank separator between heading and replacement, same for tail.
+	combined := append([]string{}, head...)
+	combined = append(combined, "")
+	combined = append(combined, replacement...)
+	if len(tail) > 0 {
+		combined = append(combined, "")
+		combined = append(combined, tail...)
+	}
+	return strings.Join(combined, "\n"), nil, ""
+}
+
+func applyBodyPatchCheckbox(prev string, patch *BodyPatchInput) (string, []string, string) {
+	if patch.CheckboxIndex == nil {
+		return "", nil, "PATCH_CHECKBOX_INDEX_REQUIRED"
+	}
+	if patch.CheckboxState == nil {
+		return "", nil, "PATCH_CHECKBOX_STATE_REQUIRED"
+	}
+	target := *patch.CheckboxIndex
+	desired := *patch.CheckboxState
+	if target < 0 {
+		return "", nil, "PATCH_CHECKBOX_INDEX_NEGATIVE"
+	}
+	lines := strings.Split(prev, "\n")
+	idx := 0
+	for i, raw := range lines {
+		line := strings.TrimRight(raw, "\r")
+		trimmed := strings.TrimLeft(line, " \t")
+		var currentState *bool
+		var prefixLen int
+		if strings.HasPrefix(trimmed, "- [ ]") || strings.HasPrefix(trimmed, "- [x]") || strings.HasPrefix(trimmed, "- [X]") {
+			checked := strings.HasPrefix(trimmed, "- [x]") || strings.HasPrefix(trimmed, "- [X]")
+			currentState = &checked
+			prefixLen = len(line) - len(trimmed)
+		}
+		if currentState == nil {
+			continue
+		}
+		if idx != target {
+			idx++
+			continue
+		}
+		// Located — same state means PATCH_NOOP warning, still accept.
+		if *currentState == desired {
+			return prev, []string{"PATCH_NOOP"}, ""
+		}
+		prefix := line[:prefixLen]
+		rest := trimmed[len("- [ ]"):] // matches "- [x]" too, same length
+		marker := "- [ ]"
+		if desired {
+			marker = "- [x]"
+		}
+		lines[i] = prefix + marker + rest
+		return strings.Join(lines, "\n"), nil, ""
+	}
+	return "", nil, "PATCH_CHECKBOX_OUT_OF_RANGE"
+}
+
+func applyBodyPatchAppend(prev string, patch *BodyPatchInput) (string, []string, string) {
+	text := strings.TrimSpace(patch.AppendText)
+	if text == "" {
+		return "", nil, "PATCH_APPEND_EMPTY"
+	}
+	joiner := "\n\n"
+	if strings.HasSuffix(prev, "\n") {
+		joiner = "\n"
+	}
+	return strings.TrimRight(prev, "\n") + joiner + patch.AppendText + "\n", nil, ""
+}
+
+// normaliseSectionKey / sectionsMatch lift the fuzzy heading logic out
+// of parseH2Sections so section_replace can match "## 목적 / Purpose"
+// against the agent's "Purpose" input without duplicating the table.
+func normaliseSectionKey(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	// strip markdown emphasis / heading-id suffix if present
+	s = strings.TrimSuffix(s, " #")
+	return s
+}
+
+// patchExplain maps a body_patch stable code to the one-line checklist
+// entry surfaced in not_ready responses. Keeping the mapping inline
+// (vs i18n.T) because these codes are deliberately low-traffic — they
+// only fire when the agent mis-uses the API shape, not during normal
+// propose flows.
+func patchExplain(code string) string {
+	switch code {
+	case "PATCH_MODE_INVALID":
+		return "body_patch.mode must be one of section_replace | checkbox_toggle | append."
+	case "PATCH_HEADING_EMPTY":
+		return "body_patch.mode=section_replace requires section_heading."
+	case "PATCH_SECTION_NOT_FOUND":
+		return "body_patch.section_heading did not match any `## heading` in the current body (fuzzy match included)."
+	case "PATCH_CHECKBOX_INDEX_REQUIRED":
+		return "body_patch.mode=checkbox_toggle requires checkbox_index (0-based across the whole body)."
+	case "PATCH_CHECKBOX_STATE_REQUIRED":
+		return "body_patch.mode=checkbox_toggle requires checkbox_state (true = checked, false = unchecked)."
+	case "PATCH_CHECKBOX_INDEX_NEGATIVE":
+		return "body_patch.checkbox_index must be ≥ 0."
+	case "PATCH_CHECKBOX_OUT_OF_RANGE":
+		return "body_patch.checkbox_index is past the last `- [ ]` / `- [x]` item in the body."
+	case "PATCH_APPEND_EMPTY":
+		return "body_patch.mode=append requires append_text with non-whitespace content."
+	}
+	return "body_patch failed with code " + code
+}
+
+func sectionsMatch(a, b string) bool {
+	if a == b {
+		return true
+	}
+	// split on "/" or "·" to accept mixed ko/en slots like "목적 / purpose".
+	parts := strings.FieldsFunc(a, func(r rune) bool { return r == '/' || r == '·' })
+	for _, p := range parts {
+		if strings.TrimSpace(p) == b {
+			return true
+		}
+	}
+	parts = strings.FieldsFunc(b, func(r rune) bool { return r == '/' || r == '·' })
+	for _, p := range parts {
+		if strings.TrimSpace(p) == a {
+			return true
+		}
+	}
+	return false
 }
