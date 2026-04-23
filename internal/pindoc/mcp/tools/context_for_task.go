@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -37,6 +38,24 @@ type ContextLanding struct {
 	HumanURL    string  `json:"human_url"`
 	HumanURLAbs string  `json:"human_url_abs,omitempty"`
 	Distance    float64 `json:"distance"`
+
+	// TrustSummary is a three-axis epistemic snapshot of the landing so
+	// the agent can decide whether to treat the artifact as authority or
+	// as a reference before reading the full body. Mirrors the subset
+	// agreed in Task `artifact-meta-jsonb-스키마-추가-6축-epistemic-metadata-도입`
+	// (source_type · confidence · next_context_policy). Empty fields when
+	// the artifact predates migration 0012.
+	TrustSummary LandingTrustSummary `json:"trust_summary"`
+}
+
+// LandingTrustSummary is the compact projection of artifact_meta emitted on
+// every context.for_task landing. Dedicated type (not ResolvedArtifactMeta)
+// so the retrieval surface stays stable as more axes ship — callers depend
+// on these three fields for framing, the rest belong on artifact.read.
+type LandingTrustSummary struct {
+	SourceType        string `json:"source_type,omitempty"`
+	Confidence        string `json:"confidence,omitempty"`
+	NextContextPolicy string `json:"next_context_policy,omitempty"`
 }
 
 // CandidateUpdate is a landing-shaped hint that an existing artifact is
@@ -132,6 +151,10 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			}
 			qVec := embed.VectorString(embed.PadTo768(res.Vectors[0]))
 
+			// artifact_meta filter: skip landings the owner has excluded
+			// from default next-session context. opt_in stays visible here
+			// because opt_in means "show when asked" — and context.for_task
+			// IS the asking surface. Only `excluded` is silently filtered.
 			sql := `
 				WITH scored AS (
 					SELECT DISTINCT ON (c.artifact_id)
@@ -147,11 +170,13 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 					  AND a.status <> 'archived'
 					  AND ($3::text[] IS NULL OR ar.slug = ANY($3))
 					  AND ($5::bool OR NOT starts_with(a.slug, '_template_'))
+					  AND COALESCE(a.artifact_meta->>'next_context_policy', '') <> 'excluded'
 					ORDER BY c.artifact_id, distance
 				)
 				SELECT
 					s.artifact_id::text, a.slug, a.type, a.title, ar.slug,
-					s.best_heading, s.best_text, s.distance, a.updated_at
+					s.best_heading, s.best_text, s.distance, a.updated_at,
+					a.artifact_meta
 				FROM scored s
 				JOIN artifacts a  ON a.id  = s.artifact_id
 				JOIN areas     ar ON ar.id = a.area_id
@@ -174,9 +199,10 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 				var l ContextLanding
 				var bestHeading, bestText string
 				var updatedAt time.Time
+				var metaRaw []byte
 				if err := rows.Scan(
 					&l.ArtifactID, &l.Slug, &l.Type, &l.Title, &l.AreaSlug,
-					&bestHeading, &bestText, &l.Distance, &updatedAt,
+					&bestHeading, &bestText, &l.Distance, &updatedAt, &metaRaw,
 				); err != nil {
 					return nil, contextForTaskOutput{}, fmt.Errorf("scan: %w", err)
 				}
@@ -187,6 +213,16 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 					l.Rationale = "Best-matching section: " + bestHeading
 				} else {
 					l.Rationale = trimSnippet(bestText, 160)
+				}
+				if len(metaRaw) > 0 {
+					var meta ResolvedArtifactMeta
+					if err := json.Unmarshal(metaRaw, &meta); err == nil {
+						l.TrustSummary = LandingTrustSummary{
+							SourceType:        meta.SourceType,
+							Confidence:        meta.Confidence,
+							NextContextPolicy: meta.NextContextPolicy,
+						}
+					}
 				}
 				out.Landings = append(out.Landings, l)
 

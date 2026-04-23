@@ -182,6 +182,17 @@ auto-publish 경로: artifact.commit 내부 호출 → review_state="auto_publis
 
 일반 publish / modification / partial 기록은 **Review Queue 안 탐**.
 
+### Conversation-derived canonical (경량 강등)
+
+6종과 별개 축. `artifact_meta.source_type=user_chat` 또는 `mixed`로 선언된 create가 default canonical path를 타려 할 때 발동한다. Review Queue로 가지 않고 server가 자동으로 가볍게 강등한다.
+
+- `consent_state` 미지정 → 응답 `warnings[]`에 `CONSENT_REQUIRED_FOR_USER_CHAT` 첨부(block 아님). `suggested_actions`로 explicit consent 선언 권고.
+- `consent_state=granted` + `completeness` 미지정 → `completeness=draft` 자동 적용.
+- `consent_state=granted` + `next_context_policy` 미지정 → `opt_in` 자동 적용.
+- caller가 explicit하게 보낸 값은 언제나 override 우선.
+
+이 클래스를 기존 sensitive 6종에 병합하지 않는 이유: 6종은 "되돌리기 힘든 행위"고 conversation-derived는 "오염 가능성이 높은 기록"이다. 전자는 block/review가 맞지만 후자는 dogfood 마찰을 고려해 warning + 경량 강등으로 시작하고, Review Queue UI가 붙은 뒤(`review_queue_supported=false` capability flip 시점) `pending_review` 경로 옵션을 추가한다. Task `conversation-derived-write-기본-draft-라우팅-...` 참조.
+
 ### 흐름
 
 ```

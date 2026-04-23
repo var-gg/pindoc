@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -45,6 +46,11 @@ type SearchHit struct {
 	AgentRef    string `json:"agent_ref"`
 	HumanURL    string `json:"human_url"`
 	HumanURLAbs string `json:"human_url_abs,omitempty"`
+
+	// TrustSummary mirrors the context.for_task landing summary so agents
+	// making retrieval decisions (search vs for_task) see the same three
+	// epistemic axes. Deliberately thin — full meta stays on artifact.read.
+	TrustSummary LandingTrustSummary `json:"trust_summary"`
 }
 
 type artifactSearchOutput struct {
@@ -129,7 +135,8 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 					s.chunk_kind,
 					s.chunk_heading,
 					s.snippet,
-					s.distance
+					s.distance,
+					a.artifact_meta
 				FROM scored s
 				JOIN artifacts a  ON a.id  = s.artifact_id
 				JOIN areas     ar ON ar.id = a.area_id
@@ -155,10 +162,11 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 			for rows.Next() {
 				var h SearchHit
 				var heading *string
+				var metaRaw []byte
 				if err := rows.Scan(
 					&h.ArtifactID, &h.Slug, &h.Type, &h.Title,
 					&h.AreaSlug, &h.ChunkKind, &heading,
-					&h.Snippet, &h.Distance,
+					&h.Snippet, &h.Distance, &metaRaw,
 				); err != nil {
 					return nil, artifactSearchOutput{}, fmt.Errorf("scan: %w", err)
 				}
@@ -171,6 +179,16 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 				h.AgentRef = "pindoc://" + h.Slug
 				h.HumanURL = HumanURL(deps.ProjectSlug, h.Slug)
 				h.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, h.Slug)
+				if len(metaRaw) > 0 {
+					var meta ResolvedArtifactMeta
+					if err := json.Unmarshal(metaRaw, &meta); err == nil {
+						h.TrustSummary = LandingTrustSummary{
+							SourceType:        meta.SourceType,
+							Confidence:        meta.Confidence,
+							NextContextPolicy: meta.NextContextPolicy,
+						}
+					}
+				}
 				out.Hits = append(out.Hits, h)
 			}
 

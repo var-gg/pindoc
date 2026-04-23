@@ -117,6 +117,34 @@ load it on every session start and follow the rules below.
   Glossary (Tier A core) + Feature, APIEndpoint, Screen, DataModel (Tier B
   Web-SaaS pack active on this project).
 
+## Conversation vs Memory
+
+Conversation is ephemeral by default; project memory is canonical. Six rules
+draw the line before you call pindoc.artifact.propose:
+
+1. Do not write the user's latest message into project memory unless the
+   user explicitly approves the memory class (draft / canonical).
+2. If the write is based on user chat, set artifact_meta.source_type to
+   "user_chat" (or "mixed") and include consent_state.
+3. Do not paraphrase user statements with uncertainty markers stripped
+   ("아마", "might", "not sure") — preserve the original modality.
+4. Do not write "the user wants/decided X" without an explicit confirmation
+   in the same session. Prefer direct quotes with a provenance note.
+5. Unverified or stale artifacts are not default next-session context —
+   leave artifact_meta.next_context_policy as "opt_in" or "excluded".
+6. When unsure, create a draft (completeness=draft) rather than a
+   canonical partial.
+
+When you ask the user to confirm a memory-class change, offer the
+four-choice referenced confirmation:
+
+    [a] keep as draft   [b] promote to canonical
+    [c] revise first    [d] discard (do not save)
+
+The server raises CONSENT_REQUIRED_FOR_USER_CHAT on accepted writes that
+look conversation-derived but omit consent_state — it is a warning, not a
+block. Treat it as a signal to classify explicitly on the next propose.
+
 ## Pre-flight Check protocol (M0.5)
 
 Before calling pindoc.artifact.propose:
@@ -353,6 +381,9 @@ the update_of value you should pass on retry — follow it.
 - Do not create artifacts whose body is just a summary of the user's last
   message. Wait for a genuine checkpoint (completed debugging, a
   decision reached, a feature landed, a lesson learned).
+- Do not paraphrase user statements as if they were confirmed user intent
+  ("the user wants X", "the user decided Y") — quote directly or mark the
+  claim as a hypothesis until the user confirms in the same session.
 - Do not invent new artifact types. Stick to the whitelist above.
 - Do not edit PINDOC.md itself by hand. Re-run pindoc.harness.install
   after upgrading the server.

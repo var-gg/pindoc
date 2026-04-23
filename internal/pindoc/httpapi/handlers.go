@@ -223,21 +223,26 @@ func (d Deps) handleAreas(w http.ResponseWriter, r *http.Request) {
 }
 
 type artifactRow struct {
-	ID           string          `json:"id"`
-	Slug         string          `json:"slug"`
-	Type         string          `json:"type"`
-	Title        string          `json:"title"`
-	AreaSlug     string          `json:"area_slug"`
-	Completeness string          `json:"completeness"`
-	Status       string          `json:"status"`
-	ReviewState  string          `json:"review_state"`
-	AuthorID     string          `json:"author_id"`
-	PublishedAt  time.Time       `json:"published_at,omitzero"`
-	UpdatedAt    time.Time       `json:"updated_at"`
+	ID           string    `json:"id"`
+	Slug         string    `json:"slug"`
+	Type         string    `json:"type"`
+	Title        string    `json:"title"`
+	AreaSlug     string    `json:"area_slug"`
+	Completeness string    `json:"completeness"`
+	Status       string    `json:"status"`
+	ReviewState  string    `json:"review_state"`
+	AuthorID     string    `json:"author_id"`
+	PublishedAt  time.Time `json:"published_at,omitzero"`
+	UpdatedAt    time.Time `json:"updated_at"`
 	// TaskMeta is raw JSONB for Task artifacts (Phase 15b). Pass-through
 	// to the client — Reader parses it to lay out the Tasks view as a
 	// kanban-lite grouped by status. null / omitted for non-Task.
 	TaskMeta json.RawMessage `json:"task_meta,omitempty"`
+	// ArtifactMeta is raw JSONB carrying the epistemic axes (migration
+	// 0012). Pass-through so the Reader Trust Card component narrows the
+	// fields it cares about client-side. Empty object for rows that
+	// predate migration 0012.
+	ArtifactMeta json.RawMessage `json:"artifact_meta,omitempty"`
 }
 
 func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
@@ -252,7 +257,7 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 		SELECT
 			a.id::text, a.slug, a.type, a.title, ar.slug,
 			a.completeness, a.status, a.review_state,
-			a.author_id, a.published_at, a.updated_at, a.task_meta
+			a.author_id, a.published_at, a.updated_at, a.task_meta, a.artifact_meta
 		FROM artifacts a
 		JOIN projects p  ON p.id  = a.project_id
 		JOIN areas    ar ON ar.id = a.area_id
@@ -275,11 +280,11 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var a artifactRow
 		var publishedAt *time.Time
-		var taskMeta []byte
+		var taskMeta, artifactMeta []byte
 		if err := rows.Scan(
 			&a.ID, &a.Slug, &a.Type, &a.Title, &a.AreaSlug,
 			&a.Completeness, &a.Status, &a.ReviewState,
-			&a.AuthorID, &publishedAt, &a.UpdatedAt, &taskMeta,
+			&a.AuthorID, &publishedAt, &a.UpdatedAt, &taskMeta, &artifactMeta,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan failed")
 			return
@@ -289,6 +294,9 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(taskMeta) > 0 {
 			a.TaskMeta = json.RawMessage(taskMeta)
+		}
+		if len(artifactMeta) > 0 {
+			a.ArtifactMeta = json.RawMessage(artifactMeta)
 		}
 		out = append(out, a)
 	}
@@ -310,6 +318,14 @@ type artifactDetail struct {
 	// markdown references.
 	Relates   []edgeRef `json:"relates_to,omitempty"`
 	RelatedBy []edgeRef `json:"related_by,omitempty"`
+	// Pins and SourceSessionRef feed the Reader Trust Card + Sidecar
+	// provenance section (Task `reader-trust-card-...`). Pins let the
+	// user confirm the code substrate behind an artifact; source_session
+	// ref records the agent_id that authored the latest revision. Both
+	// empty when the artifact has no pins / the agent didn't report a
+	// session.
+	Pins             []pinRow        `json:"pins,omitempty"`
+	SourceSessionRef json.RawMessage `json:"source_session_ref,omitempty"`
 }
 
 type edgeRef struct {
@@ -318,6 +334,18 @@ type edgeRef struct {
 	Type       string `json:"type"`
 	Title      string `json:"title"`
 	Relation   string `json:"relation"`
+}
+
+// pinRow mirrors artifact_pins. Reader Sidecar groups by Kind for the
+// provenance block. Empty fields dropped by omitempty so the wire payload
+// stays compact on resource/url pins that don't carry line ranges.
+type pinRow struct {
+	Kind       string `json:"kind"`
+	Repo       string `json:"repo,omitempty"`
+	CommitSHA  string `json:"commit_sha,omitempty"`
+	Path       string `json:"path"`
+	LinesStart int    `json:"lines_start,omitempty"`
+	LinesEnd   int    `json:"lines_end,omitempty"`
 }
 
 func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
@@ -331,13 +359,14 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	var a artifactDetail
 	var publishedAt *time.Time
 	var authorVer *string
-	var taskMeta []byte
+	var taskMeta, artifactMeta, sourceSessionRef []byte
 	err := d.DB.QueryRow(r.Context(), `
 		SELECT
 			a.id::text, a.slug, a.type, a.title, ar.slug,
 			a.completeness, a.status, a.review_state,
 			a.author_id, a.published_at, a.updated_at,
-			a.body_markdown, a.tags, a.author_version, a.created_at, a.task_meta
+			a.body_markdown, a.tags, a.author_version, a.created_at,
+			a.task_meta, a.artifact_meta, a.source_session_ref
 		FROM artifacts a
 		JOIN projects p  ON p.id  = a.project_id
 		JOIN areas    ar ON ar.id = a.area_id
@@ -347,7 +376,8 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		&a.ID, &a.Slug, &a.Type, &a.Title, &a.AreaSlug,
 		&a.Completeness, &a.Status, &a.ReviewState,
 		&a.AuthorID, &publishedAt, &a.UpdatedAt,
-		&a.BodyMarkdown, &a.Tags, &authorVer, &a.CreatedAt, &taskMeta,
+		&a.BodyMarkdown, &a.Tags, &authorVer, &a.CreatedAt,
+		&taskMeta, &artifactMeta, &sourceSessionRef,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "artifact not found")
@@ -367,6 +397,12 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	if len(taskMeta) > 0 {
 		a.TaskMeta = json.RawMessage(taskMeta)
 	}
+	if len(artifactMeta) > 0 {
+		a.ArtifactMeta = json.RawMessage(artifactMeta)
+	}
+	if len(sourceSessionRef) > 0 {
+		a.SourceSessionRef = json.RawMessage(sourceSessionRef)
+	}
 
 	// Load edges (best-effort — failure leaves the slices empty, artifact
 	// still renders). Outgoing (this → others) goes in Relates; incoming
@@ -381,8 +417,49 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	} else {
 		a.RelatedBy = inEdges
 	}
+	if pins, err := d.loadArtifactPins(r.Context(), a.ID); err != nil {
+		d.Logger.Warn("pins lookup failed", "artifact_id", a.ID, "err", err)
+	} else {
+		a.Pins = pins
+	}
 
 	writeJSON(w, http.StatusOK, a)
+}
+
+// loadArtifactPins returns artifact_pins rows sorted by insertion order.
+// The Reader Sidecar renders them grouped by kind so provenance inspection
+// lands on the most likely evidence type without extra clicks.
+func (d Deps) loadArtifactPins(ctx context.Context, artifactID string) ([]pinRow, error) {
+	rows, err := d.DB.Query(ctx, `
+		SELECT kind, repo, commit_sha, path, lines_start, lines_end
+		FROM artifact_pins
+		WHERE artifact_id = $1
+		ORDER BY id
+	`, artifactID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []pinRow
+	for rows.Next() {
+		var p pinRow
+		var commitSHA *string
+		var ls, le *int
+		if err := rows.Scan(&p.Kind, &p.Repo, &commitSHA, &p.Path, &ls, &le); err != nil {
+			return nil, err
+		}
+		if commitSHA != nil {
+			p.CommitSHA = *commitSHA
+		}
+		if ls != nil {
+			p.LinesStart = *ls
+		}
+		if le != nil {
+			p.LinesEnd = *le
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 // loadEdges returns artifact_edges rows from the perspective of the given

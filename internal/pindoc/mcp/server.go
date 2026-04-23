@@ -85,6 +85,9 @@ func NewServer(opts Options) *Server {
 	tools.RegisterArtifactDiff(s, deps)
 	tools.RegisterArtifactSummary(s, deps)
 
+	// Task status v2 (migration 0013) — agent-to-agent verification.
+	tools.RegisterArtifactVerify(s, deps)
+
 	return &Server{
 		sdk:    s,
 		logger: opts.Logger,

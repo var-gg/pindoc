@@ -29,6 +29,13 @@ var validArtifactTypes = map[string]struct{}{
 	// Tier A core
 	"Decision": {}, "Analysis": {}, "Debug": {}, "Flow": {},
 	"Task": {}, "TC": {}, "Glossary": {},
+	// Tier A — task verification (migration 0013).
+	// A VerificationReport is a typed artifact a *verifier* agent files to
+	// move a Task from claimed_done → verified via pindoc.artifact.verify.
+	// Kept as a first-class type (rather than task_meta subfield) so re-
+	// verification chains flow naturally through supersede and the Reader
+	// can surface the report as its own document.
+	"VerificationReport": {},
 	// Tier B Web SaaS
 	"Feature": {}, "APIEndpoint": {}, "Screen": {}, "DataModel": {},
 }
@@ -79,6 +86,24 @@ type artifactProposeInput struct {
 	// Target may be id, slug, or pindoc:// URL — resolved server-side.
 	// Unknown targets fail the whole call with RELATES_TARGET_NOT_FOUND.
 	RelatesTo []ArtifactRelationInput `json:"relates_to,omitempty" jsonschema:"typed edges to other artifacts"`
+
+	// ArtifactMeta carries epistemic axes that classify the artifact's
+	// trustworthiness and memory scope. All fields optional — server
+	// resolves defaults via resolveArtifactMeta based on pins, update path,
+	// and body heuristics. See docs/04-data-model.md for axis definitions.
+	//
+	// Axes:
+	//   source_type         — code | artifact | user_chat | external | mixed
+	//   consent_state       — not_needed | requested | granted | denied
+	//   confidence          — low | medium | high
+	//   audience            — owner_only | approvers | project_readers
+	//   next_context_policy — default | opt_in | excluded
+	//   verification_state  — verified | partially_verified | unverified
+	//
+	// On update_of the supplied meta MERGES with existing meta (unset keys
+	// keep previous values). Fully replacing requires explicit empty strings
+	// which resolveArtifactMeta treats as "caller cleared this axis".
+	ArtifactMeta *ArtifactMetaInput `json:"artifact_meta,omitempty" jsonschema:"epistemic axes — source_type, consent_state, confidence, audience, next_context_policy, verification_state (all optional)"`
 
 	// TaskMeta carries typed tracker dimensions for type=Task artifacts
 	// (Phase 15b). Ignored for any other type. All fields optional:
@@ -143,18 +168,58 @@ var validPinKinds = map[string]struct{}{
 // TaskMetaInput is the agent-facing shape for a Task artifact's tracker
 // dimensions. Every field is optional; the server stores what's provided.
 type TaskMetaInput struct {
-	Status     string `json:"status,omitempty" jsonschema:"todo | in_progress | blocked | done | cancelled"`
+	// Status is the Task lifecycle v2 enum (migration 0013). Agents set
+	// `claimed_done` themselves once acceptance criteria land, but
+	// `verified` is controlled exclusively by pindoc.artifact.verify —
+	// direct transitions via artifact.propose are rejected (VER_VIA_VERIFY_TOOL_ONLY).
+	Status     string `json:"status,omitempty" jsonschema:"open | claimed_done | verified | blocked | cancelled (set via pindoc.artifact.verify, not here)"`
 	Priority   string `json:"priority,omitempty" jsonschema:"p0 | p1 | p2 | p3"`
 	Assignee   string `json:"assignee,omitempty"`
 	DueAt      string `json:"due_at,omitempty" jsonschema:"RFC3339 timestamp"`
 	ParentSlug string `json:"parent_slug,omitempty" jsonschema:"slug of parent Task artifact"`
 }
 
+// validTaskStatuses was rebuilt in migration 0013 around a two-phase
+// completion model: agent self-attests claimed_done, then a *different*
+// agent files a VerificationReport to reach verified. See
+// docs/04-data-model.md (Task status v2 section).
 var validTaskStatuses = map[string]struct{}{
-	"todo": {}, "in_progress": {}, "blocked": {}, "done": {}, "cancelled": {},
+	"open": {}, "claimed_done": {}, "verified": {},
+	"blocked": {}, "cancelled": {},
 }
 var validTaskPriorities = map[string]struct{}{
 	"p0": {}, "p1": {}, "p2": {}, "p3": {},
+}
+
+// ArtifactMetaInput is the agent-facing shape for epistemic axes. Every
+// field is optional; resolveArtifactMeta fills defaults based on pins,
+// update path, and body heuristics.
+type ArtifactMetaInput struct {
+	SourceType        string `json:"source_type,omitempty" jsonschema:"code | artifact | user_chat | external | mixed"`
+	ConsentState      string `json:"consent_state,omitempty" jsonschema:"not_needed | requested | granted | denied"`
+	Confidence        string `json:"confidence,omitempty" jsonschema:"low | medium | high"`
+	Audience          string `json:"audience,omitempty" jsonschema:"owner_only | approvers | project_readers"`
+	NextContextPolicy string `json:"next_context_policy,omitempty" jsonschema:"default | opt_in | excluded"`
+	VerificationState string `json:"verification_state,omitempty" jsonschema:"verified | partially_verified | unverified"`
+}
+
+var validSourceTypes = map[string]struct{}{
+	"code": {}, "artifact": {}, "user_chat": {}, "external": {}, "mixed": {},
+}
+var validConsentStates = map[string]struct{}{
+	"not_needed": {}, "requested": {}, "granted": {}, "denied": {},
+}
+var validConfidences = map[string]struct{}{
+	"low": {}, "medium": {}, "high": {},
+}
+var validAudiences = map[string]struct{}{
+	"owner_only": {}, "approvers": {}, "project_readers": {},
+}
+var validNextContextPolicies = map[string]struct{}{
+	"default": {}, "opt_in": {}, "excluded": {},
+}
+var validVerificationStates = map[string]struct{}{
+	"verified": {}, "partially_verified": {}, "unverified": {},
 }
 
 // ArtifactRelationInput is the agent-facing shape for one edge.
@@ -226,6 +291,19 @@ type artifactProposeOutput struct {
 	// silent stub fallback. Empty when the embedder wasn't touched (e.g.
 	// pure not_ready on schema validation).
 	EmbedderUsed *EmbedderInfo `json:"embedder_used,omitempty"`
+	// ArtifactMeta echoes the resolved epistemic axes that were persisted.
+	// Populated on accepted paths so agents (and Reader) can confirm which
+	// classification actually landed — resolver defaults may override
+	// agent-supplied values when a stronger signal was present (e.g. code
+	// pins upgrading source_type). Absent on not_ready responses.
+	ArtifactMeta *ResolvedArtifactMeta `json:"artifact_meta,omitempty"`
+	// CanonicalRewriteWithoutEvidence is true when the update path rewrote
+	// a type-specific canonical claim section (Debug.Root cause,
+	// Decision.Decision, Analysis.Conclusion) without fresh evidence (new
+	// pins, verification_state bump past unverified, or commit_msg
+	// evidence keyword). Reader revision badges consume this flag for an
+	// "uncertain rewrite" marker. Always false on create paths.
+	CanonicalRewriteWithoutEvidence bool `json:"canonical_rewrite_without_evidence,omitempty"`
 }
 
 // RelatedRef is a compact pointer to another artifact the caller should
@@ -505,7 +583,13 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				baseSlug = strings.ToLower(in.Type) + "-" + time.Now().UTC().Format("20060102150405")
 			}
 
-			completeness := in.Completeness
+			// Resolve artifact_meta and classify conversation-derived writes
+			// BEFORE committing to completeness — consent-granted chat writes
+			// step down to draft by default (see Task
+			// `conversation-derived-write-기본-draft-라우팅-...`).
+			resolvedMeta := resolveArtifactMeta(in.ArtifactMeta, in.Pins, in.BodyMarkdown, false)
+			isConvDerived := classifyConversationDerived(&in)
+			completeness := applyConversationDerivedDefaults(&in, &resolvedMeta, in.Completeness)
 			if completeness == "" {
 				completeness = "partial"
 			}
@@ -524,17 +608,18 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			var newID string
 			var publishedAt time.Time
 			taskMetaJSON := taskMetaToJSON(in.Type, in.TaskMeta)
+			artifactMetaJSON := artifactMetaToJSON(resolvedMeta)
 			for attempt := 0; attempt < 10; attempt++ {
 				err = tx.QueryRow(ctx, `
 					INSERT INTO artifacts (
 						project_id, area_id, slug, type, title, body_markdown, tags,
 						completeness, status, review_state,
 						author_kind, author_id, author_version,
-						task_meta, published_at
-					) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'published', 'auto_published', 'agent', $9, $10, $11, now())
+						task_meta, artifact_meta, published_at
+					) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'published', 'auto_published', 'agent', $9, $10, $11, $12::jsonb, now())
 					RETURNING id::text, published_at
 				`, projectID, areaID, finalSlug, in.Type, in.Title, in.BodyMarkdown, in.Tags,
-					completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), taskMetaJSON).Scan(&newID, &publishedAt)
+					completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), taskMetaJSON, artifactMetaJSON).Scan(&newID, &publishedAt)
 				if err == nil {
 					break
 				}
@@ -639,6 +724,13 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			warnings = append(warnings, titleLengthWarnings(in.Title)...)
 			warnings = append(warnings, bodyH1Warnings(in.BodyMarkdown)...)
 			warnings = append(warnings, requiredH2Warnings(in.BodyMarkdown, in.Type)...)
+			if detectUnclassifiedUserChat(resolvedMeta, in.Pins, in.BodyMarkdown) {
+				warnings = append(warnings, "SOURCE_TYPE_UNCLASSIFIED")
+			}
+			if isConvDerived && resolvedMeta.ConsentState == "" {
+				warnings = append(warnings, "CONSENT_REQUIRED_FOR_USER_CHAT")
+			}
+			metaOut := resolvedMeta
 			return nil, artifactProposeOutput{
 				Status:         "accepted",
 				ArtifactID:     newID,
@@ -654,6 +746,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				Superseded:     supersededFlag,
 				Warnings:       warnings,
 				EmbedderUsed:   embedderInfo(deps),
+				ArtifactMeta:   &metaOut,
 			}, nil
 		},
 	)
@@ -678,16 +771,17 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 
 	ref := normalizeRef(in.UpdateOf)
 
-	var artifactID, projectID, currentBody, currentTitle string
+	var artifactID, projectID, currentBody, currentTitle, currentType string
+	var currentMetaRaw []byte
 	var lastRev int
 	err := deps.DB.QueryRow(ctx, `
-		SELECT a.id::text, a.project_id::text, a.body_markdown, a.title,
+		SELECT a.id::text, a.project_id::text, a.body_markdown, a.title, a.type, a.artifact_meta,
 		       COALESCE((SELECT max(revision_number) FROM artifact_revisions WHERE artifact_id = a.id), 0)
 		FROM artifacts a
 		JOIN projects p ON p.id = a.project_id
 		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 		LIMIT 1
-	`, deps.ProjectSlug, ref).Scan(&artifactID, &projectID, &currentBody, &currentTitle, &lastRev)
+	`, deps.ProjectSlug, ref).Scan(&artifactID, &projectID, &currentBody, &currentTitle, &currentType, &currentMetaRaw, &lastRev)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, artifactProposeOutput{
 			Status:    "not_ready",
@@ -824,6 +918,16 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 	// prior value so you can revise a Task's body without re-specifying
 	// status/priority every time.
 	taskMetaPatch := taskMetaToJSON(in.Type, in.TaskMeta)
+	// artifact_meta follows the same "send-to-overwrite" rule: agents that
+	// do not include artifact_meta on a revision keep the artifact's prior
+	// classification. When they do send it, the resolved payload fully
+	// replaces the stored JSONB — no server-side merge.
+	var artifactMetaPatch any
+	var resolvedUpdateMeta ResolvedArtifactMeta
+	if in.ArtifactMeta != nil {
+		resolvedUpdateMeta = resolveArtifactMeta(in.ArtifactMeta, in.Pins, in.BodyMarkdown, true)
+		artifactMetaPatch = artifactMetaToJSON(resolvedUpdateMeta)
+	}
 	err = tx.QueryRow(ctx, `
 		UPDATE artifacts
 		   SET title          = $2,
@@ -833,11 +937,12 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		       author_id      = $6,
 		       author_version = $7,
 		       task_meta      = COALESCE($8, task_meta),
+		       artifact_meta  = COALESCE($9::jsonb, artifact_meta),
 		       updated_at     = now()
 		 WHERE id = $1
 		RETURNING slug, COALESCE(published_at, now())
 	`, artifactID, in.Title, in.BodyMarkdown, in.Tags, completeness,
-		in.AuthorID, nullIfEmpty(in.AuthorVersion), taskMetaPatch,
+		in.AuthorID, nullIfEmpty(in.AuthorVersion), taskMetaPatch, artifactMetaPatch,
 	).Scan(&slug, &publishedAt)
 	if err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("update head: %w", err)
@@ -886,20 +991,50 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		return nil, artifactProposeOutput{}, fmt.Errorf("commit: %w", err)
 	}
 
+	var updateMetaOut *ResolvedArtifactMeta
+	if in.ArtifactMeta != nil {
+		m := resolvedUpdateMeta
+		updateMetaOut = &m
+	}
+
+	// Canonical-claim rewrite guard — compare prev/new H2 sections for
+	// types that carry a canonical truth claim (Debug, Decision, Analysis)
+	// and require fresh evidence when that section's content shifts.
+	warnings := updatePathWarnings(deps, in)
+	var suggested []string
+	var prevMeta ResolvedArtifactMeta
+	if len(currentMetaRaw) > 0 {
+		_ = json.Unmarshal(currentMetaRaw, &prevMeta)
+	}
+	rewrittenSections := detectCanonicalClaimRewrite(currentBody, in.BodyMarkdown, currentType)
+	canonicalRewriteFlag := false
+	if len(rewrittenSections) > 0 && !hasEvidenceDelta(prevMeta, &in) {
+		canonicalRewriteFlag = true
+		warnings = append(warnings, "CANONICAL_REWRITE_WITHOUT_EVIDENCE:"+strings.Join(rewrittenSections, "+"))
+		suggested = []string{
+			"If the new content is a hypothesis, file it as a fresh Analysis or Debug draft rather than rewriting the canonical claim.",
+			"If verified, set artifact_meta.verification_state=verified and attach the evidence pin on the same propose.",
+			"If this is wording cleanup only, mention 'wording cleanup' (or 'verified') in commit_msg so the warning stays quiet next time.",
+		}
+	}
+
 	return nil, artifactProposeOutput{
-		Status:         "accepted",
-		ArtifactID:     artifactID,
-		Slug:           slug,
-		AgentRef:       "pindoc://" + slug,
-		HumanURL:       HumanURL(deps.ProjectSlug, slug),
-		HumanURLAbs:    AbsHumanURL(deps.Settings, deps.ProjectSlug, slug),
-		PublishedAt:    publishedAt,
-		Created:        false,
-		RevisionNumber: newRev,
-		PinsStored:     pinsStored,
-		EdgesStored:    edgesStored,
-		Warnings:       updatePathWarnings(deps, in),
-		EmbedderUsed:   embedderInfo(deps),
+		Status:                          "accepted",
+		ArtifactID:                      artifactID,
+		Slug:                            slug,
+		AgentRef:                        "pindoc://" + slug,
+		HumanURL:                        HumanURL(deps.ProjectSlug, slug),
+		HumanURLAbs:                     AbsHumanURL(deps.Settings, deps.ProjectSlug, slug),
+		PublishedAt:                     publishedAt,
+		Created:                         false,
+		RevisionNumber:                  newRev,
+		PinsStored:                      pinsStored,
+		EdgesStored:                     edgesStored,
+		Warnings:                        warnings,
+		SuggestedActions:                suggested,
+		EmbedderUsed:                    embedderInfo(deps),
+		ArtifactMeta:                    updateMetaOut,
+		CanonicalRewriteWithoutEvidence: canonicalRewriteFlag,
 	}, nil
 }
 
@@ -940,6 +1075,7 @@ func bodyHash(body string) string {
 //   - agent_id: server-issued identity (Phase 12c) — trusted
 //   - reported_author_id: client-reported string — untrusted label
 //   - source_session: agent-supplied free-form session id (basis)
+//
 // Returns nil when there's nothing useful to record so the column stays
 // NULL rather than storing {} everywhere.
 func buildSourceSessionRef(deps Deps, in artifactProposeInput) any {
@@ -1004,6 +1140,43 @@ func preflight(in *artifactProposeInput, lang string) (checklist []string, faile
 		}
 	}
 
+	// artifact_meta enum validation. Each axis is optional; when set it
+	// must match the enum. Unknown values fail the whole call so agents
+	// can't quietly smuggle free-form strings into the JSONB.
+	if in.ArtifactMeta != nil {
+		m := in.ArtifactMeta
+		if v := strings.TrimSpace(m.SourceType); v != "" {
+			if _, ok := validSourceTypes[v]; !ok {
+				push(fmt.Sprintf("artifact_meta.source_type %q is not one of code|artifact|user_chat|external|mixed", v), "META_SOURCE_TYPE_INVALID")
+			}
+		}
+		if v := strings.TrimSpace(m.ConsentState); v != "" {
+			if _, ok := validConsentStates[v]; !ok {
+				push(fmt.Sprintf("artifact_meta.consent_state %q is not one of not_needed|requested|granted|denied", v), "META_CONSENT_STATE_INVALID")
+			}
+		}
+		if v := strings.TrimSpace(m.Confidence); v != "" {
+			if _, ok := validConfidences[v]; !ok {
+				push(fmt.Sprintf("artifact_meta.confidence %q is not one of low|medium|high", v), "META_CONFIDENCE_INVALID")
+			}
+		}
+		if v := strings.TrimSpace(m.Audience); v != "" {
+			if _, ok := validAudiences[v]; !ok {
+				push(fmt.Sprintf("artifact_meta.audience %q is not one of owner_only|approvers|project_readers", v), "META_AUDIENCE_INVALID")
+			}
+		}
+		if v := strings.TrimSpace(m.NextContextPolicy); v != "" {
+			if _, ok := validNextContextPolicies[v]; !ok {
+				push(fmt.Sprintf("artifact_meta.next_context_policy %q is not one of default|opt_in|excluded", v), "META_NEXT_CONTEXT_INVALID")
+			}
+		}
+		if v := strings.TrimSpace(m.VerificationState); v != "" {
+			if _, ok := validVerificationStates[v]; !ok {
+				push(fmt.Sprintf("artifact_meta.verification_state %q is not one of verified|partially_verified|unverified", v), "META_VERIFICATION_INVALID")
+			}
+		}
+	}
+
 	// Type-specific guardrails. Minimal keyword checks — Phase 13 brings
 	// in template artifacts so agents get structured exemplars instead of
 	// these ad-hoc tripwires.
@@ -1032,6 +1205,20 @@ func preflight(in *artifactProposeInput, lang string) (checklist []string, faile
 			strings.Contains(lower, "원인") || strings.Contains(lower, "해결")
 		if !hasResolution {
 			push(i18n.T(lang, "preflight.debug_no_resolution"), "DBG_NO_RESOLUTION")
+		}
+	case "VerificationReport":
+		// Migration 0013: VerificationReport artifacts must carry an explicit
+		// pass/partial/fail judgement so the downstream verify tool can
+		// parse the final verdict without re-running LLM classification.
+		// Keyword check is structural-minimum only; richer verdict schema
+		// (json body_json column or body_markdown structured section) is a
+		// V1.x follow-up.
+		lower := strings.ToLower(in.BodyMarkdown)
+		hasVerdict := strings.Contains(lower, "pass") || strings.Contains(lower, "partial") ||
+			strings.Contains(lower, "fail") || strings.Contains(lower, "합격") ||
+			strings.Contains(lower, "부분") || strings.Contains(lower, "불합격")
+		if !hasVerdict {
+			push(i18n.T(lang, "preflight.verify_no_verdict"), "VER_NO_VERDICT")
 		}
 	}
 
@@ -1086,6 +1273,30 @@ func preflight(in *artifactProposeInput, lang string) (checklist []string, faile
 		if s := strings.TrimSpace(tm.Status); s != "" {
 			if _, ok := validTaskStatuses[s]; !ok {
 				push(fmt.Sprintf(i18n.T(lang, "preflight.task_status_invalid"), tm.Status), "TASK_STATUS_INVALID")
+			}
+			// Task lifecycle v2 (migration 0013): `verified` is reserved
+			// for pindoc.artifact.verify. Propose path can only set
+			// open / claimed_done / blocked / cancelled. Direct
+			// transition to verified is rejected so a single agent
+			// cannot ship self-verification in one call — the
+			// Implementer ≠ Verifier invariant is structurally enforced,
+			// not prompt-guided.
+			if s == "verified" {
+				push(i18n.T(lang, "preflight.verified_via_verify_tool_only"), "VER_VIA_VERIFY_TOOL_ONLY")
+			}
+			// `claimed_done` requires acceptance checkboxes to be 100%
+			// checked. Minimum evidence gate so agents cannot flip status
+			// while acceptance criteria still sit at `- [ ]`. Body with
+			// no checkboxes at all passes (not every Task uses the
+			// checklist format).
+			if s == "claimed_done" {
+				done, total := countAcceptanceCheckboxes(in.BodyMarkdown)
+				if total > 0 && done != total {
+					push(
+						fmt.Sprintf(i18n.T(lang, "preflight.claimed_done_incomplete"), done, total),
+						"CLAIMED_DONE_INCOMPLETE",
+					)
+				}
 			}
 		}
 		if p := strings.TrimSpace(tm.Priority); p != "" {
@@ -1452,6 +1663,214 @@ func taskMetaToJSON(artifactType string, tm *TaskMetaInput) any {
 	return string(buf)
 }
 
+// ResolvedArtifactMeta is the server-resolved epistemic metadata that
+// actually lands on the artifact row. Mirrors ArtifactMetaInput plus a
+// warnings slice describing heuristic decisions so agents can see why a
+// default was chosen (e.g. "source_type inferred from pins").
+type ResolvedArtifactMeta struct {
+	SourceType        string   `json:"source_type,omitempty"`
+	ConsentState      string   `json:"consent_state,omitempty"`
+	Confidence        string   `json:"confidence,omitempty"`
+	Audience          string   `json:"audience,omitempty"`
+	NextContextPolicy string   `json:"next_context_policy,omitempty"`
+	VerificationState string   `json:"verification_state,omitempty"`
+	Warnings          []string `json:"-"`
+}
+
+// userChatQuotePattern matches body substrates likely derived from a user
+// chat turn: a quoted phrase that is preceded or followed by an "said"
+// marker in English or Korean. Intentionally conservative — the goal is
+// SOURCE_TYPE_UNCLASSIFIED warning (advisory), not blocking code-grounded
+// writes that happen to include user quotes as evidence.
+var userChatQuoteMarkers = []string{
+	// English markers
+	" said", "user said", "user says", " says:", "user:", "the user",
+	// Korean markers
+	"사용자는", "사용자가", "사용자 말", "말했다", "얘기했", "라고 하", "라고 했",
+}
+
+// resolveArtifactMeta combines agent-declared meta with server heuristics
+// to produce the ResolvedArtifactMeta that will be persisted. Rules (first
+// rule that applies wins per axis):
+//
+//   - source_type: caller value > pins with code kind ⇒ "code" > otherwise ""
+//   - verification_state: caller > (source_type=code ⇒ "partially_verified") > ""
+//   - next_context_policy: caller > (source_type=user_chat ⇒ "opt_in") > ""
+//   - audience: caller > (source_type=user_chat + PII heuristic ⇒ "owner_only") > ""
+//   - consent_state: caller only (no server default — agent must classify)
+//   - confidence: caller only (no server default — agent must classify)
+//
+// Empty strings on return keep the JSONB slot absent (server omits). This
+// lets the column stay {} for legacy rows and gracefully accept partial
+// classifications without forcing agents to pick every axis.
+func resolveArtifactMeta(in *ArtifactMetaInput, pins []ArtifactPinInput, body string, isUpdate bool) ResolvedArtifactMeta {
+	out := ResolvedArtifactMeta{}
+	if in != nil {
+		out.SourceType = strings.TrimSpace(in.SourceType)
+		out.ConsentState = strings.TrimSpace(in.ConsentState)
+		out.Confidence = strings.TrimSpace(in.Confidence)
+		out.Audience = strings.TrimSpace(in.Audience)
+		out.NextContextPolicy = strings.TrimSpace(in.NextContextPolicy)
+		out.VerificationState = strings.TrimSpace(in.VerificationState)
+	}
+
+	hasCodePin := false
+	for _, p := range pins {
+		kind := strings.TrimSpace(p.Kind)
+		if kind == "" {
+			kind = "code"
+		}
+		if kind == "code" {
+			hasCodePin = true
+			break
+		}
+	}
+
+	if out.SourceType == "" && hasCodePin {
+		out.SourceType = "code"
+		out.Warnings = append(out.Warnings, "source_type inferred from code pins")
+	}
+	if out.VerificationState == "" && out.SourceType == "code" {
+		out.VerificationState = "partially_verified"
+	}
+	if out.NextContextPolicy == "" && out.SourceType == "user_chat" {
+		out.NextContextPolicy = "opt_in"
+	}
+	if out.Audience == "" && out.SourceType == "user_chat" && hasPIISignal(body) {
+		out.Audience = "owner_only"
+		out.Warnings = append(out.Warnings, "audience downgraded to owner_only — PII-like pattern in body")
+	}
+	_ = isUpdate // reserved: update path currently does not shift defaults;
+	// Task 4 (canonical rewrite guard) will consume this flag to clamp
+	// verification_state to "unverified" on detected rewrites.
+
+	return out
+}
+
+// hasPIISignal is a coarse regex-free detector that fires on common PII
+// surface forms inside artifact bodies (email addresses, tokens, user IDs).
+// Deliberately over-eager: if anything resembling a secret shows up in a
+// user_chat-derived artifact the audience should start narrow.
+func hasPIISignal(body string) bool {
+	lower := strings.ToLower(body)
+	if strings.Contains(lower, "@") && strings.Contains(lower, ".") {
+		// tiny structural check for "x@y.z" anywhere
+		at := strings.Index(lower, "@")
+		dot := strings.Index(lower[at:], ".")
+		if dot > 0 {
+			return true
+		}
+	}
+	for _, marker := range []string{"bearer ", "api_key", "api-key", "authorization:", "token="} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// artifactMetaToJSON serialises the resolved meta for the JSONB column.
+// Returns "{}" when nothing is set so the column stays non-null and the
+// NOT NULL DEFAULT invariant is preserved on the Go side too (DB would
+// fall back to '{}' anyway, but explicit is safer across the update path).
+func artifactMetaToJSON(r ResolvedArtifactMeta) string {
+	payload := map[string]any{}
+	if r.SourceType != "" {
+		payload["source_type"] = r.SourceType
+	}
+	if r.ConsentState != "" {
+		payload["consent_state"] = r.ConsentState
+	}
+	if r.Confidence != "" {
+		payload["confidence"] = r.Confidence
+	}
+	if r.Audience != "" {
+		payload["audience"] = r.Audience
+	}
+	if r.NextContextPolicy != "" {
+		payload["next_context_policy"] = r.NextContextPolicy
+	}
+	if r.VerificationState != "" {
+		payload["verification_state"] = r.VerificationState
+	}
+	buf, err := json.Marshal(payload)
+	if err != nil {
+		return "{}"
+	}
+	return string(buf)
+}
+
+// classifyConversationDerived returns true when the agent has explicitly
+// declared the artifact's substrate is a user chat (source_type = user_chat
+// or mixed). This is distinct from detectUnclassifiedUserChat: the latter
+// fires on *missing* classification, this one fires on *declared* chat
+// substrate. Server policy (Task `conversation-derived-write-...`) treats
+// declared chat writes as a new sensitive_ops class
+// `conversation_derived_canonical` — they get default draft + opt_in
+// context unless the caller explicitly overrides.
+func classifyConversationDerived(in *artifactProposeInput) bool {
+	if in == nil || in.ArtifactMeta == nil {
+		return false
+	}
+	switch strings.TrimSpace(in.ArtifactMeta.SourceType) {
+	case "user_chat", "mixed":
+		return true
+	}
+	return false
+}
+
+// applyConversationDerivedDefaults mutates the resolved meta and returned
+// completeness when the caller declared a conversation-derived substrate
+// AND provided consent_state=granted. In that case default to draft body
+// status and opt_in next-session context unless the caller explicitly
+// set the corresponding axis (caller override always wins). Returns the
+// adjusted completeness value; caller assigns it back to the local var.
+func applyConversationDerivedDefaults(in *artifactProposeInput, meta *ResolvedArtifactMeta, completeness string) string {
+	if !classifyConversationDerived(in) {
+		return completeness
+	}
+	if meta.ConsentState != "granted" {
+		return completeness
+	}
+	// completeness: when caller left it blank, step down to draft.
+	if strings.TrimSpace(in.Completeness) == "" {
+		completeness = "draft"
+	}
+	// next_context_policy: when caller (and resolver) left it blank,
+	// default to opt_in. resolveArtifactMeta already applies this for
+	// source_type=user_chat; redundant here guards against mixed where
+	// the resolver stays silent.
+	if meta.NextContextPolicy == "" {
+		meta.NextContextPolicy = "opt_in"
+	}
+	return completeness
+}
+
+// detectUnclassifiedUserChat returns true when source_type is unset AND
+// there are no pins AND the body contains patterns typical of user-chat
+// paraphrase (quote marks plus an "said"-style marker). Used to raise
+// SOURCE_TYPE_UNCLASSIFIED warnings on accepted writes — not a block,
+// a nudge for the agent to classify explicitly.
+func detectUnclassifiedUserChat(meta ResolvedArtifactMeta, pins []ArtifactPinInput, body string) bool {
+	if meta.SourceType != "" {
+		return false
+	}
+	if len(pins) > 0 {
+		return false
+	}
+	lower := strings.ToLower(body)
+	hasQuote := strings.Contains(body, "\"") || strings.Contains(body, "「") || strings.Contains(body, "\u201c") || strings.Contains(body, "\u201d")
+	if !hasQuote {
+		return false
+	}
+	for _, marker := range userChatQuoteMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // semanticConflictThreshold is the cosine-distance ceiling below which we
 // treat a vector hit as "likely the same artifact". Recalibrated 2026-04-22
 // against gemma + 13-artifact Tier 2 corpus (docs/16-tier2-preflight.md
@@ -1558,6 +1977,193 @@ func bodyH1Warnings(body string) []string {
 		}
 	}
 	return nil
+}
+
+// countAcceptanceCheckboxes walks the body and returns (done, total) where
+// done counts `- [x]` lines and total counts `- [x]` + `- [ ]` lines. Both
+// are case-insensitive on the fill marker ("x" vs "X"). Used by the Task
+// claimed_done evidence gate (migration 0013): without at least one
+// checkbox the gate stays quiet (not every Task uses the checklist form),
+// but when checkboxes exist they must all be checked.
+func countAcceptanceCheckboxes(body string) (done, total int) {
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		// Accept "- [ ] x", "* [ ] x", "+ [ ] x" as bullet list checkboxes.
+		if len(trimmed) < 5 {
+			continue
+		}
+		marker := trimmed[0]
+		if marker != '-' && marker != '*' && marker != '+' {
+			continue
+		}
+		rest := strings.TrimSpace(trimmed[1:])
+		if len(rest) < 3 || rest[0] != '[' || rest[2] != ']' {
+			continue
+		}
+		fill := rest[1]
+		switch fill {
+		case ' ':
+			total++
+		case 'x', 'X':
+			total++
+			done++
+		}
+	}
+	return done, total
+}
+
+// canonicalClaimSectionsByType returns the H2 headings whose rewrite on the
+// update path counts as a canonical truth change (Task
+// `update-of-canonical-claim-rewrite-guard-...`). First entry per slot is
+// the label surfaced in `warnings[]`. Alternatives section is deliberately
+// omitted for Decision — reshaping alternatives is narrative tuning, not a
+// canonical claim rewrite.
+func canonicalClaimSectionsByType(t string) [][]string {
+	switch t {
+	case "Debug":
+		return [][]string{
+			{"Root cause", "원인"},
+			{"Resolution", "해결"},
+		}
+	case "Decision":
+		return [][]string{
+			{"Decision", "결정"},
+		}
+	case "Analysis":
+		return [][]string{
+			{"Conclusion", "결론"},
+		}
+	default:
+		return nil
+	}
+}
+
+// parseH2Sections splits a markdown body by `## ` headings and returns a
+// map keyed by lowercased heading → the raw section body (all lines up to
+// the next H2). Non-H2 content above the first H2 is discarded — we only
+// care about the named sections. Deliberately does not descend into H3+
+// headings so sub-headings don't fragment their parent section.
+func parseH2Sections(body string) map[string]string {
+	out := map[string]string{}
+	var currentHeading string
+	var buf strings.Builder
+	flush := func() {
+		if currentHeading != "" {
+			out[currentHeading] = buf.String()
+		}
+		buf.Reset()
+	}
+	for _, line := range strings.Split(body, "\n") {
+		if after, ok := strings.CutPrefix(line, "## "); ok {
+			flush()
+			currentHeading = strings.ToLower(strings.TrimSpace(strings.TrimRight(after, "#")))
+			continue
+		}
+		if currentHeading != "" {
+			buf.WriteString(line)
+			buf.WriteString("\n")
+		}
+	}
+	flush()
+	return out
+}
+
+// normalizeSectionContent strips runs of whitespace so "same content,
+// different formatting" doesn't register as a rewrite. Trailing whitespace
+// on lines, blank-line runs, and trailing newlines collapse; everything
+// else stays intact. Intentionally does NOT strip markdown syntax — bolding
+// a phrase or changing bullet markers IS worth flagging as a rewrite
+// because it can change emphasis of the canonical claim.
+func normalizeSectionContent(s string) string {
+	s = strings.TrimSpace(s)
+	var b strings.Builder
+	prevBlank := false
+	for _, line := range strings.Split(s, "\n") {
+		trimmed := strings.TrimRight(line, " \t")
+		if trimmed == "" {
+			if prevBlank {
+				continue
+			}
+			prevBlank = true
+		} else {
+			prevBlank = false
+		}
+		b.WriteString(trimmed)
+		b.WriteString("\n")
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// detectCanonicalClaimRewrite compares the canonical-claim H2 sections of
+// two bodies and returns the (canonical-label) names that changed in
+// non-whitespace content. Returns nil when the artifact type has no
+// canonical claim sections defined or nothing changed.
+func detectCanonicalClaimRewrite(prevBody, newBody, artifactType string) []string {
+	slots := canonicalClaimSectionsByType(artifactType)
+	if len(slots) == 0 {
+		return nil
+	}
+	prevSections := parseH2Sections(prevBody)
+	newSections := parseH2Sections(newBody)
+	var changed []string
+	for _, slot := range slots {
+		canonicalLabel := slot[0]
+		// Collect prev/new content across synonyms — a rewrite that changes
+		// the heading from "Root cause" to "원인" shouldn't read as "absent".
+		var prevVal, newVal string
+		for _, alt := range slot {
+			key := strings.ToLower(alt)
+			if v, ok := prevSections[key]; ok && prevVal == "" {
+				prevVal = v
+			}
+			if v, ok := newSections[key]; ok && newVal == "" {
+				newVal = v
+			}
+		}
+		prevN := normalizeSectionContent(prevVal)
+		newN := normalizeSectionContent(newVal)
+		// Absent in both → nothing to guard.
+		if prevN == "" && newN == "" {
+			continue
+		}
+		if prevN != newN {
+			changed = append(changed, canonicalLabel)
+		}
+	}
+	return changed
+}
+
+// evidenceKeywordMarkers matches commit_msg blurbs that hint the rewrite
+// was backed by fresh investigation (reproduction, verification). Weak
+// signal — resolveArtifactMeta.verification_state and new pins are the
+// primary signals.
+var evidenceKeywordMarkers = []string{
+	"evidence", "verified", "verify", "tested", "test added",
+	"reproduced", "repro", "confirmed", "근거", "재현", "검증", "확인",
+}
+
+// hasEvidenceDelta returns true when the update carries at least one signal
+// that backs a canonical-claim rewrite: new pins attached, verification
+// state advanced past `unverified`, or commit_msg references an evidence
+// keyword. Explicitly permissive on weak signals so a legitimate "fixed
+// typo, re-read the docs" rewrite doesn't earn a warning it doesn't merit.
+func hasEvidenceDelta(prevMeta ResolvedArtifactMeta, in *artifactProposeInput) bool {
+	if len(in.Pins) > 0 {
+		return true
+	}
+	if in.ArtifactMeta != nil {
+		newVer := strings.TrimSpace(in.ArtifactMeta.VerificationState)
+		if newVer != "" && newVer != "unverified" && prevMeta.VerificationState != newVer {
+			return true
+		}
+	}
+	commit := strings.ToLower(in.CommitMsg)
+	for _, marker := range evidenceKeywordMarkers {
+		if strings.Contains(commit, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // requiredH2Warnings flags missing mandatory H2 sections per Type. Fuzzy

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -28,24 +29,24 @@ type artifactReadInput struct {
 }
 
 type artifactReadOutput struct {
-	ID            string   `json:"id"`
-	ProjectSlug   string   `json:"project_slug"`
-	AreaSlug      string   `json:"area_slug"`
-	Slug          string   `json:"slug"`
-	Type          string   `json:"type"`
-	Title         string   `json:"title"`
-	BodyMarkdown  string   `json:"body_markdown,omitempty"` // omitted on view=brief
-	Tags          []string `json:"tags"`
-	Completeness  string   `json:"completeness"`
-	Status        string   `json:"status"`
-	ReviewState   string   `json:"review_state"`
-	AuthorKind    string   `json:"author_kind"`
-	AuthorID      string   `json:"author_id"`
-	AuthorVersion string   `json:"author_version,omitempty"`
-	SupersededBy  string   `json:"superseded_by,omitempty"`
-	AgentRef      string   `json:"agent_ref"`
-	HumanURL      string   `json:"human_url"`
-	HumanURLAbs   string   `json:"human_url_abs,omitempty"`
+	ID            string    `json:"id"`
+	ProjectSlug   string    `json:"project_slug"`
+	AreaSlug      string    `json:"area_slug"`
+	Slug          string    `json:"slug"`
+	Type          string    `json:"type"`
+	Title         string    `json:"title"`
+	BodyMarkdown  string    `json:"body_markdown,omitempty"` // omitted on view=brief
+	Tags          []string  `json:"tags"`
+	Completeness  string    `json:"completeness"`
+	Status        string    `json:"status"`
+	ReviewState   string    `json:"review_state"`
+	AuthorKind    string    `json:"author_kind"`
+	AuthorID      string    `json:"author_id"`
+	AuthorVersion string    `json:"author_version,omitempty"`
+	SupersededBy  string    `json:"superseded_by,omitempty"`
+	AgentRef      string    `json:"agent_ref"`
+	HumanURL      string    `json:"human_url"`
+	HumanURLAbs   string    `json:"human_url_abs,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 	PublishedAt   time.Time `json:"published_at,omitzero"`
@@ -60,6 +61,13 @@ type artifactReadOutput struct {
 	RecentRevisions []RevisionSummaryRef `json:"recent_revisions,omitempty"`
 	RelatesTo       []EdgeRef            `json:"relates_to,omitempty"`
 	RelatedBy       []EdgeRef            `json:"related_by,omitempty"`
+
+	// ArtifactMeta echoes the epistemic axes persisted on the artifact.
+	// Populated on every view (brief / full / continuation) because the
+	// 6-axis trust summary is the cheapest signal a caller needs to decide
+	// whether this artifact is usable as-is, which is the same question on
+	// every view. Empty object when the row predates migration 0012.
+	ArtifactMeta ResolvedArtifactMeta `json:"artifact_meta"`
 }
 
 // PinRef mirrors artifact_pins rows. Empty repo defaults to "origin" in
@@ -120,6 +128,7 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			var out artifactReadOutput
 			var desc, authorVer, superseded *string
 			var publishedAt *time.Time
+			var metaRaw []byte
 			err := deps.DB.QueryRow(ctx, `
 				SELECT
 					a.id::text,
@@ -139,7 +148,8 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 					a.superseded_by::text,
 					a.created_at,
 					a.updated_at,
-					a.published_at
+					a.published_at,
+					a.artifact_meta
 				FROM artifacts a
 				JOIN projects proj ON proj.id = a.project_id
 				JOIN areas    area ON area.id = a.area_id
@@ -151,7 +161,7 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 				&out.Type, &out.Title, &out.BodyMarkdown, &out.Tags,
 				&out.Completeness, &out.Status, &out.ReviewState,
 				&out.AuthorKind, &out.AuthorID, &authorVer, &superseded,
-				&out.CreatedAt, &out.UpdatedAt, &publishedAt,
+				&out.CreatedAt, &out.UpdatedAt, &publishedAt, &metaRaw,
 			)
 			_ = desc // reserved; project.description not part of read response
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -168,6 +178,12 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			}
 			if publishedAt != nil {
 				out.PublishedAt = *publishedAt
+			}
+			if len(metaRaw) > 0 {
+				if err := json.Unmarshal(metaRaw, &out.ArtifactMeta); err != nil {
+					deps.Logger.Warn("artifact_meta unmarshal failed",
+						"artifact_id", out.ID, "err", err)
+				}
 			}
 			out.AgentRef = "pindoc://" + out.Slug
 			out.HumanURL = HumanURL(out.ProjectSlug, out.Slug)
@@ -376,10 +392,11 @@ func loadEdges(ctx context.Context, deps Deps, artifactID string) ([]EdgeRef, []
 // actually wanted. Plain IDs/slugs pass through unchanged.
 //
 // Recognised shapes:
-//   pindoc://<id_or_slug>
-//   https://<host>/a/<id_or_slug>
-//   http://<host>/a/<id_or_slug>
-//   <id_or_slug>
+//
+//	pindoc://<id_or_slug>
+//	https://<host>/a/<id_or_slug>
+//	http://<host>/a/<id_or_slug>
+//	<id_or_slug>
 func normalizeRef(raw string) string {
 	s := strings.TrimSpace(raw)
 	switch {
