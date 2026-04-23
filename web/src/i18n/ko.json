@@ -9,6 +9,7 @@
   "nav.inbox": "Inbox",
   "nav.search_hint": "검색 또는 명령어 실행...",
   "nav.theme_toggle": "테마 전환",
+  "nav.telemetry": "MCP 텔레메트리",
   "nav.width_toggle": "본문 폭",
   "nav.width_narrow": "좁게",
   "nav.width_default": "기본",

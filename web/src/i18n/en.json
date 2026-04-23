@@ -9,6 +9,7 @@
   "nav.inbox": "Inbox",
   "nav.search_hint": "Search or run command...",
   "nav.theme_toggle": "Toggle theme",
+  "nav.telemetry": "MCP telemetry",
   "nav.width_toggle": "Reader width",
   "nav.width_narrow": "Narrow",
   "nav.width_default": "Default",

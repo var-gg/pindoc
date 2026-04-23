@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router";
-import { AlignCenter, AlignJustify, ChevronDown, FileText, Inbox, Maximize2, Menu, Moon, Search, Share2, Sun } from "lucide-react";
+import { Activity, AlignCenter, AlignJustify, ChevronDown, FileText, Inbox, Maximize2, Menu, Moon, Search, Share2, Sun } from "lucide-react";
 import type { ComponentType } from "react";
 import { api, type ProjectListItem } from "../api/client";
 import { useI18n, type Lang } from "../i18n";
@@ -109,6 +109,15 @@ export function TopNav({
       <button className="nav__lang" onClick={() => setLang(nextLang)} aria-label={t("lang.switch")}>
         {lang === "ko" ? "KO" : "EN"}
       </button>
+
+      <NavLink
+        to="/ops/telemetry"
+        className="nav__theme"
+        aria-label={t("nav.telemetry")}
+        title={t("nav.telemetry")}
+      >
+        <Activity className="lucide" />
+      </NavLink>
 
       <button className="nav__theme" onClick={onToggleTheme} aria-label={t("nav.theme_toggle")}>
         {theme === "dark" ? <Moon className="lucide" /> : <Sun className="lucide" />}
