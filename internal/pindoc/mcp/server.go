@@ -154,23 +154,8 @@ func NewServer(opts Options) *Server {
 // or fatal error). Graceful shutdown on ctx cancel is handled by the SDK.
 func (s *Server) Run(ctx context.Context, transport sdk.Transport) error {
 	s.logger.Info("mcp server ready",
-		"tools", []string{
-			"pindoc.ping",
-			"pindoc.project.current",
-			"pindoc.project.create",
-			"pindoc.area.list",
-			"pindoc.artifact.read",
-			"pindoc.artifact.propose",
-			"pindoc.harness.install",
-			"pindoc.artifact.search",
-			"pindoc.context.for_task",
-			"pindoc.artifact.revisions",
-			"pindoc.artifact.diff",
-			"pindoc.artifact.summary_since",
-			"pindoc.artifact.verify",
-			"pindoc.user.current",
-			"pindoc.user.update",
-			"pindoc.scope.in_flight",
-		})
+		"tools", tools.RegisteredTools,
+		"toolset_version", tools.ToolsetVersion(),
+	)
 	return s.sdk.Run(ctx, transport)
 }

@@ -329,6 +329,11 @@ type artifactProposeOutput struct {
 	// don't have to hardcode the catalog.
 	Warnings           []string `json:"warnings,omitempty"`
 	WarningSeverities  []string `json:"warning_severities,omitempty" jsonschema:"aligned with warnings[] index-by-index; one of error | warn | info"`
+	// ToolsetVersion echoes the current MCP tool catalog hash so agents
+	// can detect drift without a dedicated ping — every propose response
+	// is enough to notice "server grew a tool between sessions, reconnect".
+	// Phase H drift notice.
+	ToolsetVersion string `json:"toolset_version,omitempty"`
 	// EmbedderUsed (Phase 17 follow-up) echoes which provider served the
 	// semantic-conflict check + chunk embedding so the agent can detect
 	// silent stub fallback. Empty when the embedder wasn't touched (e.g.
@@ -829,6 +834,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				WarningSeverities: severities,
 				EmbedderUsed:      embedderInfo(deps),
 				ArtifactMeta:      &metaOut,
+				ToolsetVersion:    ToolsetVersion(),
 			}, nil
 		},
 	)
@@ -1324,6 +1330,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		EmbedderUsed:                    embedderInfo(deps),
 		ArtifactMeta:                    updateMetaOut,
 		CanonicalRewriteWithoutEvidence: canonicalRewriteFlag,
+		ToolsetVersion:                  ToolsetVersion(),
 	}, nil
 }
 

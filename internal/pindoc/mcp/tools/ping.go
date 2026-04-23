@@ -31,6 +31,12 @@ type pingOutput struct {
 	Version      string    `json:"version"`
 	ServerTime   time.Time `json:"server_time"`
 	UserLanguage string    `json:"user_language"`
+	// ToolsetVersion is a stable short hash of the current MCP tool
+	// catalog. Agents compare this across sessions to detect drift — if
+	// the server grew a new tool (e.g. pindoc.scope.in_flight landed in
+	// Phase F), this value changes and the agent's schema cache is stale
+	// until the session restarts. Phase H drift notice.
+	ToolsetVersion string `json:"toolset_version"`
 }
 
 // RegisterPing wires pindoc.ping — the Phase-1 handshake tool. Its job is
@@ -48,10 +54,11 @@ func RegisterPing(server *sdk.Server, deps PingDeps) {
 				echo = fmt.Sprintf("pong: %s", in.Message)
 			}
 			return nil, pingOutput{
-				Pong:         echo,
-				Version:      deps.Version,
-				ServerTime:   time.Now().UTC(),
-				UserLanguage: deps.UserLanguage,
+				Pong:           echo,
+				Version:        deps.Version,
+				ServerTime:     time.Now().UTC(),
+				UserLanguage:   deps.UserLanguage,
+				ToolsetVersion: ToolsetVersion(),
 			}, nil
 		},
 	)
