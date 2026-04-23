@@ -423,3 +423,43 @@
   color: var(--prio-p0);
   margin-bottom: 2px;
 }
+
+/* ===========================================================
+ * Type chip — Task task-type-palette-binding (UI-E)
+ *
+ * Semantic classification badge for artifact.type. Shape stays
+ * identical to the neutral .chip (small pill, r-1 radius) so it
+ * slots into existing list rows; color is the only varying axis
+ * so a reader can scan a 30-row list and pick out the Decision
+ * from the Debug at a glance.
+ *
+ * Palette source: colors_and_type.css --type-{kebab}-{bg,fg,border}.
+ * Unknown types fall back to --type-default (neutral).
+ * =========================================================== */
+.type-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: var(--r-1);
+  border: 1px solid var(--type-default-border);
+  background: var(--type-default-bg);
+  color: var(--type-default);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.type-chip--decision           { background: var(--type-decision-bg);           color: var(--type-decision);           border-color: var(--type-decision-border); }
+.type-chip--analysis           { background: var(--type-analysis-bg);           color: var(--type-analysis);           border-color: var(--type-analysis-border); }
+.type-chip--task               { background: var(--type-task-bg);               color: var(--type-task);               border-color: var(--type-task-border); }
+.type-chip--debug              { background: var(--type-debug-bg);              color: var(--type-debug);              border-color: var(--type-debug-border); }
+.type-chip--glossary           { background: var(--type-glossary-bg);           color: var(--type-glossary);           border-color: var(--type-glossary-border); }
+.type-chip--flow               { background: var(--type-flow-bg);               color: var(--type-flow);               border-color: var(--type-flow-border); }
+.type-chip--tc                 { background: var(--type-tc-bg);                 color: var(--type-tc);                 border-color: var(--type-tc-border); }
+.type-chip--feature            { background: var(--type-feature-bg);            color: var(--type-feature);            border-color: var(--type-feature-border); }
+.type-chip--apiendpoint        { background: var(--type-apiendpoint-bg);        color: var(--type-apiendpoint);        border-color: var(--type-apiendpoint-border); }
+.type-chip--screen             { background: var(--type-screen-bg);             color: var(--type-screen);             border-color: var(--type-screen-border); }
+.type-chip--datamodel          { background: var(--type-datamodel-bg);          color: var(--type-datamodel);          border-color: var(--type-datamodel-border); }
+.type-chip--verificationreport { background: var(--type-verificationreport-bg); color: var(--type-verificationreport); border-color: var(--type-verificationreport-border); }

@@ -111,6 +111,64 @@
   --prio-p3-bg:     oklch(96% 0.003 80);
   --prio-p3-border: oklch(90% 0.005 80);
 
+  /* Type palette — semantic classification.
+   * Hue bands intentionally distinct from status/priority so a Decision
+   * chip (amber) never visually competes with a status=draft pill (also
+   * amber) — the type-chip is squared (r-1) while status-pill is fully
+   * rounded, so even when the hue overlaps the shape separates them.
+   * Undefined types fall back to --type-default (neutral). */
+  --type-decision:        oklch(46% 0.13 75);    /* amber/gold — gravitas */
+  --type-decision-bg:     oklch(95% 0.04 80);
+  --type-decision-border: oklch(86% 0.08 78);
+
+  --type-analysis:        oklch(46% 0.12 235);   /* slate-blue — observing */
+  --type-analysis-bg:     oklch(95% 0.03 232);
+  --type-analysis-border: oklch(84% 0.06 232);
+
+  --type-task:            oklch(44% 0.13 155);   /* green — action */
+  --type-task-bg:         oklch(95% 0.05 160);
+  --type-task-border:     oklch(82% 0.09 160);
+
+  --type-debug:           oklch(48% 0.16 22);    /* crimson — alert */
+  --type-debug-bg:        oklch(95% 0.04 22);
+  --type-debug-border:    oklch(84% 0.09 22);
+
+  --type-glossary:        oklch(48% 0.14 310);   /* violet — reference */
+  --type-glossary-bg:     oklch(95% 0.04 310);
+  --type-glossary-border: oklch(84% 0.09 310);
+
+  --type-flow:            oklch(46% 0.11 195);   /* teal — process */
+  --type-flow-bg:         oklch(95% 0.03 195);
+  --type-flow-border:     oklch(84% 0.07 195);
+
+  --type-tc:              oklch(46% 0.10 145);   /* sage — verification */
+  --type-tc-bg:           oklch(95% 0.03 145);
+  --type-tc-border:       oklch(84% 0.07 145);
+
+  --type-feature:         oklch(48% 0.13 290);   /* magenta — product */
+  --type-feature-bg:      oklch(95% 0.04 290);
+  --type-feature-border:  oklch(84% 0.09 290);
+
+  --type-apiendpoint:        oklch(48% 0.13 50); /* burnt orange — surface */
+  --type-apiendpoint-bg:     oklch(95% 0.04 50);
+  --type-apiendpoint-border: oklch(86% 0.09 50);
+
+  --type-screen:          oklch(46% 0.10 180);   /* cyan — surface */
+  --type-screen-bg:       oklch(95% 0.03 180);
+  --type-screen-border:   oklch(84% 0.07 180);
+
+  --type-datamodel:        oklch(46% 0.11 260);  /* indigo — schema */
+  --type-datamodel-bg:     oklch(95% 0.03 260);
+  --type-datamodel-border: oklch(84% 0.07 260);
+
+  --type-verificationreport:        oklch(44% 0.13 160); /* emerald — verified */
+  --type-verificationreport-bg:     oklch(95% 0.05 165);
+  --type-verificationreport-border: oklch(82% 0.09 160);
+
+  --type-default:         oklch(45% 0.012 265);  /* neutral fallback */
+  --type-default-bg:      oklch(95% 0.004 80);
+  --type-default-border:  oklch(88% 0.005 80);
+
   /* Syntax / diff */
   --diff-add-bg: oklch(95% 0.05 160);
   --diff-add-fg: oklch(42% 0.14 155);
@@ -258,6 +316,60 @@
   --prio-p3:        oklch(58% 0.010 265);
   --prio-p3-bg:     oklch(20% 0.009 265);
   --prio-p3-border: oklch(28% 0.010 265);
+
+  /* Type palette — dark mode mirrors. Text tokens brighten,
+   * backgrounds darken, borders sit between. Hue bands preserved. */
+  --type-decision:        oklch(78% 0.14 78);
+  --type-decision-bg:     oklch(22% 0.05 78);
+  --type-decision-border: oklch(32% 0.08 78);
+
+  --type-analysis:        oklch(78% 0.12 232);
+  --type-analysis-bg:     oklch(22% 0.04 232);
+  --type-analysis-border: oklch(32% 0.07 232);
+
+  --type-task:            oklch(76% 0.14 160);
+  --type-task-bg:         oklch(22% 0.05 160);
+  --type-task-border:     oklch(32% 0.08 160);
+
+  --type-debug:           oklch(78% 0.15 22);
+  --type-debug-bg:        oklch(22% 0.05 22);
+  --type-debug-border:    oklch(32% 0.09 22);
+
+  --type-glossary:        oklch(78% 0.14 310);
+  --type-glossary-bg:     oklch(22% 0.05 310);
+  --type-glossary-border: oklch(32% 0.09 310);
+
+  --type-flow:            oklch(76% 0.12 195);
+  --type-flow-bg:         oklch(22% 0.04 195);
+  --type-flow-border:     oklch(32% 0.07 195);
+
+  --type-tc:              oklch(76% 0.11 145);
+  --type-tc-bg:           oklch(22% 0.04 145);
+  --type-tc-border:       oklch(32% 0.07 145);
+
+  --type-feature:         oklch(78% 0.13 290);
+  --type-feature-bg:      oklch(22% 0.05 290);
+  --type-feature-border:  oklch(32% 0.09 290);
+
+  --type-apiendpoint:        oklch(78% 0.14 50);
+  --type-apiendpoint-bg:     oklch(22% 0.05 50);
+  --type-apiendpoint-border: oklch(32% 0.09 50);
+
+  --type-screen:          oklch(76% 0.11 180);
+  --type-screen-bg:       oklch(22% 0.04 180);
+  --type-screen-border:   oklch(32% 0.07 180);
+
+  --type-datamodel:        oklch(76% 0.12 260);
+  --type-datamodel-bg:     oklch(22% 0.04 260);
+  --type-datamodel-border: oklch(32% 0.07 260);
+
+  --type-verificationreport:        oklch(76% 0.14 160);
+  --type-verificationreport-bg:     oklch(22% 0.05 160);
+  --type-verificationreport-border: oklch(32% 0.08 160);
+
+  --type-default:         oklch(62% 0.010 265);
+  --type-default-bg:      oklch(22% 0.009 265);
+  --type-default-border:  oklch(30% 0.010 265);
 
   --diff-add-bg: oklch(22% 0.05 160);
   --diff-add-fg: oklch(80% 0.14 155);

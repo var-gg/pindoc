@@ -10,6 +10,7 @@ import { Sidecar } from "./Sidecar";
 import { TopNav } from "./TopNav";
 import { initTheme, setTheme, type Theme } from "./theme";
 import { useReaderData } from "./useReaderData";
+import { typeChipClass } from "./typeChip";
 import "../styles/reader.css";
 
 export type ReaderView = "reader" | "inbox" | "graph" | "tasks";
@@ -328,7 +329,7 @@ function Body({
                   } : undefined}
                 >
                   <div className="backlink__head">
-                    <span className="chip">{a.type}</span>
+                    <span className={typeChipClass(a.type)}>{a.type}</span>
                     <span>{a.title}</span>
                   </div>
                   <div className="backlink__excerpt">

@@ -4,6 +4,7 @@ import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
 import { PindocMarkdown } from "./Markdown";
 import { TrustCard } from "./TrustCard";
+import { typeChipClass } from "./typeChip";
 
 type Props = {
   detail: Artifact | null;
@@ -52,7 +53,7 @@ export function ReaderSurface({ detail, emptyMessage }: Props) {
             <span className={`p-dot p-dot--${detail.status}`} />
             {detail.status}
           </span>
-          <span className="chip">{detail.type}</span>
+          <span className={typeChipClass(detail.type)}>{detail.type}</span>
           <span className="chip chip--area">{detail.area_slug}</span>
           <span className="art-meta__sep">·</span>
           <div className="prov">
