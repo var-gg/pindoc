@@ -73,6 +73,14 @@ type artifactProposeInput struct {
 	// current max revision_number.
 	ExpectedVersion *int `json:"expected_version,omitempty" jsonschema:"required for update_of; current revision number (>= 1)"`
 
+	// Shape is the discriminator for the revision mutation kind (Phase B
+	// revision-shapes refactor). Empty defaults to "body_patch" — the
+	// legacy path that re-encodes the whole body. Other shapes (Phase C+)
+	// unlock metadata-only / acceptance-transition / scope-defer paths
+	// without a full body round-trip. See internal/pindoc/mcp/tools/
+	// revision_shape.go for the full enum.
+	Shape string `json:"shape,omitempty" jsonschema:"one of body_patch|meta_patch|acceptance_transition|scope_defer; default body_patch"`
+
 	// SupersedeOf marks the target artifact as superseded by this new one.
 	// Creates a NEW artifact (like a no-update_of call), then flips the
 	// target's status to 'superseded' and sets superseded_by to the new id.
@@ -782,7 +790,22 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 // handleUpdate writes a new revision for an existing artifact, updates the
 // head row, re-chunks embeddings, and emits an event. Runs in a single
 // transaction so search never sees a half-indexed update.
+//
+// Phase B revision-shapes dispatch: the shape field (validated in
+// preflight) decides which writer runs. Phase B only wires body_patch —
+// meta_patch / acceptance_transition / scope_defer return
+// SHAPE_NOT_IMPLEMENTED until their phase lands (C / D / F).
 func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang string) (*sdk.CallToolResult, artifactProposeOutput, error) {
+	shape, _ := parseShape(in.Shape) // preflight already validated
+	if shape != ShapeBodyPatch {
+		return nil, artifactProposeOutput{
+			Status:          "not_ready",
+			ErrorCode:       "SHAPE_NOT_IMPLEMENTED",
+			Failed:          []string{"SHAPE_NOT_IMPLEMENTED"},
+			Checklist:       []string{fmt.Sprintf(i18n.T(lang, "preflight.shape_not_implemented"), in.Shape)},
+			PatchableFields: patchFieldsFor("SHAPE_NOT_IMPLEMENTED"),
+		}, nil
+	}
 	if strings.TrimSpace(in.CommitMsg) == "" {
 		return nil, artifactProposeOutput{
 			Status:    "not_ready",
@@ -798,17 +821,17 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 
 	ref := normalizeRef(in.UpdateOf)
 
-	var artifactID, projectID, currentBody, currentTitle, currentType string
+	var artifactID, projectID, currentBody, currentTitle, currentType, currentSlug string
 	var currentMetaRaw []byte
 	var lastRev int
 	err := deps.DB.QueryRow(ctx, `
-		SELECT a.id::text, a.project_id::text, a.body_markdown, a.title, a.type, a.artifact_meta,
+		SELECT a.id::text, a.project_id::text, a.body_markdown, a.title, a.type, a.slug, a.artifact_meta,
 		       COALESCE((SELECT max(revision_number) FROM artifact_revisions WHERE artifact_id = a.id), 0)
 		FROM artifacts a
 		JOIN projects p ON p.id = a.project_id
 		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 		LIMIT 1
-	`, deps.ProjectSlug, ref).Scan(&artifactID, &projectID, &currentBody, &currentTitle, &currentType, &currentMetaRaw, &lastRev)
+	`, deps.ProjectSlug, ref).Scan(&artifactID, &projectID, &currentBody, &currentTitle, &currentType, &currentSlug, &currentMetaRaw, &lastRev)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, artifactProposeOutput{
 			Status:    "not_ready",
@@ -1063,9 +1086,15 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 	if len(currentMetaRaw) > 0 {
 		_ = json.Unmarshal(currentMetaRaw, &prevMeta)
 	}
+	// Phase B exclusion — templates ARE the canonical source for their
+	// type's section layout, so rewriting ## Decision / ## Root cause on
+	// _template_* is the intended edit path, not a guarded claim rewrite.
+	// Skip the guard entirely for template slugs so routine template
+	// maintenance doesn't spew CANONICAL_REWRITE_WITHOUT_EVIDENCE every
+	// revision.
 	rewrittenSections := detectCanonicalClaimRewrite(currentBody, in.BodyMarkdown, currentType)
 	canonicalRewriteFlag := false
-	if len(rewrittenSections) > 0 && !hasEvidenceDelta(prevMeta, &in) {
+	if len(rewrittenSections) > 0 && !hasEvidenceDelta(prevMeta, &in) && !isTemplateArtifact(currentSlug) {
 		canonicalRewriteFlag = true
 		warnings = append(warnings, "CANONICAL_REWRITE_WITHOUT_EVIDENCE:"+strings.Join(rewrittenSections, "+"))
 		suggested = []string{
@@ -1371,6 +1400,20 @@ func preflight(ctx context.Context, deps Deps, in *artifactProposeInput, lang st
 		}
 	}
 
+	// Phase B revision-shapes: validate the optional shape discriminator
+	// before the tool dispatches into handleUpdate. Empty = legacy
+	// body_patch path; anything else has to be a known enum value. The
+	// create path only accepts body_patch (meta-only / acceptance /
+	// scope-defer shapes are meaningless without a prior head) and we
+	// enforce that here so the error surfaces alongside schema issues
+	// rather than mid-handler.
+	shape, shapeOK := parseShape(in.Shape)
+	if !shapeOK {
+		push(fmt.Sprintf(i18n.T(lang, "preflight.shape_invalid"), in.Shape), "SHAPE_INVALID")
+	} else if shape != ShapeBodyPatch && strings.TrimSpace(in.UpdateOf) == "" {
+		push(i18n.T(lang, "preflight.shape_needs_update"), "SHAPE_REQUIRES_UPDATE")
+	}
+
 	// Phase 15b: task_meta shape. Only validated when provided and only
 	// meaningful on type=Task. Non-Task with task_meta earns a soft
 	// rejection so agents don't accidentally attach tracker dims to
@@ -1587,6 +1630,8 @@ func patchFieldsFor(code string) []string {
 		return []string{"expected_version"}
 	case "VER_CONFLICT":
 		return []string{"expected_version", "body_markdown", "title"}
+	case "SHAPE_INVALID", "SHAPE_REQUIRES_UPDATE", "SHAPE_NOT_IMPLEMENTED":
+		return []string{"shape"}
 	case "MISSING_COMMIT_MSG":
 		return []string{"commit_msg"}
 	case "POSSIBLE_DUP":
