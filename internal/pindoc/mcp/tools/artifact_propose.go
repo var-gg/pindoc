@@ -321,7 +321,14 @@ type artifactProposeOutput struct {
 	// writes. Current set: RECOMMEND_READ_BEFORE_CREATE when a create
 	// passed but a semantic close match existed — the agent did not read
 	// it. Agents should log/surface; not a block.
-	Warnings []string `json:"warnings,omitempty"`
+	//
+	// Phase G ordering — slice is sorted by severity descending so the
+	// first entries are the ones an agent should act on first. The
+	// parallel WarningSeverities slice carries the resolved severity
+	// ("error" | "warn" | "info") aligned index-by-index so rich clients
+	// don't have to hardcode the catalog.
+	Warnings           []string `json:"warnings,omitempty"`
+	WarningSeverities  []string `json:"warning_severities,omitempty" jsonschema:"aligned with warnings[] index-by-index; one of error | warn | info"`
 	// EmbedderUsed (Phase 17 follow-up) echoes which provider served the
 	// semantic-conflict check + chunk embedding so the agent can detect
 	// silent stub fallback. Empty when the embedder wasn't touched (e.g.
@@ -800,22 +807,28 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			recordWarningEvent(ctx, deps, projectID, newID, 1, warnings, in.AuthorID, false)
 
 			metaOut := resolvedMeta
+			sortedWarnings := sortWarningsBySeverity(warnings)
+			severities := make([]string, len(sortedWarnings))
+			for i, w := range sortedWarnings {
+				severities[i] = warningSeverity(w)
+			}
 			return nil, artifactProposeOutput{
-				Status:         "accepted",
-				ArtifactID:     newID,
-				Slug:           finalSlug,
-				AgentRef:       "pindoc://" + finalSlug,
-				HumanURL:       HumanURL(deps.ProjectSlug, deps.ProjectLocale, finalSlug),
-				HumanURLAbs:    AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, finalSlug),
-				PublishedAt:    publishedAt,
-				Created:        true,
-				RevisionNumber: 1,
-				PinsStored:     pinsStored,
-				EdgesStored:    edgesStored,
-				Superseded:     supersededFlag,
-				Warnings:       warnings,
-				EmbedderUsed:   embedderInfo(deps),
-				ArtifactMeta:   &metaOut,
+				Status:            "accepted",
+				ArtifactID:        newID,
+				Slug:              finalSlug,
+				AgentRef:          "pindoc://" + finalSlug,
+				HumanURL:          HumanURL(deps.ProjectSlug, deps.ProjectLocale, finalSlug),
+				HumanURLAbs:       AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, finalSlug),
+				PublishedAt:       publishedAt,
+				Created:           true,
+				RevisionNumber:    1,
+				PinsStored:        pinsStored,
+				EdgesStored:       edgesStored,
+				Superseded:        supersededFlag,
+				Warnings:          sortedWarnings,
+				WarningSeverities: severities,
+				EmbedderUsed:      embedderInfo(deps),
+				ArtifactMeta:      &metaOut,
 			}, nil
 		},
 	)
@@ -1288,6 +1301,11 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 	// roll back the revision.
 	recordWarningEvent(ctx, deps, projectID, artifactID, newRev, warnings, in.AuthorID, canonicalRewriteFlag)
 
+	sortedWarnings := sortWarningsBySeverity(warnings)
+	severities := make([]string, len(sortedWarnings))
+	for i, w := range sortedWarnings {
+		severities[i] = warningSeverity(w)
+	}
 	return nil, artifactProposeOutput{
 		Status:                          "accepted",
 		ArtifactID:                      artifactID,
@@ -1300,7 +1318,8 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		RevisionNumber:                  newRev,
 		PinsStored:                      pinsStored,
 		EdgesStored:                     edgesStored,
-		Warnings:                        warnings,
+		Warnings:                        sortedWarnings,
+		WarningSeverities:               severities,
 		SuggestedActions:                suggested,
 		EmbedderUsed:                    embedderInfo(deps),
 		ArtifactMeta:                    updateMetaOut,
