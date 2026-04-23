@@ -32,6 +32,14 @@ type Deps struct {
 	// Resolved once at startup from PINDOC_PROJECT.
 	DefaultProjectSlug string
 
+	// DefaultProjectLocale pairs with DefaultProjectSlug to rebuild
+	// pre-Phase-18 URLs (`/wiki/...` legacy shares) into their new
+	// `/p/<slug>/<locale>/...` canonical shape. Resolved once at startup
+	// by querying `projects.locale WHERE slug = DefaultProjectSlug`.
+	// Empty falls back to "en" client-side (see ServerConfig in
+	// web/src/api/client.ts).
+	DefaultProjectLocale string
+
 	// MultiProject toggles UI switcher visibility. Read: does this
 	// instance expect to host >1 project? False keeps the switcher
 	// hidden even if extra rows exist in the projects table.

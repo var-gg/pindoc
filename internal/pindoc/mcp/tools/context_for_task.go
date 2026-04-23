@@ -207,8 +207,8 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 					return nil, contextForTaskOutput{}, fmt.Errorf("scan: %w", err)
 				}
 				l.AgentRef = "pindoc://" + l.Slug
-				l.HumanURL = HumanURL(deps.ProjectSlug, l.Slug)
-				l.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, l.Slug)
+				l.HumanURL = HumanURL(deps.ProjectSlug, deps.ProjectLocale, l.Slug)
+				l.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, l.Slug)
 				if bestHeading != "" {
 					l.Rationale = "Best-matching section: " + bestHeading
 				} else {

@@ -82,15 +82,30 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Resolve the default project's locale at startup so LegacyRedirect
+	// in the web UI can rebuild pre-Phase-18 URLs into /p/:slug/:locale/
+	// shape without an extra round-trip (Task task-phase-18-project-
+	// locale-implementation). Missing project row (fresh install before
+	// pindoc.project.create runs) is expected — leave empty and the
+	// client-side fallback kicks in.
+	var defaultLocale string
+	if err := pool.QueryRow(ctx,
+		`SELECT locale FROM projects WHERE slug = $1 LIMIT 1`, cfg.ProjectSlug,
+	).Scan(&defaultLocale); err != nil {
+		logger.Info("default project locale lookup skipped",
+			"project_slug", cfg.ProjectSlug, "err", err)
+	}
+
 	handler := httpapi.New(cfg, httpapi.Deps{
-		DB:                 pool,
-		Logger:             logger,
-		DefaultProjectSlug: cfg.ProjectSlug,
-		MultiProject:       cfg.MultiProject,
-		Embedder:           embedder,
-		Settings:           ssStore,
-		Version:            version,
-		BuildCommit:        commit,
+		DB:                   pool,
+		Logger:               logger,
+		DefaultProjectSlug:   cfg.ProjectSlug,
+		DefaultProjectLocale: defaultLocale,
+		MultiProject:         cfg.MultiProject,
+		Embedder:             embedder,
+		Settings:             ssStore,
+		Version:              version,
+		BuildCommit:          commit,
 	})
 
 	srv := &http.Server{

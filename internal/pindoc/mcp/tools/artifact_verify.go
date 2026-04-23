@@ -277,8 +277,8 @@ func RegisterArtifactVerify(server *sdk.Server, deps Deps) {
 				ReportID:    reportID,
 				ReportSlug:  reportSlug,
 				NewStatus:   "verified",
-				HumanURL:    HumanURL(deps.ProjectSlug, taskSlug),
-				HumanURLAbs: AbsHumanURL(deps.Settings, deps.ProjectSlug, taskSlug),
+				HumanURL:    HumanURL(deps.ProjectSlug, deps.ProjectLocale, taskSlug),
+				HumanURLAbs: AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, taskSlug),
 			}, nil
 		},
 	)

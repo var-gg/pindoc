@@ -21,6 +21,13 @@ type Deps struct {
 	// For Phase 2 the MCP server treats it as "the" project.
 	ProjectSlug string
 
+	// ProjectLocale is the `projects.locale` column value for the active
+	// ProjectSlug (Task task-phase-18-project-locale-implementation,
+	// migration 0015). Same slug can live under multiple locales, so the
+	// canonical identity is (slug, locale). Empty until server boot
+	// resolves it; HumanURL / AbsHumanURL embed it in the URL path.
+	ProjectLocale string
+
 	// UserLanguage is the PINDOC.md / env fallback language the server uses
 	// when selecting NOT_READY / suggested_action templates. Phase 5
 	// replaces this with a per-project lookup.
@@ -74,7 +81,7 @@ type Deps struct {
 // when PublicBaseURL isn't configured — callers should treat absence as
 // "operator hasn't set a base URL yet; fall back to human_url relative
 // path".
-func AbsHumanURL(s *settings.Store, projectSlug, artifactSlug string) string {
+func AbsHumanURL(s *settings.Store, projectSlug, projectLocale, artifactSlug string) string {
 	if s == nil {
 		return ""
 	}
@@ -85,14 +92,21 @@ func AbsHumanURL(s *settings.Store, projectSlug, artifactSlug string) string {
 	for len(base) > 0 && base[len(base)-1] == '/' {
 		base = base[:len(base)-1]
 	}
-	return base + HumanURL(projectSlug, artifactSlug)
+	return base + HumanURL(projectSlug, projectLocale, artifactSlug)
 }
 
-// HumanURL returns the canonical /p/:project/wiki/:slug relative URL used
-// in all agent-to-human share links. Agents paste this into chat so the
-// user can click through to the reader. Relative on purpose — the hosting
-// origin is the user's deployment (self-host first), the agent does not
-// know the external base URL.
-func HumanURL(projectSlug, artifactSlug string) string {
-	return "/p/" + projectSlug + "/wiki/" + artifactSlug
+// HumanURL returns the canonical /p/:project/:locale/wiki/:slug relative
+// URL used in all agent-to-human share links (Task task-phase-18-project-
+// locale-implementation adds the locale segment between slug and wiki).
+// Agents paste this into chat so the user can click through to the
+// reader. Relative on purpose — the hosting origin is the user's
+// deployment (self-host first), the agent does not know the external
+// base URL. Empty `projectLocale` falls back to "en" so pre-migration
+// call sites still emit a valid-looking URL.
+func HumanURL(projectSlug, projectLocale, artifactSlug string) string {
+	locale := projectLocale
+	if locale == "" {
+		locale = "en"
+	}
+	return "/p/" + projectSlug + "/" + locale + "/wiki/" + artifactSlug
 }

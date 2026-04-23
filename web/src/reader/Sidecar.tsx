@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router";
+import { Link, useParams } from "react-router";
 import { ArrowUpRight, History as HistoryIcon } from "lucide-react";
 import {
   api,
@@ -138,6 +138,7 @@ export function Sidecar({ projectSlug, detail }: Props) {
 
 function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: string }) {
   const { t } = useI18n();
+  const { locale = "" } = useParams<{ locale?: string }>();
   const [revs, setRevs] = useState<RevisionRow[] | null>(null);
 
   useEffect(() => {
@@ -171,7 +172,7 @@ function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: strin
           </span>
         </div>
         <Link
-          to={`/p/${projectSlug}/wiki/${slug}/history`}
+          to={`/p/${projectSlug}/${locale}/wiki/${slug}/history`}
           style={{ color: "var(--fg-2)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontFamily: "var(--font-mono)" }}
         >
           <HistoryIcon className="lucide" style={{ width: 11, height: 11 }} />
@@ -201,7 +202,7 @@ function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: strin
       })}
       {remainder > 0 && (
         <Link
-          to={`/p/${projectSlug}/wiki/${slug}/history`}
+          to={`/p/${projectSlug}/${locale}/wiki/${slug}/history`}
           style={{ fontSize: 11, color: "var(--fg-3)", fontFamily: "var(--font-mono)", textDecoration: "none" }}
         >
           {t("history.more_revisions", remainder)}
@@ -437,6 +438,7 @@ function EdgeGroup({
   edges: EdgeRef[];
   projectSlug: string;
 }) {
+  const { locale = "" } = useParams<{ locale?: string }>();
   return (
     <div>
       <div
@@ -455,7 +457,7 @@ function EdgeGroup({
         {edges.map((e) => (
           <li key={`${e.relation}-${e.artifact_id}`}>
             <Link
-              to={`/p/${projectSlug}/wiki/${e.slug}`}
+              to={`/p/${projectSlug}/${locale}/wiki/${e.slug}`}
               style={{
                 display: "flex",
                 gap: 6,

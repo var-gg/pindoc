@@ -177,8 +177,8 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 				// fetch full body via artifact.read if needed.
 				h.Snippet = trimSnippet(h.Snippet, 400)
 				h.AgentRef = "pindoc://" + h.Slug
-				h.HumanURL = HumanURL(deps.ProjectSlug, h.Slug)
-				h.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, h.Slug)
+				h.HumanURL = HumanURL(deps.ProjectSlug, deps.ProjectLocale, h.Slug)
+				h.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, h.Slug)
 				if len(metaRaw) > 0 {
 					var meta ResolvedArtifactMeta
 					if err := json.Unmarshal(metaRaw, &meta); err == nil {

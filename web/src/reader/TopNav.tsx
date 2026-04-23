@@ -41,7 +41,7 @@ export function TopNav({
 }: Props) {
   const { t, lang, setLang } = useI18n();
   const nextLang: Lang = lang === "ko" ? "en" : "ko";
-  const baseRoute = `/p/${project.slug}`;
+  const baseRoute = `/p/${project.slug}/${project.locale ?? project.primary_language ?? "en"}`;
 
   return (
     <div className="nav">

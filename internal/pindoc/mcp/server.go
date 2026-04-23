@@ -19,6 +19,29 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
 )
 
+// resolveStartupProjectLocale reads projects.locale for the active
+// PINDOC_PROJECT slug and returns it so HumanURL / AbsHumanURL can embed
+// the locale segment in response URLs (Task task-phase-18-project-locale-
+// implementation). Falls back to empty string when the project row is
+// missing or DB unreachable; HumanURL then falls back to its own "en"
+// default so share links still render without blocking the server boot.
+func resolveStartupProjectLocale(ctx context.Context, logger *slog.Logger, deps tools.Deps) string {
+	if deps.DB == nil {
+		return ""
+	}
+	var locale string
+	err := deps.DB.QueryRow(ctx,
+		`SELECT locale FROM projects WHERE slug = $1 LIMIT 1`,
+		deps.ProjectSlug,
+	).Scan(&locale)
+	if err != nil {
+		logger.Warn("project locale lookup failed; HumanURL uses 'en' fallback",
+			"project_slug", deps.ProjectSlug, "err", err)
+		return ""
+	}
+	return locale
+}
+
 // upsertStartupUserID resolves the users.id row this MCP session should
 // bind to (Decision `decision-author-identity-dual`, migration 0014). Any
 // failure to reach the DB or upsert is logged and treated as "no user
@@ -93,6 +116,7 @@ func NewServer(opts Options) *Server {
 		RepoRoot:     opts.Config.RepoRoot,
 	}
 	deps.UserID = upsertStartupUserID(context.Background(), opts.Logger, deps, opts.Config)
+	deps.ProjectLocale = resolveStartupProjectLocale(context.Background(), opts.Logger, deps)
 
 	tools.RegisterProjectCurrent(s, deps)
 	tools.RegisterProjectCreate(s, deps)

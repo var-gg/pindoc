@@ -186,8 +186,8 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 				}
 			}
 			out.AgentRef = "pindoc://" + out.Slug
-			out.HumanURL = HumanURL(out.ProjectSlug, out.Slug)
-			out.HumanURLAbs = AbsHumanURL(deps.Settings, out.ProjectSlug, out.Slug)
+			out.HumanURL = HumanURL(out.ProjectSlug, deps.ProjectLocale, out.Slug)
+			out.HumanURLAbs = AbsHumanURL(deps.Settings, out.ProjectSlug, deps.ProjectLocale, out.Slug)
 			out.View = view
 
 			// view=brief / continuation: drop the heavy body, add summary.
@@ -356,8 +356,8 @@ func loadEdges(ctx context.Context, deps Deps, artifactID string) ([]EdgeRef, []
 			return nil, nil, err
 		}
 		e.AgentRef = "pindoc://" + e.Slug
-		e.HumanURL = HumanURL(deps.ProjectSlug, e.Slug)
-		e.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, e.Slug)
+		e.HumanURL = HumanURL(deps.ProjectSlug, deps.ProjectLocale, e.Slug)
+		e.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, e.Slug)
 		out = append(out, e)
 	}
 	rows.Close()
@@ -380,8 +380,8 @@ func loadEdges(ctx context.Context, deps Deps, artifactID string) ([]EdgeRef, []
 			return out, nil, err
 		}
 		e.AgentRef = "pindoc://" + e.Slug
-		e.HumanURL = HumanURL(deps.ProjectSlug, e.Slug)
-		e.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, e.Slug)
+		e.HumanURL = HumanURL(deps.ProjectSlug, deps.ProjectLocale, e.Slug)
+		e.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, e.Slug)
 		outBy = append(outBy, e)
 	}
 

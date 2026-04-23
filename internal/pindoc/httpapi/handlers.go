@@ -20,6 +20,11 @@ type projectInfo struct {
 	Description     string        `json:"description,omitempty"`
 	Color           string        `json:"color,omitempty"`
 	PrimaryLanguage string        `json:"primary_language"`
+	// Locale is the authoritative canonical-key column added by Phase 18
+	// (migration 0015, Task task-phase-18-project-locale-implementation).
+	// Reader URL embeds it between the project slug and the view verb so
+	// the same slug across locales stays uniquely addressable.
+	Locale          string        `json:"locale"`
 	AreasCount      int           `json:"areas_count"`
 	ArtifactsCount  int           `json:"artifacts_count"`
 	CreatedAt       time.Time     `json:"created_at"`
@@ -56,10 +61,11 @@ func (d Deps) handleConfig(w http.ResponseWriter, r *http.Request) {
 		publicBase = d.Settings.Get().PublicBaseURL
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"default_project_slug": d.DefaultProjectSlug,
-		"multi_project":        d.MultiProject,
-		"public_base_url":      publicBase,
-		"version":              d.Version,
+		"default_project_slug":   d.DefaultProjectSlug,
+		"default_project_locale": d.DefaultProjectLocale,
+		"multi_project":          d.MultiProject,
+		"public_base_url":        publicBase,
+		"version":                d.Version,
 	})
 }
 
@@ -124,13 +130,13 @@ func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
 	err := d.DB.QueryRow(r.Context(), `
 		SELECT
 			p.id::text, p.slug, p.name, p.owner_id, p.description, p.color,
-			p.primary_language, p.created_at,
+			p.primary_language, p.locale, p.created_at,
 			(SELECT count(*) FROM areas     WHERE project_id = p.id),
 			(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
 		FROM projects p WHERE p.slug = $1
 	`, slug).Scan(
 		&out.ID, &out.Slug, &out.Name, &out.OwnerID, &desc, &color,
-		&out.PrimaryLanguage, &out.CreatedAt,
+		&out.PrimaryLanguage, &out.Locale, &out.CreatedAt,
 		&out.AreasCount, &out.ArtifactsCount,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {

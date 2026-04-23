@@ -18,6 +18,12 @@ type projectCurrentOutput struct {
 	Description     string        `json:"description,omitempty"`
 	Color           string        `json:"color,omitempty"`
 	PrimaryLanguage string        `json:"primary_language"`
+	// Locale is the authoritative canonical-key field (Task task-phase-
+	// 18-project-locale-implementation, migration 0015). primary_language
+	// is retained as a soft back-compat column; new code should branch
+	// on locale. Same slug may exist across locales —
+	// `(owner_id, slug, locale)` is the unique key.
+	Locale          string        `json:"locale"`
 	AreasCount      int           `json:"areas_count"`
 	ArtifactsCount  int           `json:"artifacts_count"`
 	CreatedAt       time.Time     `json:"created_at"`
@@ -117,6 +123,7 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 					p.description,
 					p.color,
 					p.primary_language,
+					p.locale,
 					p.created_at,
 					(SELECT count(*) FROM areas     WHERE project_id = p.id),
 					(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
@@ -125,7 +132,7 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 			`, deps.ProjectSlug).Scan(
 				&out.ID, &out.Slug, &out.Name, &out.OwnerID,
 				&desc, &color,
-				&out.PrimaryLanguage, &out.CreatedAt,
+				&out.PrimaryLanguage, &out.Locale, &out.CreatedAt,
 				&out.AreasCount, &out.ArtifactsCount,
 			)
 			if err != nil {

@@ -235,11 +235,14 @@ var validVerificationStates = map[string]struct{}{
 // ArtifactRelationInput is the agent-facing shape for one edge.
 type ArtifactRelationInput struct {
 	TargetID string `json:"target_id" jsonschema:"id, slug, or pindoc:// URL of the related artifact"`
-	Relation string `json:"relation" jsonschema:"one of implements|references|blocks|relates_to"`
+	Relation string `json:"relation" jsonschema:"one of implements|references|blocks|relates_to|translation_of"`
 }
 
 var validRelations = map[string]struct{}{
 	"implements": {}, "references": {}, "blocks": {}, "relates_to": {},
+	// Phase 18 — cross-locale pairing for project-locale composite key
+	// (Task task-phase-18-project-locale-implementation).
+	"translation_of": {},
 }
 
 type artifactProposeOutput struct {
@@ -758,8 +761,8 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				ArtifactID:     newID,
 				Slug:           finalSlug,
 				AgentRef:       "pindoc://" + finalSlug,
-				HumanURL:       HumanURL(deps.ProjectSlug, finalSlug),
-				HumanURLAbs:    AbsHumanURL(deps.Settings, deps.ProjectSlug, finalSlug),
+				HumanURL:       HumanURL(deps.ProjectSlug, deps.ProjectLocale, finalSlug),
+				HumanURLAbs:    AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, finalSlug),
 				PublishedAt:    publishedAt,
 				Created:        true,
 				RevisionNumber: 1,
@@ -1081,8 +1084,8 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		ArtifactID:                      artifactID,
 		Slug:                            slug,
 		AgentRef:                        "pindoc://" + slug,
-		HumanURL:                        HumanURL(deps.ProjectSlug, slug),
-		HumanURLAbs:                     AbsHumanURL(deps.Settings, deps.ProjectSlug, slug),
+		HumanURL:                        HumanURL(deps.ProjectSlug, deps.ProjectLocale, slug),
+		HumanURLAbs:                     AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, slug),
 		PublishedAt:                     publishedAt,
 		Created:                         false,
 		RevisionNumber:                  newRev,
@@ -1556,8 +1559,8 @@ func makeRelated(deps Deps, slug, id, artType, title, reason string) RelatedRef 
 		Type:        artType,
 		Title:       title,
 		AgentRef:    "pindoc://" + slug,
-		HumanURL:    HumanURL(deps.ProjectSlug, slug),
-		HumanURLAbs: AbsHumanURL(deps.Settings, deps.ProjectSlug, slug),
+		HumanURL:    HumanURL(deps.ProjectSlug, deps.ProjectLocale, slug),
+		HumanURLAbs: AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, slug),
 		Reason:      reason,
 	}
 }

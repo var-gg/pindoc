@@ -125,8 +125,8 @@ the new project by launching pindoc-server with PINDOC_PROJECT=<new>.
 
 			var projectID string
 			err = tx.QueryRow(ctx, `
-				INSERT INTO projects (owner_id, slug, name, description, color, primary_language)
-				VALUES ($1, $2, $3, $4, $5, $6)
+				INSERT INTO projects (owner_id, slug, name, description, color, primary_language, locale)
+				VALUES ($1, $2, $3, $4, $5, $6, $6)
 				RETURNING id::text
 			`, ownerID, slug, name, descPtr, colorPtr, lang).Scan(&projectID)
 			if err != nil {
@@ -183,19 +183,19 @@ the new project by launching pindoc-server with PINDOC_PROJECT=<new>.
 				ID:                projectID,
 				Slug:              slug,
 				Name:              name,
-				URL:               fmt.Sprintf("/p/%s/wiki", slug),
+				URL:               fmt.Sprintf("/p/%s/%s/wiki", slug, lang),
 				DefaultArea:       "misc",
 				ReconnectRequired: true,
 				Activation:        "not_in_this_session",
 				NextSteps: []string{
 					fmt.Sprintf("Restart pindoc-server with PINDOC_PROJECT=%s to make this MCP session write into the new project.", slug),
-					fmt.Sprintf("Open the Reader at /p/%s/wiki once pindoc-api reloads.", slug),
+					fmt.Sprintf("Open the Reader at /p/%s/%s/wiki once pindoc-api reloads.", slug, lang),
 				},
 				Message: strings.TrimSpace(fmt.Sprintf(`
-Project %q created. Share this URL with the user: /p/%s/wiki
+Project %q (%s locale) created. Share this URL with the user: /p/%s/%s/wiki
 Note: this MCP session is still scoped to the old project — to write
 artifacts into %q, restart pindoc-server with PINDOC_PROJECT=%s.
-`, slug, slug, slug, slug)),
+`, slug, lang, slug, lang, slug, slug)),
 			}, nil
 		},
 	)

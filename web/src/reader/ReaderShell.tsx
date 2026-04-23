@@ -48,7 +48,7 @@ type Props = {
 };
 
 export function ReaderShell({ view }: Props) {
-  const { project = "", slug } = useParams<{ project: string; slug?: string }>();
+  const { project = "", locale = "", slug } = useParams<{ project: string; locale?: string; slug?: string }>();
   const { t } = useI18n();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -97,7 +97,7 @@ export function ReaderShell({ view }: Props) {
     }
   }, [selectedArea, selectedType, view, searchParams, setSearchParams]);
 
-  const baseRoute = `/p/${project}/${view === "tasks" ? "tasks" : "wiki"}`;
+  const baseRoute = `/p/${project}/${locale}/${view === "tasks" ? "tasks" : "wiki"}`;
 
   // When the user filters via the sidebar we drop the currently-selected
   // artifact so the filter effect is visible (otherwise the reader body
@@ -236,6 +236,7 @@ export function ReaderShell({ view }: Props) {
         <Body
           view={view}
           projectSlug={project}
+          projectLocale={locale}
           detail={detail}
           list={filteredArtifacts}
           currentSlug={slug}
@@ -251,6 +252,7 @@ export function ReaderShell({ view }: Props) {
 function Body({
   view,
   projectSlug,
+  projectLocale,
   detail,
   list,
   currentSlug,
@@ -258,6 +260,7 @@ function Body({
 }: {
   view: ReaderView;
   projectSlug: string;
+  projectLocale: string;
   detail: Artifact | null;
   list: ArtifactRef[];
   currentSlug: string | undefined;
@@ -311,7 +314,7 @@ function Body({
       : t("wiki.empty_list");
 
   if (view === "tasks") {
-    return <TasksKanban projectSlug={projectSlug} list={list} currentSlug={currentSlug} empty={empty} />;
+    return <TasksKanban projectSlug={projectSlug} projectLocale={projectLocale} list={list} currentSlug={currentSlug} empty={empty} />;
   }
 
   return (
@@ -325,7 +328,7 @@ function Body({
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {list.map((a) => {
-              const linkBase = `/p/${projectSlug}/wiki`;
+              const linkBase = `/p/${projectSlug}/${projectLocale}/wiki`;
               const isActive = currentSlug === a.slug;
               return (
                 <Link
@@ -390,11 +393,13 @@ const PRIORITY_CLASS: Record<string, string> = {
 
 function TasksKanban({
   projectSlug,
+  projectLocale,
   list,
   currentSlug,
   empty,
 }: {
   projectSlug: string;
+  projectLocale: string;
   list: ArtifactRef[];
   currentSlug: string | undefined;
   empty: string;
@@ -437,6 +442,7 @@ function TasksKanban({
             pill={col.pill}
             items={groups.get(col.id) ?? []}
             projectSlug={projectSlug}
+            projectLocale={projectLocale}
             currentSlug={currentSlug}
           />
         ))}
@@ -448,6 +454,7 @@ function TasksKanban({
             pill="todo"
             items={noStatus}
             projectSlug={projectSlug}
+            projectLocale={projectLocale}
             currentSlug={currentSlug}
             subtle
           />
@@ -460,6 +467,7 @@ function TasksKanban({
             pill="archived"
             items={cancelled}
             projectSlug={projectSlug}
+            projectLocale={projectLocale}
             currentSlug={currentSlug}
             subtle
           />
@@ -474,6 +482,7 @@ function TaskColumn({
   pill,
   items,
   projectSlug,
+  projectLocale,
   currentSlug,
   subtle,
 }: {
@@ -481,6 +490,7 @@ function TaskColumn({
   pill: TaskColumnSpec["pill"];
   items: ArtifactRef[];
   projectSlug: string;
+  projectLocale: string;
   currentSlug: string | undefined;
   subtle?: boolean;
 }) {
@@ -499,6 +509,7 @@ function TaskColumn({
             key={a.id}
             artifact={a}
             projectSlug={projectSlug}
+            projectLocale={projectLocale}
             isActive={currentSlug === a.slug}
           />
         ))}
@@ -517,10 +528,12 @@ function TaskColumn({
 function TaskCard({
   artifact: a,
   projectSlug,
+  projectLocale,
   isActive,
 }: {
   artifact: ArtifactRef;
   projectSlug: string;
+  projectLocale: string;
   isActive: boolean;
 }) {
   const { t } = useI18n();
@@ -529,7 +542,7 @@ function TaskCard({
   const blocked = a.task_meta?.status === "blocked";
   return (
     <Link
-      to={`/p/${projectSlug}/tasks/${a.slug}`}
+      to={`/p/${projectSlug}/${projectLocale}/tasks/${a.slug}`}
       className={`task-card${isActive ? " is-active" : ""}`}
     >
       {blocked && (
