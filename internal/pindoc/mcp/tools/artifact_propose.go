@@ -63,10 +63,12 @@ type artifactProposeInput struct {
 	CommitMsg string `json:"commit_msg,omitempty" jsonschema:"required for updates; one line rationale"`
 
 	// ExpectedVersion gates an update_of call against concurrent revision
-	// writers. If set, the server compares against the artifact's current
-	// max(revision_number); mismatch → not_ready with VER_CONFLICT. Leave
-	// unset to accept whatever head is (legacy, optimistic-lock off).
-	ExpectedVersion int `json:"expected_version,omitempty" jsonschema:"optional optimistic lock for update_of"`
+	// writers. When update_of is set the server requires this field
+	// (NEED_VER) and then compares the value to the artifact's current
+	// max(revision_number); mismatch → not_ready with VER_CONFLICT.
+	// Pointer type so a legitimate zero value (seeded artifact with no
+	// revision rows yet) is distinguishable from "field omitted."
+	ExpectedVersion *int `json:"expected_version,omitempty" jsonschema:"required for update_of; current revision number (use 0 for freshly seeded artifacts)"`
 
 	// SupersedeOf marks the target artifact as superseded by this new one.
 	// Creates a NEW artifact (like a no-update_of call), then flips the
@@ -806,7 +808,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 	// current version is an implicit "agent read this target before
 	// updating it" gate. Without the requirement an over-confident agent
 	// can overwrite stale context.
-	if in.ExpectedVersion == 0 {
+	if in.ExpectedVersion == nil {
 		return nil, artifactProposeOutput{
 			Status:    "not_ready",
 			ErrorCode: "NEED_VER",
@@ -826,13 +828,13 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 	}
 
 	// Optimistic lock: version provided but stale → VER_CONFLICT.
-	if in.ExpectedVersion != lastRev {
+	if *in.ExpectedVersion != lastRev {
 		return nil, artifactProposeOutput{
 			Status:    "not_ready",
 			ErrorCode: "VER_CONFLICT",
 			Failed:    []string{"VER_CONFLICT"},
 			Checklist: []string{
-				fmt.Sprintf(i18n.T(lang, "preflight.ver_conflict"), in.ExpectedVersion, lastRev),
+				fmt.Sprintf(i18n.T(lang, "preflight.ver_conflict"), *in.ExpectedVersion, lastRev),
 			},
 			SuggestedActions: []string{
 				i18n.T(lang, "suggested.reread_before_update"),
@@ -840,7 +842,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 			NextTools:       defaultNextTools("VER_CONFLICT"),
 			PatchableFields: patchFieldsFor("VER_CONFLICT"),
 			Related: []RelatedRef{
-				makeRelated(deps, ref, artifactID, "", currentTitle, fmt.Sprintf("current revision = %d, not %d", lastRev, in.ExpectedVersion)),
+				makeRelated(deps, ref, artifactID, "", currentTitle, fmt.Sprintf("current revision = %d, not %d", lastRev, *in.ExpectedVersion)),
 			},
 		}, nil
 	}
@@ -1257,7 +1259,7 @@ func preflight(in *artifactProposeInput, lang string) (checklist []string, faile
 			push(fmt.Sprintf(i18n.T(lang, "preflight.rel_invalid"), i, r.Relation), "REL_INVALID")
 		}
 	}
-	if in.ExpectedVersion < 0 {
+	if in.ExpectedVersion != nil && *in.ExpectedVersion < 0 {
 		push(i18n.T(lang, "preflight.expected_version_negative"), "VER_INVALID")
 	}
 
