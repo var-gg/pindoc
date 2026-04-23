@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import mermaid from "mermaid";
+import { uniqueSlug } from "./slug";
 
 // Initialize mermaid once per page. Theme follows the Pindoc dark/light
 // class on <html>. We invert the theme selection at render time so fresh
@@ -28,6 +29,16 @@ function ensureMermaid(): void {
  * display.
  */
 export function PindocMarkdown({ source }: { source: string }) {
+  // Each render keeps its own slug ledger so duplicate H2 titles inside
+  // one artifact get stable `-2`, `-3` suffixes. Ledger lives inside
+  // useMemo so it rebuilds when the body changes but is stable during a
+  // single render pass (headingId is called once per h2 the renderer
+  // walks across, in document order).
+  const headingIds = useMemo(() => {
+    const used = new Set<string>();
+    return (text: string) => uniqueSlug(text, used);
+  }, [source]);
+
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -40,11 +51,30 @@ export function PindocMarkdown({ source }: { source: string }) {
           }
           return <code className={className}>{children}</code>;
         },
+        h2({ children }) {
+          // extractHeadingText flattens children (often an array of
+          // strings + inline code + emphasis) back into the plain text
+          // used for slug generation. Keeping the rendered children
+          // unchanged preserves inline formatting on the heading itself.
+          const id = headingIds(extractHeadingText(children));
+          return <h2 id={id}>{children}</h2>;
+        },
       }}
     >
       {source}
     </ReactMarkdown>
   );
+}
+
+function extractHeadingText(node: unknown): string {
+  if (node == null || node === false) return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(extractHeadingText).join("");
+  if (typeof node === "object" && "props" in (node as Record<string, unknown>)) {
+    const props = (node as { props?: { children?: unknown } }).props;
+    return extractHeadingText(props?.children);
+  }
+  return "";
 }
 
 function MermaidBlock({ source }: { source: string }) {

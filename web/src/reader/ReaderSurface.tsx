@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { ChevronRight } from "lucide-react";
 import type { Artifact, ArtifactRef } from "../api/client";
 import { useI18n } from "../i18n";
@@ -5,6 +6,8 @@ import { agentAvatar } from "./avatars";
 import { PindocMarkdown } from "./Markdown";
 import { TrustCard } from "./TrustCard";
 import { typeChipClass } from "./typeChip";
+import { Toc } from "./Toc";
+import { headingsFromBody } from "./slug";
 
 type Props = {
   detail: Artifact | null;
@@ -13,6 +16,16 @@ type Props = {
 
 export function ReaderSurface({ detail, emptyMessage }: Props) {
   const { t } = useI18n();
+
+  // Headings parsed once per body change; Toc.tsx needs the slug list to
+  // wire IntersectionObserver, and Markdown.tsx independently derives the
+  // same slugs from the same function so `<h2 id>` matches `href="#...">`
+  // without a DOM round-trip. useMemo placed BEFORE the null-detail early
+  // return so React's hook order stays stable across renders.
+  const headings = useMemo(
+    () => (detail ? headingsFromBody(detail.body_markdown) : []),
+    [detail],
+  );
 
   if (!detail) {
     return (
@@ -70,6 +83,7 @@ export function ReaderSurface({ detail, emptyMessage }: Props) {
 
         <RelatedHint detail={detail} />
       </article>
+      {headings.length >= 2 && <Toc headings={headings} />}
     </main>
   );
 }

@@ -53,6 +53,7 @@
   "sidecar.prov_id": "slug",
 
   "reader.written_by": "written by %s",
+  "reader.toc_title": "On this page",
   "reader.published": "published %s",
   "reader.backlinks_empty_head": "Backlinks",
   "reader.backlinks_empty": "No artifacts reference %s yet. Graph edges populate as you write — any propose that mentions an existing slug creates a backlink.",
