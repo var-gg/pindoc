@@ -141,6 +141,9 @@ func NewServer(opts Options) *Server {
 	tools.RegisterUserCurrent(s, deps)
 	tools.RegisterUserUpdate(s, deps)
 
+	// Phase F revision-shapes — queryable scope graph.
+	tools.RegisterScopeInFlight(s, deps)
+
 	return &Server{
 		sdk:    s,
 		logger: opts.Logger,
@@ -167,6 +170,7 @@ func (s *Server) Run(ctx context.Context, transport sdk.Transport) error {
 			"pindoc.artifact.verify",
 			"pindoc.user.current",
 			"pindoc.user.update",
+			"pindoc.scope.in_flight",
 		})
 	return s.sdk.Run(ctx, transport)
 }

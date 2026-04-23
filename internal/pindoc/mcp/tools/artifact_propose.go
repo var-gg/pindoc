@@ -114,6 +114,12 @@ type artifactProposeInput struct {
 	// shape=acceptance_transition; ignored on other shapes.
 	AcceptanceTransition *AcceptanceTransitionInput `json:"acceptance_transition,omitempty" jsonschema:"payload for shape=acceptance_transition — checkbox locator + new_state + reason"`
 
+	// ScopeDefer is the Phase F payload for shape=scope_defer. Moves an
+	// acceptance item to a target artifact — server atomically rewrites
+	// the source checkbox to [-] and writes an artifact_scope_edges row.
+	// Only read when shape=scope_defer.
+	ScopeDefer *ScopeDeferInput `json:"scope_defer,omitempty" jsonschema:"payload for shape=scope_defer — checkbox locator + to_artifact + reason"`
+
 	// ArtifactMeta carries epistemic axes that classify the artifact's
 	// trustworthiness and memory scope. All fields optional — server
 	// resolves defaults via resolveArtifactMeta based on pins, update path,
@@ -826,11 +832,11 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang string) (*sdk.CallToolResult, artifactProposeOutput, error) {
 	shape, _ := parseShape(in.Shape) // preflight already validated
 	switch shape {
-	case ShapeBodyPatch, ShapeAcceptanceTransition:
+	case ShapeBodyPatch, ShapeAcceptanceTransition, ShapeScopeDefer:
 		// Fall through — body_patch is the plain-body path; acceptance_
-		// transition materialises its rewritten body below and then
-		// travels the same tx (single-byte marker flip counts as a body
-		// revision with a richer audit trail via shape_payload).
+		// transition materialises its rewritten body below; scope_defer
+		// synthesises an acceptance transition to [-] plus an edge insert
+		// in the same tx. All three travel the body-update flow.
 	case ShapeMetaPatch:
 		return handleUpdateMetaPatch(ctx, deps, in, lang)
 	default:
@@ -911,17 +917,80 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		}, nil
 	}
 
-	// Acceptance-transition materialisation (Phase D). For shape=
-	// acceptance_transition the caller sends a locator + new_state +
-	// reason instead of body; we compute the rewritten body here and set
-	// in.BodyMarkdown so the rest of handleUpdate proceeds with a body
-	// that already has the marker flipped. The from_state / reason ride
-	// on shapePayload and land in artifact_revisions.shape_payload for
-	// audit. Canonical-rewrite / body-warning gates are bypassed for this
-	// shape — a single-byte marker flip isn't a claim rewrite.
+	// Acceptance-transition materialisation (Phase D) + scope-defer
+	// (Phase F). For shape=acceptance_transition the caller sends a
+	// locator + new_state + reason. For shape=scope_defer the caller
+	// additionally names a target artifact — the server synthesises an
+	// AcceptanceTransition to [-] and records an artifact_scope_edges
+	// row in the same tx so the graph and body stay in lockstep. Either
+	// path ends with in.BodyMarkdown = rewritten body so the rest of
+	// handleUpdate proceeds as if the caller had sent body_markdown
+	// whole. Canonical-rewrite / body-warning gates are bypassed for
+	// both shapes — a single-byte marker flip isn't a claim rewrite.
 	var acceptanceShapePayload []byte
-	if shape == ShapeAcceptanceTransition {
-		if in.AcceptanceTransition == nil {
+	var scopeDeferTargetID string
+	var scopeDeferTargetSlug string
+	if shape == ShapeAcceptanceTransition || shape == ShapeScopeDefer {
+		acceptanceInput := in.AcceptanceTransition
+		if shape == ShapeScopeDefer {
+			if in.ScopeDefer == nil {
+				return nil, artifactProposeOutput{
+					Status:          "not_ready",
+					ErrorCode:       "SCOPE_DEFER_REQUIRED",
+					Failed:          []string{"SCOPE_DEFER_REQUIRED"},
+					Checklist:       []string{i18n.T(lang, "preflight.scope_defer_required")},
+					PatchableFields: patchFieldsFor("SCOPE_DEFER_REQUIRED"),
+				}, nil
+			}
+			if strings.TrimSpace(in.ScopeDefer.Reason) == "" {
+				return nil, artifactProposeOutput{
+					Status:          "not_ready",
+					ErrorCode:       "SCOPE_DEFER_REASON_REQUIRED",
+					Failed:          []string{"SCOPE_DEFER_REASON_REQUIRED"},
+					Checklist:       []string{i18n.T(lang, "preflight.scope_defer_reason_required")},
+					PatchableFields: patchFieldsFor("SCOPE_DEFER_REASON_REQUIRED"),
+				}, nil
+			}
+			// Resolve target artifact — must exist in same project, not archived.
+			targetRef := normalizeRef(in.ScopeDefer.ToArtifact)
+			err := deps.DB.QueryRow(ctx, `
+				SELECT a.id::text, a.slug FROM artifacts a
+				JOIN projects p ON p.id = a.project_id
+				WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
+				  AND a.status <> 'archived'
+				LIMIT 1
+			`, deps.ProjectSlug, targetRef).Scan(&scopeDeferTargetID, &scopeDeferTargetSlug)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, artifactProposeOutput{
+					Status:    "not_ready",
+					ErrorCode: "SCOPE_DEFER_TARGET_NOT_FOUND",
+					Failed:    []string{"SCOPE_DEFER_TARGET_NOT_FOUND"},
+					Checklist: []string{
+						fmt.Sprintf(i18n.T(lang, "preflight.scope_defer_target_missing"), in.ScopeDefer.ToArtifact),
+					},
+					NextTools:       defaultNextTools("SCOPE_DEFER_TARGET_NOT_FOUND"),
+					PatchableFields: patchFieldsFor("SCOPE_DEFER_TARGET_NOT_FOUND"),
+				}, nil
+			}
+			if err != nil {
+				return nil, artifactProposeOutput{}, fmt.Errorf("resolve scope-defer target: %w", err)
+			}
+			if scopeDeferTargetID == artifactID {
+				return nil, artifactProposeOutput{
+					Status:          "not_ready",
+					ErrorCode:       "SCOPE_DEFER_SELF",
+					Failed:          []string{"SCOPE_DEFER_SELF"},
+					Checklist:       []string{i18n.T(lang, "preflight.scope_defer_self")},
+					PatchableFields: patchFieldsFor("SCOPE_DEFER_SELF"),
+				}, nil
+			}
+			acceptanceInput = &AcceptanceTransitionInput{
+				CheckboxIndex: in.ScopeDefer.CheckboxIndex,
+				NewState:      "[-]",
+				Reason:        fmt.Sprintf("moved to %s: %s", scopeDeferTargetSlug, strings.TrimSpace(in.ScopeDefer.Reason)),
+			}
+		}
+		if acceptanceInput == nil {
 			return nil, artifactProposeOutput{
 				Status:          "not_ready",
 				ErrorCode:       "ACCEPT_TRANSITION_REQUIRED",
@@ -930,7 +999,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 				PatchableFields: patchFieldsFor("ACCEPT_TRANSITION_REQUIRED"),
 			}, nil
 		}
-		newBody, fromMarker, code := applyAcceptanceTransition(currentBody, in.AcceptanceTransition)
+		newBody, fromMarker, code := applyAcceptanceTransition(currentBody, acceptanceInput)
 		if code != "" {
 			return nil, artifactProposeOutput{
 				Status:          "not_ready",
@@ -942,12 +1011,17 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		}
 		in.BodyMarkdown = newBody
 		payload := map[string]any{
-			"checkbox_index": *in.AcceptanceTransition.CheckboxIndex,
+			"checkbox_index": *acceptanceInput.CheckboxIndex,
 			"from_state":     string([]byte{fromMarker}),
-			"new_state":      strings.TrimSpace(in.AcceptanceTransition.NewState),
+			"new_state":      strings.TrimSpace(acceptanceInput.NewState),
 		}
-		if r := strings.TrimSpace(in.AcceptanceTransition.Reason); r != "" {
+		if r := strings.TrimSpace(acceptanceInput.Reason); r != "" {
 			payload["reason"] = r
+		}
+		if shape == ShapeScopeDefer {
+			payload["to_artifact_id"] = scopeDeferTargetID
+			payload["to_artifact_slug"] = scopeDeferTargetSlug
+			payload["scope_defer_reason"] = strings.TrimSpace(in.ScopeDefer.Reason)
 		}
 		b, err := json.Marshal(payload)
 		if err != nil {
@@ -1127,6 +1201,26 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		return nil, artifactProposeOutput{}, fmt.Errorf("event: %w", err)
 	}
 
+	// Phase F scope-defer edge write. Runs inside the same tx so the
+	// graph and the body's [-] marker commit or roll back together.
+	// from_item_ref is the agent-facing locator ("acceptance[N]") — Reader
+	// resolves it against the current body at query time so subsequent
+	// body edits that renumber checkboxes don't break the edge.
+	if shape == ShapeScopeDefer && in.ScopeDefer != nil {
+		fromItemRef := fmt.Sprintf("acceptance[%d]", *in.ScopeDefer.CheckboxIndex)
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO artifact_scope_edges (
+				from_artifact_id, from_item_ref, to_artifact_id,
+				reason, created_by_user_id, created_by_agent
+			) VALUES ($1::uuid, $2, $3::uuid, $4, NULLIF($5, '')::uuid, $6)
+			ON CONFLICT (from_artifact_id, from_item_ref, to_artifact_id) DO NOTHING
+		`, artifactID, fromItemRef, scopeDeferTargetID,
+			strings.TrimSpace(in.ScopeDefer.Reason), deps.UserID, in.AuthorID,
+		); err != nil {
+			return nil, artifactProposeOutput{}, fmt.Errorf("scope edge insert: %w", err)
+		}
+	}
+
 	// pins and edges are additive on update (append new pins; edges are
 	// idempotent on (source, target, relation)). If an agent needs to
 	// "replace" all pins they should supersede rather than update.
@@ -1178,7 +1272,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 	// claim rewrite by construction, so skip the guard for that shape (D).
 	rewrittenSections := detectCanonicalClaimRewrite(currentBody, in.BodyMarkdown, currentType)
 	canonicalRewriteFlag := false
-	if len(rewrittenSections) > 0 && !hasEvidenceDelta(prevMeta, &in) && !isTemplateArtifact(currentSlug) && shape != ShapeAcceptanceTransition {
+	if len(rewrittenSections) > 0 && !hasEvidenceDelta(prevMeta, &in) && !isTemplateArtifact(currentSlug) && shape != ShapeAcceptanceTransition && shape != ShapeScopeDefer {
 		canonicalRewriteFlag = true
 		warnings = append(warnings, "CANONICAL_REWRITE_WITHOUT_EVIDENCE:"+strings.Join(rewrittenSections, "+"))
 		suggested = []string{
@@ -1311,8 +1405,14 @@ func preflight(ctx context.Context, deps Deps, in *artifactProposeInput, lang st
 			push("body_patch is only valid with update_of; create and supersede paths require body_markdown.", "PATCH_UPDATE_ONLY")
 		}
 	}
-	if strings.TrimSpace(in.BodyMarkdown) == "" && in.BodyPatch == nil {
-		push(i18n.T(lang, "preflight.body_empty"), "BODY_EMPTY")
+	// Phase B+D+F: shape=meta_patch / acceptance_transition / scope_defer
+	// derive their final body from server-side state or a dedicated payload,
+	// so an empty body_markdown at preflight time is expected — skip the
+	// BODY_EMPTY gate for those shapes.
+	if shape := strings.TrimSpace(in.Shape); shape == "" || shape == string(ShapeBodyPatch) {
+		if strings.TrimSpace(in.BodyMarkdown) == "" && in.BodyPatch == nil {
+			push(i18n.T(lang, "preflight.body_empty"), "BODY_EMPTY")
+		}
 	}
 	if strings.TrimSpace(in.AreaSlug) == "" {
 		push(i18n.T(lang, "preflight.area_empty"), "AREA_EMPTY")
@@ -1673,7 +1773,7 @@ func defaultNextTools(code string) []string {
 		return []string{"pindoc.artifact.read", "pindoc.artifact.propose"}
 	case "VER_CONFLICT", "FIELD_VALUE_RESERVED":
 		return []string{"pindoc.artifact.revisions", "pindoc.artifact.diff"}
-	case "UPDATE_TARGET_NOT_FOUND", "SUPERSEDE_TARGET_NOT_FOUND", "REL_TARGET_NOT_FOUND":
+	case "UPDATE_TARGET_NOT_FOUND", "SUPERSEDE_TARGET_NOT_FOUND", "REL_TARGET_NOT_FOUND", "SCOPE_DEFER_TARGET_NOT_FOUND":
 		return []string{"pindoc.artifact.search", "pindoc.area.list"}
 	case "AREA_NOT_FOUND", "AREA_EMPTY":
 		return []string{"pindoc.area.list"}
@@ -1728,6 +1828,11 @@ func patchFieldsFor(code string) []string {
 		"ACCEPT_TRANSITION_REASON_REQUIRED",
 		"ACCEPT_TRANSITION_NOOP":
 		return []string{"acceptance_transition"}
+	case "SCOPE_DEFER_REQUIRED",
+		"SCOPE_DEFER_REASON_REQUIRED",
+		"SCOPE_DEFER_TARGET_NOT_FOUND",
+		"SCOPE_DEFER_SELF":
+		return []string{"scope_defer"}
 	case "MISSING_COMMIT_MSG":
 		return []string{"commit_msg"}
 	case "POSSIBLE_DUP":

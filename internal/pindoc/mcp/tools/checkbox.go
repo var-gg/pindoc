@@ -30,6 +30,23 @@ type AcceptanceTransitionInput struct {
 	Reason        string `json:"reason,omitempty" jsonschema:"required for [~] and [-]; free-form justification stored on the revision"`
 }
 
+// ScopeDeferInput is the Phase F payload for shape=scope_defer. Moves an
+// acceptance checkbox to another artifact: rewrites the source checkbox
+// to [-] (synthesized AcceptanceTransition under the hood), records a
+// row in artifact_scope_edges pointing at the target, and keeps both as
+// one atomic revision so the graph never disagrees with the body.
+//
+// Reason is required — scope moves without explanation become noise in
+// the in-flight query. The final acceptance marker's reason is composed
+// server-side as "moved to <to_artifact_slug>: <reason>" so readers see
+// both the destination and the rationale inline.
+type ScopeDeferInput struct {
+	CheckboxIndex *int   `json:"checkbox_index,omitempty" jsonschema:"0-based index across all 4-state acceptance checkboxes"`
+	ToArtifact    string `json:"to_artifact" jsonschema:"slug or pindoc:// URL of the artifact that absorbs this acceptance item"`
+	Reason        string `json:"reason" jsonschema:"short justification — why the item moved, not just where"`
+}
+
+
 // checkboxHit is a positional record for a 4-state checkbox found while
 // walking the body. lineIndex is the line within strings.Split(body,"\n")
 // containing the marker; markerByteOffset is the byte offset of '[' inside
