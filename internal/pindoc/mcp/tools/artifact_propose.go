@@ -108,6 +108,12 @@ type artifactProposeInput struct {
 	// Mutually exclusive with BodyMarkdown.
 	BodyPatch *BodyPatchInput `json:"body_patch,omitempty" jsonschema:"lightweight patch against the current body — update_of only, exclusive with body_markdown"`
 
+	// AcceptanceTransition is the Phase D payload for shape=
+	// acceptance_transition. Flips a single 4-state checkbox (locator +
+	// new_state + reason) without resending body_markdown. Only read when
+	// shape=acceptance_transition; ignored on other shapes.
+	AcceptanceTransition *AcceptanceTransitionInput `json:"acceptance_transition,omitempty" jsonschema:"payload for shape=acceptance_transition — checkbox locator + new_state + reason"`
+
 	// ArtifactMeta carries epistemic axes that classify the artifact's
 	// trustworthiness and memory scope. All fields optional — server
 	// resolves defaults via resolveArtifactMeta based on pins, update path,
@@ -798,8 +804,11 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang string) (*sdk.CallToolResult, artifactProposeOutput, error) {
 	shape, _ := parseShape(in.Shape) // preflight already validated
 	switch shape {
-	case ShapeBodyPatch:
-		// fall through to the legacy body_patch writer below
+	case ShapeBodyPatch, ShapeAcceptanceTransition:
+		// Fall through — body_patch is the plain-body path; acceptance_
+		// transition materialises its rewritten body below and then
+		// travels the same tx (single-byte marker flip counts as a body
+		// revision with a richer audit trail via shape_payload).
 	case ShapeMetaPatch:
 		return handleUpdateMetaPatch(ctx, deps, in, lang)
 	default:
@@ -878,6 +887,51 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 				makeRelated(deps, ref, artifactID, "", currentTitle, fmt.Sprintf("current revision = %d; pass expected_version = %d", lastRev, lastRev)),
 			},
 		}, nil
+	}
+
+	// Acceptance-transition materialisation (Phase D). For shape=
+	// acceptance_transition the caller sends a locator + new_state +
+	// reason instead of body; we compute the rewritten body here and set
+	// in.BodyMarkdown so the rest of handleUpdate proceeds with a body
+	// that already has the marker flipped. The from_state / reason ride
+	// on shapePayload and land in artifact_revisions.shape_payload for
+	// audit. Canonical-rewrite / body-warning gates are bypassed for this
+	// shape — a single-byte marker flip isn't a claim rewrite.
+	var acceptanceShapePayload []byte
+	if shape == ShapeAcceptanceTransition {
+		if in.AcceptanceTransition == nil {
+			return nil, artifactProposeOutput{
+				Status:          "not_ready",
+				ErrorCode:       "ACCEPT_TRANSITION_REQUIRED",
+				Failed:          []string{"ACCEPT_TRANSITION_REQUIRED"},
+				Checklist:       []string{acceptanceTransitionChecklist(lang, "ACCEPT_TRANSITION_REQUIRED")},
+				PatchableFields: patchFieldsFor("ACCEPT_TRANSITION_REQUIRED"),
+			}, nil
+		}
+		newBody, fromMarker, code := applyAcceptanceTransition(currentBody, in.AcceptanceTransition)
+		if code != "" {
+			return nil, artifactProposeOutput{
+				Status:          "not_ready",
+				ErrorCode:       code,
+				Failed:          []string{code},
+				Checklist:       []string{acceptanceTransitionChecklist(lang, code)},
+				PatchableFields: patchFieldsFor(code),
+			}, nil
+		}
+		in.BodyMarkdown = newBody
+		payload := map[string]any{
+			"checkbox_index": *in.AcceptanceTransition.CheckboxIndex,
+			"from_state":     string([]byte{fromMarker}),
+			"new_state":      strings.TrimSpace(in.AcceptanceTransition.NewState),
+		}
+		if r := strings.TrimSpace(in.AcceptanceTransition.Reason); r != "" {
+			payload["reason"] = r
+		}
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return nil, artifactProposeOutput{}, fmt.Errorf("marshal acceptance payload: %w", err)
+		}
+		acceptanceShapePayload = b
 	}
 
 	// Body patch materialisation (Task artifact-propose-본문-patch-입력-도입).
@@ -972,16 +1026,20 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 
 	newRev := lastRev + 1
 	var revID string
+	var shapePayloadArg any
+	if len(acceptanceShapePayload) > 0 {
+		shapePayloadArg = string(acceptanceShapePayload)
+	}
 	err = tx.QueryRow(ctx, `
 		INSERT INTO artifact_revisions (
 			artifact_id, revision_number, title, body_markdown, body_hash, tags,
 			completeness, author_kind, author_id, author_version, commit_msg,
-			source_session_ref, revision_shape
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'agent', $8, $9, $10, $11, 'body_patch')
+			source_session_ref, revision_shape, shape_payload
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'agent', $8, $9, $10, $11, $12, $13::jsonb)
 		RETURNING id::text
 	`, artifactID, newRev, in.Title, in.BodyMarkdown, bodyHash(in.BodyMarkdown),
 		in.Tags, completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), in.CommitMsg,
-		buildSourceSessionRef(deps, in),
+		buildSourceSessionRef(deps, in), string(shape), shapePayloadArg,
 	).Scan(&revID)
 	if err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("insert revision: %w", err)
@@ -1091,15 +1149,14 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 	if len(currentMetaRaw) > 0 {
 		_ = json.Unmarshal(currentMetaRaw, &prevMeta)
 	}
-	// Phase B exclusion — templates ARE the canonical source for their
+	// Phase B/D exclusions — templates ARE the canonical source for their
 	// type's section layout, so rewriting ## Decision / ## Root cause on
-	// _template_* is the intended edit path, not a guarded claim rewrite.
-	// Skip the guard entirely for template slugs so routine template
-	// maintenance doesn't spew CANONICAL_REWRITE_WITHOUT_EVIDENCE every
-	// revision.
+	// _template_* is the intended edit path (B). Acceptance-transition
+	// shape flips a single checkbox marker byte; that can't be a canonical
+	// claim rewrite by construction, so skip the guard for that shape (D).
 	rewrittenSections := detectCanonicalClaimRewrite(currentBody, in.BodyMarkdown, currentType)
 	canonicalRewriteFlag := false
-	if len(rewrittenSections) > 0 && !hasEvidenceDelta(prevMeta, &in) && !isTemplateArtifact(currentSlug) {
+	if len(rewrittenSections) > 0 && !hasEvidenceDelta(prevMeta, &in) && !isTemplateArtifact(currentSlug) && shape != ShapeAcceptanceTransition {
 		canonicalRewriteFlag = true
 		warnings = append(warnings, "CANONICAL_REWRITE_WITHOUT_EVIDENCE:"+strings.Join(rewrittenSections, "+"))
 		suggested = []string{
@@ -1641,6 +1698,14 @@ func patchFieldsFor(code string) []string {
 		return []string{"body_markdown", "body_patch", "shape"}
 	case "META_PATCH_EMPTY":
 		return []string{"tags", "completeness", "task_meta", "artifact_meta"}
+	case "ACCEPT_TRANSITION_REQUIRED",
+		"ACCEPT_TRANSITION_INDEX_REQUIRED",
+		"ACCEPT_TRANSITION_INDEX_NEGATIVE",
+		"ACCEPT_TRANSITION_INDEX_OUT_OF_RANGE",
+		"ACCEPT_TRANSITION_STATE_INVALID",
+		"ACCEPT_TRANSITION_REASON_REQUIRED",
+		"ACCEPT_TRANSITION_NOOP":
+		return []string{"acceptance_transition"}
 	case "MISSING_COMMIT_MSG":
 		return []string{"commit_msg"}
 	case "POSSIBLE_DUP":
@@ -2143,37 +2208,15 @@ func bodyH1Warnings(body string) []string {
 	return nil
 }
 
-// countAcceptanceCheckboxes walks the body and returns (done, total) where
-// done counts `- [x]` lines and total counts `- [x]` + `- [ ]` lines. Both
-// are case-insensitive on the fill marker ("x" vs "X"). Used by the Task
-// claimed_done evidence gate (migration 0013): without at least one
-// checkbox the gate stays quiet (not every Task uses the checklist form),
-// but when checkboxes exist they must all be checked.
-func countAcceptanceCheckboxes(body string) (done, total int) {
-	for _, line := range strings.Split(body, "\n") {
-		trimmed := strings.TrimSpace(line)
-		// Accept "- [ ] x", "* [ ] x", "+ [ ] x" as bullet list checkboxes.
-		if len(trimmed) < 5 {
-			continue
-		}
-		marker := trimmed[0]
-		if marker != '-' && marker != '*' && marker != '+' {
-			continue
-		}
-		rest := strings.TrimSpace(trimmed[1:])
-		if len(rest) < 3 || rest[0] != '[' || rest[2] != ']' {
-			continue
-		}
-		fill := rest[1]
-		switch fill {
-		case ' ':
-			total++
-		case 'x', 'X':
-			total++
-			done++
-		}
-	}
-	return done, total
+// countAcceptanceCheckboxes returns (resolved, total) for the body's
+// 4-state acceptance checkboxes. Phase D widened the semantics from
+// binary [ ]/[x] to 4-state: resolved now counts [x] (done), [~]
+// (partial, recorded reason), and [-] (deferred, recorded reason).
+// claimed_done gate: resolved == total means no unchecked [ ] remain;
+// [~]/[-] count as judgment calls an agent recorded via shape=
+// acceptance_transition and are no longer blocking.
+func countAcceptanceCheckboxes(body string) (resolved, total int) {
+	return countAcceptanceResolution(body)
 }
 
 // canonicalClaimSectionsByType returns the H2 headings whose rewrite on the
