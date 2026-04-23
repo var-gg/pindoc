@@ -260,7 +260,16 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 				out.Notice = "stub embedder active — landings are hash-ranked, not semantic."
 			}
 			if deps.Receipts != nil {
-				out.SearchReceipt = deps.Receipts.Issue(deps.ProjectSlug, in.TaskDescription)
+				// Phase E — bind the receipt to the landings' current head
+				// revisions. propose-time verifier flags drift instead of
+				// trusting a 30-min clock.
+				ids := make([]string, 0, len(out.Landings))
+				for _, l := range out.Landings {
+					ids = append(ids, l.ArtifactID)
+				}
+				out.SearchReceipt = deps.Receipts.Issue(deps.ProjectSlug, in.TaskDescription,
+					headSnapshotsForArtifacts(ctx, deps, ids),
+				)
 			}
 			return nil, out, rows.Err()
 		},

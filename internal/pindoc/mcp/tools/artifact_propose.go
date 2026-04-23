@@ -492,6 +492,28 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						PatchableFields:  patchFieldsFor("RECEIPT_WRONG_PROJECT"),
 					}, nil
 				}
+				// Phase E — corpus-drift staleness. If the receipt was issued
+				// with snapshots (artifact_id, revision_number at search time)
+				// and ALL of those artifacts have since moved past their
+				// snapshotted revision, the receipt is stale in the one sense
+				// that matters: the agent searched a corpus that no longer
+				// exists. Partial drift is just a warning (see checkReceiptSupersedes).
+				if len(res.Snapshots) > 0 {
+					superseded, err := checkReceiptSupersedes(ctx, deps, res.Snapshots)
+					if err != nil {
+						deps.Logger.Warn("receipt supersede check failed — allowing write", "err", err)
+					} else if len(superseded) == len(res.Snapshots) {
+						return nil, artifactProposeOutput{
+							Status:           "not_ready",
+							ErrorCode:        "RECEIPT_SUPERSEDED",
+							Failed:           []string{"RECEIPT_SUPERSEDED"},
+							Checklist:        []string{i18n.T(lang, "preflight.receipt_superseded")},
+							SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
+							NextTools:        defaultNextTools("RECEIPT_SUPERSEDED"),
+							PatchableFields:  patchFieldsFor("RECEIPT_SUPERSEDED"),
+						}, nil
+					}
+				}
 			}
 
 			// --- Resolve supersede_of target first (if set) --------------
@@ -1645,7 +1667,7 @@ func embedAndStoreChunks(ctx context.Context, tx pgx.Tx, provider embed.Provider
 // into that bucket because the fix is "fill in the missing field".
 func defaultNextTools(code string) []string {
 	switch code {
-	case "NO_SRCH", "RECEIPT_UNKNOWN", "RECEIPT_EXPIRED", "RECEIPT_WRONG_PROJECT":
+	case "NO_SRCH", "RECEIPT_UNKNOWN", "RECEIPT_EXPIRED", "RECEIPT_WRONG_PROJECT", "RECEIPT_SUPERSEDED":
 		return []string{"pindoc.artifact.search", "pindoc.context.for_task"}
 	case "CONFLICT_EXACT_TITLE", "POSSIBLE_DUP":
 		return []string{"pindoc.artifact.read", "pindoc.artifact.propose"}
@@ -1686,7 +1708,7 @@ func makeRelated(deps Deps, slug, id, artType, title, reason string) RelatedRef 
 // peer review's `patchable_fields[]` proposal.
 func patchFieldsFor(code string) []string {
 	switch code {
-	case "NO_SRCH", "RECEIPT_UNKNOWN", "RECEIPT_EXPIRED", "RECEIPT_WRONG_PROJECT":
+	case "NO_SRCH", "RECEIPT_UNKNOWN", "RECEIPT_EXPIRED", "RECEIPT_WRONG_PROJECT", "RECEIPT_SUPERSEDED":
 		return []string{"basis.search_receipt"}
 	case "NEED_VER", "FIELD_VALUE_RESERVED":
 		return []string{"expected_version"}

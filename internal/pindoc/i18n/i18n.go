@@ -81,7 +81,8 @@ var bundle = Bundle{
 
 		"preflight.no_search_receipt":     "✗ basis.search_receipt is missing — a create path requires a valid receipt from pindoc.artifact.search or pindoc.context.for_task in the current session",
 		"preflight.receipt_unknown":       "✗ basis.search_receipt is not recognised — the token may have been issued by a different MCP session or has been swept",
-		"preflight.receipt_expired":       "✗ basis.search_receipt is expired (TTL 10 minutes) — re-run search/context and retry",
+		"preflight.receipt_expired":       "✗ basis.search_receipt has passed the 24h fallback TTL — re-run search/context and retry",
+		"preflight.receipt_superseded":    "✗ basis.search_receipt is stale — every artifact in the search snapshot has been revised since issue. Re-run pindoc.artifact.search or pindoc.context.for_task and retry with the fresh receipt.",
 		"preflight.receipt_wrong_project": "✗ basis.search_receipt belongs to a different project",
 		"preflight.possible_dup":          "✗ a near-duplicate artifact %q already exists (cosine distance %.3f) — read it and either update_of or prove the new one is distinct",
 		"preflight.debug_no_repro":        "✗ Debug body should include reproduction or symptom info (keywords: reproduction / repro / symptom / 재현 / 증상)",
@@ -157,7 +158,8 @@ var bundle = Bundle{
 
 		"preflight.no_search_receipt":     "✗ basis.search_receipt가 없음 — create 경로는 현재 세션에서 발급된 pindoc.artifact.search 또는 pindoc.context.for_task의 receipt 필수",
 		"preflight.receipt_unknown":       "✗ basis.search_receipt를 인식하지 못함 — 다른 MCP 세션에서 발급됐거나 이미 sweep됨",
-		"preflight.receipt_expired":       "✗ basis.search_receipt 만료 (TTL 10분) — search/context 재호출 후 재시도",
+		"preflight.receipt_expired":       "✗ basis.search_receipt 24h fallback TTL 초과 — search/context 재호출 후 재시도",
+		"preflight.receipt_superseded":    "✗ basis.search_receipt stale — 검색 스냅샷의 모든 artifact가 이후 revision으로 이동함. pindoc.artifact.search 또는 pindoc.context.for_task를 재호출하고 새 receipt로 재시도.",
 		"preflight.receipt_wrong_project": "✗ basis.search_receipt가 다른 프로젝트의 것임",
 		"preflight.possible_dup":          "✗ 유사한 기존 artifact %q 존재 (cosine distance %.3f) — 읽어본 뒤 update_of 하거나 새 artifact가 다르다는 근거를 제시",
 		"preflight.debug_no_repro":        "✗ Debug body에 재현/증상 정보 필요 (키워드: reproduction / repro / symptom / 재현 / 증상)",

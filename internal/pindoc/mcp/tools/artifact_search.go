@@ -198,7 +198,16 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 				out.Notice = "stub embedder — ranking is hash-based, not semantic. Swap to a real embedding provider to get meaningful results."
 			}
 			if deps.Receipts != nil {
-				out.SearchReceipt = deps.Receipts.Issue(deps.ProjectSlug, in.Query)
+				// Phase E — receipt is bound to the hit-set's current head
+				// revisions. The verifier at propose time flags drift against
+				// this snapshot instead of trusting a clock TTL.
+				ids := make([]string, 0, len(out.Hits))
+				for _, h := range out.Hits {
+					ids = append(ids, h.ArtifactID)
+				}
+				out.SearchReceipt = deps.Receipts.Issue(deps.ProjectSlug, in.Query,
+					headSnapshotsForArtifacts(ctx, deps, ids),
+				)
 			}
 			return nil, out, rows.Err()
 		},
