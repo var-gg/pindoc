@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { FileText, Search } from "lucide-react";
 import { api, type SearchHit } from "../api/client";
 import { useI18n } from "../i18n";
+import { localizedAreaName } from "./areaLocale";
 
 type Props = {
   projectSlug: string;
@@ -118,7 +119,7 @@ export function CmdK({ projectSlug, open, onClose }: Props) {
               <div>
                 <div>{hit.title}</div>
                 <div className="mono">
-                  {hit.type} · {hit.area_slug} · distance {hit.distance.toFixed(3)}
+                  {hit.type} · {localizedAreaName(t, hit.area_slug, hit.area_slug)} · distance {hit.distance.toFixed(3)}
                 </div>
               </div>
               <span className="mono">↵</span>

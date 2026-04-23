@@ -4,6 +4,7 @@ import type { ComponentType } from "react";
 import type { Area } from "../api/client";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
+import { localizedAreaName } from "./areaLocale";
 import type { Aggregate } from "./useReaderData";
 
 type Props = {
@@ -102,6 +103,7 @@ export function Sidebar({
           level={0}
           selectedArea={selectedArea}
           onSelectArea={onSelectArea}
+          t={t}
         />
       ))}
       {crossCutting.length > 0 && (
@@ -113,9 +115,10 @@ export function Sidebar({
               className={`side-item${selectedArea === a.slug ? " active" : ""}`}
               onClick={() => onSelectArea(selectedArea === a.slug ? null : a.slug)}
               data-testid={`area-${a.slug}`}
+              title={a.description || undefined}
             >
               <Folder className="lucide" />
-              <span>{a.name}</span>
+              <span>{localizedAreaName(t, a.slug, a.name)}</span>
               <span className="side-item__count">{a.artifact_count}</span>
             </button>
           ))}
@@ -206,11 +209,13 @@ function AreaTreeNode({
   level,
   selectedArea,
   onSelectArea,
+  t,
 }: {
   node: AreaNode;
   level: number;
   selectedArea: string | null;
   onSelectArea: (slug: string | null) => void;
+  t: (key: string) => string;
 }) {
   // Default to expanded: Pindoc trees are shallow (2-3 levels), so
   // collapse-by-default hides more than it helps on first render.
@@ -226,6 +231,7 @@ function AreaTreeNode({
         className={`side-item${active ? " active" : ""}`}
         style={indent}
         onClick={() => onSelectArea(active ? null : node.slug)}
+        title={node.description || undefined}
       >
         {hasChildren ? (
           <span
@@ -252,7 +258,7 @@ function AreaTreeNode({
           <span style={{ width: 14, display: "inline-block" }} />
         )}
         {active ? <FolderOpen className="lucide" /> : <Folder className="lucide" />}
-        <span>{node.name}</span>
+        <span>{localizedAreaName(t, node.slug, node.name)}</span>
         <span className="side-item__count">{node.artifact_count}</span>
       </button>
       {hasChildren && expanded && node.children.map((child) => (
@@ -262,6 +268,7 @@ function AreaTreeNode({
           level={level + 1}
           selectedArea={selectedArea}
           onSelectArea={onSelectArea}
+          t={t}
         />
       ))}
     </>
