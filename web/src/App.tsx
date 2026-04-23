@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation, useParams } from "react-router";
 import { api } from "./api/client";
 import { useI18n } from "./i18n";
+import { Telemetry } from "./ops/Telemetry";
 import { Diff } from "./reader/Diff";
 import { History } from "./reader/History";
 import { ReaderShell } from "./reader/ReaderShell";
@@ -46,6 +47,12 @@ export function App() {
       <Route path="/tasks/*" element={<LegacyRedirect base="tasks" />} />
       <Route path="/graph" element={<LegacyRedirect base="graph" />} />
       <Route path="/inbox" element={<LegacyRedirect base="inbox" />} />
+
+      {/* Ops — Phase J MCP tool-call telemetry. Instance-wide, not
+          project-scoped (tool calls span every project this instance
+          serves). Reachable via /ops/telemetry; linked from the Reader
+          TopNav's overflow menu. */}
+      <Route path="/ops/telemetry" element={<Telemetry />} />
 
       {/* Bare root. / redirects to /p/:default/:locale/wiki. */}
       <Route path="/" element={<LegacyRedirect base="wiki" />} />

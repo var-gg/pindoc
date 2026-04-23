@@ -1,0 +1,207 @@
+/* Phase J — MCP tool-call telemetry page.
+   Self-contained styles so the page doesn't drag in reader.css chrome.
+   Dark-neutral palette that doesn't fight the Reader when linked from
+   either side. */
+
+.ops {
+  --ops-bg: #0f1013;
+  --ops-surface: #171a1f;
+  --ops-border: #262b33;
+  --ops-text: #e7e9ec;
+  --ops-mute: #8a8f97;
+  --ops-accent: #6ea8fe;
+  --ops-err: #f08886;
+  --ops-ok: #7fd0a0;
+  min-height: 100vh;
+  background: var(--ops-bg);
+  color: var(--ops-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 24px 32px 64px;
+}
+
+.ops__bar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.ops__back {
+  color: var(--ops-mute);
+  text-decoration: none;
+  font-size: 12px;
+}
+.ops__back:hover { color: var(--ops-accent); }
+
+.ops__title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  margin: 0;
+  flex: 1;
+}
+
+.ops__controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ops__windows {
+  display: flex;
+  background: var(--ops-surface);
+  border: 1px solid var(--ops-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.ops__win {
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--ops-mute);
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  border-left: 1px solid var(--ops-border);
+}
+.ops__win:first-child { border-left: none; }
+.ops__win.is-active { background: var(--ops-accent); color: #0f1013; }
+.ops__win:hover:not(.is-active) { color: var(--ops-text); }
+
+.ops__auto {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ops-mute);
+  font-size: 12px;
+}
+
+.ops__refresh {
+  padding: 4px 12px;
+  background: var(--ops-surface);
+  color: var(--ops-text);
+  border: 1px solid var(--ops-border);
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+}
+.ops__refresh:hover:not(:disabled) { border-color: var(--ops-accent); }
+.ops__refresh:disabled { opacity: 0.5; cursor: wait; }
+
+.ops__error {
+  padding: 12px 16px;
+  background: #3a1f22;
+  border: 1px solid var(--ops-err);
+  color: var(--ops-err);
+  border-radius: 4px;
+  margin-bottom: 16px;
+}
+
+.ops__empty {
+  padding: 32px;
+  background: var(--ops-surface);
+  border: 1px solid var(--ops-border);
+  border-radius: 4px;
+  color: var(--ops-mute);
+  text-align: center;
+}
+
+/* Totals band */
+.ops__totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.ops__metric {
+  background: var(--ops-surface);
+  border: 1px solid var(--ops-border);
+  border-radius: 6px;
+  padding: 14px 16px;
+}
+.ops__metric.is-strong { border-color: var(--ops-accent); }
+
+.ops__metric-val {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+
+.ops__metric-lab {
+  font-size: 11px;
+  color: var(--ops-mute);
+  margin-top: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ops__metric-sub {
+  color: var(--ops-text);
+  opacity: 0.7;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Tables */
+.ops__tools, .ops__recent {
+  margin-bottom: 32px;
+}
+
+.ops h2 {
+  font-size: 12px;
+  color: var(--ops-mute);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin: 0 0 8px 0;
+  font-weight: 500;
+}
+
+.ops table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--ops-surface);
+  border: 1px solid var(--ops-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.ops th, .ops td {
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 12px;
+  border-bottom: 1px solid var(--ops-border);
+}
+
+.ops thead th {
+  background: #12141a;
+  color: var(--ops-mute);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 11px;
+}
+
+.ops tbody tr:last-child td { border-bottom: none; }
+.ops tbody tr:hover { background: #1b1f26; }
+
+.ops td.num, .ops th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.ops td.strong { font-weight: 600; }
+.ops td.err { color: var(--ops-err); }
+.ops td.tool { font-weight: 500; }
+.ops td.mono { color: var(--ops-mute); }
+.ops td.ts { color: var(--ops-mute); font-size: 11px; }
+
+.ops tbody tr.is-err td { background: #2a1719; }
+.ops tbody tr.is-err:hover td { background: #331b1e; }
+
+.ops__foot {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid var(--ops-border);
+  color: var(--ops-mute);
+  font-size: 11px;
+}

@@ -59,6 +59,13 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/config", d.handleConfig)
 	mux.HandleFunc("GET /api/projects", d.handleProjectList)
 
+	// Ops surface (Phase J UI). Instance-wide telemetry aggregation —
+	// per-tool averages + recent call timeline so operators can see
+	// "which tool is a token hog this week" in the Reader without
+	// dropping into psql. Read-only, same convention as the rest of
+	// httpapi.
+	mux.HandleFunc("GET /api/ops/telemetry", d.handleTelemetry)
+
 	// Project-scoped reads. The {project} path segment resolves a row in
 	// projects.slug; 404 if missing so URL shares fail loudly rather than
 	// silently leaking to the caller's current project.

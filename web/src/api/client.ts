@@ -289,4 +289,66 @@ export const api = {
       `${p(project)}/artifacts/${encodeURIComponent(idOrSlug)}/diff${q ? `?${q}` : ""}`,
     );
   },
+
+  // Ops — instance-wide MCP tool-call telemetry. Reads from the async
+  // mcp_tool_calls pipeline (Phase J). window = "1h" | "6h" | "24h" |
+  // "7d" | "30d", default 24h. project filters by project_slug; omit
+  // for an instance-wide view.
+  telemetry: (params?: { window?: TelemetryWindow; project?: string; recentLimit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.window) qs.set("window", params.window);
+    if (params?.project) qs.set("project", params.project);
+    if (params?.recentLimit) qs.set("recent_limit", String(params.recentLimit));
+    const q = qs.toString();
+    return j<TelemetryResponse>(`/api/ops/telemetry${q ? `?${q}` : ""}`);
+  },
+};
+
+export type TelemetryWindow = "1h" | "6h" | "24h" | "7d" | "30d";
+
+export type TelemetryTotals = {
+  calls: number;
+  errors: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  unique_agents: number;
+};
+
+export type TelemetryToolRow = {
+  tool_name: string;
+  calls: number;
+  errors: number;
+  error_rate: number;
+  avg_duration_ms: number;
+  p50_duration_ms: number;
+  p95_duration_ms: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  avg_input_tokens: number;
+  avg_output_tokens: number;
+  avg_input_bytes: number;
+  avg_output_bytes: number;
+  last_call_at: string;
+};
+
+export type TelemetryRecentCall = {
+  started_at: string;
+  duration_ms: number;
+  tool_name: string;
+  agent_id?: string;
+  project_slug?: string;
+  input_bytes: number;
+  output_bytes: number;
+  input_tokens_est: number;
+  output_tokens_est: number;
+  error_code?: string;
+  toolset_version?: string;
+};
+
+export type TelemetryResponse = {
+  window_hours: number;
+  project_slug?: string;
+  totals: TelemetryTotals;
+  tools: TelemetryToolRow[];
+  recent: TelemetryRecentCall[];
 };
