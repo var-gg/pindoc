@@ -22,6 +22,8 @@
   "sidebar.view": "View options",
   "sidebar.templates": "Show templates",
   "sidebar.templates_hint": "Toggle inclusion of _template_ artifacts (per-type recommended structure) in the list",
+  "sidebar.type_locked_badge": "locked",
+  "sidebar.type_locked_hint": "Tasks Surface pins Type to Task. Switch to Wiki for cross-type filtering.",
 
   "sidecar.this_artifact": "This artifact",
   "sidecar.no_selection": "No artifact selected",
@@ -33,6 +35,9 @@
   "tasks.col_in_progress": "In progress",
   "tasks.col_blocked": "Blocked",
   "tasks.col_done": "Done",
+  "tasks.col_open": "Open",
+  "tasks.col_claimed_done": "Claimed done",
+  "tasks.col_verified": "Verified",
   "tasks.col_no_status": "No status",
   "tasks.col_cancelled": "Cancelled",
   "sidecar.prov_author": "author",

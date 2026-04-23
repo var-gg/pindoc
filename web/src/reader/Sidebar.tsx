@@ -14,6 +14,11 @@ type Props = {
   onSelectArea: (slug: string | null) => void;
   selectedType: string | null;
   onSelectType: (t: string | null) => void;
+  // typeFilterLocked hides the Type section when the current Surface
+  // already pins Type to a single value (Tasks Surface = Task). The label
+  // falls back to a muted "Type · Task" chip so users still see why the
+  // filter is gone. Decision `decision-reader-ia-hierarchy` §Surface 집합.
+  typeFilterLocked?: boolean;
   open: boolean;
   showTemplates: boolean;
   onToggleTemplates: () => void;
@@ -68,6 +73,7 @@ export function Sidebar({
   onSelectArea,
   selectedType,
   onSelectType,
+  typeFilterLocked = false,
   open,
   showTemplates,
   onToggleTemplates,
@@ -116,27 +122,44 @@ export function Sidebar({
         </div>
       )}
 
-      {types.length > 0 && (
+      {typeFilterLocked ? (
         <>
           <div className="side-section" style={{ marginTop: 12 }}>
             {t("sidebar.types")}
           </div>
-          {types.map(({ key, count }) => {
-            const Icon = TYPE_ICONS[key] ?? FileText;
-            return (
-              <button
-                type="button"
-                key={key}
-                className={`side-item${selectedType === key ? " active" : ""}`}
-                onClick={() => onSelectType(selectedType === key ? null : key)}
-              >
-                <Icon className="lucide" />
-                <span>{key}</span>
-                <span className="side-item__count">{count}</span>
-              </button>
-            );
-          })}
+          <div
+            className="side-item"
+            style={{ color: "var(--fg-3)", cursor: "default" }}
+            title={t("sidebar.type_locked_hint")}
+          >
+            <Check className="lucide" />
+            <span>Task</span>
+            <span className="side-item__count">{t("sidebar.type_locked_badge")}</span>
+          </div>
         </>
+      ) : (
+        types.length > 0 && (
+          <>
+            <div className="side-section" style={{ marginTop: 12 }}>
+              {t("sidebar.types")}
+            </div>
+            {types.map(({ key, count }) => {
+              const Icon = TYPE_ICONS[key] ?? FileText;
+              return (
+                <button
+                  type="button"
+                  key={key}
+                  className={`side-item${selectedType === key ? " active" : ""}`}
+                  onClick={() => onSelectType(selectedType === key ? null : key)}
+                >
+                  <Icon className="lucide" />
+                  <span>{key}</span>
+                  <span className="side-item__count">{count}</span>
+                </button>
+              );
+            })}
+          </>
+        )
       )}
 
       <div className="side-section" style={{ marginTop: 12 }}>

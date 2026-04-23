@@ -22,6 +22,8 @@
   "sidebar.view": "보기 옵션",
   "sidebar.templates": "템플릿 표시",
   "sidebar.templates_hint": "타입별 권장 섹션 구조(_template_ prefix) artifact를 목록에 포함/제외",
+  "sidebar.type_locked_badge": "고정",
+  "sidebar.type_locked_hint": "Tasks 화면에서는 Type이 Task로 고정됩니다. 교차 필터가 필요하면 Wiki로 전환하세요.",
 
   "sidecar.this_artifact": "이 아티팩트",
   "sidecar.no_selection": "선택된 아티팩트가 없음",
@@ -33,6 +35,9 @@
   "tasks.col_in_progress": "진행 중",
   "tasks.col_blocked": "블록",
   "tasks.col_done": "완료",
+  "tasks.col_open": "대기",
+  "tasks.col_claimed_done": "완료 주장",
+  "tasks.col_verified": "검증 완료",
   "tasks.col_no_status": "상태 미지정",
   "tasks.col_cancelled": "취소됨",
   "sidecar.prov_author": "작성자",
