@@ -792,12 +792,17 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 // transaction so search never sees a half-indexed update.
 //
 // Phase B revision-shapes dispatch: the shape field (validated in
-// preflight) decides which writer runs. Phase B only wires body_patch —
-// meta_patch / acceptance_transition / scope_defer return
-// SHAPE_NOT_IMPLEMENTED until their phase lands (C / D / F).
+// preflight) decides which writer runs. Phase B wired body_patch only;
+// Phase C adds meta_patch. acceptance_transition / scope_defer return
+// SHAPE_NOT_IMPLEMENTED until Phase D / F light them up.
 func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang string) (*sdk.CallToolResult, artifactProposeOutput, error) {
 	shape, _ := parseShape(in.Shape) // preflight already validated
-	if shape != ShapeBodyPatch {
+	switch shape {
+	case ShapeBodyPatch:
+		// fall through to the legacy body_patch writer below
+	case ShapeMetaPatch:
+		return handleUpdateMetaPatch(ctx, deps, in, lang)
+	default:
 		return nil, artifactProposeOutput{
 			Status:          "not_ready",
 			ErrorCode:       "SHAPE_NOT_IMPLEMENTED",
@@ -1632,6 +1637,10 @@ func patchFieldsFor(code string) []string {
 		return []string{"expected_version", "body_markdown", "title"}
 	case "SHAPE_INVALID", "SHAPE_REQUIRES_UPDATE", "SHAPE_NOT_IMPLEMENTED":
 		return []string{"shape"}
+	case "META_PATCH_HAS_BODY":
+		return []string{"body_markdown", "body_patch", "shape"}
+	case "META_PATCH_EMPTY":
+		return []string{"tags", "completeness", "task_meta", "artifact_meta"}
 	case "MISSING_COMMIT_MSG":
 		return []string{"commit_msg"}
 	case "POSSIBLE_DUP":
