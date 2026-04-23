@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import mermaid from "mermaid";
-import { uniqueSlug } from "./slug";
+import { headingsFromBody, slugifyHeading } from "./slug";
 
 // Initialize mermaid once per page. Theme follows the Pindoc dark/light
 // class on <html>. We invert the theme selection at render time so fresh
@@ -29,15 +29,29 @@ function ensureMermaid(): void {
  * display.
  */
 export function PindocMarkdown({ source }: { source: string }) {
-  // Each render keeps its own slug ledger so duplicate H2 titles inside
-  // one artifact get stable `-2`, `-3` suffixes. Ledger lives inside
-  // useMemo so it rebuilds when the body changes but is stable during a
-  // single render pass (headingId is called once per h2 the renderer
-  // walks across, in document order).
-  const headingIds = useMemo(() => {
-    const used = new Set<string>();
-    return (text: string) => uniqueSlug(text, used);
+  // Derive every H2's final slug up-front from the raw source so the
+  // h2 renderer is a pure lookup instead of a stateful slug ledger.
+  // The previous design kept a `used` Set inside a memoized closure —
+  // harmless in production but under React StrictMode's dev double-render
+  // the Set accumulated across the two passes, so "Purpose" on the second
+  // pass collided and came back as "purpose-2". TOC hrefs (fresh ledger
+  // from headingsFromBody) then pointed at ids that didn't exist, which
+  // is what made the TOC look dead. Index-by-text-occurrence + a local
+  // counter keeps both sides in lock-step and is idempotent per render.
+  const slugsByText = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const h of headingsFromBody(source)) {
+      const bucket = map.get(h.text);
+      if (bucket) bucket.push(h.slug);
+      else map.set(h.text, [h.slug]);
+    }
+    return map;
   }, [source]);
+
+  // Per-render counter: a fresh Map every time PindocMarkdown runs, so
+  // StrictMode's double-invoke gets independent state and h2 ids stay
+  // deterministic across both passes.
+  const counters = new Map<string, number>();
 
   return (
     <ReactMarkdown
@@ -56,7 +70,11 @@ export function PindocMarkdown({ source }: { source: string }) {
           // strings + inline code + emphasis) back into the plain text
           // used for slug generation. Keeping the rendered children
           // unchanged preserves inline formatting on the heading itself.
-          const id = headingIds(extractHeadingText(children));
+          const text = extractHeadingText(children);
+          const slugs = slugsByText.get(text);
+          const n = counters.get(text) ?? 0;
+          counters.set(text, n + 1);
+          const id = slugs?.[n] ?? slugifyHeading(text);
           return <h2 id={id}>{children}</h2>;
         },
       }}

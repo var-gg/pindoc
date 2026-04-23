@@ -1,15 +1,18 @@
 import { useEffect, useState } from "react";
 import { useI18n } from "../i18n";
 
-// Toc — sticky right rail that lists every H2 in the current artifact
+// Toc — section inside Sidecar that lists every H2 in the current artifact
 // body and scroll-spies the active section via IntersectionObserver.
 // Clicks trigger smooth scroll + URL fragment update so the section is
 // bookmarkable. Rendered only when headings.length >= 2; the parent
-// ReaderSurface gates visibility so a one-section artifact doesn't get a
+// Sidecar gates visibility so a one-section artifact doesn't get a
 // TOC-shaped empty card.
 //
-// Task task-reader-sticky-toc (UI-F). Width-mode gating (hide on narrow)
-// happens in CSS via :root[data-reader-width="narrow"] .reader-toc.
+// Scroll container = window (after reader-toc-into-sidecar refactor), so
+// root=null and scrollIntoView both target the viewport naturally. Hiding
+// on narrow width follows Sidecar's own responsive rules — the old
+// :root[data-reader-width="narrow"] .reader-toc override was dropped
+// because Sidecar hides itself at that breakpoint anyway.
 
 type Heading = { text: string; slug: string };
 
@@ -41,7 +44,7 @@ export function Toc({ headings }: Props) {
           setActive(visible[0].target.id);
         }
       },
-      { rootMargin: "0px 0px -70% 0px", threshold: [0, 1] },
+      { root: null, rootMargin: "0px 0px -70% 0px", threshold: [0, 1] },
     );
     for (const el of els) observer.observe(el);
     return () => observer.disconnect();

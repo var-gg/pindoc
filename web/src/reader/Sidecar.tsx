@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import { ArrowUpRight, History as HistoryIcon } from "lucide-react";
 import {
@@ -12,6 +12,8 @@ import {
 } from "../api/client";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
+import { Toc } from "./Toc";
+import { headingsFromBody } from "./slug";
 
 type Props = {
   projectSlug: string;
@@ -20,6 +22,15 @@ type Props = {
 
 export function Sidecar({ projectSlug, detail }: Props) {
   const { t } = useI18n();
+  // TOC feeds off body_markdown; Markdown.tsx independently derives the
+  // same slugs via the same uniqueSlug ledger so `<h2 id>` matches
+  // `href="#..."` without a DOM round-trip. Computed here (not ReaderSurface)
+  // so Sidecar owns the TOC lifecycle alongside its other metadata rails.
+  const headings = useMemo(
+    () => (detail ? headingsFromBody(detail.body_markdown) : []),
+    [detail],
+  );
+
   if (!detail) {
     return (
       <aside className="sidecar">
@@ -51,6 +62,8 @@ export function Sidecar({ projectSlug, detail }: Props) {
       <div className="sidecar__head">
         <h3>{t("sidecar.this_artifact")}</h3>
       </div>
+
+      {headings.length >= 2 && <Toc headings={headings} />}
 
       <div className="graph-wrap">
         <div className="mini-graph">
