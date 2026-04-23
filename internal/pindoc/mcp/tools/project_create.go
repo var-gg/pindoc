@@ -158,7 +158,8 @@ the new project by launching pindoc-server with PINDOC_PROJECT=<new>.
 				return nil, projectCreateOutput{}, fmt.Errorf("resolve misc area: %w", err)
 			}
 			for _, t := range templateSeeds {
-				if _, err := tx.Exec(ctx, `
+				var templateID string
+				if err := tx.QueryRow(ctx, `
 					INSERT INTO artifacts (
 						project_id, area_id, slug, type, title, body_markdown, tags,
 						completeness, status, review_state,
@@ -168,8 +169,24 @@ the new project by launching pindoc-server with PINDOC_PROJECT=<new>.
 						'partial', 'published', 'auto_published',
 						'system', 'pindoc-seed', '0.0.1', now()
 					)
-				`, projectID, miscID, t.Slug, t.Type, t.Title, t.Body); err != nil {
+					RETURNING id::text
+				`, projectID, miscID, t.Slug, t.Type, t.Title, t.Body).Scan(&templateID); err != nil {
 					return nil, projectCreateOutput{}, fmt.Errorf("seed template %s: %w", t.Slug, err)
+				}
+				// Phase A revision-shapes refactor: every artifact must have
+				// revision 1 (head() = 0 is no longer legal — see migration
+				// 0017). Templates seeded via raw INSERT historically skipped
+				// this; doing it in the same tx keeps project_create atomic.
+				if _, err := tx.Exec(ctx, `
+					INSERT INTO artifact_revisions (
+						artifact_id, revision_number, title, body_markdown, body_hash, tags,
+						completeness, author_kind, author_id, author_version, commit_msg,
+						revision_shape
+					) VALUES ($1::uuid, 1, $2, $3, encode(sha256(convert_to($3, 'UTF8')), 'hex'),
+					          ARRAY['_template'], 'partial', 'system', 'pindoc-seed', '0.0.1',
+					          'seed: template artifact', 'body_patch')
+				`, templateID, t.Title, t.Body); err != nil {
+					return nil, projectCreateOutput{}, fmt.Errorf("seed template revision %s: %w", t.Slug, err)
 				}
 			}
 

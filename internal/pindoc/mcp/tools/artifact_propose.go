@@ -66,9 +66,12 @@ type artifactProposeInput struct {
 	// writers. When update_of is set the server requires this field
 	// (NEED_VER) and then compares the value to the artifact's current
 	// max(revision_number); mismatch → not_ready with VER_CONFLICT.
-	// Pointer type so a legitimate zero value (seeded artifact with no
-	// revision rows yet) is distinguishable from "field omitted."
-	ExpectedVersion *int `json:"expected_version,omitempty" jsonschema:"required for update_of; current revision number (use 0 for freshly seeded artifacts)"`
+	// Pointer type preserves the nil / zero distinction: nil = omitted
+	// (NEED_VER), 0 = reserved invalid (FIELD_VALUE_RESERVED — migration
+	// 0017 guarantees every artifact has revision >= 1), N>=1 = compared
+	// to head. Agents should read pindoc.artifact.revisions and pass the
+	// current max revision_number.
+	ExpectedVersion *int `json:"expected_version,omitempty" jsonschema:"required for update_of; current revision number (>= 1)"`
 
 	// SupersedeOf marks the target artifact as superseded by this new one.
 	// Creates a NEW artifact (like a no-update_of call), then flips the
@@ -709,27 +712,26 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				supersededFlag = true
 			}
 
-			if err := tx.Commit(ctx); err != nil {
-				return nil, artifactProposeOutput{}, fmt.Errorf("commit: %w", err)
-			}
-
 			// First revision — keep the invariant that every artifact has
-			// at least one artifact_revisions row. Done outside the tx
-			// (commit just happened) which is safe because a missing
-			// revision row still has the artifact intact; a background
-			// backfill (future) can repair it.
-			if _, err := deps.DB.Exec(ctx, `
+			// at least one artifact_revisions row. Phase A of the revision-
+			// shape refactor moves this inside the tx so a best-effort
+			// failure can't leave an artifact with head() = 0 ever again
+			// (migration 0017 mopped up the pre-fix backlog).
+			if _, err := tx.Exec(ctx, `
 				INSERT INTO artifact_revisions (
 					artifact_id, revision_number, title, body_markdown, body_hash, tags,
 					completeness, author_kind, author_id, author_version, commit_msg,
-					source_session_ref
-				) VALUES ($1, 1, $2, $3, $4, $5, $6, 'agent', $7, $8, 'initial', $9)
+					source_session_ref, revision_shape
+				) VALUES ($1, 1, $2, $3, $4, $5, $6, 'agent', $7, $8, 'initial', $9, 'body_patch')
 			`, newID, in.Title, in.BodyMarkdown, bodyHash(in.BodyMarkdown), in.Tags,
 				completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion),
 				buildSourceSessionRef(deps, in),
 			); err != nil {
-				deps.Logger.Warn("initial revision insert failed — head row still present",
-					"artifact_id", newID, "err", err)
+				return nil, artifactProposeOutput{}, fmt.Errorf("initial revision insert: %w", err)
+			}
+
+			if err := tx.Commit(ctx); err != nil {
+				return nil, artifactProposeOutput{}, fmt.Errorf("commit: %w", err)
 			}
 
 			warnings := createWarnings(ctx, deps, projectID, in.Title, in.BodyMarkdown)
@@ -946,8 +948,8 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		INSERT INTO artifact_revisions (
 			artifact_id, revision_number, title, body_markdown, body_hash, tags,
 			completeness, author_kind, author_id, author_version, commit_msg,
-			source_session_ref
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'agent', $8, $9, $10, $11)
+			source_session_ref, revision_shape
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'agent', $8, $9, $10, $11, 'body_patch')
 		RETURNING id::text
 	`, artifactID, newRev, in.Title, in.BodyMarkdown, bodyHash(in.BodyMarkdown),
 		in.Tags, completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), in.CommitMsg,
@@ -1357,8 +1359,16 @@ func preflight(ctx context.Context, deps Deps, in *artifactProposeInput, lang st
 			push(fmt.Sprintf(i18n.T(lang, "preflight.rel_invalid"), i, r.Relation), "REL_INVALID")
 		}
 	}
-	if in.ExpectedVersion != nil && *in.ExpectedVersion < 0 {
-		push(i18n.T(lang, "preflight.expected_version_negative"), "VER_INVALID")
+	if in.ExpectedVersion != nil {
+		switch {
+		case *in.ExpectedVersion < 0:
+			push(i18n.T(lang, "preflight.expected_version_negative"), "VER_INVALID")
+		case *in.ExpectedVersion == 0:
+			// Migration 0017 backfilled revision 1 for every seeded artifact
+			// and create paths now write the initial revision inside the
+			// artifact insert tx — head() = 0 is no longer a legal state.
+			push(i18n.T(lang, "preflight.expected_version_reserved"), "FIELD_VALUE_RESERVED")
+		}
 	}
 
 	// Phase 15b: task_meta shape. Only validated when provided and only
@@ -1534,7 +1544,7 @@ func defaultNextTools(code string) []string {
 		return []string{"pindoc.artifact.search", "pindoc.context.for_task"}
 	case "CONFLICT_EXACT_TITLE", "POSSIBLE_DUP":
 		return []string{"pindoc.artifact.read", "pindoc.artifact.propose"}
-	case "VER_CONFLICT":
+	case "VER_CONFLICT", "FIELD_VALUE_RESERVED":
 		return []string{"pindoc.artifact.revisions", "pindoc.artifact.diff"}
 	case "UPDATE_TARGET_NOT_FOUND", "SUPERSEDE_TARGET_NOT_FOUND", "REL_TARGET_NOT_FOUND":
 		return []string{"pindoc.artifact.search", "pindoc.area.list"}
@@ -1573,7 +1583,7 @@ func patchFieldsFor(code string) []string {
 	switch code {
 	case "NO_SRCH", "RECEIPT_UNKNOWN", "RECEIPT_EXPIRED", "RECEIPT_WRONG_PROJECT":
 		return []string{"basis.search_receipt"}
-	case "NEED_VER":
+	case "NEED_VER", "FIELD_VALUE_RESERVED":
 		return []string{"expected_version"}
 	case "VER_CONFLICT":
 		return []string{"expected_version", "body_markdown", "title"}
