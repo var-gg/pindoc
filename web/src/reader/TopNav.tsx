@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router";
-import { ChevronDown, FileText, Inbox, Menu, Moon, Search, Share2, Sun } from "lucide-react";
+import { AlignCenter, AlignJustify, ChevronDown, FileText, Inbox, Maximize2, Menu, Moon, Search, Share2, Sun } from "lucide-react";
+import type { ComponentType } from "react";
 import { api, type ProjectListItem } from "../api/client";
 import { useI18n, type Lang } from "../i18n";
 import type { Project } from "../api/client";
 import type { Theme } from "./theme";
+import type { ReaderWidth } from "./readerWidth";
 
 type Props = {
   project: Project;
@@ -13,7 +15,19 @@ type Props = {
   onOpenPalette: () => void;
   onToggleMenu: () => void;
   inboxCount: number;
+  readerWidth: ReaderWidth;
+  onChangeReaderWidth: (next: ReaderWidth) => void;
 };
+
+// Width toggle ordering + icons. AlignCenter = narrow (tight column),
+// AlignJustify = default (balanced), Maximize2 = wide (full-bleed).
+// Kept in one array so TopNav renders a tight segmented control with
+// stable aria labels.
+const WIDTH_OPTIONS: Array<{ mode: ReaderWidth; icon: ComponentType<{ className?: string }>; labelKey: string }> = [
+  { mode: "narrow", icon: AlignCenter, labelKey: "nav.width_narrow" },
+  { mode: "default", icon: AlignJustify, labelKey: "nav.width_default" },
+  { mode: "wide", icon: Maximize2, labelKey: "nav.width_wide" },
+];
 
 export function TopNav({
   project,
@@ -22,6 +36,8 @@ export function TopNav({
   onOpenPalette,
   onToggleMenu,
   inboxCount,
+  readerWidth,
+  onChangeReaderWidth,
 }: Props) {
   const { t, lang, setLang } = useI18n();
   const nextLang: Lang = lang === "ko" ? "en" : "ko";
@@ -70,6 +86,25 @@ export function TopNav({
         <span>{t("nav.search_hint")}</span>
         <span className="kbd">⌘K</span>
       </button>
+
+      <div className="nav__width" role="group" aria-label={t("nav.width_toggle")}>
+        {WIDTH_OPTIONS.map(({ mode, icon: Icon, labelKey }) => {
+          const active = readerWidth === mode;
+          return (
+            <button
+              key={mode}
+              type="button"
+              className={`nav__width-btn${active ? " is-active" : ""}`}
+              onClick={() => onChangeReaderWidth(mode)}
+              aria-pressed={active}
+              aria-label={t(labelKey)}
+              title={t(labelKey)}
+            >
+              <Icon className="lucide" />
+            </button>
+          );
+        })}
+      </div>
 
       <button className="nav__lang" onClick={() => setLang(nextLang)} aria-label={t("lang.switch")}>
         {lang === "ko" ? "KO" : "EN"}

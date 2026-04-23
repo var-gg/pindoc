@@ -232,18 +232,36 @@
   --nav-h:        48px;
   --sidebar-w:    256px;
   --sidecar-w:    320px;
-  --reader-max:   66ch;     /* 45–75ch research range; Baymard / Butterick */
+
+  /* Reader column width — 3 modes (Task task-reader-width-modes).
+   * narrow  = blog / essay (45-55ch band)
+   * default = engineering spec + code blocks (~65ch, up from original 66ch)
+   * wide    = docs / diagrams / wide tables
+   * --reader-max resolves to one of these based on
+   * :root[data-reader-width="..."] below. */
+  --reader-max-narrow:  640px;
+  --reader-max-default: 820px;
+  --reader-max-wide:    1120px;
+  --reader-max:         var(--reader-max-default);
 
   /* Motion */
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
   --dur-fast: 120ms;
   --dur-med:  200ms;
+  --dur-slow: 260ms;
 
   /* Breakpoints (for reference — use @media below) */
   --bp-mobile:  375px;
   --bp-tablet:  768px;
   --bp-desktop: 1440px;
 }
+
+/* Reader width mode overrides (Task task-reader-width-modes).
+ * Default is already baked into --reader-max above, so the "default"
+ * attribute keeps working even if data-reader-width is unset. */
+:root[data-reader-width="narrow"]  { --reader-max: var(--reader-max-narrow); }
+:root[data-reader-width="default"] { --reader-max: var(--reader-max-default); }
+:root[data-reader-width="wide"]    { --reader-max: var(--reader-max-wide); }
 
 /* ============================================================
    DARK — opt-in via .theme-dark on :root

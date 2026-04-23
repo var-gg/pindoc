@@ -11,6 +11,7 @@ import { TopNav } from "./TopNav";
 import { initTheme, setTheme, type Theme } from "./theme";
 import { useReaderData } from "./useReaderData";
 import { typeChipClass } from "./typeChip";
+import { initReaderWidth, setReaderWidth as applyReaderWidth, type ReaderWidth } from "./readerWidth";
 import "../styles/reader.css";
 
 export type ReaderView = "reader" | "inbox" | "graph" | "tasks";
@@ -54,6 +55,7 @@ export function ReaderShell({ view }: Props) {
   const [showTemplates, setShowTemplates] = useState(false);
   const state = useReaderData(project, slug, showTemplates);
   const [theme, setThemeState] = useState<Theme>(() => initTheme());
+  const [readerWidth, setReaderWidthState] = useState<ReaderWidth>(() => initReaderWidth());
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   // Surface·Type·Area 3축: Surface is owned by the URL segment (wiki|tasks|
@@ -126,6 +128,11 @@ export function ReaderShell({ view }: Props) {
     const next: Theme = theme === "dark" ? "light" : "dark";
     setTheme(next);
     setThemeState(next);
+  };
+
+  const changeReaderWidth = (next: ReaderWidth) => {
+    applyReaderWidth(next);
+    setReaderWidthState(next);
   };
 
   // Hooks must stay at top level (rules-of-hooks). Filter against a
@@ -209,6 +216,8 @@ export function ReaderShell({ view }: Props) {
         onOpenPalette={() => setPaletteOpen(true)}
         onToggleMenu={() => setMenuOpen((v) => !v)}
         inboxCount={inboxStubCount()}
+        readerWidth={readerWidth}
+        onChangeReaderWidth={changeReaderWidth}
       />
       <div className="main">
         <Sidebar
