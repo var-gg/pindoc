@@ -140,6 +140,40 @@ sensitive_ops 판정
 
 ---
 
+## Epistemic Axes (`artifact_meta`)
+
+3축 상태(completeness / status / review_state)는 artifact의 **생애주기**를 말하지만, "이 기록을 얼마나 믿어도 되는가 / 왜 여기에 있나 / 다음 세션 context로 들어가나"에는 답하지 못한다. 외부 리뷰(2026-04-23) 흡수 결과로 등장한 **네 번째 축군**이 `artifact_meta` JSONB다. 단일 JSONB 안에 6개의 선택 축이 들어간다.
+
+Migration: `0012_artifact_meta.sql` — `artifacts.artifact_meta JSONB NOT NULL DEFAULT '{}'` + partial GIN index (`jsonb_path_ops`, skip empty rows).
+
+| 축 | 값 | 의미 |
+|---|---|---|
+| `source_type` | `code` / `artifact` / `user_chat` / `external` / `mixed` | 진실의 substrate. pins에 code 있으면 기본 `code`로 추론됨. |
+| `consent_state` | `not_needed` / `requested` / `granted` / `denied` | user-originated 지식 승격 경계. 서버는 agent 선언에 의존. |
+| `confidence` | `low` / `medium` / `high` | agent-declared. 장기적으로 server-computed 축 병기 고려(관찰 기록: `외부-리뷰-후속-관찰-...`). |
+| `audience` | `owner_only` / `approvers` / `project_readers` | private/shared 분리. `source_type=user_chat` + PII pattern 감지 시 `owner_only`로 강등. |
+| `next_context_policy` | `default` / `opt_in` / `excluded` | 다음 session retrieval에서 `context.for_task`가 `excluded`를 스킵. `opt_in`은 호출 시 surface. |
+| `verification_state` | `verified` / `partially_verified` / `unverified` | 검증 전 추론과 코드-grounded 확인 분리. `source_type=code` 기본 `partially_verified`. |
+
+Default 결정(서버 resolver, `resolveArtifactMeta`):
+
+- `source_type` 미지정 + code pin 존재 → `code`, `verification_state=partially_verified`
+- `source_type=user_chat` → `next_context_policy=opt_in` (caller가 `excluded` 명시하면 그대로 유지)
+- `source_type=user_chat` + body PII 패턴(email / `Authorization:` / `api_key=`) → `audience=owner_only`
+- 나머지 축은 agent-declared 우선, 서버 기본값 없음
+
+Update path 규칙: `task_meta`와 동일하게 "send-to-overwrite" — `artifact_meta`를 포함해 propose하면 그 payload가 JSONB를 전체 교체하고, 생략하면 기존 값을 유지한다. 서버 merge 없음.
+
+API 노출:
+
+- `artifact.propose` 응답 `artifact_meta` — 실제로 persist된 resolved meta. 요청 payload와 다를 수 있음(resolver가 덮어쓴 경우).
+- `artifact.read(view=full|brief|continuation)` 응답 `artifact_meta` — 저장된 JSONB 그대로.
+- `context.for_task` landings · `artifact.search` hits — 3필드 `trust_summary` (`source_type` · `confidence` · `next_context_policy`)만 동반. Reader Trust Card에서 full meta가 필요하면 `artifact.read`로.
+
+`SOURCE_TYPE_UNCLASSIFIED` warning: `source_type` 미지정 + pins 없음 + body에 인용부호 + chat marker("said", "사용자는" 등) 감지되면 accepted 응답에 포함. Block 아님 — agent에게 classify를 유도하는 advisory.
+
+---
+
 ## Artifact Types — Tier A (Core, 강제)
 
 Decision(ADR), Analysis, Debug, Flow, Task, TC, Glossary.
@@ -182,20 +216,36 @@ AgentAttempt {
 }
 ```
 
-### Task 상태 머신
+### Task 상태 머신 (v2, migration 0013)
 
 ```
-todo ─▶ in_progress ─▶ done
-  │         │            │
-  └─────────┴──▶ archived ◀──┘
+           ┌─────────────────────────────────────────┐
+           ▼                                         │
+open ──▶ claimed_done ──(pindoc.artifact.verify)──▶ verified
+ │                                                   │
+ └──▶ blocked    ──▶ cancelled    ──▶ archived ◀─────┘
 ```
 
-전이 규칙:
-- `todo → in_progress`: 에이전트가 assignee로 잡을 때 자동
-- `in_progress → done`: `acceptance_criteria` 전부 체크 + (선택) `resolution_artifact` 연결
-- `* → archived`: 명시적 요청 (sensitive_op, Review Queue)
-- `done → archived`: 허용 (히스토리 정리)
-- `archived → *`: 금지 (새 Task로 재생성)
+AI-agent 운영 모델로 재설계된 상태머신. 기존 `todo | in_progress | done`는 한 사람이 며칠 단위로 Task를 잡고 있는 가정에서 나왔지만, agent는 수 분 만에 전 사이클을 돈다. 'in_progress'는 깜빡이다 사라지는 상태라 의미를 잃고, 'done'은 과도 확신 경향의 LLM이 쉽게 주장한다. v2는 두 가지 원칙으로 단순화한다:
+
+1. **Implementer ≠ Verifier**: Task를 구현한 agent는 스스로 검증할 수 없다. `verified` 전이는 오직 `pindoc.artifact.verify`를 통해서만 가능하며, 서버가 revision author_id ≠ verifier agent_id를 확인한다.
+2. **사람은 상태 머신 밖**: 사용자가 Verify 버튼을 누르는 경로를 만들지 않는다. 사용자는 필요하면 다른 agent 세션(다른 모델 권장)을 spawn해 재검을 시키는 orchestrator.
+
+**전이 규칙**:
+
+- `open → claimed_done`: implementer agent가 `artifact.propose` + `update_of` + `task_meta.status='claimed_done'`. 서버 체크: 본문의 acceptance checkbox 전부 체크(`CLAIMED_DONE_INCOMPLETE` 아니면 reject). 체크박스 없는 body는 건너뜀(모든 Task가 checklist 형태는 아니라).
+- `claimed_done → verified`: 오직 `pindoc.artifact.verify` 툴에서만 가능. 다른 agent가 `VerificationReport` (Tier A 신규 타입)를 먼저 발행한 뒤 이 툴을 호출한다. 서버 체크: Task 현재 status=claimed_done, VerificationReport type 일치, verifier agent_id ≠ Task revision 작성자들. 성공 시 `artifact_edges(relation='verified_by')` + `events(kind='artifact.verified')` 기록.
+- `artifact.propose`로 `task_meta.status='verified'` 직접 전이 시도 → `VER_VIA_VERIFY_TOOL_ONLY` reject. Self-verification 불가.
+- `* → blocked / cancelled`: 어느 agent나 이유와 함께 전이 가능.
+- `* → archived`: sensitive_op (기존 규칙 유지).
+- `verified → open`: 허용되지만 이 전이는 `VerificationReport`의 supersede 체인을 통해 일어난다 — 후속 verifier가 새 report를 filed하고 기존 것을 superseded로 표시하면 파생되는 결과.
+
+**VerificationReport artifact** (Tier A, migration 0013): type="VerificationReport"로 `artifact.propose`로 생성. body에 판정 키워드(`pass` / `partial` / `fail` / `합격` / `부분` / `불합격`) 중 하나 필수(`VER_NO_VERDICT`). `artifact.verify`에서 이 slug를 `report_id_or_slug`로 참조해 Task에 연결.
+
+**남은 질문** (후속):
+- VerificationReport의 verdict가 `partial`일 때 Task는 `claimed_done`에 머무는가, 별개 상태? 초기 구현은 임의로 `verified`로 올라가지만 dogfood 관찰 후 조정.
+- Verifier agent의 모델 다양성을 서버가 요구할지(Opus 구현→ Sonnet/Haiku 검증 강제). 현재는 agent_id 달라야만 하는 제약.
+- trivial Task의 `self_attested` opt-out은 도입 보류(M1.x 범위 밖).
 
 ### Task 전용 Pre-flight
 

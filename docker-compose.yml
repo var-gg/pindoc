@@ -1,13 +1,18 @@
 # Pindoc local dev stack.
 #
-# Two services: Postgres 16 + pgvector, and Text Embeddings Inference (TEI).
-# The MCP server and web UI run on the host so Go/pnpm tooling stays in
-# hot-reload mode. TEI is containerised because it owns a model runtime
-# (tokenizer + weights) that we don't want to install on the host.
+# Default: Postgres 16 + pgvector only. Embedding runs in-process via the
+# bundled Gemma Q4 ONNX provider (2026-04-22 Decision, Phase 17) so no
+# embedding sidecar is required for day-to-day dev.
+#
+# Optional: Text Embeddings Inference (TEI) behind the `tei` profile.
+# Opt in with `docker compose --profile tei up` when running with
+# PINDOC_EMBED_PROVIDER=http (see Makefile's server-run-http /
+# api-run-http targets). The HuggingFace cache volume is kept across
+# profile toggles so re-enabling doesn't re-download ~500MB of weights.
 #
 # Upgrade path: when we want container-everything for a deploy artefact,
-# split this into docker-compose.prod.yml. For now, host-native dev + two
-# service containers is the lowest-friction setup.
+# split this into docker-compose.prod.yml. For now, host-native dev +
+# Postgres-only is the lowest-friction setup.
 
 services:
   db:
@@ -58,6 +63,11 @@ services:
   #      / zero-pads so >768 dim models lose their tail.
   #   3. Re-embed: go run ./cmd/pindoc-reembed
   embed:
+    # Gated behind the `tei` profile (2026-04-23 cleanup). Bundled Gemma Q4
+    # is the default embedder; this service only runs when the operator
+    # explicitly opts into PINDOC_EMBED_PROVIDER=http with
+    # `docker compose --profile tei up`.
+    profiles: ["tei"]
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
     container_name: pindoc-embed
     command:

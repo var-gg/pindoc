@@ -23,8 +23,8 @@ help:
 	@echo "  db-up            — start Postgres + pgvector in Docker"
 	@echo "  db-down          — stop Postgres container (data persists)"
 	@echo "  db-logs          — follow Postgres logs"
-	@echo "  embed-up         — start TEI embedding server (port 5860)"
-	@echo "  embed-down       — stop TEI container (cache persists)"
+	@echo "  embed-up         — start TEI embedding server (tei profile, port 5860)"
+	@echo "  embed-down       — stop TEI container (cache volume persists)"
 	@echo "  embed-logs       — follow TEI logs"
 	@echo "  server-build     — compile the MCP server binary"
 	@echo "  api-build        — compile the HTTP API binary"
@@ -46,13 +46,13 @@ db-logs:
 	docker compose logs -f db
 
 embed-up:
-	docker compose up -d embed
+	docker compose --profile tei up -d embed
 
 embed-down:
-	docker compose stop embed
+	docker compose --profile tei stop embed
 
 embed-logs:
-	docker compose logs -f embed
+	docker compose --profile tei logs -f embed
 
 server-build:
 	go build -o bin/pindoc-server$(shell go env GOEXE) ./cmd/pindoc-server
