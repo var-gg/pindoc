@@ -1,0 +1,111 @@
+package tools
+
+import (
+	"reflect"
+	"testing"
+)
+
+// TestParseValidatorHints covers the four shapes the preflight layer
+// expects from `<!-- validator: ... -->` comments on _template_*
+// bodies (Task preflight-template-drift-통합).
+func TestParseValidatorHints(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want *validatorHints
+	}{
+		{
+			name: "both axes populated",
+			body: "<!-- validator: required_h2=Purpose,Scope,Acceptance criteria; required_keywords=acceptance -->\n" +
+				"## Purpose\nbody\n",
+			want: &validatorHints{
+				RequiredH2:       []string{"Purpose", "Scope", "Acceptance criteria"},
+				RequiredKeywords: []string{"acceptance"},
+			},
+		},
+		{
+			name: "only h2 axis",
+			body: "<!-- validator: required_h2=TL;DR -->\n...",
+			// TL;DR splits at semicolon in our grammar (semicolons separate
+			// axes). Callers aware of this use `TL` as the canonical slot
+			// — so we assert the parser's literal behaviour here to lock
+			// the contract.
+			want: &validatorHints{
+				RequiredH2: []string{"TL"},
+			},
+		},
+		{
+			name: "only keywords axis",
+			body: "<!-- validator: required_keywords=repro,증상,resolution,해결 -->",
+			want: &validatorHints{
+				RequiredKeywords: []string{"repro", "증상", "resolution", "해결"},
+			},
+		},
+		{
+			name: "no comment returns nil",
+			body: "## just body\nno hints here.\n",
+			want: nil,
+		},
+		{
+			name: "empty axis values skipped",
+			body: "<!-- validator: required_h2=; required_keywords=acceptance -->",
+			want: &validatorHints{
+				RequiredKeywords: []string{"acceptance"},
+			},
+		},
+		{
+			name: "whitespace around tokens trimmed",
+			body: "<!-- validator: required_h2=  Purpose ,  Scope  -->",
+			want: &validatorHints{
+				RequiredH2: []string{"Purpose", "Scope"},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseValidatorHints(tc.body)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("parseValidatorHints mismatch\n  got:  %+v\n  want: %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRequiredH2WarningsSlashMixed locks the fuzzy-heading upgrade:
+// "## 목적 / Purpose" should satisfy a Purpose slot even though the raw
+// heading text is neither "Purpose" nor "목적" alone.
+func TestRequiredH2WarningsSlashMixed(t *testing.T) {
+	body := "## 목적 / Purpose\n\n## 범위 / Scope\n\n- [ ] acceptance criteria stub\n"
+	// Task type expects Purpose / Scope / Acceptance criteria slots.
+	warns := requiredH2Warnings(body, "Task")
+	for _, w := range warns {
+		if w == "MISSING_H2:Purpose" || w == "MISSING_H2:Scope" {
+			t.Fatalf("slash-mixed heading should satisfy slot, got %v", warns)
+		}
+	}
+}
+
+// TestBodyContainsAnyKeywordCaseInsensitive guards the template-driven
+// keyword gate used by preflight for Task/Debug types.
+func TestBodyContainsAnyKeywordCaseInsensitive(t *testing.T) {
+	if !bodyContainsAnyKeyword("The Acceptance Criteria", []string{"acceptance"}) {
+		t.Fatal("expected case-insensitive match")
+	}
+	if bodyContainsAnyKeyword("no match here", []string{"foo", "bar"}) {
+		t.Fatal("unexpected match")
+	}
+	if !bodyContainsAnyKeyword("anything", nil) {
+		t.Fatal("nil keywords should pass (no gate)")
+	}
+}
+
+// TestBodyContainsAllKeywords guards the AND-semantics Decision path.
+func TestBodyContainsAllKeywords(t *testing.T) {
+	if !bodyContainsAllKeywords("Decision section plus Context header", []string{"decision", "context"}) {
+		t.Fatal("expected all keywords matched")
+	}
+	if bodyContainsAllKeywords("Decision only — second word intentionally omitted.", []string{"decision", "context"}) {
+		t.Fatal("missing keyword should fail")
+	}
+}

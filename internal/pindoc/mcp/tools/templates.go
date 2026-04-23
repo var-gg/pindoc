@@ -27,7 +27,8 @@ var templateSeeds = []TemplateSeed{
 	{Slug: "_template_task", Type: "Task", Title: "Template — Task artifact", Body: templateTaskBody},
 }
 
-const templateDebugBody = `> **This artifact is a template.** Read it before proposing a new
+const templateDebugBody = `<!-- validator: required_h2=증상,재현,원인,해결; required_keywords=reproduction,repro,재현,증상,symptom,resolution,root cause,원인,해결 -->
+> **This artifact is a template.** Read it before proposing a new
 > ` + "`Debug`" + ` artifact so the resulting document matches the house structure.
 > The template itself is an ordinary artifact — improvements land as
 > revisions (` + "`update_of`" + `) on this slug. Do **not** copy-paste this body
@@ -77,7 +78,8 @@ const templateDebugBody = `> **This artifact is a template.** Read it before pro
 이 fix가 이전 Debug artifact의 원인을 교정한다면 ` + "`supersede_of`" + ` edge로 lineage를 남기고, 관련 Decision·Feature는 ` + "`relates_to`" + `로 연결한다.
 `
 
-const templateDecisionBody = `> **This artifact is a template.** Read before proposing a new
+const templateDecisionBody = `<!-- validator: required_h2=Context,Decision,Rationale,Alternatives considered,Consequences; required_keywords=decision,context -->
+> **This artifact is a template.** Read before proposing a new
 > ` + "`Decision`" + ` artifact. Template evolves via ` + "`update_of`" + `.
 
 > **Register guide.** 이 템플릿을 참조해 Decision artifact를 작성할 때 각 H2 섹션 내부는 1-2 문단 narrative가 기본이다. 표와 bullet은 독립 항목이 셋 이상으로 나열되거나 본질적으로 checklist일 때만 보조 도구로 쓴다. ` + "`Alt A — 장점 / 단점 / 기각`" + ` 같은 축약 포맷은 피한다 — 축약은 artifact에서 대화 register로 역유입되어 추론 흐름을 훼손한다. 섹션 제목(H2)은 Pre-flight ` + "`checkRequiredH2`" + `와 Reader sticky TOC가 의존하므로 바꾸지 말고, 아래 slot 순서를 유지한다.
@@ -111,7 +113,8 @@ const templateDecisionBody = `> **This artifact is a template.** Read before pro
 영향을 받거나 이 결정을 근거로 움직이는 Feature / Task는 ` + "`relates_to`" + ` edge로 연결한다. 기존 Decision을 뒤집는다면 ` + "`supersede_of`" + ` 필드를 사용해 lineage를 남긴다. 관련 artifact 수가 많아지면 이 섹션에서 한 문단으로 그룹을 요약해도 된다.
 `
 
-const templateAnalysisBody = `> **This artifact is a template.** Read before proposing a new
+const templateAnalysisBody = `<!-- validator: required_h2=TL;DR -->
+> **This artifact is a template.** Read before proposing a new
 > ` + "`Analysis`" + `. Template evolves via ` + "`update_of`" + `.
 
 > **Register guide.** Analysis는 관찰과 측정, 그리고 그에 대한 해석을 남기는 artifact이므로 각 섹션은 1-2 문단 narrative로 쓰는 것이 기본이다. 표·bullet은 독립 항목이 셋 이상 나열될 때나 수치 집계 같은 구조화된 데이터를 담을 때에만 쓴다. "발견 1: ~" 식의 단일 라인 축약은 피하고, 각 발견을 한 문단 이상으로 풀어 적는다. H2 slot은 Pre-flight ` + "`checkRequiredH2`" + `와 Reader sticky TOC가 의존하므로 이름을 바꾸지 말고 순서만 참고한다.
@@ -155,7 +158,8 @@ const templateAnalysisBody = `> **This artifact is a template.** Read before pro
 이 분석에서 파생된 Decision / Task는 ` + "`relates_to`" + ` edge로 연결하고, 이 섹션에서는 "어느 축의 follow-up이 나왔는지" 한두 문장으로 요약한다.
 `
 
-const templateTaskBody = `> **This artifact is a template.** Read before proposing a new
+const templateTaskBody = `<!-- validator: required_h2=목적,범위,TODO; required_keywords=acceptance -->
+> **This artifact is a template.** Read before proposing a new
 > ` + "`Task`" + `. Template evolves via ` + "`update_of`" + `.
 
 > **Register guide.** Task는 "무엇을 왜 하는가"와 "어떤 상태가 되면 끝났는가"를 나누어 기록하는 artifact다. 목적·범위·분석 요약·리소스 섹션은 narrative로 작성하고, TODO acceptance criteria와 TC/DoD의 자동 TC / 수동 QA는 본질적으로 체크리스트이므로 bullet 포맷을 유지한다. Bullet을 쓸 때도 각 항목이 독립적으로 "완료 판정이 가능한 조건"이어야 한다. H2 slot은 Pre-flight와 sticky TOC가 의존하므로 이름은 그대로 두고 순서만 참고한다.

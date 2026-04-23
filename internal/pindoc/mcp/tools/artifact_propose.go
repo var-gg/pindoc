@@ -347,7 +347,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 		func(ctx context.Context, _ *sdk.CallToolRequest, in artifactProposeInput) (*sdk.CallToolResult, artifactProposeOutput, error) {
 			// --- Pre-flight ----------------------------------------------
 			lang := deps.UserLanguage
-			checklist, failed, code := preflight(&in, lang)
+			checklist, failed, code := preflight(ctx, deps, &in, lang)
 			if len(checklist) > 0 {
 				return nil, artifactProposeOutput{
 					Status:    "not_ready",
@@ -740,6 +740,12 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			if isConvDerived && resolvedMeta.ConsentState == "" {
 				warnings = append(warnings, "CONSENT_REQUIRED_FOR_USER_CHAT")
 			}
+			// Invalidate validator hints when a new `_template_*` row lands
+			// — the pre-insert cache may have a negative-cache entry for
+			// this type that we need to clear so the next propose picks
+			// up the template's meta comment.
+			invalidateValidatorHints(deps.ProjectSlug, finalSlug)
+
 			metaOut := resolvedMeta
 			return nil, artifactProposeOutput{
 				Status:         "accepted",
@@ -1022,6 +1028,11 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		return nil, artifactProposeOutput{}, fmt.Errorf("commit: %w", err)
 	}
 
+	// Template validator cache invalidation — revising `_template_*`
+	// should re-anchor the per-type preflight rules without a server
+	// restart (Task preflight-template-drift-통합 §cache invalidation).
+	invalidateValidatorHints(deps.ProjectSlug, slug)
+
 	var updateMetaOut *ResolvedArtifactMeta
 	if in.ArtifactMeta != nil {
 		m := resolvedUpdateMeta
@@ -1143,7 +1154,7 @@ func buildSourceSessionRef(deps Deps, in artifactProposeInput) any {
 // Phase 11a change: every check now emits both a natural-language line
 // (legacy) AND a stable code (Phase 12-style). Phase 12 will make codes
 // primary and prose optional.
-func preflight(in *artifactProposeInput, lang string) (checklist []string, failed []string, code string) {
+func preflight(ctx context.Context, deps Deps, in *artifactProposeInput, lang string) (checklist []string, failed []string, code string) {
 	push := func(line, failCode string) {
 		checklist = append(checklist, line)
 		failed = append(failed, failCode)
@@ -1224,33 +1235,60 @@ func preflight(in *artifactProposeInput, lang string) (checklist []string, faile
 		}
 	}
 
-	// Type-specific guardrails. Minimal keyword checks — Phase 13 brings
-	// in template artifacts so agents get structured exemplars instead of
-	// these ad-hoc tripwires.
+	// Type-specific guardrails. The previous code hard-coded keywords
+	// (`"acceptance"`, `"reproduction"`, …) directly in this switch; the
+	// drift between those strings and the canonical `_template_*` bodies
+	// caused the 1차 dogfood TASK_NO_ACCEPTANCE loop. Now each type reads
+	// its required_keywords from the matching `_template_<type>` body's
+	// validator meta comment. A nil hint set (no template, no comment,
+	// DB unreachable) falls back to the hard-coded defaults below.
+	hints := getValidatorHints(ctx, deps, in.Type)
 	switch in.Type {
 	case "Task":
-		if !strings.Contains(strings.ToLower(in.BodyMarkdown), "acceptance") {
+		needed := []string{"acceptance"}
+		if hints != nil && len(hints.RequiredKeywords) > 0 {
+			needed = hints.RequiredKeywords
+		}
+		if !bodyContainsAnyKeyword(in.BodyMarkdown, needed) {
 			push(i18n.T(lang, "preflight.task_acceptance"), "TASK_NO_ACCEPTANCE")
 		}
 	case "Decision":
-		lower := strings.ToLower(in.BodyMarkdown)
-		if !strings.Contains(lower, "decision") || !strings.Contains(lower, "context") {
-			push(i18n.T(lang, "preflight.adr_sections"), "DEC_NO_SECTIONS")
+		if hints != nil && len(hints.RequiredKeywords) > 0 {
+			if !bodyContainsAllKeywords(in.BodyMarkdown, hints.RequiredKeywords) {
+				push(i18n.T(lang, "preflight.adr_sections"), "DEC_NO_SECTIONS")
+			}
+		} else {
+			lower := strings.ToLower(in.BodyMarkdown)
+			if !strings.Contains(lower, "decision") || !strings.Contains(lower, "context") {
+				push(i18n.T(lang, "preflight.adr_sections"), "DEC_NO_SECTIONS")
+			}
 		}
 	case "Debug":
-		// Expect at least one of the repro/cause anchors so debug artifacts
-		// don't devolve into summaries. Korean + English keywords to match
-		// both user languages; lowercasing Korean is a no-op but harmless.
-		lower := strings.ToLower(in.BodyMarkdown)
-		hasRepro := strings.Contains(lower, "reproduction") || strings.Contains(lower, "repro") ||
-			strings.Contains(lower, "재현") || strings.Contains(lower, "증상") ||
-			strings.Contains(lower, "symptom")
-		if !hasRepro {
+		// Debug keeps its "at least one repro-ish keyword and at least
+		// one resolution-ish keyword" split because that captures the
+		// "symptom → resolution" arc better than a single all-or-nothing
+		// check. Template hints contribute extra synonyms on top of the
+		// hard-coded base set.
+		reproKeywords := []string{"reproduction", "repro", "재현", "증상", "symptom"}
+		resolutionKeywords := []string{"resolution", "root cause", "원인", "해결"}
+		if hints != nil {
+			for _, kw := range hints.RequiredKeywords {
+				lower := strings.ToLower(kw)
+				if strings.Contains(lower, "repro") || strings.Contains(lower, "symptom") ||
+					strings.Contains(lower, "증상") || strings.Contains(lower, "재현") {
+					reproKeywords = append(reproKeywords, kw)
+					continue
+				}
+				if strings.Contains(lower, "resolution") || strings.Contains(lower, "cause") ||
+					strings.Contains(lower, "원인") || strings.Contains(lower, "해결") {
+					resolutionKeywords = append(resolutionKeywords, kw)
+				}
+			}
+		}
+		if !bodyContainsAnyKeyword(in.BodyMarkdown, reproKeywords) {
 			push(i18n.T(lang, "preflight.debug_no_repro"), "DBG_NO_REPRO")
 		}
-		hasResolution := strings.Contains(lower, "resolution") || strings.Contains(lower, "root cause") ||
-			strings.Contains(lower, "원인") || strings.Contains(lower, "해결")
-		if !hasResolution {
+		if !bodyContainsAnyKeyword(in.BodyMarkdown, resolutionKeywords) {
 			push(i18n.T(lang, "preflight.debug_no_resolution"), "DBG_NO_RESOLUTION")
 		}
 	case "VerificationReport":
@@ -2230,6 +2268,23 @@ func requiredH2Warnings(body, artifactType string) []string {
 		}
 		heading := strings.ToLower(strings.TrimSpace(strings.TrimRight(after, "#")))
 		seen[heading] = true
+		// Slash-mixed bilingual headings like "## 목적 / Purpose" used to
+		// miss synonym slots because only the full joined string landed
+		// in `seen`. Index each slash- / middle-dot- / em-dash-separated
+		// token so a Purpose slot matches either side of a mixed heading
+		// and a "## TODO — Acceptance criteria" subtitle still satisfies
+		// an Acceptance criteria slot (Task preflight-template-drift-통합
+		// §requiredH2Warnings).
+		for _, sep := range []string{"/", "·", "—", "–", "-"} {
+			if strings.Contains(heading, sep) {
+				for _, part := range strings.Split(heading, sep) {
+					trimmed := strings.TrimSpace(part)
+					if trimmed != "" {
+						seen[trimmed] = true
+					}
+				}
+			}
+		}
 	}
 	var out []string
 	for _, syn := range slots {
@@ -2569,6 +2624,38 @@ func normaliseSectionKey(s string) string {
 	// strip markdown emphasis / heading-id suffix if present
 	s = strings.TrimSuffix(s, " #")
 	return s
+}
+
+// bodyContainsAnyKeyword returns true when at least one keyword substring
+// appears in body (case-insensitive). Used by the per-type preflight
+// guardrails so a Task can pass when the template's required_keywords
+// or the hard-coded fallback keywords show up anywhere in the body.
+func bodyContainsAnyKeyword(body string, keywords []string) bool {
+	if len(keywords) == 0 {
+		return true
+	}
+	lower := strings.ToLower(body)
+	for _, kw := range keywords {
+		if strings.Contains(lower, strings.ToLower(kw)) {
+			return true
+		}
+	}
+	return false
+}
+
+// bodyContainsAllKeywords is the Decision-strength variant: every keyword
+// must appear. Decisions traditionally demand both "decision" and
+// "context" sections, so the AND semantics preserve that stricter bar
+// while still being driven by template meta instead of hard-coded
+// literals.
+func bodyContainsAllKeywords(body string, keywords []string) bool {
+	lower := strings.ToLower(body)
+	for _, kw := range keywords {
+		if !strings.Contains(lower, strings.ToLower(kw)) {
+			return false
+		}
+	}
+	return true
 }
 
 // patchExplain maps a body_patch stable code to the one-line checklist

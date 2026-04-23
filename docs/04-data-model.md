@@ -261,6 +261,21 @@ AI-agent 운영 모델로 재설계된 상태머신. 기존 `todo | in_progress 
 - Sprint / burndown / velocity 없음. Jira/Linear 대체 아님.
 - Task는 **Artifact로서의 1급 시민** — 모든 edge / Fast Landing / Search가 동일하게 작동.
 
+### Template ↔ Validator 관계
+
+Pre-flight의 type별 키워드 가드(`TASK_NO_ACCEPTANCE`, `DEC_NO_SECTIONS`, `DBG_NO_REPRO`, `DBG_NO_RESOLUTION`)와 `MISSING_H2` warning은 과거 Go 코드에 하드코딩된 문자열 목록을 참조했다. 그 결과 `_template_*` 본문이 revision으로 진화할 때 validator 규칙이 따라오지 않아, 템플릿을 성실히 따라 쓴 agent가 오히려 reject를 맞는 drift가 발생했다(Task `preflight-template-drift-통합`).
+
+V1.x부터는 각 `_template_<type>` artifact body 최상단에 validator 메타 주석이 source-of-truth다:
+
+```markdown
+<!-- validator: required_h2=Purpose,Scope,Acceptance criteria; required_keywords=acceptance -->
+> **This artifact is a template.** ...
+```
+
+서버가 해당 type의 propose를 받을 때 `_template_<type-lowercase>` 의 body를 읽어 `required_h2` · `required_keywords` 를 추출하고 preflight 가드에 적용한다. 메타 주석이 없거나 DB 조회가 실패하면 과거 하드코딩 fallback 이 그대로 동작(backward compat). 템플릿이 `update_of` 로 수정되면 `_template_*` slug 기반 cache invalidation 이 자동 트리거되어 다음 propose 부터 새 규칙이 반영된다.
+
+`MISSING_H2` fuzzy 매치도 `/` · `·` · em-dash 분할을 지원해 `## 목적 / Purpose` 같은 ko/en 혼합 heading과 `## TODO — Acceptance criteria` 같은 subtitle 형태가 각 slot과 정상 매치된다.
+
 ## Artifact Types — Tier B (Domain Pack)
 
 ### Web SaaS/SI Pack (V1 stable)
