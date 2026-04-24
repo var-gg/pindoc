@@ -421,6 +421,25 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				return handleUpdate(ctx, deps, in, lang)
 			}
 
+			// --- Task assignee default ----------------------------------
+			// Create / supersede-create: when the caller omits
+			// task_meta.assignee on a Task, default to the self-reporting
+			// agent (`agent:<author_id>`). MCP sessions already carry the
+			// identity (author_id on every tool call + server-issued
+			// agent_id in provenance), so a missing assignee is an
+			// operational gap, not a signal. Explicit assignee in the
+			// input overrides — agents that mean "hand this to a human"
+			// still pass `user:<name>` or `@<handle>` as before.
+			// Decision: task-assignee-default-author-id.
+			if in.Type == "Task" && strings.TrimSpace(in.AuthorID) != "" {
+				if in.TaskMeta == nil {
+					in.TaskMeta = &TaskMetaInput{}
+				}
+				if strings.TrimSpace(in.TaskMeta.Assignee) == "" {
+					in.TaskMeta.Assignee = "agent:" + in.AuthorID
+				}
+			}
+
 			// --- Supersede path (supersede_of set) -----------------------
 			// Creates a fresh artifact via the same insert flow as "new",
 			// then flips the target artifact's status to 'superseded' and
