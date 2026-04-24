@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -86,10 +87,20 @@ type StaleSignal struct {
 	DaysOld    int    `json:"days_old"`
 }
 
+type AreaSuggestion struct {
+	AreaSlug string  `json:"area_slug"`
+	Score    float64 `json:"score"`
+	Reason   string  `json:"reason"`
+}
+
 type contextForTaskOutput struct {
 	TaskDescription string           `json:"task_description"`
 	Landings        []ContextLanding `json:"landings"`
 	Notice          string           `json:"notice,omitempty"`
+	// SuggestedAreas proposes landing areas for a future artifact. It is
+	// advisory and omitted only by older servers; low-confidence runs return
+	// an empty array so existing callers stay backward-compatible.
+	SuggestedAreas []AreaSuggestion `json:"suggested_areas"`
 	// SearchReceipt mirrors artifact.search — same opaque token, same TTL,
 	// same downstream effect on artifact.propose. Agents that Fast-Land
 	// with context.for_task satisfy the search-before-propose gate without
@@ -193,7 +204,11 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			}
 			defer rows.Close()
 
-			out := contextForTaskOutput{TaskDescription: in.TaskDescription, Landings: []ContextLanding{}}
+			out := contextForTaskOutput{
+				TaskDescription: in.TaskDescription,
+				Landings:        []ContextLanding{},
+				SuggestedAreas:  []AreaSuggestion{},
+			}
 			now := time.Now()
 			for rows.Next() {
 				var l ContextLanding
@@ -259,6 +274,9 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			if info.Name == "stub" {
 				out.Notice = "stub embedder active — landings are hash-ranked, not semantic."
 			}
+			if areaCounts, err := areaArtifactCounts(ctx, deps); err == nil {
+				out.SuggestedAreas = suggestAreasForTaskDescription(in.TaskDescription, out.Landings, areaCounts)
+			}
 			if deps.Receipts != nil {
 				// Phase E — bind the receipt to the landings' current head
 				// revisions. propose-time verifier flags drift instead of
@@ -271,7 +289,199 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 					headSnapshotsForArtifacts(ctx, deps, ids),
 				)
 			}
+			if err := recordAreaSuggestionEvent(ctx, deps, out.SearchReceipt, in.TaskDescription, out.SuggestedAreas); err != nil && deps.Logger != nil {
+				deps.Logger.Warn("area suggestion event failed", "err", err)
+			}
 			return nil, out, rows.Err()
 		},
 	)
+}
+
+type areaSuggestionRule struct {
+	Slug     string
+	Keywords []string
+	Label    string
+}
+
+var areaSuggestionRules = []areaSuggestionRule{
+	{"users", []string{"user", "persona", "job to be done", "사용자", "페르소나"}, "user research"},
+	{"competitors", []string{"competitor", "competitive", "경쟁"}, "competitive context"},
+	{"literature", []string{"literature", "paper", "research review", "survey", "문헌", "논문"}, "literature review"},
+	{"external-apis", []string{"external api", "third-party", "vendor api", "provider api"}, "external API context"},
+	{"standards", []string{"standard", "specification", "protocol", "표준"}, "standards context"},
+	{"glossary", []string{"glossary", "terminology", "용어"}, "glossary context"},
+	{"flows", []string{"flow", "workflow", "journey", "플로우"}, "user flow"},
+	{"information-architecture", []string{"information architecture", "navigation", "hierarchy", "sidebar"}, "information architecture"},
+	{"content", []string{"copy", "content", "message", "documentation copy"}, "content structure"},
+	{"developer-experience", []string{"developer experience", "dx", "setup", "onboarding"}, "developer experience"},
+	{"campaigns", []string{"campaign", "launch page", "marketing"}, "campaign experience"},
+	{"ui", []string{"reader ui", "interface", "screen", "component", "layout", "frontend", "화면"}, "user interface"},
+	{"architecture", []string{"architecture", "boundary", "layer", "deployment", "시스템 아키텍처"}, "system architecture"},
+	{"data", []string{"schema", "migration", "data model", "database", "jsonb", "데이터"}, "data contract"},
+	{"mechanisms", []string{"mechanism", "runtime behavior", "preflight", "template", "harness"}, "internal mechanism"},
+	{"mcp", []string{"mcp", "tool", "artifact.propose", "context.for_task", "server tool"}, "MCP tool surface"},
+	{"embedding", []string{"embedding", "vector", "semantic", "retrieval", "similarity"}, "embedding/retrieval"},
+	{"api", []string{"api endpoint", "http api", "rest", "endpoint"}, "API contract"},
+	{"integrations", []string{"integration", "adapter", "webhook"}, "integration boundary"},
+	{"delivery", []string{"delivery", "handoff", "rollout"}, "delivery process"},
+	{"release", []string{"release", "version", "changelog"}, "release process"},
+	{"launch", []string{"launch", "readiness", "go-live"}, "launch readiness"},
+	{"incidents", []string{"incident", "outage", "postmortem", "장애"}, "incident response"},
+	{"editorial-ops", []string{"editorial", "docs ops", "publishing"}, "editorial operations"},
+	{"community-ops", []string{"community", "moderation", "support"}, "community operations"},
+	{"policies", []string{"policy", "rule", "consent", "license", "auth mode"}, "project policy"},
+	{"compliance", []string{"compliance", "regulation", "audit"}, "compliance"},
+	{"ownership", []string{"owner", "ownership", "assignee", "identity", "accountability"}, "ownership boundary"},
+	{"review", []string{"review", "retrospective", "evaluation", "observation", "검토"}, "review/evaluation"},
+	{"taxonomy-policy", []string{"taxonomy", "area", "classification", "sub-area", "cross-cutting"}, "taxonomy governance"},
+	{"security", []string{"security", "auth", "permission", "token", "보안"}, "security concern"},
+	{"privacy", []string{"privacy", "pii", "personal data"}, "privacy concern"},
+	{"accessibility", []string{"accessibility", "a11y"}, "accessibility concern"},
+	{"reliability", []string{"reliability", "sla", "resilience"}, "reliability concern"},
+	{"observability", []string{"telemetry", "metric", "observability", "logging", "monitoring"}, "observability concern"},
+	{"localization", []string{"localization", "i18n", "locale", "translation"}, "localization concern"},
+	{"roadmap", []string{"roadmap", "milestone", "phase", "launch criteria"}, "roadmap"},
+	{"strategy", []string{"strategy", "vision", "goal", "scope", "hypothesis"}, "strategy"},
+}
+
+type areaSuggestionScore struct {
+	slug    string
+	score   float64
+	reasons []string
+}
+
+func suggestAreasForTaskDescription(desc string, landings []ContextLanding, areaCounts map[string]int) []AreaSuggestion {
+	lower := strings.ToLower(strings.TrimSpace(desc))
+	if lower == "" || len(areaCounts) == 0 {
+		return []AreaSuggestion{}
+	}
+	valid := func(slug string) bool {
+		_, ok := areaCounts[slug]
+		return ok
+	}
+	scores := map[string]*areaSuggestionScore{}
+	add := func(slug string, delta float64, reason string) {
+		if !valid(slug) || delta <= 0 {
+			return
+		}
+		s, ok := scores[slug]
+		if !ok {
+			s = &areaSuggestionScore{slug: slug}
+			scores[slug] = s
+		}
+		s.score += delta
+		if reason != "" {
+			s.reasons = append(s.reasons, reason)
+		}
+	}
+
+	for _, rule := range areaSuggestionRules {
+		if !valid(rule.Slug) {
+			continue
+		}
+		var matches []string
+		for _, kw := range rule.Keywords {
+			if strings.Contains(lower, strings.ToLower(kw)) {
+				matches = append(matches, kw)
+			}
+		}
+		if len(matches) > 0 {
+			score := 0.72 + float64(len(matches)-1)*0.06
+			if score > 0.96 {
+				score = 0.96
+			}
+			add(rule.Slug, score, "matched "+rule.Label+": "+strings.Join(matches, ", "))
+		}
+	}
+
+	for _, l := range landings {
+		if l.Distance > 0.55 {
+			continue
+		}
+		add(l.AreaSlug, 0.12+(0.55-l.Distance)*0.18, fmt.Sprintf("nearby artifact %s in %s", l.Slug, l.AreaSlug))
+	}
+
+	for slug, s := range scores {
+		if areaCounts[slug] > 0 {
+			s.score += 0.03
+			s.reasons = append(s.reasons, fmt.Sprintf("project already has %d artifact(s) in %s", areaCounts[slug], slug))
+		}
+		if s.score > 0.99 {
+			s.score = 0.99
+		}
+	}
+
+	ranked := make([]*areaSuggestionScore, 0, len(scores))
+	for _, s := range scores {
+		if s.score >= 0.50 {
+			ranked = append(ranked, s)
+		}
+	}
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].score == ranked[j].score {
+			return ranked[i].slug < ranked[j].slug
+		}
+		return ranked[i].score > ranked[j].score
+	})
+	if len(ranked) > 3 {
+		ranked = ranked[:3]
+	}
+	out := make([]AreaSuggestion, 0, len(ranked))
+	for _, s := range ranked {
+		out = append(out, AreaSuggestion{
+			AreaSlug: s.slug,
+			Score:    s.score,
+			Reason:   strings.Join(s.reasons, "; "),
+		})
+	}
+	return out
+}
+
+func areaArtifactCounts(ctx context.Context, deps Deps) (map[string]int, error) {
+	rows, err := deps.DB.Query(ctx, `
+		SELECT ar.slug, count(a.id)::int
+		FROM areas ar
+		JOIN projects p ON p.id = ar.project_id
+		LEFT JOIN artifacts a ON a.area_id = ar.id AND a.status <> 'archived'
+		WHERE p.slug = $1
+		GROUP BY ar.slug
+	`, deps.ProjectSlug)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var slug string
+		var count int
+		if err := rows.Scan(&slug, &count); err != nil {
+			return nil, err
+		}
+		out[slug] = count
+	}
+	return out, rows.Err()
+}
+
+func recordAreaSuggestionEvent(ctx context.Context, deps Deps, correlationID, taskDescription string, suggestions []AreaSuggestion) error {
+	if deps.DB == nil {
+		return nil
+	}
+	if correlationID == "" {
+		correlationID = fmt.Sprintf("context:%d", time.Now().UnixNano())
+	}
+	payload, err := json.Marshal(map[string]any{
+		"correlation_id":   correlationID,
+		"task_description": taskDescription,
+		"suggested_areas":  suggestions,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = deps.DB.Exec(ctx, `
+		INSERT INTO events (project_id, kind, subject_id, payload)
+		SELECT p.id, 'agent.area_suggestion_proposed', NULL, $2::jsonb
+		FROM projects p
+		WHERE p.slug = $1
+	`, deps.ProjectSlug, string(payload))
+	return err
 }

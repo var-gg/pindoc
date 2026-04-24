@@ -444,17 +444,15 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, artifactProposeOutput{
 					Status:    "not_ready",
-					ErrorCode: "AREA_NOT_FOUND",
-					Failed:    []string{"AREA_NOT_FOUND"},
-					Checklist: []string{
-						fmt.Sprintf(i18n.T(lang, "preflight.area_not_found"), in.AreaSlug, deps.ProjectSlug),
-					},
+					ErrorCode: "AREA_UNKNOWN",
+					Failed:    []string{"AREA_UNKNOWN"},
+					Checklist: areaUnknownChecklist(ctx, deps, lang, in.AreaSlug),
 					SuggestedActions: []string{
 						i18n.T(lang, "suggested.list_areas"),
 						i18n.T(lang, "suggested.area_or_misc"),
 					},
-					NextTools:       defaultNextTools("AREA_NOT_FOUND"),
-					PatchableFields: patchFieldsFor("AREA_NOT_FOUND"),
+					NextTools:       defaultNextTools("AREA_UNKNOWN"),
+					PatchableFields: patchFieldsFor("AREA_UNKNOWN"),
 				}, nil
 			}
 			if err != nil {
@@ -799,6 +797,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			warnings = append(warnings, titleLengthWarnings(in.Title)...)
 			warnings = append(warnings, bodyH1Warnings(in.BodyMarkdown)...)
 			warnings = append(warnings, requiredH2Warnings(in.BodyMarkdown, in.Type)...)
+			warnings = append(warnings, decisionSubjectAreaWarnings(in)...)
 			if detectUnclassifiedUserChat(resolvedMeta, in.Pins, in.BodyMarkdown) {
 				warnings = append(warnings, "SOURCE_TYPE_UNCLASSIFIED")
 			}
@@ -1120,14 +1119,12 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		WHERE p.slug = $1 AND area.slug = $2
 	`, deps.ProjectSlug, in.AreaSlug).Scan(&areaID); err != nil {
 		return nil, artifactProposeOutput{
-			Status:    "not_ready",
-			ErrorCode: "AREA_NOT_FOUND",
-			Failed:    []string{"AREA_NOT_FOUND"},
-			Checklist: []string{
-				fmt.Sprintf(i18n.T(lang, "preflight.area_not_found"), in.AreaSlug, deps.ProjectSlug),
-			},
-			NextTools:       defaultNextTools("AREA_NOT_FOUND"),
-			PatchableFields: patchFieldsFor("AREA_NOT_FOUND"),
+			Status:          "not_ready",
+			ErrorCode:       "AREA_UNKNOWN",
+			Failed:          []string{"AREA_UNKNOWN"},
+			Checklist:       areaUnknownChecklist(ctx, deps, lang, in.AreaSlug),
+			NextTools:       defaultNextTools("AREA_UNKNOWN"),
+			PatchableFields: patchFieldsFor("AREA_UNKNOWN"),
 		}, nil
 	}
 
@@ -1281,6 +1278,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 	// types that carry a canonical truth claim (Debug, Decision, Analysis)
 	// and require fresh evidence when that section's content shifts.
 	warnings := updatePathWarnings(deps, in)
+	warnings = append(warnings, decisionSubjectAreaWarnings(in)...)
 	// Body-patch warnings bubble up here so PATCH_NOOP etc. sit alongside
 	// canonical-rewrite / source-type advisories instead of a separate
 	// response field.
@@ -1392,6 +1390,9 @@ func buildSourceSessionRef(deps Deps, in artifactProposeInput) any {
 		if s := strings.TrimSpace(in.Basis.SourceSession); s != "" {
 			payload["source_session"] = s
 		}
+		if r := strings.TrimSpace(in.Basis.SearchReceipt); r != "" {
+			payload["search_receipt"] = r
+		}
 	}
 	if len(payload) == 0 {
 		return nil
@@ -1448,6 +1449,9 @@ func preflight(ctx context.Context, deps Deps, in *artifactProposeInput, lang st
 	}
 	if strings.TrimSpace(in.AreaSlug) == "" {
 		push(i18n.T(lang, "preflight.area_empty"), "AREA_EMPTY")
+	}
+	if in.Type == "Decision" && strings.TrimSpace(in.AreaSlug) == "decisions" {
+		push(i18n.T(lang, "preflight.decision_area_deprecated"), "DECISION_AREA_DEPRECATED")
 	}
 	if strings.TrimSpace(in.AuthorID) == "" {
 		push(i18n.T(lang, "preflight.author_empty"), "AUTHOR_EMPTY")
@@ -1793,6 +1797,39 @@ func embedAndStoreChunks(ctx context.Context, tx pgx.Tx, provider embed.Provider
 	return nil
 }
 
+func areaUnknownChecklist(ctx context.Context, deps Deps, lang, areaSlug string) []string {
+	out := []string{
+		fmt.Sprintf(i18n.T(lang, "preflight.area_not_found"), areaSlug, deps.ProjectSlug),
+	}
+	if deps.DB == nil {
+		return out
+	}
+	rows, err := deps.DB.Query(ctx, `
+		SELECT area.slug
+		FROM areas area
+		JOIN projects p ON p.id = area.project_id
+		WHERE p.slug = $1
+		ORDER BY CASE WHEN area.parent_id IS NULL THEN 0 ELSE 1 END, area.slug
+		LIMIT 24
+	`, deps.ProjectSlug)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	var slugs []string
+	for rows.Next() {
+		var slug string
+		if err := rows.Scan(&slug); err != nil {
+			return out
+		}
+		slugs = append(slugs, slug)
+	}
+	if len(slugs) > 0 {
+		out = append(out, "Valid area_slug examples: "+strings.Join(slugs, ", ")+"; full list via pindoc.area.list.")
+	}
+	return out
+}
+
 // defaultNextTools maps a stable fail code to the MCP tools an agent
 // should call next to unblock itself. Returning nil means "no suggestion;
 // agent should re-read the checklist" — schema-level failures mostly fall
@@ -1807,7 +1844,7 @@ func defaultNextTools(code string) []string {
 		return []string{"pindoc.artifact.revisions", "pindoc.artifact.diff"}
 	case "UPDATE_TARGET_NOT_FOUND", "SUPERSEDE_TARGET_NOT_FOUND", "REL_TARGET_NOT_FOUND", "SCOPE_DEFER_TARGET_NOT_FOUND":
 		return []string{"pindoc.artifact.search", "pindoc.area.list"}
-	case "AREA_NOT_FOUND", "AREA_EMPTY":
+	case "AREA_UNKNOWN", "AREA_NOT_FOUND", "AREA_EMPTY", "DECISION_AREA_DEPRECATED":
 		return []string{"pindoc.area.list"}
 	case "TASK_NO_ACCEPTANCE", "DEC_NO_SECTIONS", "DBG_NO_REPRO", "DBG_NO_RESOLUTION":
 		return []string{"pindoc.harness.install"}
@@ -1881,7 +1918,7 @@ func patchFieldsFor(code string) []string {
 		return []string{"update_of", "supersede_of"}
 	case "UPDATE_TARGET_NOT_FOUND":
 		return []string{"update_of"}
-	case "AREA_NOT_FOUND", "AREA_EMPTY":
+	case "AREA_UNKNOWN", "AREA_NOT_FOUND", "AREA_EMPTY", "DECISION_AREA_DEPRECATED":
 		return []string{"area_slug"}
 	case "TASK_NO_ACCEPTANCE", "DEC_NO_SECTIONS", "DBG_NO_REPRO", "DBG_NO_RESOLUTION":
 		return []string{"body_markdown"}
@@ -2386,6 +2423,18 @@ func bodyH1Warnings(body string) []string {
 		}
 	}
 	return nil
+}
+
+func decisionSubjectAreaWarnings(in artifactProposeInput) []string {
+	if in.Type != "Decision" {
+		return nil
+	}
+	switch strings.TrimSpace(in.AreaSlug) {
+	case "misc", "_unsorted":
+		return []string{"DECISION_AREA_MUST_BE_SUBJECT:docs/19-area-taxonomy.md"}
+	default:
+		return nil
+	}
 }
 
 // countAcceptanceCheckboxes returns (resolved, total) for the body's

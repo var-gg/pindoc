@@ -44,6 +44,7 @@ var warningSeverityCatalog = map[string]string{
 	// WARN — changes reader interpretation but write stands.
 	"CONSENT_REQUIRED_FOR_USER_CHAT": SeverityWarn,
 	"SOURCE_TYPE_UNCLASSIFIED":       SeverityWarn,
+	"DECISION_AREA_MUST_BE_SUBJECT":  SeverityWarn,
 	"MISSING_H2":                     SeverityWarn,
 	"BODY_HAS_H1_REDUNDANT":          SeverityWarn,
 	"TITLE_LONG":                     SeverityWarn,

@@ -237,6 +237,32 @@ Before calling pindoc.artifact.propose:
   new head.
 - update_of and supersede_of are mutually exclusive.
 
+## Area taxonomy
+
+Every artifact belongs to exactly one subject area. The top-level concern
+skeleton is fixed:
+
+    strategy      — vision, goals, scope, hypotheses, roadmap
+    context       — users, competitors, literature, standards, external APIs
+    experience    — UI, flows, information architecture, content, DX
+    system        — architecture, data, API, integrations, mechanisms, MCP, embedding
+    operations    — delivery, release, launch, incidents, editorial/community ops
+    governance    — policies, compliance, ownership, review, taxonomy policy
+    cross-cutting — security, privacy, accessibility, reliability, observability, localization
+    misc          — temporary overflow only when no subject area fits
+
+Use starter sub-areas from pindoc.area.list when they fit, e.g.
+literature, information-architecture, data, mcp, taxonomy-policy,
+observability. The taxonomy rationale and starter catalog live in
+docs/19-area-taxonomy.md and Decision area-taxonomy-reform-path-a.
+
+Type and Area are separate axes. Type=Decision means "this artifact records
+a decision"; it does not mean the artifact belongs in a Decisions area.
+Decision artifacts must land in their subject area such as policies, mcp,
+ui, data, ownership, or taxonomy-policy. Do not use legacy pre-reform area
+slugs; if a slug is not returned by pindoc.area.list, pick a current
+subject area instead.
+
 ## Task auto-proposal heuristic
 
 Task artifacts are the "what needs to be done next" layer of the graph.
