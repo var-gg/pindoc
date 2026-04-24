@@ -7,6 +7,12 @@
 -- data to show in dogfood. Real sub-area creation happens per-project via
 -- operator CLI (future) or direct INSERT — this seed is illustrative, not
 -- load-bearing.
+--
+-- Area taxonomy note (T2d): migration 0021_area_taxonomy_reform supersedes
+-- the hierarchy demonstrated here. The legacy `embedding-layer` and
+-- `mcp-surface` sub-areas are remapped to `embedding` and `mcp` under the new
+-- `system` parent; new installs should treat this migration as historical
+-- dogfood setup rather than the canonical starter taxonomy.
 
 WITH p AS (SELECT id FROM projects WHERE slug = 'pindoc'),
      parent_a AS (SELECT id FROM areas WHERE project_id = (SELECT id FROM p) AND slug = 'architecture')

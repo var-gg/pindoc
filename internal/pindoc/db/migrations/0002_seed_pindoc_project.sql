@@ -1,5 +1,12 @@
 -- +goose Up
 -- Seed the Pindoc project itself. Idempotent via ON CONFLICT DO NOTHING.
+--
+-- Area taxonomy note (T2d): the top-level Area enum seeded here is the
+-- legacy 9-slug skeleton. Migration 0021_area_taxonomy_reform supersedes it
+-- with the fixed 8 concern skeleton and remaps legacy slugs in-place:
+-- `vision` -> `strategy`, `data-model` -> `data`, `decisions` -> `_unsorted`
+-- for T2c subject reclassification, while same-slug `architecture`,
+-- `mechanisms`, `ui`, and `roadmap` become sub-areas.
 
 INSERT INTO projects (slug, name, description, color, primary_language) VALUES
     ('pindoc', 'Pindoc',

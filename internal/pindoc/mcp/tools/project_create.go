@@ -48,7 +48,7 @@ type projectCreateOutput struct {
 	Slug        string `json:"slug"`
 	Name        string `json:"name"`
 	URL         string `json:"url" jsonschema:"canonical UI path to the project's wiki — share this, not /wiki/..."`
-	DefaultArea string `json:"default_area" jsonschema:"slug of the 'misc' area auto-created so artifacts can be filed immediately"`
+	DefaultArea string `json:"default_area" jsonschema:"slug of the 'misc' area seeded so artifacts can be filed immediately"`
 	Message     string `json:"message"`
 	// ReconnectRequired + Activation + NextSteps advertise the Phase 14b
 	// onboarding contract: project.create writes a row but does NOT
@@ -64,18 +64,82 @@ type projectCreateOutput struct {
 // so the /p/{project}/... URL stays readable in shares.
 var projectSlugRe = regexp.MustCompile(`^[a-z][a-z0-9-]{1,39}$`)
 
+type projectAreaSeed struct {
+	ParentSlug     string
+	Slug           string
+	Name           string
+	Description    string
+	IsCrossCutting bool
+}
+
+var projectCreateTopLevelAreaSeeds = []projectAreaSeed{
+	{"", "strategy", "Strategy", "Why this exists: vision, goals, scope, hypotheses, roadmap.", false},
+	{"", "context", "Context", "External facts: users, competitors, literature, standards, external APIs.", false},
+	{"", "experience", "Experience", "What external actors see and do: UI, flows, IA, content, developer experience.", false},
+	{"", "system", "System", "How it works internally: architecture, data, API, integrations, mechanisms, MCP, embedding.", false},
+	{"", "operations", "Operations", "How it ships, runs, and is supported: delivery, release, launch, incidents, editorial ops.", false},
+	{"", "governance", "Governance", "Rules, ownership, compliance, review, and taxonomy policy.", false},
+	{"", "cross-cutting", "Cross-cutting", "Reusable named concerns spanning multiple areas: security, privacy, accessibility, reliability, observability, localization.", true},
+	{"", "misc", "Misc", "Temporary overflow when no better subject area is clear.", false},
+	{"", "_unsorted", "_Unsorted", "Quarantine queue for artifacts that need reclassification.", false},
+}
+
+var projectCreateStarterSubAreaSeeds = []projectAreaSeed{
+	{"context", "users", "Users", "User research, personas, jobs, and needs.", false},
+	{"context", "competitors", "Competitors", "Competitive analysis and adjacent products.", false},
+	{"context", "literature", "Literature", "Literature review and external research.", false},
+	{"context", "external-apis", "External APIs", "Third-party API facts, limits, contracts, and behavior.", false},
+	{"context", "standards", "Standards", "External standards and protocol references.", false},
+	{"context", "glossary", "Glossary", "Domain vocabulary and terminology context.", false},
+
+	{"experience", "flows", "Flows", "User, agent, and developer-facing flows.", false},
+	{"experience", "information-architecture", "Information architecture", "Navigation, hierarchy, and wayfinding.", false},
+	{"experience", "content", "Content", "Reader copy, documentation content, and message structure.", false},
+	{"experience", "developer-experience", "Developer experience", "Developer-facing setup, guidance, and ergonomics.", false},
+	{"experience", "campaigns", "Campaigns", "Marketing or launch campaign experience.", false},
+
+	{"system", "architecture", "Architecture", "System architecture and internal boundaries.", false},
+	{"system", "data", "Data", "Schema, data model, migrations, and data contracts.", false},
+	{"system", "mechanisms", "Mechanisms", "Internal mechanisms and runtime behavior.", false},
+	{"system", "mcp", "MCP", "MCP tool contract and runtime surface.", false},
+	{"system", "embedding", "Embedding", "Vector provider, chunking, dimensions, and retrieval substrate.", false},
+	{"system", "api", "API", "Internal and external API contracts.", false},
+	{"system", "integrations", "Integrations", "Integration boundaries and adapters.", false},
+
+	{"operations", "delivery", "Delivery", "Delivery flow and handoff.", false},
+	{"operations", "release", "Release", "Release process and notes.", false},
+	{"operations", "launch", "Launch", "Launch operations and readiness.", false},
+	{"operations", "incidents", "Incidents", "Incident response and postmortems.", false},
+	{"operations", "editorial-ops", "Editorial ops", "Documentation and content operations.", false},
+	{"operations", "community-ops", "Community ops", "Community support and moderation operations.", false},
+
+	{"governance", "policies", "Policies", "Product and project policies.", false},
+	{"governance", "compliance", "Compliance", "Compliance requirements and constraints.", false},
+	{"governance", "ownership", "Ownership", "Ownership, accountability, and review boundaries.", false},
+	{"governance", "review", "Review", "Review rules and approval gates.", false},
+	{"governance", "taxonomy-policy", "Taxonomy policy", "Area taxonomy and classification governance.", false},
+
+	{"cross-cutting", "security", "Security", "Security concern spanning multiple areas.", true},
+	{"cross-cutting", "privacy", "Privacy", "Privacy concern spanning multiple areas.", true},
+	{"cross-cutting", "accessibility", "Accessibility", "Accessibility concern spanning multiple areas.", true},
+	{"cross-cutting", "reliability", "Reliability", "Reliability concern spanning multiple areas.", true},
+	{"cross-cutting", "observability", "Observability", "Observability concern spanning multiple areas.", true},
+	{"cross-cutting", "localization", "Localization", "Localization concern spanning multiple areas.", true},
+}
+
 // RegisterProjectCreate wires pindoc.project.create. Creates a new project
-// and seeds it with a single 'misc' area so the first artifact has somewhere
-// to land. No UI button calls this — per architecture principle 1 (agent-only
-// write surface), the user asks the agent and the agent calls this tool.
+// and seeds it with the fixed Area taxonomy skeleton so the first artifact has
+// somewhere to land. No UI button calls this — per architecture principle 1
+// (agent-only write surface), the user asks the agent and the agent calls this
+// tool.
 func RegisterProjectCreate(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name: "pindoc.project.create",
 			Description: strings.TrimSpace(`
 Create a new Pindoc project. Returns the canonical /p/{slug}/wiki URL
-the user should bookmark. Auto-creates a 'misc' area so artifacts can
-be filed immediately.
+the user should bookmark. Seeds the fixed 8 top-level Area skeleton,
+starter sub-areas, and _unsorted so artifacts can be filed immediately.
 
 When to call: user says "start a new project for X" or asks to split
 docs for a repo that isn't covered by the current Pindoc instance.
@@ -137,13 +201,7 @@ the new project by launching pindoc-server with PINDOC_PROJECT=<new>.
 				return nil, projectCreateOutput{}, fmt.Errorf("project insert: %w", err)
 			}
 
-			_, err = tx.Exec(ctx, `
-				INSERT INTO areas (project_id, slug, name, description, is_cross_cutting)
-				VALUES
-				  ($1::uuid, 'misc', 'Miscellaneous', 'Catch-all area for artifacts without a better home. Promote to a real area via pindoc.area.propose once a pattern emerges.', false),
-				  ($1::uuid, '_unsorted', '_Unsorted', 'Quarantine queue — artifacts the agent couldn''t classify. Reader UI surfaces them for reclassification.', false)
-			`, projectID)
-			if err != nil {
+			if err := seedProjectAreas(ctx, tx, projectID); err != nil {
 				return nil, projectCreateOutput{}, fmt.Errorf("seed default areas: %w", err)
 			}
 
@@ -218,3 +276,24 @@ artifacts into %q, restart pindoc-server with PINDOC_PROJECT=%s.
 	)
 }
 
+func seedProjectAreas(ctx context.Context, tx pgx.Tx, projectID string) error {
+	for _, seed := range projectCreateTopLevelAreaSeeds {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO areas (project_id, slug, name, description, is_cross_cutting)
+			VALUES ($1::uuid, $2, $3, $4, $5)
+		`, projectID, seed.Slug, seed.Name, seed.Description, seed.IsCrossCutting); err != nil {
+			return fmt.Errorf("seed area %s: %w", seed.Slug, err)
+		}
+	}
+	for _, seed := range projectCreateStarterSubAreaSeeds {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO areas (project_id, parent_id, slug, name, description, is_cross_cutting)
+			SELECT $1::uuid, parent.id, $3, $4, $5, $6
+			FROM areas parent
+			WHERE parent.project_id = $1::uuid AND parent.slug = $2
+		`, projectID, seed.ParentSlug, seed.Slug, seed.Name, seed.Description, seed.IsCrossCutting); err != nil {
+			return fmt.Errorf("seed area %s/%s: %w", seed.ParentSlug, seed.Slug, err)
+		}
+	}
+	return nil
+}
