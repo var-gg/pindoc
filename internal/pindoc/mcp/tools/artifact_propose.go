@@ -327,8 +327,8 @@ type artifactProposeOutput struct {
 	// parallel WarningSeverities slice carries the resolved severity
 	// ("error" | "warn" | "info") aligned index-by-index so rich clients
 	// don't have to hardcode the catalog.
-	Warnings           []string `json:"warnings,omitempty"`
-	WarningSeverities  []string `json:"warning_severities,omitempty" jsonschema:"aligned with warnings[] index-by-index; one of error | warn | info"`
+	Warnings          []string `json:"warnings,omitempty"`
+	WarningSeverities []string `json:"warning_severities,omitempty" jsonschema:"aligned with warnings[] index-by-index; one of error | warn | info"`
 	// ToolsetVersion echoes the current MCP tool catalog hash so agents
 	// can detect drift without a dedicated ping — every propose response
 	// is enough to notice "server grew a tool between sessions, reconnect".
@@ -380,9 +380,15 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.propose",
-			Description: "Propose a new artifact (the only write path humans use — always via an agent). Returns Status=accepted + artifact_id on success, or Status=not_ready + checklist + suggested_actions if Pre-flight fails. Always read the checklist; never surface the raw error to the user without trying the suggested actions first.",
+			Description: "Propose a new artifact (the only write path humans use — always via an agent). Create path (both update_of and supersede_of omitted) requires basis.search_receipt from pindoc.artifact.search or pindoc.context.for_task in the same session; update/supersede paths do not. Returns Status=accepted + artifact_id on success, or Status=not_ready + checklist + suggested_actions if Pre-flight fails. Always read the checklist; never surface the raw error to the user without trying the suggested actions first.",
 		},
 		func(ctx context.Context, _ *sdk.CallToolRequest, in artifactProposeInput) (*sdk.CallToolResult, artifactProposeOutput, error) {
+			// Create / supersede-create Task rows should never land without
+			// the lifecycle's baseline metadata. Updates intentionally skip
+			// this so existing task_meta is preserved unless the caller
+			// explicitly patches it.
+			applyTaskCreateDefaults(&in)
+
 			// --- Pre-flight ----------------------------------------------
 			lang := deps.UserLanguage
 			checklist, failed, code := preflight(ctx, deps, &in, lang)
@@ -419,25 +425,6 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			// --- Update path (update_of set) -----------------------------
 			if strings.TrimSpace(in.UpdateOf) != "" {
 				return handleUpdate(ctx, deps, in, lang)
-			}
-
-			// --- Task assignee default ----------------------------------
-			// Create / supersede-create: when the caller omits
-			// task_meta.assignee on a Task, default to the self-reporting
-			// agent (`agent:<author_id>`). MCP sessions already carry the
-			// identity (author_id on every tool call + server-issued
-			// agent_id in provenance), so a missing assignee is an
-			// operational gap, not a signal. Explicit assignee in the
-			// input overrides — agents that mean "hand this to a human"
-			// still pass `user:<name>` or `@<handle>` as before.
-			// Decision: task-assignee-default-author-id.
-			if in.Type == "Task" && strings.TrimSpace(in.AuthorID) != "" {
-				if in.TaskMeta == nil {
-					in.TaskMeta = &TaskMetaInput{}
-				}
-				if strings.TrimSpace(in.TaskMeta.Assignee) == "" {
-					in.TaskMeta.Assignee = "agent:" + in.AuthorID
-				}
 			}
 
 			// --- Supersede path (supersede_of set) -----------------------
@@ -2249,6 +2236,25 @@ func applyConversationDerivedDefaults(in *artifactProposeInput, meta *ResolvedAr
 	return completeness
 }
 
+// applyTaskCreateDefaults normalizes Task create inputs so new Task rows
+// always land with the lifecycle's baseline status plus an assignee.
+// Update paths skip this helper because they should preserve the current
+// task_meta unless the caller explicitly changes it.
+func applyTaskCreateDefaults(in *artifactProposeInput) {
+	if in == nil || in.Type != "Task" || strings.TrimSpace(in.UpdateOf) != "" {
+		return
+	}
+	if in.TaskMeta == nil {
+		in.TaskMeta = &TaskMetaInput{}
+	}
+	if strings.TrimSpace(in.TaskMeta.Status) == "" {
+		in.TaskMeta.Status = "open"
+	}
+	if strings.TrimSpace(in.AuthorID) != "" && strings.TrimSpace(in.TaskMeta.Assignee) == "" {
+		in.TaskMeta.Assignee = "agent:" + in.AuthorID
+	}
+}
+
 // detectUnclassifiedUserChat returns true when source_type is unset AND
 // there are no pins AND the body contains patterns typical of user-chat
 // paraphrase (quote marks plus an "said"-style marker). Used to raise
@@ -2762,9 +2768,9 @@ func findSemanticConflicts(ctx context.Context, deps Deps, projectID, title, bod
 // BodyPatchInput is the shape of the light-weight patch an agent can
 // send in place of a full body_markdown on update_of. Three modes:
 //
-//   "section_replace"   — swap one `## heading` section's body with new text
-//   "checkbox_toggle"   — flip one `- [ ]` / `- [x]` item to the target state
-//   "append"            — tack text on the end of the current body
+//	"section_replace"   — swap one `## heading` section's body with new text
+//	"checkbox_toggle"   — flip one `- [ ]` / `- [x]` item to the target state
+//	"append"            — tack text on the end of the current body
 //
 // applyBodyPatch reads the previous body (already fetched by handleUpdate)
 // and writes the resulting body back into propose input so the rest of

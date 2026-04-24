@@ -168,6 +168,78 @@ mark complete
 	})
 }
 
+// TestApplyTaskCreateDefaults keeps new Task artifacts out of the
+// "no status" bucket by injecting the lifecycle baseline only on create /
+// supersede-create paths. Explicit caller choices still win.
+func TestApplyTaskCreateDefaults(t *testing.T) {
+	t.Run("missing task_meta gets open status and default assignee", func(t *testing.T) {
+		in := artifactProposeInput{
+			Type:     "Task",
+			AuthorID: "codex",
+		}
+		applyTaskCreateDefaults(&in)
+		if in.TaskMeta == nil {
+			t.Fatal("expected task_meta to be allocated")
+		}
+		if in.TaskMeta.Status != "open" {
+			t.Fatalf("expected status=open, got %q", in.TaskMeta.Status)
+		}
+		if in.TaskMeta.Assignee != "agent:codex" {
+			t.Fatalf("expected assignee=agent:codex, got %q", in.TaskMeta.Assignee)
+		}
+	})
+
+	t.Run("blank status is normalized without losing other fields", func(t *testing.T) {
+		in := artifactProposeInput{
+			Type:     "Task",
+			AuthorID: "codex",
+			TaskMeta: &TaskMetaInput{
+				Priority: "p1",
+			},
+		}
+		applyTaskCreateDefaults(&in)
+		if in.TaskMeta.Status != "open" {
+			t.Fatalf("expected status=open, got %q", in.TaskMeta.Status)
+		}
+		if in.TaskMeta.Priority != "p1" {
+			t.Fatalf("expected priority to survive, got %q", in.TaskMeta.Priority)
+		}
+		if in.TaskMeta.Assignee != "agent:codex" {
+			t.Fatalf("expected default assignee, got %q", in.TaskMeta.Assignee)
+		}
+	})
+
+	t.Run("explicit status and assignee are preserved", func(t *testing.T) {
+		in := artifactProposeInput{
+			Type:     "Task",
+			AuthorID: "codex",
+			TaskMeta: &TaskMetaInput{
+				Status:   "blocked",
+				Assignee: "user:1234",
+			},
+		}
+		applyTaskCreateDefaults(&in)
+		if in.TaskMeta.Status != "blocked" {
+			t.Fatalf("explicit status overwritten: %q", in.TaskMeta.Status)
+		}
+		if in.TaskMeta.Assignee != "user:1234" {
+			t.Fatalf("explicit assignee overwritten: %q", in.TaskMeta.Assignee)
+		}
+	})
+
+	t.Run("update path is left untouched", func(t *testing.T) {
+		in := artifactProposeInput{
+			Type:     "Task",
+			AuthorID: "codex",
+			UpdateOf: "existing-task",
+		}
+		applyTaskCreateDefaults(&in)
+		if in.TaskMeta != nil {
+			t.Fatalf("expected update path to stay nil, got %+v", in.TaskMeta)
+		}
+	})
+}
+
 // TestPreflightVerificationReport asserts the verdict-keyword rule fires
 // when the VerificationReport body does not explicitly declare pass /
 // partial / fail (or Korean equivalents). Without the verdict a downstream
