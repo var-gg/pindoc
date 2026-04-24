@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 
 // Toc — section inside Sidecar that lists every H2 in the current artifact
@@ -23,6 +23,7 @@ type Props = {
 export function Toc({ headings }: Props) {
   const { t } = useI18n();
   const [active, setActive] = useState<string | null>(headings[0]?.slug ?? null);
+  const clickLockUntil = useRef(0);
 
   useEffect(() => {
     if (headings.length === 0) return;
@@ -37,6 +38,7 @@ export function Toc({ headings }: Props) {
     // "the section at the absolute top."
     const observer = new IntersectionObserver(
       (entries) => {
+        if (Date.now() < clickLockUntil.current) return;
         const visible = entries
           .filter((e) => e.isIntersecting)
           .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
@@ -54,6 +56,7 @@ export function Toc({ headings }: Props) {
     e.preventDefault();
     const el = document.getElementById(slug);
     if (!el) return;
+    clickLockUntil.current = Date.now() + 900;
     el.scrollIntoView({ behavior: "smooth", block: "start" });
     history.replaceState(null, "", `#${slug}`);
     setActive(slug);

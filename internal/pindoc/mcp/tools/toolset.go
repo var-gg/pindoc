@@ -20,6 +20,7 @@ var RegisteredTools = []string{
 	"pindoc.project.current",
 	"pindoc.project.create",
 	"pindoc.area.list",
+	"pindoc.area.create",
 	"pindoc.artifact.read",
 	"pindoc.artifact.propose",
 	"pindoc.harness.install",

@@ -65,7 +65,7 @@
 /* Main 3-column layout — columns stretch to the tallest child (usually
  * the article). Sidebar/Sidecar use sticky positioning to stay visible
  * while window scrolls the article. */
-.main { display: grid; grid-template-columns: var(--sidebar-w) 1fr var(--sidecar-w); align-items: start; }
+.main { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--sidecar-w); align-items: start; }
 
 /* Sidebar */
 .sidebar {
@@ -90,7 +90,7 @@
  * overflow) so TOC's scrollIntoView + IntersectionObserver root=null both
  * target the viewport naturally. */
 .content { background: var(--bg-0); min-width: 0; }
-.reader-article { max-width: var(--reader-max); margin: 0 auto; padding: 48px 32px 96px; transition: max-width var(--dur-slow) var(--ease-out); }
+.reader-article { width: min(100%, var(--reader-max)); max-width: var(--reader-max); margin: 0 auto; padding: 48px 32px 96px; transition: max-width var(--dur-slow) var(--ease-out); }
 @media (prefers-reduced-motion: reduce) {
   .reader-article { transition: none; }
 }
@@ -98,7 +98,7 @@
 .crumbs .lucide { width: 12px; height: 12px; }
 .crumbs span.current { color: var(--fg-2); }
 
-.art-title { font-size: var(--fs-3xl); line-height: 1.2; letter-spacing: -0.015em; font-weight: 600; color: var(--fg-0); margin: 0 0 16px; }
+.art-title { font-size: var(--fs-3xl); line-height: 1.2; letter-spacing: -0.015em; font-weight: 600; color: var(--fg-0); margin: 0 0 16px; overflow-wrap: anywhere; }
 .art-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 32px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
 .art-meta__sep { color: var(--fg-4); font-family: var(--font-mono); }
 .art-meta .prov { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 12px; color: var(--fg-2); }
@@ -127,21 +127,21 @@
 
 .art-body { font-size: var(--fs-md); line-height: var(--lh-reader); color: var(--fg-1); }
 .art-body h1 { display: none; } /* title lives outside the markdown body */
-.art-body h2 { font-size: 22px; letter-spacing: -0.01em; color: var(--fg-0); margin: 40px 0 12px; font-weight: 600; }
+.art-body h2 { font-size: 22px; letter-spacing: -0.01em; color: var(--fg-0); margin: 40px 0 12px; font-weight: 600; scroll-margin-top: calc(var(--nav-h) + 20px); }
 .art-body h3 { font-size: 17px; color: var(--fg-0); margin: 28px 0 8px; font-weight: 600; }
 .art-body p { margin: 0 0 16px; }
 .art-body ul { margin: 0 0 16px; padding-left: 22px; }
 .art-body ul li { margin-bottom: 6px; }
 .art-body ol { margin: 0 0 16px; padding-left: 22px; }
 .art-body ol li { margin-bottom: 6px; }
-.art-body code { font-family: var(--font-mono); font-size: 13.5px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; color: var(--fg-0); }
-.art-body pre { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-2); padding: 12px 14px; overflow-x: auto; margin: 0 0 16px; }
-.art-body pre code { background: transparent; border: 0; padding: 0; font-size: 12.5px; }
+.art-body code { font-family: var(--font-mono); font-size: 13.5px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; color: var(--fg-0); overflow-wrap: anywhere; word-break: break-word; }
+.art-body pre { max-width: 100%; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-2); padding: 12px 14px; overflow-x: auto; margin: 0 0 16px; }
+.art-body pre code { background: transparent; border: 0; padding: 0; font-size: 12.5px; white-space: pre; overflow-wrap: normal; word-break: normal; }
 .art-body a { color: var(--fg-0); border-bottom: 1px dashed var(--fg-4); text-decoration: none; padding-bottom: 1px; }
 .art-body a:hover { border-bottom-color: var(--accent); color: var(--accent); }
 .art-body blockquote { margin: 20px 0; padding: 12px 16px; border-left: 2px solid var(--border-strong); color: var(--fg-2); font-size: 14.5px; }
-.art-body table { border-collapse: collapse; margin: 0 0 16px; width: 100%; }
-.art-body th, .art-body td { border: 1px solid var(--border); padding: 6px 10px; font-size: 13.5px; text-align: left; }
+.art-body table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 0 0 16px; width: 100%; }
+.art-body th, .art-body td { border: 1px solid var(--border); padding: 6px 10px; font-size: 13.5px; text-align: left; overflow-wrap: anywhere; }
 .art-body th { background: var(--bg-2); font-weight: 600; }
 
 .backlinks { margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--border); }
@@ -211,10 +211,20 @@
 
 /* Responsive */
 @media (max-width: 1023px) {
-  .main { grid-template-columns: 1fr; }
+  .main { grid-template-columns: minmax(0, 1fr); }
   .sidebar { display: none; position: fixed; top: var(--nav-h); left: 0; bottom: 0; width: 260px; background: var(--bg-0); border-right: 1px solid var(--border); z-index: 50; padding-top: 8px; }
   .sidebar.open { display: block; box-shadow: var(--shadow-float); }
-  .sidecar { display: none; }
+  .sidecar {
+    position: static;
+    height: auto;
+    max-height: none;
+    width: 100%;
+    min-width: 0;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    overflow: visible;
+  }
+  .sidecar--empty { display: none; }
   .nav__menu { display: inline-flex; align-items: center; justify-content: center; }
   .nav__project { display: none; }
   .nav__brand span.word { display: none; }

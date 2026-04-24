@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -15,9 +16,10 @@ import (
 type artifactReadInput struct {
 	// One of IDOrSlug (UUID or project-scoped slug) must be set.
 	// URLs coming from Wiki Reader share links (pindoc://... or
-	// https://pindoc.org/a/<id>) are accepted here too and normalized
-	// server-side — agents shouldn't have to parse Pindoc's URL shape.
-	IDOrSlug string `json:"id_or_slug" jsonschema:"artifact UUID, slug, or share URL (pindoc://... or https://.../a/ID)"`
+	// /p/{project}/{locale}/wiki/{slug}) are accepted here too and
+	// normalized server-side — agents shouldn't have to parse Pindoc's URL
+	// shape.
+	IDOrSlug string `json:"id_or_slug" jsonschema:"artifact UUID, slug, or share URL (pindoc://... or /p/{project}/{locale}/wiki/{slug})"`
 
 	// View controls how much the server returns. Default "full" matches
 	// Phase 1–11 behaviour for backward compat. "brief" omits
@@ -110,12 +112,16 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.read",
-			Description: "Fetch an artifact by UUID, slug, or share URL. view=brief returns title/summary/pins/stale without the full body; view=continuation adds recent revisions and typed edges; view=full (default) returns everything.",
+			Description: "Fetch an artifact by UUID, slug, or share URL, including /p/{project}/{locale}/wiki/{slug} paths and their absolute URLs. view=brief returns title/summary/pins/stale without the full body; view=continuation adds recent revisions and typed edges; view=full (default) returns everything.",
 		},
 		func(ctx context.Context, _ *sdk.CallToolRequest, in artifactReadInput) (*sdk.CallToolResult, artifactReadOutput, error) {
-			idOrSlug := normalizeRef(in.IDOrSlug)
+			ref := normalizeArtifactReadRef(in.IDOrSlug, deps.ProjectSlug, deps.ProjectLocale)
+			idOrSlug := ref.Value
 			if idOrSlug == "" {
 				return nil, artifactReadOutput{}, errors.New("id_or_slug is required")
+			}
+			if ref.ScopeMismatch {
+				return nil, artifactReadOutput{}, artifactReadNotFoundError(in.IDOrSlug, deps, ref)
 			}
 			view := strings.ToLower(strings.TrimSpace(in.View))
 			if view == "" {
@@ -154,9 +160,10 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 				JOIN projects proj ON proj.id = a.project_id
 				JOIN areas    area ON area.id = a.area_id
 				WHERE proj.slug = $1
-				  AND (a.id::text = $2 OR a.slug = $2)
+				  AND ($2 = '' OR proj.locale = $2)
+				  AND (a.id::text = $3 OR a.slug = $3)
 				LIMIT 1
-			`, deps.ProjectSlug, idOrSlug).Scan(
+			`, deps.ProjectSlug, deps.ProjectLocale, idOrSlug).Scan(
 				&out.ID, &out.ProjectSlug, &out.AreaSlug, &out.Slug,
 				&out.Type, &out.Title, &out.BodyMarkdown, &out.Tags,
 				&out.Completeness, &out.Status, &out.ReviewState,
@@ -165,7 +172,7 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			)
 			_ = desc // reserved; project.description not part of read response
 			if errors.Is(err, pgx.ErrNoRows) {
-				return nil, artifactReadOutput{}, fmt.Errorf("artifact %q not found in project %q", in.IDOrSlug, deps.ProjectSlug)
+				return nil, artifactReadOutput{}, artifactReadNotFoundError(in.IDOrSlug, deps, ref)
 			}
 			if err != nil {
 				return nil, artifactReadOutput{}, fmt.Errorf("read: %w", err)
@@ -409,4 +416,98 @@ func normalizeRef(raw string) string {
 		}
 	}
 	return s
+}
+
+type artifactReadRef struct {
+	Value             string
+	LooksLikeShareURL bool
+	ScopeMismatch     bool
+}
+
+// normalizeArtifactReadRef handles the Reader-facing share URL shape. It is
+// intentionally stricter than normalizeRef: a /p/<project>/<locale>/wiki/...
+// URL from another fixed-session project scope must not be allowed to
+// collapse to a bare slug that could accidentally match the active project.
+func normalizeArtifactReadRef(raw, projectSlug, projectLocale string) artifactReadRef {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return artifactReadRef{}
+	}
+	if strings.HasPrefix(s, "pindoc://") {
+		return artifactReadRef{Value: strings.TrimPrefix(s, "pindoc://")}
+	}
+
+	if strings.HasPrefix(s, "/") || strings.Contains(s, "://") {
+		if parsed, err := url.Parse(s); err == nil {
+			if ref, ok := normalizeArtifactReadPath(parsed.Path, projectSlug, projectLocale); ok {
+				return ref
+			}
+		}
+	}
+
+	return artifactReadRef{Value: s}
+}
+
+func normalizeArtifactReadPath(path, projectSlug, projectLocale string) (artifactReadRef, bool) {
+	segments := splitPathSegments(path)
+	if len(segments) == 0 {
+		return artifactReadRef{}, false
+	}
+
+	if segments[0] == "a" && len(segments) >= 2 {
+		return artifactReadRef{
+			Value:             strings.Join(segments[1:], "/"),
+			LooksLikeShareURL: true,
+		}, true
+	}
+
+	if len(segments) >= 4 && segments[0] == "p" && segments[3] == "wiki" {
+		ref := artifactReadRef{LooksLikeShareURL: true}
+		if len(segments) < 5 || segments[4] == "" {
+			ref.Value = strings.TrimSpace(path)
+			return ref, true
+		}
+		ref.Value = segments[4]
+		expectedLocale := projectLocale
+		if expectedLocale == "" {
+			expectedLocale = "en"
+		}
+		ref.ScopeMismatch = segments[1] != projectSlug || segments[2] != expectedLocale
+		return ref, true
+	}
+
+	return artifactReadRef{}, false
+}
+
+func splitPathSegments(path string) []string {
+	path = strings.Trim(path, "/")
+	if path == "" {
+		return nil
+	}
+	rawSegments := strings.Split(path, "/")
+	segments := make([]string, 0, len(rawSegments))
+	for _, raw := range rawSegments {
+		segment, err := url.PathUnescape(raw)
+		if err != nil {
+			segment = raw
+		}
+		segments = append(segments, segment)
+	}
+	return segments
+}
+
+func artifactReadNotFoundError(raw string, deps Deps, ref artifactReadRef) error {
+	projectScope := deps.ProjectSlug
+	if deps.ProjectLocale != "" {
+		projectScope += "/" + deps.ProjectLocale
+	}
+	msg := fmt.Sprintf("artifact %q not found in project %q", raw, projectScope)
+	if ref.LooksLikeShareURL {
+		if ref.Value != "" {
+			msg += fmt.Sprintf("; input looks like a share URL, retry with only the extracted slug %q if this project scope is intended", ref.Value)
+		} else {
+			msg += "; input looks like a share URL, extract the wiki slug and retry with id_or_slug"
+		}
+	}
+	return errors.New(msg)
 }
