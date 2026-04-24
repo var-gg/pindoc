@@ -15,6 +15,7 @@ import {
 import type { Aggregate } from "./useReaderData";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
+import { localizedAreaName } from "./areaLocale";
 import { TaskControls } from "./TaskControls";
 import { Toc } from "./Toc";
 import { headingsFromBody } from "./slug";
@@ -72,6 +73,7 @@ export function Sidecar({ projectSlug, detail, authMode, agents, users, onArtifa
   const publishedAt = detail.published_at
     ? new Date(detail.published_at).toLocaleString()
     : "—";
+  const areaLabel = localizedAreaName(t, detail.area_slug, detail.area_slug);
 
   // Graph edges aren't derived yet (Phase 3+ pipeline populates these via
   // artifact.superseded_by + future artifact_edges). Show placeholder
@@ -161,7 +163,7 @@ export function Sidecar({ projectSlug, detail, authMode, agents, users, onArtifa
         </div>
         <div className="provenance__row">
           <span className="k">{t("sidecar.prov_area")}</span>
-          <span className="v">{detail.area_slug}</span>
+          <span className="v">{areaLabel}</span>
         </div>
         <div className="provenance__row">
           <span className="k">{t("sidecar.prov_status")}</span>

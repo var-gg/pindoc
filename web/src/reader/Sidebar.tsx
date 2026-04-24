@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Folder, FolderOpen, FileText, Zap, Bug, Book, BookOpen, Hash, Check, Code, LayoutTemplate } from "lucide-react";
 import type { ComponentType } from "react";
 import type { Area } from "../api/client";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
-import { localizedAreaName } from "./areaLocale";
+import { compareAreas, localizedAreaName } from "./areaLocale";
 import type { Aggregate } from "./useReaderData";
 
 type Props = {
@@ -26,8 +26,6 @@ type Props = {
 };
 
 // AreaNode is the tree-enriched Area: same fields + resolved children.
-// Cross-cutting areas stay outside the tree (they are category-orthogonal
-// by design — see docs/04-data-model §Area).
 type AreaNode = Area & { children: AreaNode[] };
 
 const TYPE_ICONS: Record<string, ComponentType<{ className?: string }>> = {
@@ -45,8 +43,9 @@ const TYPE_ICONS: Record<string, ComponentType<{ className?: string }>> = {
 };
 
 // buildAreaTree turns a flat list into a tree by parent_slug. Areas whose
-// parent_slug is unknown (or empty) are roots. Sorts siblings by slug at
-// every level so the tree is deterministic across renders.
+// parent_slug is unknown (or empty) are roots. Top-level rows follow the
+// canonical taxonomy order from docs/19-area-taxonomy.md; subareas stay
+// alphabetical so project-specific additions remain predictable.
 function buildAreaTree(areas: Area[]): AreaNode[] {
   const bySlug = new Map<string, AreaNode>();
   for (const a of areas) {
@@ -59,11 +58,21 @@ function buildAreaTree(areas: Area[]): AreaNode[] {
     else roots.push(node);
   });
   const sortTree = (nodes: AreaNode[]) => {
-    nodes.sort((a, b) => a.slug.localeCompare(b.slug));
+    nodes.sort(compareAreas);
     nodes.forEach((n) => sortTree(n.children));
   };
   sortTree(roots);
   return roots;
+}
+
+function subtreeArtifactCount(node: AreaNode): number {
+  return node.artifact_count + node.children.reduce((sum, child) => sum + subtreeArtifactCount(child), 0);
+}
+
+function containsSelected(node: AreaNode, selectedArea: string | null): boolean {
+  if (!selectedArea) return false;
+  if (node.slug === selectedArea) return true;
+  return node.children.some((child) => containsSelected(child, selectedArea));
 }
 
 export function Sidebar({
@@ -84,6 +93,7 @@ export function Sidebar({
   const regular = areas.filter((a) => !a.is_cross_cutting);
   const crossCutting = areas.filter((a) => a.is_cross_cutting);
   const tree = buildAreaTree(regular);
+  const crossCuttingTree = buildAreaTree(crossCutting);
 
   return (
     <aside className={`sidebar${open ? " open" : ""}`}>
@@ -106,23 +116,22 @@ export function Sidebar({
           t={t}
         />
       ))}
-      {crossCutting.length > 0 && (
-        <div className="side-sub">
-          {crossCutting.map((a) => (
-            <button
-              type="button"
-              key={a.id}
-              className={`side-item${selectedArea === a.slug ? " active" : ""}`}
-              onClick={() => onSelectArea(selectedArea === a.slug ? null : a.slug)}
-              data-testid={`area-${a.slug}`}
-              title={a.description || undefined}
-            >
-              <Folder className="lucide" />
-              <span>{localizedAreaName(t, a.slug, a.name)}</span>
-              <span className="side-item__count">{a.artifact_count}</span>
-            </button>
+      {crossCuttingTree.length > 0 && (
+        <>
+          <div className="side-section" style={{ marginTop: 12 }}>
+            {localizedAreaName(t, "cross-cutting", "Cross-cutting")}
+          </div>
+          {crossCuttingTree.map((node) => (
+            <AreaTreeNode
+              key={node.id}
+              node={node}
+              level={0}
+              selectedArea={selectedArea}
+              onSelectArea={onSelectArea}
+              t={t}
+            />
           ))}
-        </div>
+        </>
       )}
 
       {typeFilterLocked ? (
@@ -217,18 +226,24 @@ function AreaTreeNode({
   onSelectArea: (slug: string | null) => void;
   t: (key: string) => string;
 }) {
-  // Default to expanded: Pindoc trees are shallow (2-3 levels), so
-  // collapse-by-default hides more than it helps on first render.
-  const [expanded, setExpanded] = useState(true);
+  const selectedInside = containsSelected(node, selectedArea);
+  // Default closed keeps the eight-domain taxonomy scannable; selected
+  // descendants auto-open so URL-restored filters remain visible.
+  const [expanded, setExpanded] = useState(() => selectedInside);
   const hasChildren = node.children.length > 0;
   const active = selectedArea === node.slug;
+  const empty = subtreeArtifactCount(node) === 0;
   const indent = { paddingLeft: 8 + level * 14 } as React.CSSProperties;
+
+  useEffect(() => {
+    if (selectedInside) setExpanded(true);
+  }, [selectedInside]);
 
   return (
     <>
       <button
         type="button"
-        className={`side-item${active ? " active" : ""}`}
+        className={`side-item${active ? " active" : ""}${empty ? " empty" : ""}`}
         style={indent}
         onClick={() => onSelectArea(active ? null : node.slug)}
         title={node.description || undefined}

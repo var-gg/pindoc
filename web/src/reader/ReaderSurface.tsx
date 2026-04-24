@@ -4,6 +4,7 @@ import { useI18n } from "../i18n";
 import { ArtifactByline } from "./ArtifactByline";
 import { PindocMarkdown } from "./Markdown";
 import { TrustCard } from "./TrustCard";
+import { localizedAreaName } from "./areaLocale";
 import { typeChipClass } from "./typeChip";
 
 type Props = {
@@ -27,12 +28,13 @@ export function ReaderSurface({ detail, emptyMessage }: Props) {
   const publishedAt = detail.published_at
     ? new Date(detail.published_at).toLocaleString()
     : "—";
+  const areaLabel = localizedAreaName(t, detail.area_slug, detail.area_slug);
 
   return (
     <main className="content">
       <article className="reader-article">
         <div className="crumbs">
-          <span>{detail.area_slug}</span>
+          <span>{areaLabel}</span>
           <ChevronRight className="lucide" />
           <span>{detail.type}</span>
           <ChevronRight className="lucide" />
@@ -54,7 +56,7 @@ export function ReaderSurface({ detail, emptyMessage }: Props) {
             {detail.status}
           </span>
           <span className={typeChipClass(detail.type)}>{detail.type}</span>
-          <span className="chip chip--area">{detail.area_slug}</span>
+          <span className="chip chip--area">{areaLabel}</span>
           <span className="art-meta__sep">·</span>
           <ArtifactByline artifact={detail} />
           <span className="art-meta__sep">·</span>

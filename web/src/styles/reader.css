@@ -83,6 +83,9 @@
 .side-item:hover { background: var(--bg-2); }
 .side-item.active { background: var(--bg-2); color: var(--fg-0); border-left-color: var(--accent); }
 .side-item.active .lucide { color: var(--fg-1); }
+.side-item.empty:not(.active) { color: var(--fg-3); }
+.side-item.empty:not(.active) .lucide,
+.side-item.empty:not(.active) .side-item__count { color: var(--fg-4); }
 .side-item__count { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); margin-left: auto; flex: 0 0 auto; }
 .side-sub .side-item { padding-left: 28px; }
 

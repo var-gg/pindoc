@@ -12,6 +12,7 @@ import { initTheme, setTheme, type Theme } from "./theme";
 import { useReaderData } from "./useReaderData";
 import { typeChipClass } from "./typeChip";
 import { initReaderWidth, setReaderWidth as applyReaderWidth, type ReaderWidth } from "./readerWidth";
+import { localizedAreaName } from "./areaLocale";
 import "../styles/reader.css";
 
 export type ReaderView = "reader" | "inbox" | "graph" | "tasks";
@@ -207,6 +208,9 @@ export function ReaderShell({ view }: Props) {
     ...a,
     artifact_count: areaCountMap.get(a.slug) ?? 0,
   }));
+  const areaNameBySlug = new Map(
+    displayAreas.map((a) => [a.slug, localizedAreaName(t, a.slug, a.name)]),
+  );
 
   return (
     <div className="app-shell">
@@ -242,6 +246,7 @@ export function ReaderShell({ view }: Props) {
           list={filteredArtifacts}
           currentSlug={slug}
           selectedType={selectedType}
+          areaNameBySlug={areaNameBySlug}
         />
         <Sidecar
           projectSlug={project}
@@ -265,6 +270,7 @@ function Body({
   list,
   currentSlug,
   selectedType,
+  areaNameBySlug,
 }: {
   view: ReaderView;
   projectSlug: string;
@@ -273,6 +279,7 @@ function Body({
   list: ArtifactRef[];
   currentSlug: string | undefined;
   selectedType: string | null;
+  areaNameBySlug: ReadonlyMap<string, string>;
 }) {
   const { t } = useI18n();
 
@@ -322,7 +329,16 @@ function Body({
       : t("wiki.empty_list");
 
   if (view === "tasks") {
-    return <TasksKanban projectSlug={projectSlug} projectLocale={projectLocale} list={list} currentSlug={currentSlug} empty={empty} />;
+    return (
+      <TasksKanban
+        projectSlug={projectSlug}
+        projectLocale={projectLocale}
+        list={list}
+        currentSlug={currentSlug}
+        empty={empty}
+        areaNameBySlug={areaNameBySlug}
+      />
+    );
   }
 
   return (
@@ -353,7 +369,7 @@ function Body({
                     <span>{a.title}</span>
                   </div>
                   <div className="backlink__excerpt">
-                    {a.area_slug} · {a.author_id} · {new Date(a.updated_at).toLocaleDateString()}
+                    {(areaNameBySlug.get(a.area_slug) ?? a.area_slug)} · {a.author_id} · {new Date(a.updated_at).toLocaleDateString()}
                   </div>
                 </Link>
               );
@@ -405,12 +421,14 @@ function TasksKanban({
   list,
   currentSlug,
   empty,
+  areaNameBySlug,
 }: {
   projectSlug: string;
   projectLocale: string;
   list: ArtifactRef[];
   currentSlug: string | undefined;
   empty: string;
+  areaNameBySlug: ReadonlyMap<string, string>;
 }) {
   const { t } = useI18n();
 
@@ -452,6 +470,7 @@ function TasksKanban({
             projectSlug={projectSlug}
             projectLocale={projectLocale}
             currentSlug={currentSlug}
+            areaNameBySlug={areaNameBySlug}
           />
         ))}
       </div>
@@ -465,6 +484,7 @@ function TasksKanban({
             projectLocale={projectLocale}
             currentSlug={currentSlug}
             subtle
+            areaNameBySlug={areaNameBySlug}
           />
         </div>
       )}
@@ -478,6 +498,7 @@ function TasksKanban({
             projectLocale={projectLocale}
             currentSlug={currentSlug}
             subtle
+            areaNameBySlug={areaNameBySlug}
           />
         </div>
       )}
@@ -493,6 +514,7 @@ function TaskColumn({
   projectLocale,
   currentSlug,
   subtle,
+  areaNameBySlug,
 }: {
   label: string;
   pill: TaskColumnSpec["pill"];
@@ -501,6 +523,7 @@ function TaskColumn({
   projectLocale: string;
   currentSlug: string | undefined;
   subtle?: boolean;
+  areaNameBySlug: ReadonlyMap<string, string>;
 }) {
   return (
     <div className={`kanban-col${subtle ? " kanban-col--subtle" : ""}`}>
@@ -519,6 +542,7 @@ function TaskColumn({
             projectSlug={projectSlug}
             projectLocale={projectLocale}
             isActive={currentSlug === a.slug}
+            areaNameBySlug={areaNameBySlug}
           />
         ))}
         {items.length === 0 && <div className="kanban-col__empty">—</div>}
@@ -538,16 +562,19 @@ function TaskCard({
   projectSlug,
   projectLocale,
   isActive,
+  areaNameBySlug,
 }: {
   artifact: ArtifactRef;
   projectSlug: string;
   projectLocale: string;
   isActive: boolean;
+  areaNameBySlug: ReadonlyMap<string, string>;
 }) {
   const { t } = useI18n();
   const priority = a.task_meta?.priority;
   const prioClass = priority ? PRIORITY_CLASS[priority] : undefined;
   const blocked = a.task_meta?.status === "blocked";
+  const areaLabel = areaNameBySlug.get(a.area_slug) ?? localizedAreaName(t, a.area_slug, a.area_slug);
   return (
     <Link
       to={`/p/${projectSlug}/${projectLocale}/tasks/${a.slug}`}
@@ -573,7 +600,7 @@ function TaskCard({
             {priority?.toUpperCase()}
           </span>
         )}
-        <span className="chip-area">{a.area_slug}</span>
+        <span className="chip-area">{areaLabel}</span>
       </div>
       <div className="task-card__title">{a.title}</div>
       <div className="task-card__foot">
