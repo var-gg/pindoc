@@ -718,6 +718,9 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			`, projectID, newID, in.AreaSlug, in.Type, finalSlug, in.AuthorID); err != nil {
 				return nil, artifactProposeOutput{}, fmt.Errorf("event insert: %w", err)
 			}
+			if err := recordAreaSuggestionResolvedEvent(ctx, tx, projectID, newID, areaSuggestionCorrelation(in), in.AreaSlug, finalSlug, in.AuthorID); err != nil {
+				return nil, artifactProposeOutput{}, fmt.Errorf("area suggestion resolve event: %w", err)
+			}
 
 			// Embed title + body chunks in the same transaction so search
 			// never observes a half-indexed artifact. If the embedder fails
@@ -1222,6 +1225,9 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 	`, projectID, artifactID, newRev, slug, in.AuthorID, in.CommitMsg); err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("event: %w", err)
 	}
+	if err := recordAreaSuggestionResolvedEvent(ctx, tx, projectID, artifactID, areaSuggestionCorrelation(in), in.AreaSlug, slug, in.AuthorID); err != nil {
+		return nil, artifactProposeOutput{}, fmt.Errorf("area suggestion resolve event: %w", err)
+	}
 
 	// Phase F scope-defer edge write. Runs inside the same tx so the
 	// graph and the body's [-] marker commit or roll back together.
@@ -1402,6 +1408,30 @@ func buildSourceSessionRef(deps Deps, in artifactProposeInput) any {
 		return nil
 	}
 	return string(buf)
+}
+
+func areaSuggestionCorrelation(in artifactProposeInput) string {
+	if in.Basis == nil {
+		return ""
+	}
+	return strings.TrimSpace(in.Basis.SearchReceipt)
+}
+
+func recordAreaSuggestionResolvedEvent(ctx context.Context, tx pgx.Tx, projectID, artifactID, correlationID, finalAreaSlug, slug, authorID string) error {
+	correlationID = strings.TrimSpace(correlationID)
+	if correlationID == "" {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `
+		INSERT INTO events (project_id, kind, subject_id, payload)
+		VALUES ($1, 'agent.area_suggestion_resolved', $2, jsonb_build_object(
+			'correlation_id',  $3::text,
+			'final_area_slug', $4::text,
+			'artifact_slug',   $5::text,
+			'author_id',       $6::text
+		))
+	`, projectID, artifactID, correlationID, finalAreaSlug, slug, authorID)
+	return err
 }
 
 // preflight runs the cheap synchronous checks. Returns a list of ✗-prefixed

@@ -95,6 +95,7 @@ accessibility, reliability, observability, localization.
 제외: 특정 primary area의 단일 instance. Reader UI 접근성 수정은 `experience/ui` + `accessibility` Tag다.
 
 혼동 주의: cross-cutting은 "여러 곳에 걸친다"가 아니라 "여러 곳에 반복 적용되는 named concern"일 때만 쓴다.
+입장/해제 절차는 [21. Cross-cutting Admission Rule](21-cross-cutting-admission-rule.md)을 따른다.
 
 ### `misc`
 
@@ -121,6 +122,9 @@ accessibility, reliability, observability, localization.
 
 Sub-area는 depth 1 only다. `system/mcp`는 허용하고 `system/mcp/tools`는 만들지 않는다.
 각 sub-area는 single parent를 가진다.
+
+정식 승격, rename, merge, remove 절차는 [20. Sub-area Promotion Policy](20-sub-area-promotion-policy.md)를
+source of truth로 둔다. 이 섹션은 빠른 판단 기준만 요약한다.
 
 승격 조건:
 
