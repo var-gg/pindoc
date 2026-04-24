@@ -891,16 +891,22 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 	ref := normalizeRef(in.UpdateOf)
 
 	var artifactID, projectID, currentBody, currentTitle, currentType, currentSlug string
+	var currentTags []string
+	var currentCompleteness string
 	var currentMetaRaw []byte
 	var lastRev int
 	err := deps.DB.QueryRow(ctx, `
-		SELECT a.id::text, a.project_id::text, a.body_markdown, a.title, a.type, a.slug, a.artifact_meta,
+		SELECT a.id::text, a.project_id::text, a.body_markdown, a.title, a.type, a.slug,
+		       a.tags, a.completeness, a.artifact_meta,
 		       COALESCE((SELECT max(revision_number) FROM artifact_revisions WHERE artifact_id = a.id), 0)
 		FROM artifacts a
 		JOIN projects p ON p.id = a.project_id
 		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 		LIMIT 1
-	`, deps.ProjectSlug, ref).Scan(&artifactID, &projectID, &currentBody, &currentTitle, &currentType, &currentSlug, &currentMetaRaw, &lastRev)
+	`, deps.ProjectSlug, ref).Scan(
+		&artifactID, &projectID, &currentBody, &currentTitle, &currentType, &currentSlug,
+		&currentTags, &currentCompleteness, &currentMetaRaw, &lastRev,
+	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, artifactProposeOutput{
 			Status:    "not_ready",
@@ -1098,9 +1104,11 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		}, nil
 	}
 
-	// No-op detection: identical body + title → reject so history stays
-	// clean. Agents that hit this should stop retrying.
-	if currentBody == in.BodyMarkdown && currentTitle == in.Title {
+	// No-op detection: identical body + title with no explicit metadata
+	// change → reject so history stays clean. Task status transitions
+	// intentionally use this body-update lane until pindoc.task.transition
+	// exists, so task_meta must count as a meaningful change.
+	if currentBody == in.BodyMarkdown && currentTitle == in.Title && !hasExplicitMetadataUpdate(in) {
 		return nil, artifactProposeOutput{
 			Status:    "not_ready",
 			ErrorCode: "NO_CHANGES",
@@ -1132,11 +1140,14 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 	}
 
 	if in.Tags == nil {
-		in.Tags = []string{}
+		in.Tags = currentTags
 	}
 	completeness := in.Completeness
 	if completeness == "" {
-		completeness = "partial"
+		completeness = currentCompleteness
+		if completeness == "" {
+			completeness = "partial"
+		}
 	}
 
 	tx, err := deps.DB.Begin(ctx)
@@ -2118,6 +2129,13 @@ func taskMetaToJSON(artifactType string, tm *TaskMetaInput) any {
 		return nil
 	}
 	return string(buf)
+}
+
+func hasExplicitMetadataUpdate(in artifactProposeInput) bool {
+	return in.TaskMeta != nil ||
+		in.ArtifactMeta != nil ||
+		in.Tags != nil ||
+		strings.TrimSpace(in.Completeness) != ""
 }
 
 // ResolvedArtifactMeta is the server-resolved epistemic metadata that

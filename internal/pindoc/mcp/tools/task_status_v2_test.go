@@ -240,6 +240,21 @@ func TestApplyTaskCreateDefaults(t *testing.T) {
 	})
 }
 
+func TestHasExplicitMetadataUpdate(t *testing.T) {
+	if hasExplicitMetadataUpdate(artifactProposeInput{}) {
+		t.Fatal("empty update should not count as metadata change")
+	}
+	if !hasExplicitMetadataUpdate(artifactProposeInput{TaskMeta: &TaskMetaInput{Status: "claimed_done"}}) {
+		t.Fatal("task_meta status transition must count as metadata change")
+	}
+	if !hasExplicitMetadataUpdate(artifactProposeInput{Completeness: "settled"}) {
+		t.Fatal("completeness update must count as metadata change")
+	}
+	if !hasExplicitMetadataUpdate(artifactProposeInput{Tags: []string{}}) {
+		t.Fatal("explicit tags update must count as metadata change")
+	}
+}
+
 // TestPreflightVerificationReport asserts the verdict-keyword rule fires
 // when the VerificationReport body does not explicitly declare pass /
 // partial / fail (or Korean equivalents). Without the verdict a downstream
