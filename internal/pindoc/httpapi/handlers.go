@@ -93,6 +93,50 @@ type projectListRow struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
+// userRow is the thin projection of users table rows TaskControls needs
+// to build the assignee dropdown (Decision agent-only-write-분할 AC
+// "users + agents"). email is intentionally omitted so a published
+// Pindoc instance doesn't leak addresses in UI payloads.
+type userRow struct {
+	ID           string `json:"id"`
+	DisplayName  string `json:"display_name"`
+	GithubHandle string `json:"github_handle,omitempty"`
+	Source       string `json:"source"`
+}
+
+// handleUserList returns all rows in `users` ordered by display_name.
+// Unscoped on purpose — the users table is instance-wide (migration 0014).
+// Reader's TaskControls fetches this once per shell load to populate the
+// assignee dropdown alongside the project's agents aggregate.
+func (d Deps) handleUserList(w http.ResponseWriter, r *http.Request) {
+	rows, err := d.DB.Query(r.Context(), `
+		SELECT id::text, display_name, github_handle, source
+		FROM users
+		ORDER BY display_name
+	`)
+	if err != nil {
+		d.Logger.Error("user list", "err", err)
+		writeError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+	defer rows.Close()
+
+	out := []userRow{}
+	for rows.Next() {
+		var u userRow
+		var gh *string
+		if err := rows.Scan(&u.ID, &u.DisplayName, &gh, &u.Source); err != nil {
+			writeError(w, http.StatusInternalServerError, "scan failed")
+			return
+		}
+		if gh != nil {
+			u.GithubHandle = *gh
+		}
+		out = append(out, u)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"users": out})
+}
+
 func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
 	rows, err := d.DB.Query(r.Context(), `
 		SELECT

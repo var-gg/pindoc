@@ -195,7 +195,7 @@ export function ReaderShell({ view }: Props) {
     );
   }
 
-  const { project: projectData, areas, detail, agents, authMode } = state.data;
+  const { project: projectData, areas, detail, agents, users, authMode } = state.data;
   const reload = state.reload;
   // Override area.artifact_count with the Surface-aware recomputation so
   // the sidebar badge matches the list the user is actually looking at.
@@ -247,6 +247,8 @@ export function ReaderShell({ view }: Props) {
           projectSlug={project}
           detail={view === "reader" || view === "tasks" ? detail : null}
           authMode={authMode}
+          agents={agents}
+          users={users}
           onArtifactUpdated={reload}
         />
       </div>

@@ -19,29 +19,80 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CalendarClock, CircleUserRound, Flag, Loader2 } from "lucide-react";
-import { api, type Artifact, type TaskMetaPatchInput } from "../api/client";
+import {
+  api,
+  type Artifact,
+  type TaskMetaPatchInput,
+  type UserRef,
+} from "../api/client";
+import type { Aggregate } from "./useReaderData";
 import { useI18n } from "../i18n";
 
 type Props = {
   projectSlug: string;
   detail: Artifact;
   authMode?: string;
+  // agents is the project's author_id aggregate (see ReaderData.agents).
+  // Rendered as one optgroup in the assignee dropdown so the user can
+  // hand off to any agent that's previously written in this project.
+  agents: Aggregate[];
+  // users is the instance users table projection. Second optgroup in
+  // the dropdown — empty array renders as a hidden group.
+  users: UserRef[];
   onUpdated: () => void;
 };
 
 const PRIORITIES = ["p0", "p1", "p2", "p3"] as const;
 type Priority = (typeof PRIORITIES)[number];
 
-// Canonical agent handles. Free-text covers users + anything else;
-// these three are quick-select buttons so the common path is one click.
-const AGENT_PRESETS = ["agent:claude-code", "agent:codex", "unassigned"];
-
 // M1 has no /api/user/current endpoint, so edits are attributed to a
 // stable web-originated identity. When V1.5 ships the user-identity
 // endpoint this becomes dynamic.
 const WEB_AUTHOR_ID = "user:web-reader";
 
-export function TaskControls({ projectSlug, detail, authMode, onUpdated }: Props) {
+// Assignee value conventions (migration 0010 task_meta shape):
+//   agent:<author_id>   — e.g. agent:claude-code
+//   user:<display_name> — local display name, V1 single-user default
+//   @<github_handle>    — once V1.5 OAuth fills github_handle
+//   ""                  — unassigned
+// We emit `agent:` or `user:` prefixed values by default so the kanban
+// card can style them differently without parsing heuristics.
+type AssigneeOption = { value: string; label: string; group: "agents" | "users" };
+
+// Agents we always keep visible even if they haven't written in the
+// current project yet — typical hand-off targets for a fresh project.
+const BOOTSTRAP_AGENTS = ["agent:claude-code", "agent:codex"] as const;
+
+function buildAssigneeOptions(agents: Aggregate[], users: UserRef[]): AssigneeOption[] {
+  const agentValues = new Set<string>();
+  // existing agents from the aggregate — prefix author_id with "agent:"
+  // unless the author_id is already a full "user:..." form (identity-
+  // dual artifacts). Authored-by-user rows end up in the users group.
+  for (const a of agents) {
+    if (a.key.startsWith("user:")) continue;
+    agentValues.add(a.key.startsWith("agent:") ? a.key : `agent:${a.key}`);
+  }
+  for (const name of BOOTSTRAP_AGENTS) agentValues.add(name);
+
+  const agentOptions: AssigneeOption[] = Array.from(agentValues)
+    .sort((a, b) => a.localeCompare(b))
+    .map((v) => ({ value: v, label: v, group: "agents" }));
+
+  const userOptions: AssigneeOption[] = users
+    .slice()
+    .sort((a, b) => a.display_name.localeCompare(b.display_name))
+    .map((u) => ({
+      value: u.github_handle ? `@${u.github_handle}` : `user:${u.display_name}`,
+      label: u.github_handle
+        ? `${u.display_name} (@${u.github_handle})`
+        : u.display_name,
+      group: "users",
+    }));
+
+  return [...agentOptions, ...userOptions];
+}
+
+export function TaskControls({ projectSlug, detail, authMode, agents, users, onUpdated }: Props) {
   const { t } = useI18n();
   const taskMeta = detail.task_meta ?? {};
   const readOnly = authMode !== "trusted_local";
@@ -52,6 +103,19 @@ export function TaskControls({ projectSlug, detail, authMode, onUpdated }: Props
   const [saving, setSaving] = useState(false);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const options = useMemo(() => buildAssigneeOptions(agents, users), [agents, users]);
+  const agentOptions = options.filter((o) => o.group === "agents");
+  const userOptions = options.filter((o) => o.group === "users");
+
+  // If the current assignee isn't in the options list (legacy free-text
+  // or hand-set via MCP), we still want the select to display it. Inject
+  // it as a transient extra option so round-tripping preserves the value
+  // instead of silently resetting to unassigned.
+  const extraOption =
+    assignee && !options.some((o) => o.value === assignee)
+      ? { value: assignee, label: `${assignee} (current)`, group: "agents" as const }
+      : null;
 
   // Re-sync local state when the artifact refetches (e.g. after a save
   // triggers onUpdated). Without this, the inputs would stay anchored
@@ -199,18 +263,23 @@ export function TaskControls({ projectSlug, detail, authMode, onUpdated }: Props
         })}
       </div>
 
-      {/* Assignee — quick preset buttons + free-text input */}
+      {/* Assignee — real dropdown grouped by agents / users (Decision
+          agent-only-write-분할 AC). Free-text entry is deliberately
+          dropped; an empty options list is a sign of a setup problem,
+          not a cue to fall through to untyped strings. */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
         <CircleUserRound className="lucide" style={{ width: 13, height: 13, color: "var(--fg-3)" }} />
         <span style={{ fontSize: 11, color: "var(--fg-3)", minWidth: 58 }}>
           {t("task_controls.assignee")}
         </span>
-        <input
-          type="text"
+        <select
           value={assignee}
           disabled={readOnly || saving}
-          onChange={(e) => setAssignee(e.target.value)}
-          placeholder="agent:claude-code"
+          onChange={(e) => {
+            const v = e.target.value;
+            setAssignee(v);
+            if (!readOnly) void saveOne("assignee", v);
+          }}
           style={{
             fontFamily: "var(--font-mono)",
             fontSize: 11,
@@ -219,33 +288,32 @@ export function TaskControls({ projectSlug, detail, authMode, onUpdated }: Props
             border: "1px solid var(--border-1)",
             background: "var(--bg-2)",
             color: "var(--fg-1)",
-            minWidth: 160,
+            minWidth: 200,
           }}
-        />
-        {AGENT_PRESETS.map((p) => (
-          <button
-            key={p}
-            type="button"
-            disabled={readOnly || saving}
-            onClick={() => {
-              const v = p === "unassigned" ? "" : p;
-              setAssignee(v);
-              if (!readOnly) void saveOne("assignee", v);
-            }}
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 10,
-              padding: "2px 6px",
-              borderRadius: "var(--r-1)",
-              border: "1px solid var(--border-1)",
-              background: "transparent",
-              color: "var(--fg-2)",
-              cursor: readOnly || saving ? "default" : "pointer",
-            }}
-          >
-            {p}
-          </button>
-        ))}
+        >
+          <option value="">{t("task_controls.assignee_unassigned")}</option>
+          {extraOption && (
+            <option value={extraOption.value}>{extraOption.label}</option>
+          )}
+          {agentOptions.length > 0 && (
+            <optgroup label={t("task_controls.assignee_group_agents")}>
+              {agentOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {userOptions.length > 0 && (
+            <optgroup label={t("task_controls.assignee_group_users")}>
+              {userOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </optgroup>
+          )}
+        </select>
       </div>
 
       {/* due_at — native datetime-local for zero-dep pickers */}

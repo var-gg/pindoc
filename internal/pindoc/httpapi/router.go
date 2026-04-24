@@ -60,6 +60,10 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/health", d.handleHealth)
 	mux.HandleFunc("GET /api/config", d.handleConfig)
 	mux.HandleFunc("GET /api/projects", d.handleProjectList)
+	// users is an instance-wide table (migration 0014). Surfaced read-only
+	// so Reader TaskControls can offer a real assignee dropdown next to
+	// the agents aggregate (Decision agent-only-write-분할 AC).
+	mux.HandleFunc("GET /api/users", d.handleUserList)
 
 	// Ops surface (Phase J UI). Instance-wide telemetry aggregation —
 	// per-tool averages + recent call timeline so operators can see

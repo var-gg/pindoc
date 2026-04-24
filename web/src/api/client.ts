@@ -133,6 +133,17 @@ export type AuthorUserRef = {
   github_handle?: string;
 };
 
+// UserRef mirrors the /api/users row shape. TaskControls uses this to
+// build the assignee datalist — display_name is the primary label,
+// github_handle gets the @ prefix when present so an agent or human can
+// type either form.
+export type UserRef = {
+  id: string;
+  display_name: string;
+  github_handle?: string;
+  source: "harness_install" | "pindoc_admin" | "github_oauth";
+};
+
 export type ArtifactRef = {
   id: string;
   slug: string;
@@ -291,6 +302,7 @@ export const api = {
   // Instance-wide
   config: () => j<ServerConfig>("/api/config"),
   projectList: () => j<ProjectListResp>("/api/projects"),
+  users: () => j<{ users: UserRef[] }>("/api/users"),
 
   // Operational-metadata write — the one UI-side POST. Throws a
   // TaskMetaPatchError-shaped Error with error_code preserved so callers

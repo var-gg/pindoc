@@ -17,6 +17,7 @@ import {
   type ArtifactRef,
   type Project,
   type ServerConfig,
+  type UserRef,
 } from "../api/client";
 
 export type Aggregate = { key: string; count: number };
@@ -30,6 +31,12 @@ export type ReaderData = {
   types: Aggregate[];
   /** counts by author_id across the unfiltered list. */
   agents: Aggregate[];
+  /** instance-wide users list (migration 0014). Empty array while the
+   * endpoint is reachable but returned no rows; null when the fetch
+   * failed so the UI can fall back without blocking the rest of the
+   * shell. TaskControls combines this with `agents` to build the
+   * assignee datalist. */
+  users: UserRef[] | null;
   /** Server auth mode — "trusted_local" | "project_token" | "oauth". */
   authMode?: ServerConfig["auth_mode"];
 };
@@ -52,11 +59,12 @@ export function useReaderData(projectSlug: string, slug?: string, includeTemplat
     let cancelled = false;
     (async () => {
       try {
-        const [project, areasResp, listResp, cfg] = await Promise.all([
+        const [project, areasResp, listResp, cfg, usersResp] = await Promise.all([
           api.project(projectSlug),
           api.areas(projectSlug, { includeTemplates }),
           api.artifacts(projectSlug, { includeTemplates }),
           api.config().catch(() => null),
+          api.users().catch(() => null),
         ]);
         // Only load detail when a slug is explicitly requested. The
         // handoff's intended navigation is ⌘K-first; auto-loading the
@@ -78,6 +86,7 @@ export function useReaderData(projectSlug: string, slug?: string, includeTemplat
             detail,
             types: aggregate(listResp.artifacts, (a) => a.type),
             agents: aggregate(listResp.artifacts, (a) => a.author_id),
+            users: usersResp?.users ?? null,
             authMode: cfg?.auth_mode,
           },
           reload,

@@ -10,7 +10,9 @@ import {
   type RevisionRow,
   type ServerConfig,
   type SourceSessionRef,
+  type UserRef,
 } from "../api/client";
+import type { Aggregate } from "./useReaderData";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
 import { TaskControls } from "./TaskControls";
@@ -25,13 +27,22 @@ type Props = {
   // 분할). Undefined = config not yet loaded — treat as non-trusted and
   // stay read-only until we know.
   authMode?: ServerConfig["auth_mode"];
+  // agents is the author_id aggregate across the current project's
+  // artifact list. TaskControls surfaces it as the "assigned to an
+  // agent" half of the assignee dropdown.
+  agents?: Aggregate[];
+  // users is the instance-wide users table projection. Combined with
+  // agents to build the assignee dropdown — null when the /api/users
+  // fetch failed (Reader still renders, TaskControls hides the users
+  // section).
+  users?: UserRef[] | null;
   // onArtifactUpdated is called after a successful task-meta write so
   // the Reader refetches the detail and the revision rail / TaskControls
   // reflect the new head.
   onArtifactUpdated?: () => void;
 };
 
-export function Sidecar({ projectSlug, detail, authMode, onArtifactUpdated }: Props) {
+export function Sidecar({ projectSlug, detail, authMode, agents, users, onArtifactUpdated }: Props) {
   const { t } = useI18n();
   // TOC feeds off body_markdown; Markdown.tsx independently derives the
   // same slugs via the same uniqueSlug ledger so `<h2 id>` matches
@@ -81,6 +92,8 @@ export function Sidecar({ projectSlug, detail, authMode, onArtifactUpdated }: Pr
           projectSlug={projectSlug}
           detail={detail}
           authMode={authMode}
+          agents={agents ?? []}
+          users={users ?? []}
           onUpdated={() => onArtifactUpdated?.()}
         />
       )}
