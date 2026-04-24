@@ -45,8 +45,10 @@ func TestMetaFieldsChangedList(t *testing.T) {
 	}
 }
 
-// TestPatchFieldsForMetaPatch asserts the retry hints for the two new
-// meta_patch error codes so agents know exactly what to patch.
+// TestPatchFieldsForMetaPatch asserts the retry hints for the meta_patch
+// error codes so agents know exactly what to patch. task_meta.status
+// uses a dotted path on purpose — the other three task_meta fields stay
+// valid, only status needs to drop out of the payload.
 func TestPatchFieldsForMetaPatch(t *testing.T) {
 	got := patchFieldsFor("META_PATCH_HAS_BODY")
 	wantBody := []string{"body_markdown", "body_patch", "shape"}
@@ -57,5 +59,10 @@ func TestPatchFieldsForMetaPatch(t *testing.T) {
 	wantEmpty := []string{"tags", "completeness", "task_meta", "artifact_meta"}
 	if !reflect.DeepEqual(got, wantEmpty) {
 		t.Fatalf("META_PATCH_EMPTY patchable=%v want=%v", got, wantEmpty)
+	}
+	got = patchFieldsFor("TASK_STATUS_VIA_TRANSITION_TOOL")
+	wantStatus := []string{"task_meta.status"}
+	if !reflect.DeepEqual(got, wantStatus) {
+		t.Fatalf("TASK_STATUS_VIA_TRANSITION_TOOL patchable=%v want=%v", got, wantStatus)
 	}
 }

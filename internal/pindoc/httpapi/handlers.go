@@ -66,8 +66,20 @@ func (d Deps) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"multi_project":          d.MultiProject,
 		"public_base_url":        publicBase,
 		"version":                d.Version,
+		// auth_mode mirrors the Capabilities.AuthMode surfaced by
+		// pindoc.project.current. Reader's TaskControls branches off this:
+		// "trusted_local" → inline editable, anything else → read-only
+		// (Decision agent-only-write-분할). Hardcoded constant in M1 since
+		// we don't ship project_token / oauth yet.
+		"auth_mode": AuthModeTrustedLocal,
 	})
 }
+
+// AuthModeTrustedLocal is the M1 hosting model: one operator, local
+// subprocess, no token. Keeping this as a named constant so the
+// TaskControls gate and the task-meta POST handler agree on the literal.
+// When V1.5+ introduces "project_token" this becomes a field on Deps.
+const AuthModeTrustedLocal = "trusted_local"
 
 type projectListRow struct {
 	ID              string    `json:"id"`
@@ -345,6 +357,11 @@ type artifactDetail struct {
 	Tags          []string  `json:"tags"`
 	AuthorVersion string    `json:"author_version,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
+	// RevisionNumber is the current head revision. Surfaced so the Reader
+	// TaskControls can pass it back as expected_version on
+	// POST .../task-meta without a second round-trip to /revisions.
+	// Zero is never legal (migration 0017 backfills rev 1 for every row).
+	RevisionNumber int `json:"revision_number"`
 	// Relates and RelatedBy (Phase 15b) surface artifact_edges to the
 	// Reader's Sidecar so users opening a Task/Decision see their
 	// connected artifacts as one-click cards instead of hunting through
@@ -423,7 +440,8 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 			a.author_id, a.published_at, a.updated_at,
 			a.body_markdown, a.tags, a.author_version, a.created_at,
 			a.task_meta, a.artifact_meta, a.source_session_ref,
-			u.id::text, u.display_name, u.github_handle
+			u.id::text, u.display_name, u.github_handle,
+			COALESCE((SELECT max(revision_number) FROM artifact_revisions WHERE artifact_id = a.id), 0)
 		FROM artifacts a
 		JOIN projects p  ON p.id  = a.project_id
 		JOIN areas    ar ON ar.id = a.area_id
@@ -437,6 +455,7 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		&a.BodyMarkdown, &a.Tags, &authorVer, &a.CreatedAt,
 		&taskMeta, &artifactMeta, &sourceSessionRef,
 		&userID, &userDisplay, &userGithub,
+		&a.RevisionNumber,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "artifact not found")

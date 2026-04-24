@@ -195,7 +195,8 @@ export function ReaderShell({ view }: Props) {
     );
   }
 
-  const { project: projectData, areas, detail, agents } = state.data;
+  const { project: projectData, areas, detail, agents, authMode } = state.data;
+  const reload = state.reload;
   // Override area.artifact_count with the Surface-aware recomputation so
   // the sidebar badge matches the list the user is actually looking at.
   // Acceptance #6/#7: counters respect current Surface + the *other* filter
@@ -242,7 +243,12 @@ export function ReaderShell({ view }: Props) {
           currentSlug={slug}
           selectedType={selectedType}
         />
-        <Sidecar projectSlug={project} detail={view === "reader" || view === "tasks" ? detail : null} />
+        <Sidecar
+          projectSlug={project}
+          detail={view === "reader" || view === "tasks" ? detail : null}
+          authMode={authMode}
+          onArtifactUpdated={reload}
+        />
       </div>
       <CmdK projectSlug={project} open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>

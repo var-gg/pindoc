@@ -8,19 +8,30 @@ import {
   type EdgeRef,
   type PinRef,
   type RevisionRow,
+  type ServerConfig,
   type SourceSessionRef,
 } from "../api/client";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
+import { TaskControls } from "./TaskControls";
 import { Toc } from "./Toc";
 import { headingsFromBody } from "./slug";
 
 type Props = {
   projectSlug: string;
   detail: Artifact | null;
+  // auth_mode lets TaskControls flip between inline-editable and
+  // read-only without a second round-trip (Decision agent-only-write-
+  // 분할). Undefined = config not yet loaded — treat as non-trusted and
+  // stay read-only until we know.
+  authMode?: ServerConfig["auth_mode"];
+  // onArtifactUpdated is called after a successful task-meta write so
+  // the Reader refetches the detail and the revision rail / TaskControls
+  // reflect the new head.
+  onArtifactUpdated?: () => void;
 };
 
-export function Sidecar({ projectSlug, detail }: Props) {
+export function Sidecar({ projectSlug, detail, authMode, onArtifactUpdated }: Props) {
   const { t } = useI18n();
   // TOC feeds off body_markdown; Markdown.tsx independently derives the
   // same slugs via the same uniqueSlug ledger so `<h2 id>` matches
@@ -64,6 +75,15 @@ export function Sidecar({ projectSlug, detail }: Props) {
       </div>
 
       {headings.length >= 2 && <Toc headings={headings} />}
+
+      {detail.type === "Task" && (
+        <TaskControls
+          projectSlug={projectSlug}
+          detail={detail}
+          authMode={authMode}
+          onUpdated={() => onArtifactUpdated?.()}
+        />
+      )}
 
       <div className="graph-wrap">
         <div className="mini-graph">

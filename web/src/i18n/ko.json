@@ -66,6 +66,15 @@
   "sidecar.prov_published": "발행",
   "sidecar.prov_id": "slug",
 
+  "task_controls.header": "Task 운영 필드",
+  "task_controls.read_only": "읽기 전용 (auth_mode)",
+  "task_controls.priority": "priority",
+  "task_controls.assignee": "담당",
+  "task_controls.due_at": "마감",
+  "task_controls.save": "저장",
+  "task_controls.commit_bulk": "UI TaskControls: operational metadata 일괄 편집",
+  "task_controls.err_no_revision": "현재 revision 번호를 찾지 못했습니다 — 페이지를 새로고침한 후 재시도.",
+
   "reader.written_by": "%s 작성",
   "reader.toc_title": "이 문서",
   "reader.byline_unknown": "(미확인)",

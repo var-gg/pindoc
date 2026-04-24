@@ -1,10 +1,12 @@
-// Package httpapi exposes read-only HTTP endpoints the web UI uses.
+// Package httpapi exposes the HTTP endpoints the web UI uses.
 //
-// Writes stay on the MCP side — agents write through pindoc.artifact.propose
-// over stdio, UI just reads. Keeping the HTTP surface read-only is a
-// deliberate design choice: it means a deployment can ship the web UI
-// behind read-only auth (GitHub OAuth, for instance) without the web
-// layer needing to mint agent tokens.
+// Semantic writes (body / title / relations) stay on the MCP side —
+// agents write through pindoc.artifact.propose over stdio, UI reads.
+// Operational-metadata writes (task_meta assignee / priority / due_at
+// per Decision agent-only-write-분할) are the one exception and live on
+// POST /api/p/{project}/artifacts/{idOrSlug}/task-meta. That lane is
+// gated on auth_mode=trusted_local today; V1.5+ ACLs will extend the
+// check rather than reopening the MCP-only invariant for other fields.
 //
 // URL convention: every project-scoped read lives under /api/p/{project}/…
 // so a URL is shareable without ambiguity. Unscoped reads (config, health,
@@ -77,6 +79,12 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/p/{project}/artifacts/{idOrSlug}/diff", d.handleArtifactDiff)
 	mux.HandleFunc("GET /api/p/{project}/search", d.handleSearch)
 
+	// Operational metadata edit — the one write surface the HTTP API
+	// exposes. Scope is locked to task_meta.assignee / priority / due_at /
+	// parent_slug per Decision agent-only-write-분할. Status and every
+	// semantic-content field stays on the MCP lane.
+	mux.HandleFunc("POST /api/p/{project}/artifacts/{idOrSlug}/task-meta", d.handleTaskMetaPatch)
+
 	return withCORS(withRecover(mux, d.Logger))
 }
 
@@ -97,7 +105,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 func withCORS(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

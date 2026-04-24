@@ -54,6 +54,21 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, in artifactProposeInp
 		}, nil
 	}
 
+	// Task status transitions are reserved for pindoc.task.transition /
+	// pindoc.artifact.verify. meta_patch is the operational-metadata lane
+	// (Decision agent-only-write-분할) — keeping status gates out of this
+	// path prevents the UI-facing endpoint from bypassing the acceptance-
+	// checklist check or the Implementer ≠ Verifier invariant.
+	if in.TaskMeta != nil && strings.TrimSpace(in.TaskMeta.Status) != "" {
+		return nil, artifactProposeOutput{
+			Status:          "not_ready",
+			ErrorCode:       "TASK_STATUS_VIA_TRANSITION_TOOL",
+			Failed:          []string{"TASK_STATUS_VIA_TRANSITION_TOOL"},
+			Checklist:       []string{i18n.T(lang, "preflight.task_status_via_transition_tool")},
+			PatchableFields: patchFieldsFor("TASK_STATUS_VIA_TRANSITION_TOOL"),
+		}, nil
+	}
+
 	hasTags := in.Tags != nil
 	hasCompleteness := strings.TrimSpace(in.Completeness) != ""
 	hasTaskMeta := in.TaskMeta != nil
@@ -139,24 +154,10 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, in artifactProposeInp
 		}, nil
 	}
 
-	// task_meta.status = claimed_done needs the acceptance-checklist gate
-	// evaluated against the *current* body (body is unchanged here, so
-	// preflight's schema-level count saw an empty string and vacuously
-	// passed). Re-check once we have currentBody.
-	if hasTaskMeta && strings.TrimSpace(in.TaskMeta.Status) == "claimed_done" {
-		done, total := countAcceptanceCheckboxes(currentBody)
-		if total > 0 && done != total {
-			return nil, artifactProposeOutput{
-				Status:    "not_ready",
-				ErrorCode: "CLAIMED_DONE_INCOMPLETE",
-				Failed:    []string{"CLAIMED_DONE_INCOMPLETE"},
-				Checklist: []string{
-					fmt.Sprintf(i18n.T(lang, "preflight.claimed_done_incomplete"), done, total),
-				},
-				PatchableFields: patchFieldsFor("CLAIMED_DONE_INCOMPLETE"),
-			}, nil
-		}
-	}
+	// Status transitions are blocked at the top of this handler, so there
+	// is no claimed_done acceptance-checklist re-check to run here. If that
+	// changes, gate via pindoc.task.transition instead of re-opening this
+	// path.
 
 	// Effective values. For tags / completeness, absent = preserve current;
 	// present = replace. task_meta / artifact_meta follow the same
@@ -228,11 +229,18 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, in artifactProposeInp
 		return nil, artifactProposeOutput{}, fmt.Errorf("insert meta_patch revision: %w", err)
 	}
 
+	// task_meta update is a shallow merge (top-level key overwrite) so an
+	// agent can PATCH one field without re-sending the rest. Without this,
+	// "change assignee only" would null out priority and due_at — the UI-
+	// facing TaskControls never ships all four fields at once.
 	if _, err := tx.Exec(ctx, `
 		UPDATE artifacts
 		   SET tags           = $2,
 		       completeness   = $3,
-		       task_meta      = COALESCE($4, task_meta),
+		       task_meta      = CASE
+		           WHEN $4::jsonb IS NULL THEN task_meta
+		           ELSE COALESCE(task_meta, '{}'::jsonb) || $4::jsonb
+		       END,
 		       artifact_meta  = COALESCE($5::jsonb, artifact_meta),
 		       author_id      = $6,
 		       author_version = $7,

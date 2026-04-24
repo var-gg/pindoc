@@ -66,6 +66,15 @@
   "sidecar.prov_published": "published",
   "sidecar.prov_id": "slug",
 
+  "task_controls.header": "Task controls",
+  "task_controls.read_only": "read-only (auth_mode)",
+  "task_controls.priority": "priority",
+  "task_controls.assignee": "assignee",
+  "task_controls.due_at": "due",
+  "task_controls.save": "Save",
+  "task_controls.commit_bulk": "UI TaskControls: bulk operational-metadata edit",
+  "task_controls.err_no_revision": "Current revision number missing — reload the page and retry.",
+
   "reader.written_by": "written by %s",
   "reader.toc_title": "On this page",
   "reader.byline_unknown": "(unknown)",

@@ -16,6 +16,12 @@ export type ServerConfig = {
   default_project_locale?: string;
   multi_project: boolean;
   version: string;
+  // auth_mode mirrors Capabilities.AuthMode. TaskControls flips between
+  // inline-editable and read-only off this value. M1 always returns
+  // "trusted_local"; V1.5+ adds "project_token" / "oauth" where the
+  // Reader must fall back to read-only + chat-shortcut UX
+  // (Decision agent-only-write-분할, Alternative C).
+  auth_mode?: "trusted_local" | "project_token" | "oauth";
 };
 
 export type Project = {
@@ -161,6 +167,10 @@ export type Artifact = ArtifactRef & {
   author_version?: string;
   superseded_by?: string;
   created_at: string;
+  // revision_number is the current head revision. TaskControls passes
+  // this back as expected_version on POST /task-meta so the UI inherits
+  // the same optimistic-lock contract every MCP write uses.
+  revision_number?: number;
   relates_to?: EdgeRef[];
   related_by?: EdgeRef[];
   pins?: PinRef[];
@@ -247,10 +257,77 @@ function p(project: string): string {
   return `/api/p/${encodeURIComponent(project)}`;
 }
 
+// TaskMetaPatchInput is the write surface the Reader's TaskControls
+// ships to POST /api/p/{project}/artifacts/{idOrSlug}/task-meta. Fields
+// map 1:1 onto the server taskMetaPatchRequest — assignee / priority /
+// due_at / parent_slug are the four operational-metadata axes the
+// Decision permits; status stays on the MCP-only lane. `null` is never
+// emitted by the current UI (clearing a field needs a separate design
+// pass); every `undefined` field is omitted from the wire payload.
+export type TaskMetaPatchInput = {
+  expected_version: number;
+  commit_msg: string;
+  author_id: string;
+  author_version?: string;
+  assignee?: string;
+  priority?: "p0" | "p1" | "p2" | "p3";
+  due_at?: string;
+  parent_slug?: string;
+};
+
+export type TaskMetaPatchResp = {
+  artifact_id: string;
+  slug: string;
+  revision_number: number;
+};
+
+export type TaskMetaPatchError = {
+  error_code: string;
+  message: string;
+  failed?: string[];
+};
+
 export const api = {
   // Instance-wide
   config: () => j<ServerConfig>("/api/config"),
   projectList: () => j<ProjectListResp>("/api/projects"),
+
+  // Operational-metadata write — the one UI-side POST. Throws a
+  // TaskMetaPatchError-shaped Error with error_code preserved so callers
+  // can surface "status via transition tool" / "version conflict" etc.
+  // as first-class UX instead of a generic network error.
+  taskMetaPatch: async (
+    project: string,
+    idOrSlug: string,
+    input: TaskMetaPatchInput,
+  ): Promise<TaskMetaPatchResp> => {
+    const res = await fetch(
+      `${p(project)}/artifacts/${encodeURIComponent(idOrSlug)}/task-meta`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      },
+    );
+    if (!res.ok) {
+      let parsed: TaskMetaPatchError | null = null;
+      try {
+        parsed = (await res.json()) as TaskMetaPatchError;
+      } catch {
+        // fall through to generic
+      }
+      const err = new Error(
+        parsed?.message ?? `${res.status} ${res.statusText}`,
+      ) as Error & Partial<TaskMetaPatchError>;
+      if (parsed) {
+        err.error_code = parsed.error_code;
+        err.message = parsed.message;
+        err.failed = parsed.failed;
+      }
+      throw err;
+    }
+    return (await res.json()) as TaskMetaPatchResp;
+  },
 
   // Project-scoped
   project: (project: string) => j<Project>(p(project)),

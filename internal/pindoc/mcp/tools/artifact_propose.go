@@ -1846,6 +1846,8 @@ func patchFieldsFor(code string) []string {
 		return []string{"body_markdown", "body_patch", "shape"}
 	case "META_PATCH_EMPTY":
 		return []string{"tags", "completeness", "task_meta", "artifact_meta"}
+	case "TASK_STATUS_VIA_TRANSITION_TOOL":
+		return []string{"task_meta.status"}
 	case "ACCEPT_TRANSITION_REQUIRED",
 		"ACCEPT_TRANSITION_INDEX_REQUIRED",
 		"ACCEPT_TRANSITION_INDEX_NEGATIVE",
