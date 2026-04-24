@@ -71,7 +71,7 @@ Pindoc: {
     "✗ pins / related_resources 비어있음. 영향 경로 확인?"
   ],
   suggested_next_tools: [
-    "pindoc.artifact.search(type=ADR, area=/Payment)",
+    "pindoc.artifact.search(type=Decision, area=system/api)",
     "pindoc.context.for_task(...)"
   ]
 }

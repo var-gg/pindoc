@@ -33,10 +33,10 @@ embedder + ASCII-only slugify 문제 때문이었음. 새 MCP에서 **explicit s
 
 | # | Title | Type | Area | Slug (권장 명시) | relates_to |
 |---|---|---|---|---|---|
-| D1 | Slug 정책: Unicode 보존 | Decision | decisions | `decision-slug-unicode-preservation` | `pindoc-agent-written-8` (implements) |
-| D2 | `include_templates` 파라미터 통일 | Decision | decisions | `decision-include-templates-unified` | `pindoc-mcp-tools-v1-implementation-status-spec-runtime-drift` (implements) |
-| D3 | `embedder_used` 공통 응답 필드 | Decision | decisions | `decision-embedder-used-response-field` | D2 (relates_to), `pindoc-url` (references) |
-| D4 | Pin path validation (warn-level) | Decision | decisions | `decision-pin-path-warn` | `pindoc-3-tier-a-b-types-pin-vs-resourceref` (implements) |
+| D1 | Slug 정책: Unicode 보존 | Decision | governance/taxonomy-policy | `decision-slug-unicode-preservation` | `pindoc-agent-written-8` (implements) |
+| D2 | `include_templates` 파라미터 통일 | Decision | system/mcp | `decision-include-templates-unified` | `pindoc-mcp-tools-v1-implementation-status-spec-runtime-drift` (implements) |
+| D3 | `embedder_used` 공통 응답 필드 | Decision | system/mcp | `decision-embedder-used-response-field` | D2 (relates_to), `pindoc-url` (references) |
+| D4 | Pin path validation (warn-level) | Decision | system/data | `decision-pin-path-warn` | `pindoc-3-tier-a-b-types-pin-vs-resourceref` (implements) |
 
 **공통 pins**: `internal/pindoc/mcp/tools/artifact_propose.go` (구현 중심 파일).
 **공통 basis**: `context.for_task(<decision 제목>)` 응답의 search_receipt.
@@ -88,14 +88,14 @@ embedder + ASCII-only slugify 문제 때문이었음. 새 MCP에서 **explicit s
 
 ### 발행 순서 (dependency 기반)
 
-1. **01-problem.md** → Analysis / vision (Vision의 "왜 지금인가" 확장)
-2. **08-non-goals.md** → Decision / vision (명시적 반-목표 선언)
-3. **02-concepts.md** → Analysis / vision (primitive 5개 — Project/Harness/Promote/Artifact/Graph)
-4. **09-pindoc-md-spec.md** → Analysis / mechanisms (Harness Reversal M0의 포맷 spec)
-5. **07-roadmap.md** → Analysis / roadmap (V1/V1.x/V2, BM)
-6. **12-m1-implementation-plan.md** → Analysis / roadmap (Phase별 진행)
-7. **06-ui-flows.md** → Analysis / ui (Flow 0-N, Cmd+K, Sidecar)
-8. **11-design-system-handoff.md** → Analysis / ui (디자인 토큰, 영감원)
+1. **01-problem.md** → Analysis / strategy/vision (Vision의 "왜 지금인가" 확장)
+2. **08-non-goals.md** → Decision / strategy/vision (명시적 반-목표 선언)
+3. **02-concepts.md** → Analysis / strategy/vision (primitive 5개 — Project/Harness/Promote/Artifact/Graph)
+4. **09-pindoc-md-spec.md** → Analysis / system/mechanisms (Harness Reversal M0의 포맷 spec)
+5. **07-roadmap.md** → Analysis / strategy/roadmap (V1/V1.x/V2, BM)
+6. **12-m1-implementation-plan.md** → Analysis / strategy/roadmap (Phase별 진행)
+7. **06-ui-flows.md** → Analysis / experience/ui (Flow 0-N, Cmd+K, Sidecar)
+8. **11-design-system-handoff.md** → Analysis / experience/ui (디자인 토큰, 영감원)
 
 2번(non-goals)만 Type=Decision. 나머지는 Analysis. Glossary는 Tier 3으로 밀
 림 — 12개 이상 용어 정의라 별건 batch가 낫다.
@@ -103,7 +103,7 @@ embedder + ASCII-only slugify 문제 때문이었음. 새 MCP에서 **explicit s
 ### 각 artifact 메타 (propose 입력 스케치)
 
 #### T2-1 · 01-problem.md → "실패 모드 F1–F6과 공백의 맥락"
-- `area_slug: vision`
+- `area_slug: strategy/vision`
 - `type: Analysis`
 - `pins: [docs/01-problem.md, docs/00-vision.md]`
 - `relates_to: [pindoc-agent-written-8 (references)]`
@@ -112,7 +112,7 @@ embedder + ASCII-only slugify 문제 때문이었음. 새 MCP에서 **explicit s
   매핑되는지 + Vision 원칙 대응
 
 #### T2-2 · 08-non-goals.md → "Pindoc이 되지 않는 것들 (Never list)"
-- `area_slug: vision`
+- `area_slug: strategy/vision`
 - `type: Decision` (anti-charter)
 - `pins: [docs/08-non-goals.md]`
 - `relates_to: [pindoc-agent-written-8 (references)]`
@@ -120,7 +120,7 @@ embedder + ASCII-only slugify 문제 때문이었음. 새 MCP에서 **explicit s
   "raw 세션 흡수", "메신저/CRM 확장" 등 명시적 Non-goals
 
 #### T2-3 · 02-concepts.md → "5 Primitive 정의와 경계"
-- `area_slug: vision`
+- `area_slug: strategy/vision`
 - `type: Analysis`
 - `pins: [docs/02-concepts.md, docs/00-vision.md]`
 - `relates_to: [pindoc-agent-written-8 (references), pindoc-3-tier-a-b-types-pin-vs-resourceref (implements)]`
@@ -128,7 +128,7 @@ embedder + ASCII-only slugify 문제 때문이었음. 새 MCP에서 **explicit s
   정의·예시·다른 primitive와의 관계. Session/Checkpoint가 보조로 밀려난 이유
 
 #### T2-4 · 09-pindoc-md-spec.md → "PINDOC.md Harness 포맷 스펙"
-- `area_slug: mechanisms`
+- `area_slug: system/mechanisms`
 - `type: Analysis`
 - `pins: [docs/09-pindoc-md-spec.md, internal/pindoc/harness (존재 시)]`
 - `relates_to: [pindoc-m0-m7-harness-reversal-6 (implements)]`
@@ -136,7 +136,7 @@ embedder + ASCII-only slugify 문제 때문이었음. 새 MCP에서 **explicit s
   PINDOC.md version vs server version compatibility
 
 #### T2-5 · 07-roadmap.md → "V1 / V1.x / V2 로드맵과 BM Phase"
-- `area_slug: roadmap`
+- `area_slug: strategy/roadmap`
 - `type: Analysis`
 - `pins: [docs/07-roadmap.md]`
 - `relates_to: [pindoc-agent-written-8 (references), pindoc-url (references)]`
@@ -144,21 +144,21 @@ embedder + ASCII-only slugify 문제 때문이었음. 새 MCP에서 **explicit s
   Hosted SaaS V2+
 
 #### T2-6 · 12-m1-implementation-plan.md → "M1 Phase 체인과 현재 상태"
-- `area_slug: roadmap`
+- `area_slug: strategy/roadmap`
 - `type: Analysis`
 - `pins: [docs/12-m1-implementation-plan.md]`
 - `relates_to: [T2-5 (references), pindoc-url (references)]`
 - body: Phase 1-17 + follow-up까지 체인 요약. Phase별 "왜 그 순서였나"
 
 #### T2-7 · 06-ui-flows.md → "Wiki Reader UX Flow 0-N"
-- `area_slug: ui`
+- `area_slug: experience/ui`
 - `type: Analysis`
 - `pins: [docs/06-ui-flows.md, web/src/reader/ReaderShell.tsx, web/src/reader/CmdK.tsx]`
 - `relates_to: [pindoc-agent-written-8 (references)]`
 - body: Onboarding, Search Cmd+K, Sidecar, Review Queue, Graph (stub)
 
 #### T2-8 · 11-design-system-handoff.md → "디자인 토큰과 영감원"
-- `area_slug: ui`
+- `area_slug: experience/ui`
 - `type: Analysis`
 - `pins: [docs/11-design-system-handoff.md, web/src/styles/reader.css, web/public/design-system]`
 - `relates_to: [T2-7 (references)]`

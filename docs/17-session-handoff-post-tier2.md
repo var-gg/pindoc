@@ -152,7 +152,7 @@ warnings 관찰:
 
 ### 4th pass (UI UX Task 6건 등록 — 2026-04-23 진입)
 
-저자 분류대로 **UI/UX 개선은 구현하지 않고 Task artifact로 등록만** — MCP 사용 모드 전환 결과. 전부 `area=ui`, 필수 H2(Purpose/Scope/Acceptance criteria) 포함해 pre-flight 통과.
+저자 분류대로 **UI/UX 개선은 구현하지 않고 Task artifact로 등록만** — MCP 사용 모드 전환 결과. 전부 `area=experience/ui`, 필수 H2(Purpose/Scope/Acceptance criteria) 포함해 pre-flight 통과.
 
 | slug | 제목 | priority | pins | edges |
 |---|---|---|---|---|
@@ -274,16 +274,16 @@ PINDOC_REPO_ROOT="$PWD" ./bin/pindoc-api.exe &
 
 | 우선 | row | 분해 artifact 유형 | 기대 관계 |
 |---|---|---|---|
-| 1 | "Primitive 7 → 5" | Decision/vision | `pindoc-5-primitive-개념` implements |
-| 2 | "Publish ≡ Promote 통합" | Decision/mechanisms | `pindoc-m0-m7-harness-reversal-6` implements |
-| 3 | "Raw 세션 파일 흡수 V1~V1.x Never" | Decision/vision | `pindoc-non-goals-헌법` implements |
-| 4 | "Tier A/B/C 타입 체계" | Decision/data-model | `pindoc-3-tier-a-b-types-pin-vs-resourceref` implements |
-| 5 | "Pin(hard) vs Related Resource(soft) 분리" | Decision/data-model | `pindoc-3-tier-a-b-types-pin-vs-resourceref` implements |
-| 6 | "Graph edge = Derived View" | Decision/architecture | — |
-| 7 | "MCP tool 네임스페이스 정리" | Decision/mcp-surface | `pindoc-mcp-tools-*` implements |
-| 8 | "BM Phase 1: EthicalAds + GitHub Sponsors" | Decision/roadmap | `pindoc-v1-로드맵-bm-phase` implements |
-| 9 | "프로젝트명 Varn → Pindoc" | Decision/vision | `pindoc-agent-written-8` references |
-| 10 | "Human Approve 단계 삭제, Auto-publish 기본" | Decision/mechanisms | `pindoc-m0-m7-harness-reversal-6` implements |
+| 1 | "Primitive 7 → 5" | Decision/strategy/vision | `pindoc-5-primitive-개념` implements |
+| 2 | "Publish ≡ Promote 통합" | Decision/system/mechanisms | `pindoc-m0-m7-harness-reversal-6` implements |
+| 3 | "Raw 세션 파일 흡수 V1~V1.x Never" | Decision/strategy/vision | `pindoc-non-goals-헌법` implements |
+| 4 | "Tier A/B/C 타입 체계" | Decision/system/data | `pindoc-3-tier-a-b-types-pin-vs-resourceref` implements |
+| 5 | "Pin(hard) vs Related Resource(soft) 분리" | Decision/system/data | `pindoc-3-tier-a-b-types-pin-vs-resourceref` implements |
+| 6 | "Graph edge = Derived View" | Decision/system/architecture | — |
+| 7 | "MCP tool 네임스페이스 정리" | Decision/system/mcp | `pindoc-mcp-tools-*` implements |
+| 8 | "BM Phase 1: EthicalAds + GitHub Sponsors" | Decision/strategy/roadmap | `pindoc-v1-로드맵-bm-phase` implements |
+| 9 | "프로젝트명 Varn → Pindoc" | Decision/strategy/vision | `pindoc-agent-written-8` references |
+| 10 | "Human Approve 단계 삭제, Auto-publish 기본" | Decision/system/mechanisms | `pindoc-m0-m7-harness-reversal-6` implements |
 
 상위 5건만이라도 분해하면 주요 축이 artifact graph에 드러남. 관측
 포인트:
@@ -304,7 +304,7 @@ PINDOC_REPO_ROOT="$PWD" ./bin/pindoc-api.exe &
 쪼개면 micro-artifact noise).
 
 - title: "3차 Peer Review 수용/거부 근거"
-- area: decisions (또는 misc — 판단 필요)
+- area: governance/review (또는 misc — 판단 필요)
 - pins: docs/14, 수용된 변경이 반영된 code 몇 곳
 
 ### Step 7 (선택) — 추가 pairwise 관측

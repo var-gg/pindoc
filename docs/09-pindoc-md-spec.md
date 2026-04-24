@@ -63,7 +63,7 @@ pindoc_version:  1.0.0
 
 정리 대상:
   - Type: {Debug | Feature | ADR | ...}
-  - Area: /{Payment}
+  - Area: {system/api | experience/ui | governance/taxonomy-policy | ...}
   - Scope: {1줄 요약}
 
 관련 기존 문서:
@@ -146,11 +146,15 @@ Preview: {draft URL}
 ## 5. Area 규율
 
 - 모든 artifact는 **하나의 Area**에 속함 (단수).
-- 기존 Area 중 하나에 배치하거나 `/Misc`로 넣음.
-- 새 Area가 진짜 필요하면 `pindoc.area.propose` 호출 → Write-Intent Router 통과 → (sensitive_ops=confirm 이면 Review Queue).
-- **"여러 area에 걸친 관심사"**는:
-  - (a) 별도 artifact 여러 개 + Graph `relates_to`
-  - (b) 상위 Area (예: `/Cross-cutting/Observability`)
+- top-level Area는 고정 8개: `strategy`, `context`, `experience`, `system`, `operations`, `governance`, `cross-cutting`, `misc`.
+- sub-area는 depth 1 only: `system/mcp`는 가능, `system/mcp/tools`는 불가.
+- 미분류는 `/misc`로 넣되 temporary overflow로 취급하고, 가능한 한 subject area로 rehome.
+- 새 sub-area가 진짜 필요하면 stable recurring noun인지 확인한 뒤 `pindoc.area.create` 호출 → Write-Intent Router 통과 → (sensitive_ops=confirm 이면 Review Queue).
+- **여러 area에 걸친 관심사**는:
+  - reusable named concern이면 `cross-cutting/<concern>`에 둔다.
+  - 특정 subject area의 단일 instance면 subject area + Tag로 표현한다.
+  - 여러 subject를 독립적으로 다루면 별도 artifact 여러 개 + Graph `relates_to`로 분리한다.
+- `Decision`은 Artifact type이다. Decision artifact도 subject area에 배치하고 `decisions` Area는 사용하지 않는다.
 
 ## 6. URL 처리
 
@@ -277,8 +281,11 @@ Propose 시 Pindoc이 NOT_READY 응답으로 되돌릴 수 있는 체크. 통과
 
 ### Section 5 (Area 규율) 구현 주의
 
-- `/Misc` 는 install 시 자동 생성. 사용하지 말라고 유도하되 막지는 않음.
-- Area name 은 case-sensitive이나 slug 는 kebab-case 표준. `/Payment` ↔ `/payment` 는 **다른** Area (하지만 UI에서 경고).
+- `/misc` 는 install 시 자동 생성. 사용하지 말라고 유도하되 막지는 않음.
+- Area slug는 lowercase kebab-case 표준. UI display name은 locale에서 별도 관리한다.
+- 새 top-level Area 생성은 금지한다. Project-specific 확장은 고정 top-level 아래 depth 1 sub-area로만 둔다.
+- sub-area로 문서 형식, workflow 상태, 사람/팀/agent 이름, one-off initiative를 만들지 않는다.
+- `decisions` Area 입력은 거절하고 `Type=Decision` + subject area 조합을 안내한다.
 
 ### Section 6 (URL 처리) 구현 주의
 

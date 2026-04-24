@@ -88,7 +88,7 @@ Pindoc V1 MCP Tool 전체 스펙. Input/Output 스키마 + 예시 + 에러 케�
   checklist: Array<{
     item: string,                      // "alternatives 최소 2개 탐색?"
     passed: boolean,
-    hint?: string                      // "pindoc.artifact.search(type=ADR, area=/Payment) 호출 권장"
+    hint?: string                      // "pindoc.artifact.search(type=Decision, area=system/api) 호출 권장"
   }>,
   suggested_next_tools: ToolCallHint[]
 }
@@ -258,7 +258,7 @@ Pindoc V1 MCP Tool 전체 스펙. Input/Output 스키마 + 예시 + 에러 케�
 // Request
 {
   query: "PG 타임아웃 재시도",
-  filters: { type: ["Debug", "Analysis", "ADR"], area: ["/Payment"] },
+  filters: { type: ["Debug", "Analysis", "Decision"], area: ["system/api"] },
   semantic: true,
   limit: 5
 }
@@ -272,7 +272,7 @@ Pindoc V1 MCP Tool 전체 스펙. Input/Output 스키마 + 예시 + 에러 케�
       url: "https://pindoc.example.com/a/doc_debug_abc",
       title: "PG사 API 타임아웃 재시도 오류",
       type: "Debug",
-      area: "/Payment",
+      area: "system/api",
       completeness: "partial",
       status: "published",
       relevance_score: 0.92,

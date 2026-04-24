@@ -40,7 +40,7 @@
 저자가 1호 사용자 관점에서 "지금 필요한" 네 가지 묶음. "V1.x 미루기" 패턴을 명시적으로 거부.
 
 - **15D**: [harness_install.go](../internal/pindoc/mcp/tools/harness_install.go) PINDOC.md 템플릿에 "Task auto-proposal heuristic" 섹션 — imperative 표현 / Decision 후속 / Debug regression test / Analysis open questions 등 capture signals + code-derived vs design Task 구분 + anti-patterns.
-- **15A**: Migration 0008 `architecture` 하위 `embedding-layer` / `mcp-surface` sub-area seed. [Sidebar.tsx](../web/src/reader/Sidebar.tsx) 재귀 `AreaTreeNode` + chevron toggle. DB parent_id schema는 0001부터 있던 것 — UI만 보완.
+- **15A**: Migration 0008 legacy taxonomy 기준 `architecture` 하위 `embedding-layer` / `mcp-surface` sub-area seed. [Sidebar.tsx](../web/src/reader/Sidebar.tsx) 재귀 `AreaTreeNode` + chevron toggle. DB parent_id schema는 0001부터 있던 것 — UI만 보완.
 - **15C**: Migration 0009 `artifact_pins.kind` enum (`code | resource | url`). 인프라/URL 참조 artifact가 path에 억지 string 안 넣어도 됨. Preflight + PinRef 응답 필드 확장.
 - **15B**: Migration 0010 `artifacts.task_meta JSONB` + 부분 인덱스. TaskMetaInput (status/priority/assignee/due_at/parent_slug). Preflight 검증 + 4 stable codes. HTTP list/detail에 task_meta + edges 노출. Reader Tasks → kanban-lite (4 column + no_status/cancelled) + Sidecar `ConnectedArtifacts` (outgoing/incoming edges 카드). Drag-drop 의도적 미구현 (agent-only write 원칙).
 
@@ -261,7 +261,7 @@ V1.5+로 미뤄졌지만 URL 구조는 **지금** 박아야 미래에 안 깨짐
 
 ### 현재 DB 상태 (스냅샷)
 - 1 project (pindoc, primary_language=ko)
-- 9 areas
+- 9 areas (legacy pre-reform snapshot; post-reform taxonomy는 `docs/19-area-taxonomy.md`)
 - 17 artifacts (15 seeded + 2 테스트)
   - `decisions-log`는 revision 2까지 있음 (Phase 7 스모크 테스트)
   - `phase-3-embedding-test`, `phase-2-3-smoke-test` 는 제거해도 됨 (테스트 잔재)

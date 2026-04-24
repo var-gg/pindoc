@@ -120,6 +120,7 @@ cd web && pnpm install && pnpm dev   # http://localhost:5830
 - [08 Non-Goals](docs/08-non-goals.md) — 하지 않을 것들
 - [09 PINDOC.md Spec](docs/09-pindoc-md-spec.md) — Harness 파일 완전 스펙 + 해설
 - [10 MCP Tools Spec](docs/10-mcp-tools-spec.md) — Tool input/output 스키마 + 예시
+- [19 Area Taxonomy](docs/19-area-taxonomy.md) — 8 concern skeleton + sub-area 운영 규칙
 - [Glossary](docs/glossary.md) — 모든 용어 정의 + 경계 (Meta-dogfooding 1호)
 - [Decisions](docs/decisions.md) — Resolved decisions + Open questions
 

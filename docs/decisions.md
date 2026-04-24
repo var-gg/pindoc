@@ -20,7 +20,7 @@
 | 2026-04-21 | **프로젝트명 Varn → Pindoc** | "pin + doc" = 제품 핵심(코드-문서 결합)을 이름이 즉시 전달. var.gg 는 생태계, pindoc 은 제품으로 계층 분리. | [README](../README.md) |
 | 2026-04-21 | **pindoc.org 공개 인스턴스 V1 오픈** | Meta-dogfooding + 데모 + 운영비 투명 테스트. | [07 §운영계획](07-roadmap.md) |
 | 2026-04-21 | **Tier A/B/C 타입 체계** | Core 강제 + Domain Pack 선택 + Custom V2+. Scope 거버넌스 공백 해결. | [02 §4](02-concepts.md), [04 §Tier B](04-data-model.md) |
-| 2026-04-21 | **Area 단수 (Artifact 1 Area)** | Cross-cutting 은 상위 Area 또는 별도 artifact + Graph relates_to로. | [04 §Area](04-data-model.md) |
+| 2026-04-21 | **Area 단수 (Artifact 1 Area)** | Cross-cutting 은 reusable named concern만 받고, 단일 instance는 subject area + Tag 또는 별도 artifact + Graph relates_to로 표현. | [04 §Area](04-data-model.md) |
 | 2026-04-21 | **Pin(hard) vs Related Resource(soft) 분리** | 정합 필수 pin과 맥락 navigation resource 의미 구분. | [04 §Pin/ResourceRef](04-data-model.md) |
 | 2026-04-21 | **Graph edge = Derived View** | Source of truth 는 Artifact 필드. 이중 저장 아님. | [02 §Graph](02-concepts.md), [04 §Graph](04-data-model.md) |
 | 2026-04-21 | **MCP tool 네임스페이스 정리** | `pindoc.session.*` 삭제, `wiki.read` → `artifact.read` 흡수. | [10 MCP Tools](10-mcp-tools-spec.md) |

@@ -62,6 +62,11 @@ Pindoc은 이 역할을 **제품화**합니다.
 
 Notion은 "뭐든 써라" 제품. Pindoc은 **"이 규칙 지켜야 써라"** 제품. 에이전트 write volume이 사람의 100배인 시대에 필요한 건 자유가 아니라 **규율**.
 
+이 규율의 핵심 분류축은 [Area Taxonomy](19-area-taxonomy.md)다. Type은 문서 형식이고 Area는
+8 concern skeleton(`strategy`, `context`, `experience`, `system`, `operations`, `governance`,
+`cross-cutting`, `misc`)이다. `Decision` 같은 Type이나 `roadmap` 같은 time view를 top-level Area로
+다시 인코딩하지 않는다.
+
 ### 원칙 6. 코드와 문서는 결합되어야 한다.
 
 모든 artifact는 커밋/PR/파일 경로에 **고정(pin)** 됩니다. 코드 변경 시 artifact stale 자동. 제품 이름 `Pindoc`이 이 원칙에서 파생.

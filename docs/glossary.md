@@ -112,8 +112,8 @@ V2+ 에서 YAML 스키마로 팀 정의.
 
 ### Area
 Project 하위 수직 구분. 모든 Artifact는 1 Area에 속함 (단수).
-- 예: `/Payment`, `/Cart`, `/Auth`, `/Misc` (최후수단)
-- 신규 Area 생성은 Write-Intent Router 통과 필수
+- 예: `strategy`, `experience/ui`, `system/api`, `governance/taxonomy-policy`, `misc` (최후수단)
+- top-level은 고정 8 skeleton이고, 신규 sub-area 생성은 Write-Intent Router 통과 필수
 
 ### Domain Pack
 Tier B 타입들의 묶음. Project 설정으로 활성.

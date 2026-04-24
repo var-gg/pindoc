@@ -241,7 +241,7 @@ claude mcp list           # pindoc 있음
 
 **15A — Area hierarchy UI**:
 - DB schema는 `parent_id` 이미 있었음 (0001). Seed가 flat이라 UI가 flat으로 보였던 것.
-- Migration 0008에서 `architecture` 하위 `embedding-layer`, `mcp-surface` seed (예시).
+- Migration 0008에서 legacy taxonomy 기준 `architecture` 하위 `embedding-layer`, `mcp-surface` seed (예시).
 - Reader Sidebar가 재귀 `AreaTreeNode` 컴포넌트로 전환. Chevron toggle (접기/펼치기), 들여쓰기 (`paddingLeft = 8 + level*14`), 기본 전개. Cross-cutting area는 트리 밖 유지.
 
 **15C — Pin kind enum**:

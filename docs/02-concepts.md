@@ -23,7 +23,7 @@ Promote ─▶ Artifact ─▶ Graph ─▶ (다음 Session의 Continuation Cont
 ```
 Pindoc Instance
  ├─ Project "shop-fe"   (FE repo, Web SaaS pack)
- │    ├─ Areas: /Cart, /Payment, /Auth
+ │    ├─ Areas: /strategy, /experience/ui, /system/api, /misc
  │    └─ Members: Alice(writer-agent, approver-user), Bob(reader)
  ├─ Project "shop-be"   (BE repo)
  └─ Project "side-game" (사이드 프로젝트, Game pack skeleton)
@@ -100,7 +100,7 @@ Pindoc MCP install 시 각 Project 루트에 **`PINDOC.md`** 생성, `CLAUDE.md`
 - **Agent-only write**: `created_by` · `last_modified_via` 모두 `AgentRef` 필수
 - **Project 소속**: `project_id` 필수
 - **Git-pinned**: commit/PR/파일경로 고정
-- **Area 소속**: 1개의 Area (수직 구분)
+- **Area 소속**: 1개의 primary concern Area (고정 8 skeleton + depth 1 sub-area)
 - **Completeness**: `draft` / `partial` / `settled`
 
 ---
@@ -159,15 +159,21 @@ Graph의 `pinned_to` / `related_resource` 엣지는 위 필드에서 derive.
 ```json
 {
   "kind": "new" | "modification" | "split" | "supersede",
-  "target_type": "Document/Debug",
-  "target_area": "/Payment",        // 단수 — Artifact는 1개 Area에만 속함
+  "target_type": "Feature/Debug",
+  "target_area": "system/api",      // 단수 — Artifact는 1개 Area에만 속함
   "target_id": "doc_xxx?",
   "reason": "PG 타임아웃 재시도 반영",
   "related_session": "SessionRef"
 }
 ```
 
-**cross-area 는?** 1개 Area 원칙. "여러 area에 걸친" 건 별도 Artifact 여러 개 또는 상위 Area(예: `/Cross-cutting/Observability`)로 표현. Graph `relates_to` 엣지로 연결.
+**cross-area 는?** 1개 Area 원칙. 여러 area를 가로지르는 reusable named concern은
+`cross-cutting/<concern>`에 둔다. 특정 primary area의 단일 instance는 subject area + Tag로 표현한다.
+한 문서가 실제로 여러 subject를 독립적으로 다루면 별도 Artifact 여러 개 + Graph `relates_to` 엣지로 분리한다.
+
+**Decision은?** `Decision`은 Artifact type이다. Decision artifact도 `system/mcp`,
+`experience/information-architecture`, `governance/taxonomy-policy` 같은 subject area에 배치한다.
+`decisions` Area는 사용하지 않는다.
 
 ### Pre-flight Check (Tool-driven Prompting)
 

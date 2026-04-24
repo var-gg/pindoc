@@ -157,15 +157,15 @@ $ pindoc init
 │ [shop-fe ▼]  Cmd+K 🔍 [Debug PG 타임아웃   ]  [📥 Inbox]  [User]│
 ├──────┬─────────────────────────────────┬────────────────────────┤
 │Tree  │  # PG사 API 타임아웃 재시도 오류   │ ─── Related ───        │
-│      │     Debug · /Payment · live     │ 📁 Code                │
-│ 📂 /Payment ★                            │ retry.ts  [→ GitHub]  │
+│      │     Debug · system/api · live   │ 📁 Code                │
+│ 📂 system/api ★                         │ retry.ts  [→ GitHub]  │
 │  ├Feature                                │ gateway.ts [→ GitHub] │
 │  ├Debug ★                                │ api/payment.ts        │
 │  ├Flow                                   │                        │
 │  └ADR                                    │ 🌐 External            │
-│ 📂 /Cart                                 │ PG provider docs      │
-│ 📂 /Auth                                 │                        │
-│ 📂 /Misc                                 │ ─── Graph ──           │
+│ 📂 experience/ui                         │ PG provider docs      │
+│ 📂 governance/review                     │                        │
+│ 📂 misc                                  │ ─── Graph ──           │
 │                                          │ ← references           │
 │ ─ Type ─                                 │   ADR-042              │
 │ 📁 Decision                              │ → validates            │
@@ -257,7 +257,7 @@ Agent: 이 작업 묶어 정리할 만합니다.
   
   정리 대상:
     - Debug "PG사 API 타임아웃 재시도 오류"
-    - Project: shop-fe · Area: /Payment
+    - Project: shop-fe · Area: system/api
   
   관련 기존 문서:
     - [ADR-042 결제 재시도 정책](https://pindoc.example.com/a/adr-042)
@@ -309,17 +309,17 @@ Agent: ✓ 발행했습니다.
 │    자동. 이 큐는 민감 작업만.                                │
 ├────────────────────────────────────────────────────────────┤
 │                                                              │
-│ 🔴 archive · Debug · /Payment                                │
+│ 🔴 archive · Debug · system/api                              │
 │ PG사 API 타임아웃 재시도 오류 (이전 버전)                     │
 │ alice-claude · 3m ago · supersede 대상: doc_new               │
 │ [Preview ▸]  [OK]  [NO]  [피드백 요청]                       │
 │                                                              │
-│ 🟠 new Area · /Payment/Retry                                 │
+│ 🟠 new Area · system/provider-retry                          │
 │ alice-claude · 10m ago                                       │
 │ 이유: "PG별 재시도 로직 분리 필요"                             │
 │ [OK]  [NO]  [피드백 요청]                                    │
 │                                                              │
-│ 🟡 settled 승격 · Flow · /Payment                            │
+│ 🟡 settled 승격 · Flow · system/api                          │
 │ 결제 처리 플로우 V3 → settled                                 │
 │ bob-cursor · 1h ago                                          │
 │ [Preview ▸]  [OK]  [NO]  [피드백 요청]                       │
@@ -416,7 +416,7 @@ Cmd+K 에서도 접근 가능.
 │  ── Recent Promoted ──                                       │
 │  • Debug PG 타임아웃 재시도 (2h ago) · live                  │
 │  • Feature 결제 재시도 settled (1d ago)                      │
-│  • Area /Cart/Retry 신설 (3d ago)                            │
+│  • Area system/provider-retry 신설 (3d ago)                  │
 │                                                              │
 │  ── Activity ──                                              │
 │  (graph: 주간 promote 건수)                                  │

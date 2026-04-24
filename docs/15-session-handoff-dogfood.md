@@ -47,7 +47,7 @@ $ docker compose exec -T db psql -U pindoc -d pindoc -c \
 
 이전 dummy data (Phase 6에서 import한 docs/*.md 15개 + Phase smoke test 3개)는
 전부 삭제됨. `_template_*` 4개만 남김 (dogfood 시 agent가 읽을 양식
-참조용). Events도 cascade 클린. Areas는 유지 (vision / architecture /
+참조용). Events도 cascade 클린. Areas는 유지 (legacy pre-reform taxonomy: vision / architecture /
 data-model / decisions / mechanisms / roadmap / ui / misc / _unsorted /
 cross-cutting + architecture 하위 embedding-layer / mcp-surface).
 
@@ -88,7 +88,7 @@ Dogfood는 **빈 캔버스 + 양식 4개** 상태에서 시작.
 5. **structured body 작성**: template 섹션 구조 기반 + repo 실 내용.
 6. **propose**: `pindoc.artifact.propose`
    - `type="Analysis"`
-   - `area_slug="architecture"` (또는 맞는 것)
+   - `area_slug="system/architecture"` (또는 맞는 것)
    - `title`, `body_markdown`
    - `basis.search_receipt=<receipt>`
    - `pins=[{kind:"code", path:"docs/03-architecture.md"}]` 또는 주요 코드 path

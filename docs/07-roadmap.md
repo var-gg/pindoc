@@ -1,5 +1,9 @@
 # 07. Roadmap
 
+> **Taxonomy note**: 이 파일명은 링크 안정성을 위해 유지한다. Area taxonomy에서는 top-level `roadmap`
+> Area를 사용하지 않고, roadmap 성격의 artifact는 `strategy/roadmap` sub-area에 둔다.
+> 전체 규칙은 [19 Area Taxonomy](19-area-taxonomy.md)를 따른다.
+
 ## 원칙
 
 1. **V1 = Flagship 완성도 100%**. 깊이 우선.
@@ -73,7 +77,7 @@
 - [ ] Tier A 7 타입 (Decision/Analysis/Debug/Flow/Task/TC/Glossary)
 - [ ] Tier B Web SaaS 4 타입 stable (Feature/APIEndpoint/Screen/DataModel)
 - [ ] Tier B Game/ML/Mobile skeleton 등록
-- [ ] Area (Project 하위) + 신규 Area Router
+- [ ] Area taxonomy (고정 8 skeleton + depth 1 sub-area) + 신규 sub-area Router ([19-area-taxonomy](19-area-taxonomy.md))
 - [ ] Pin (hard) + Related Resource (soft) 분리
 - [ ] Event Bus + 기본 이벤트 타입
 - [ ] SessionRef 경량 모델 (raw 세션 저장 없음)

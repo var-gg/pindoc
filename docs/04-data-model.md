@@ -87,7 +87,7 @@ Artifact {
   related_resources: ResourceRef[]
   
   // 분류
-  area: AreaRef                      // 필수, 단수 (없으면 /Misc)
+  area: AreaRef                      // 필수, 단수 (없으면 /misc)
   labels: string[]
   
   // 관계 (source of truth)
@@ -305,6 +305,9 @@ DataModel    { entity, fields[], relations[], storage, migrations[] }
 
 ## Area
 
+Area는 Artifact가 속한 **primary concern**이다. 문서 형식, 작업 상태, 작성자, 임시 initiative가 아니라
+"이 artifact가 답하는 핵심 질문"을 기준으로 하나의 shelf를 고른다.
+
 ```
 Area {
   id, project_id, name, slug,
@@ -316,9 +319,82 @@ Area {
 }
 ```
 
-- 모든 Artifact는 **하나의 Area**에 속함 (단수). 미지정 시 `/Misc`.
-- Project 하위 스코프 — Project A의 `/Cart`와 Project B의 `/Cart`는 별개.
+### Top-level 8 concern skeleton
+
+Top-level Area slug는 프로젝트마다 자유 생성하지 않는다. Pindoc V1의 고정 skeleton은 다음 8개다.
+
+| slug | 핵심 질문 | starter sub-area |
+|---|---|---|
+| `strategy` | 왜 하는가, 무엇을 선택하는가 | `vision`, `goals`, `scope`, `hypotheses`, `roadmap` |
+| `context` | 바깥 세계에서 무엇이 사실인가 | `users`, `competitors`, `literature`, `external-apis`, `standards` |
+| `experience` | 외부 actor가 무엇을 보고 겪는가 | `ui`, `flows`, `information-architecture`, `content`, `developer-experience` |
+| `system` | 내부적으로 어떻게 실현되는가 | `architecture`, `data`, `api`, `integrations`, `mechanisms`, `mcp`, `embedding` |
+| `operations` | 어떻게 ship/run/support 하는가 | `delivery`, `release`, `launch`, `incidents`, `editorial-ops` |
+| `governance` | 어떤 규칙/ownership/제약이 있는가 | `policies`, `compliance`, `ownership`, `review`, `taxonomy-policy` |
+| `cross-cutting` | 여러 Area를 가로지르는 reusable named concern은 무엇인가 | `security`, `privacy`, `accessibility`, `reliability`, `observability`, `localization` |
+| `misc` | 아직 분류가 확정되지 않은 temporary overflow인가 | 없음 |
+
+### 소속 규칙
+
+- 모든 Artifact는 **하나의 Area**에 속한다. `Artifact.area`는 필수 단수 필드이며, 미지정 시 `/misc`로 들어간다.
+- `labels`/Tag는 보조 분류다. 단수 Area 원칙을 회피하기 위해 여러 Area 이름을 label로 중복 저장하지 않는다.
+- Area는 Project 하위 스코프다. Project A의 `/system/api`와 Project B의 `/system/api`는 별개다.
 - 신규 Area 생성은 Write-Intent Router 통과 + `sensitive_ops: confirm` 이면 Review Queue.
+
+### Sub-area promotion
+
+Sub-area는 **depth 1 only**다. 즉 `system/mcp`는 가능하지만 `system/mcp/tools` 같은 depth 2+는 만들지 않는다.
+각 sub-area는 정확히 하나의 top-level parent만 가진다.
+
+Sub-area로 승격하려면 다음 조건을 만족해야 한다.
+
+- 여러 artifact에서 반복적으로 등장하는 stable recurring noun이다.
+- 문서 형식이 아니라 concern을 가리킨다.
+- owner 또는 운영 규칙을 붙일 만큼 장기적으로 남는다.
+- 단일 artifact의 임시 작업명이 아니라 이후 artifact도 같은 shelf를 공유할 가능성이 높다.
+
+다음은 sub-area로 만들지 않는다.
+
+- 문서 형식: `decision`, `task`, `analysis`, `debug`, `apiendpoint`, `screen`
+- 워크플로우 상태: `todo`, `in-progress`, `review`, `done`, `blocked`
+- 사람/팀/에이전트 이름: `alice`, `codex`, `claude`, `backend-team`
+- one-off initiative 또는 릴리스 코드명: `april-patch`, `mvp-week`, `phase-3`
+
+반복성은 있으나 아직 shelf로 고정하기 이르면 Tag로 시작하고, 충분히 재사용된 뒤 sub-area로 승격한다.
+
+### Cross-cutting admission rule
+
+`cross-cutting`은 여러 top-level Area를 가로지르는 **reusable named concern**만 받는다.
+예: `security`, `privacy`, `accessibility`, `reliability`, `observability`, `localization`.
+
+특정 Area 안의 단일 instance는 `cross-cutting`으로 보내지 않는다. 예를 들어 Reader UI의 접근성 수정은
+`experience/ui`에 두고 `accessibility` Tag를 붙인다. 여러 Area에 공통 정책, 점검 기준, telemetry,
+governance가 생긴 named concern만 `cross-cutting/<concern>`으로 승격한다.
+
+### Decision landing
+
+`Type=Decision`은 artifact form이고 Area가 아니다. Decision artifact도 주제에 맞는 subject area에 둔다.
+예: MCP tool shape 결정은 `system/mcp`, Reader IA 결정은 `experience/information-architecture`,
+taxonomy 정책 결정은 `governance/taxonomy-policy`.
+
+`decisions` Area는 금지된다. Decision 여부는 `Artifact.type == "Decision"`으로 표현하고,
+Area로 한 번 더 인코딩하지 않는다.
+
+### 기존 9 -> 8 매핑 부록
+
+| 기존 slug | 새 landing | 비고 |
+|---|---|---|
+| `vision` | `strategy` | vision은 `strategy/vision` starter sub-area로 유지 |
+| `architecture` | `system/architecture` | 내부 구조 concern |
+| `data-model` | `system/data` | schema/data model concern |
+| `mechanisms` | `system/mechanisms` | 내부 동작 원리 |
+| `ui` | `experience/ui` | 외부 actor 경험 concern |
+| `roadmap` | `strategy/roadmap` | time view는 strategy 하위 |
+| `decisions` | subject area + `Type=Decision` | Area는 drop, artifact type만 유지 |
+| `cross-cutting` | `cross-cutting` | reusable named concern만 입장 |
+| `misc` | `misc` | temporary overflow only |
+| `mcp-surface` | `system/mcp` | 기존 architecture sub-area |
+| `embedding-layer` | `system/embedding` | 기존 architecture sub-area |
 
 ## Project Tree
 
@@ -398,7 +474,9 @@ Intent {
 }
 ```
 
-**Cross-area**: Artifact는 1개 Area에만 속함. "여러 area에 걸친 관심사"는 **상위 Area** (`/Cross-cutting/Observability`) 또는 **별도 Artifact 여러 개** + Graph `relates_to` edge로.
+**Cross-area**: Artifact는 1개 Area에만 속함. 여러 area에 걸친 reusable named concern은
+`cross-cutting/<concern>`에 둔다. 특정 primary area의 단일 instance는 subject area + Tag로 표현한다.
+한 문서가 실제로 여러 subject를 독립적으로 다루면 별도 Artifact 여러 개 + Graph `relates_to` edge로 분리한다.
 
 ---
 
@@ -550,17 +628,17 @@ ContinuationContext {
 ```
 Project: shop-fe
 ├─ active_domain_packs: [web-saas]
-├─ Areas: /Cart, /Payment, /Auth, /Misc
+├─ Areas: /strategy, /experience/ui, /system/api, /misc
 ├─ Members: Alice(admin+approver), Bob(reader),
 │           Alice-claude(writer), Bob-cursor(reader)
 └─ Artifacts:
-    └─ Feature "장바구니 재시도 UI" [Area: /Cart, completeness: partial]
+    └─ Feature "장바구니 재시도 UI" [Area: experience/ui, completeness: partial]
         ├─ references → shop-be:APIEndpoint "POST /cart/retry"  (cross-project)
         ├─ pins: [retry-ui.tsx @ commit-abc]
         └─ related_resources: [useCart.ts, cart-store.ts]
 
 Project: shop-be
-└─ APIEndpoint "POST /cart/retry" [Area: /Cart]
+└─ APIEndpoint "POST /cart/retry" [Area: system/api]
     └─ referenced_by ← shop-fe:Feature "장바구니 재시도 UI"
 ```
 
