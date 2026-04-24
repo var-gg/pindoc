@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__pindoc__pindoc_project_current",
+      "mcp__pindoc__pindoc_area_list",
+      "mcp__pindoc__pindoc_context_for_task"
+    ]
+  }
+}

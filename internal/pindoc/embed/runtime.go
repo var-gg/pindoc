@@ -30,7 +30,14 @@ import (
 
 // ONNXRuntimeVersion matches the C API headers yalue/onnxruntime_go v1.27.0
 // was built against. Bump both together — the wrapper is version-locked.
-const ONNXRuntimeVersion = "1.24.1"
+//
+// 1.24.2 bump: 1.24.1 had a regression in ValidateExternalDataPath
+// (microsoft/onnxruntime#27353, fixed in #27374) that false-positived on
+// Windows model paths under %LOCALAPPDATA%, rejecting perfectly valid
+// external-data sidecars (model.onnx + model.onnx_data in the same dir).
+// The ORT C ABI is stable across patch releases so the Go wrapper stays
+// pinned at v1.27.0.
+const ONNXRuntimeVersion = "1.24.2"
 
 // runtimeArtifact describes one platform's onnxruntime download.
 type runtimeArtifact struct {

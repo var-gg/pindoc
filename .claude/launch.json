@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "C:\\Users\\curioustore\\AppData\\Roaming\\npm\\pnpm.cmd",
+      "runtimeArgs": ["--dir", "web", "dev"],
+      "port": 5830
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "A:\\vargg-workspace\\pindoc\\bin\\pindoc-api.exe",
+      "runtimeArgs": [],
+      "port": 5831
+    }
+  ]
+}
