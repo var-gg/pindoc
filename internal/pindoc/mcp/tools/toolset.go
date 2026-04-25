@@ -33,6 +33,9 @@ var RegisteredTools = []string{
 	"pindoc.user.current",
 	"pindoc.user.update",
 	"pindoc.scope.in_flight",
+	"pindoc.task.queue",
+	"pindoc.task.assign",
+	"pindoc.task.bulk_assign",
 }
 
 // ToolsetVersion returns a stable short string identifying the current

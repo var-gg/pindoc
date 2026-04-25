@@ -99,6 +99,32 @@ Preview: {draft URL}
 - conflict 반려 시 force 대신 "별개" 주장
 - 필수 필드 누락 상태로 propose 재시도
 
+### 2.1 본문과 Graph edge 분리
+
+Artifact 본문은 narrative 전용입니다. Purpose, Scope, Background,
+Decision, Evidence 같은 설명 섹션을 쓰고, artifact 간 관계는 본문 섹션이
+아니라 `relates_to` 입력 필드로 제출합니다.
+
+**준수**:
+```json
+{
+  "relates_to": [
+    {"target_id": "task-reader-ia-refactor", "relation": "implements"}
+  ]
+}
+```
+
+**안티패턴**:
+```markdown
+## 연관
+
+- implements -> task-reader-ia-refactor
+```
+
+`## 연관`, `## 역참조`, `## Dependencies / 선후`, `## 리소스 경로` 같은
+H2가 graph metadata를 본문에 중복하면 서버는 publish를 막지 않고
+`SECTION_DUPLICATES_EDGES` warning을 반환할 수 있습니다.
+
 ## 3. Referenced Confirmation 프로토콜
 
 사용자에게 확인·승인 요청할 때 **반드시 다음 포함**:
@@ -268,6 +294,8 @@ Propose 시 Pindoc이 NOT_READY 응답으로 되돌릴 수 있는 체크. 통과
 
 - `pindoc.artifact.search` 없이 propose하면 Pre-flight Check가 "선행 search 없음" 으로 NOT_READY 반환. 에이전트는 이 루프를 학습해야 함.
 - NOT_READY 응답 포맷은 [10-mcp-tools-spec](10-mcp-tools-spec.md)의 `pindoc.artifact.propose` 섹션 참조.
+- `SECTION_DUPLICATES_EDGES`는 warn-only입니다. Artifact는 publish되지만,
+  에이전트는 다음 update에서 관계를 `relates_to` 필드로 옮기도록 유도받습니다.
 
 ### Section 3 (Referenced Confirmation) 구현 주의
 

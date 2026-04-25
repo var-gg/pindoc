@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { X } from "lucide-react";
 import type { Aggregate } from "./useReaderData";
 import type { Artifact, ArtifactRef, Area } from "../api/client";
 import { useI18n } from "../i18n";
 import { CmdK } from "./CmdK";
-import { ReaderSurface } from "./ReaderSurface";
+import { ReaderSurface, type DetailScope } from "./ReaderSurface";
 import { Sidebar } from "./Sidebar";
 import { Sidecar } from "./Sidecar";
 import { TopNav } from "./TopNav";
@@ -100,16 +101,24 @@ export function ReaderShell({ view }: Props) {
 
   const baseRoute = `/p/${project}/${locale}/${view === "tasks" ? "tasks" : "wiki"}`;
 
-  // When the user filters via the sidebar we drop the currently-selected
-  // artifact so the filter effect is visible (otherwise the reader body
-  // would paper over the list). Filter-while-detail-shown is a future
-  // UX improvement that needs in-place scroll to next matching artifact.
+  // In Wiki detail mode, Area selection is a live scope for the detail
+  // header and sibling nav; the article stays mounted. Other surfaces
+  // still return to their list/board so the filter effect is obvious.
   function handleSelectArea(next: string | null) {
     setSelectedArea(next);
-    if (slug) navigate(baseRoute);
+    if (slug && view !== "reader") navigate(baseRoute);
   }
   function handleSelectType(next: string | null) {
     setSelectedTypeState((prev) => (prev === next ? null : next));
+    if (slug) navigate(baseRoute);
+  }
+  function clearAreaFilter() {
+    setSelectedArea(null);
+    if (slug) navigate(baseRoute);
+  }
+  function clearFilters() {
+    setSelectedArea(null);
+    setSelectedTypeState(null);
     if (slug) navigate(baseRoute);
   }
 
@@ -124,6 +133,20 @@ export function ReaderShell({ view }: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  useEffect(() => {
+    if (view !== "tasks") return;
+    function onKey(e: KeyboardEvent) {
+      if (paletteOpen || e.key !== "Escape") return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      if (!selectedArea && !selectedType) return;
+      e.preventDefault();
+      clearFilters();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [view, paletteOpen, selectedArea, selectedType, slug, baseRoute, navigate]);
 
   const toggleTheme = () => {
     const next: Theme = theme === "dark" ? "light" : "dark";
@@ -211,6 +234,7 @@ export function ReaderShell({ view }: Props) {
   const areaNameBySlug = new Map(
     displayAreas.map((a) => [a.slug, localizedAreaName(t, a.slug, a.name)]),
   );
+  const areaPathBySlug = buildAreaPathMap(displayAreas, areaNameBySlug);
 
   return (
     <div className="app-shell">
@@ -244,9 +268,14 @@ export function ReaderShell({ view }: Props) {
           projectLocale={locale}
           detail={detail}
           list={filteredArtifacts}
+          allList={surfaceList}
           currentSlug={slug}
+          selectedArea={selectedArea}
           selectedType={selectedType}
           areaNameBySlug={areaNameBySlug}
+          areaPathBySlug={areaPathBySlug}
+          onClearAreaFilter={clearAreaFilter}
+          onClearFilters={clearFilters}
         />
         <Sidecar
           projectSlug={project}
@@ -262,26 +291,146 @@ export function ReaderShell({ view }: Props) {
   );
 }
 
+function buildAreaPathMap(
+  areas: Area[],
+  areaNameBySlug: ReadonlyMap<string, string>,
+): ReadonlyMap<string, string[]> {
+  const bySlug = new Map(areas.map((a) => [a.slug, a]));
+  const out = new Map<string, string[]>();
+  for (const area of areas) {
+    const path: string[] = [];
+    const seen = new Set<string>();
+    let current: Area | undefined = area;
+    while (current && !seen.has(current.slug)) {
+      seen.add(current.slug);
+      path.unshift(areaNameBySlug.get(current.slug) ?? current.name ?? current.slug);
+      current = current.parent_slug ? bySlug.get(current.parent_slug) : undefined;
+    }
+    out.set(area.slug, path.length > 0 ? path : [areaNameBySlug.get(area.slug) ?? area.slug]);
+  }
+  return out;
+}
+
+function buildDetailScope({
+  detail,
+  list,
+  selectedArea,
+  selectedType,
+  areaNameBySlug,
+  areaPathBySlug,
+  baseRoute,
+}: {
+  detail: Artifact;
+  list: ArtifactRef[];
+  selectedArea: string | null;
+  selectedType: string | null;
+  areaNameBySlug: ReadonlyMap<string, string>;
+  areaPathBySlug: ReadonlyMap<string, string[]>;
+  baseRoute: string;
+}): DetailScope {
+  const scopeArea = selectedArea ?? detail.area_slug;
+  const pathLabels =
+    areaPathBySlug.get(scopeArea) ?? [areaNameBySlug.get(scopeArea) ?? scopeArea];
+  const mismatch = Boolean(selectedArea && detail.area_slug !== selectedArea);
+  const listHref = filteredReaderHref(baseRoute, undefined, selectedArea ?? scopeArea, selectedType);
+  if (mismatch) {
+    return { pathLabels, mismatch, listHref };
+  }
+
+  const siblings = list
+    .filter((a) => a.area_slug === scopeArea)
+    .slice()
+    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+  const idx = siblings.findIndex((a) => a.slug === detail.slug);
+  const prev = idx > 0 ? siblings[idx - 1] : undefined;
+  const next = idx >= 0 && idx < siblings.length - 1 ? siblings[idx + 1] : undefined;
+  return {
+    pathLabels,
+    mismatch: false,
+    listHref,
+    prev,
+    next,
+    prevHref: prev ? filteredReaderHref(baseRoute, prev.slug, selectedArea, selectedType) : undefined,
+    nextHref: next ? filteredReaderHref(baseRoute, next.slug, selectedArea, selectedType) : undefined,
+  };
+}
+
+function filteredReaderHref(
+  baseRoute: string,
+  slug: string | undefined,
+  selectedArea: string | null,
+  selectedType: string | null,
+): string {
+  const params = new URLSearchParams();
+  if (selectedArea) params.set("area", selectedArea);
+  if (selectedType) params.set("type", selectedType);
+  const qs = params.toString();
+  return `${baseRoute}${slug ? `/${slug}` : ""}${qs ? `?${qs}` : ""}`;
+}
+
 function Body({
   view,
   projectSlug,
   projectLocale,
   detail,
   list,
+  allList,
   currentSlug,
+  selectedArea,
   selectedType,
   areaNameBySlug,
+  areaPathBySlug,
+  onClearAreaFilter,
+  onClearFilters,
 }: {
   view: ReaderView;
   projectSlug: string;
   projectLocale: string;
   detail: Artifact | null;
   list: ArtifactRef[];
+  allList: ArtifactRef[];
   currentSlug: string | undefined;
+  selectedArea: string | null;
   selectedType: string | null;
   areaNameBySlug: ReadonlyMap<string, string>;
+  areaPathBySlug: ReadonlyMap<string, string[]>;
+  onClearAreaFilter: () => void;
+  onClearFilters: () => void;
 }) {
   const { t } = useI18n();
+  const navigate = useNavigate();
+  const baseRoute = `/p/${projectSlug}/${projectLocale}/${view === "tasks" ? "tasks" : "wiki"}`;
+  const detailScope = detail && view === "reader"
+    ? buildDetailScope({
+        detail,
+        list: allList,
+        selectedArea,
+        selectedType,
+        areaNameBySlug,
+        areaPathBySlug,
+        baseRoute,
+      })
+    : null;
+
+  useEffect(() => {
+    if (view !== "reader" || !detailScope || detailScope.mismatch) return;
+    const scope = detailScope;
+    function onKey(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      if (e.key === "[" && scope.prevHref) {
+        e.preventDefault();
+        navigate(scope.prevHref);
+      }
+      if (e.key === "]" && scope.nextHref) {
+        e.preventDefault();
+        navigate(scope.nextHref);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [view, detailScope, navigate]);
 
   if (view === "graph") {
     return (
@@ -317,6 +466,7 @@ function Body({
       <ReaderSurface
         detail={detail}
         emptyMessage={view === "tasks" ? t("wiki.empty_tasks_detail") : t("wiki.empty_detail")}
+        scope={detailScope}
       />
     );
   }
@@ -334,9 +484,13 @@ function Body({
         projectSlug={projectSlug}
         projectLocale={projectLocale}
         list={list}
+        allList={allList}
         currentSlug={currentSlug}
         empty={empty}
+        selectedArea={selectedArea}
         areaNameBySlug={areaNameBySlug}
+        onClearAreaFilter={onClearAreaFilter}
+        onClearFilters={onClearFilters}
       />
     );
   }
@@ -419,40 +573,50 @@ function TasksKanban({
   projectSlug,
   projectLocale,
   list,
+  allList,
   currentSlug,
   empty,
+  selectedArea,
   areaNameBySlug,
+  onClearAreaFilter,
+  onClearFilters,
 }: {
   projectSlug: string;
   projectLocale: string;
   list: ArtifactRef[];
+  allList: ArtifactRef[];
   currentSlug: string | undefined;
   empty: string;
+  selectedArea: string | null;
   areaNameBySlug: ReadonlyMap<string, string>;
+  onClearAreaFilter: () => void;
+  onClearFilters: () => void;
 }) {
   const { t } = useI18n();
 
-  const groups = new Map<string, ArtifactRef[]>();
-  for (const col of TASK_COLUMNS) groups.set(col.id, []);
-  const noStatus: ArtifactRef[] = [];
-  const cancelled: ArtifactRef[] = [];
+  const groups = groupTasksByStatus(list);
+  const allGroups = groupTasksByStatus(allList);
+  const hasActiveFilters = Boolean(selectedArea);
+  const scopeLabel = selectedArea
+    ? areaNameBySlug.get(selectedArea) ?? selectedArea
+    : t("wiki.area_all");
+  const filteredPendingCount = countPendingTasks(list);
+  const allPendingCount = countPendingTasks(allList);
 
-  for (const a of list) {
-    const s = a.task_meta?.status;
-    if (s === "cancelled") {
-      cancelled.push(a);
-    } else if (s && groups.has(s)) {
-      groups.get(s)!.push(a);
-    } else {
-      noStatus.push(a);
-    }
-  }
-
-  if (list.length === 0) {
+  if (allList.length === 0) {
     return (
       <main className="content">
         <div className="reader-article">
-          <div style={{ color: "var(--fg-3)", fontSize: 13 }}>{empty}</div>
+          <TaskBoardHeader
+            scopeLabel={scopeLabel}
+            totalCount={0}
+            filteredPendingCount={0}
+            selectedArea={selectedArea}
+            onClearAreaFilter={onClearAreaFilter}
+          />
+          <div className="task-empty-state">
+            <div className="task-empty-state__title">{empty}</div>
+          </div>
         </div>
       </main>
     );
@@ -460,6 +624,19 @@ function TasksKanban({
 
   return (
     <main className="content">
+      <TaskBoardHeader
+        scopeLabel={scopeLabel}
+        totalCount={allList.length}
+        filteredPendingCount={filteredPendingCount}
+        selectedArea={selectedArea}
+        onClearAreaFilter={onClearAreaFilter}
+      />
+      {list.length === 0 && hasActiveFilters && (
+        <TaskFilterEmptyState
+          allPendingCount={allPendingCount}
+          onClearFilters={onClearFilters}
+        />
+      )}
       <div className="kanban">
         {TASK_COLUMNS.map((col) => (
           <TaskColumn
@@ -467,6 +644,9 @@ function TasksKanban({
             label={t(col.labelKey)}
             pill={col.pill}
             items={groups.get(col.id) ?? []}
+            allCount={allGroups.get(col.id)?.length ?? 0}
+            hasActiveFilters={hasActiveFilters}
+            onClearFilters={onClearFilters}
             projectSlug={projectSlug}
             projectLocale={projectLocale}
             currentSlug={currentSlug}
@@ -474,12 +654,15 @@ function TasksKanban({
           />
         ))}
       </div>
-      {noStatus.length > 0 && (
+      {(groups.get("no_status")?.length ?? 0) > 0 && (
         <div className="kanban__extra">
           <TaskColumn
             label={t("tasks.col_no_status")}
             pill="todo"
-            items={noStatus}
+            items={groups.get("no_status") ?? []}
+            allCount={allGroups.get("no_status")?.length ?? 0}
+            hasActiveFilters={hasActiveFilters}
+            onClearFilters={onClearFilters}
             projectSlug={projectSlug}
             projectLocale={projectLocale}
             currentSlug={currentSlug}
@@ -488,12 +671,15 @@ function TasksKanban({
           />
         </div>
       )}
-      {cancelled.length > 0 && (
+      {(groups.get("cancelled")?.length ?? 0) > 0 && (
         <div className="kanban__extra">
           <TaskColumn
             label={t("tasks.col_cancelled")}
             pill="archived"
-            items={cancelled}
+            items={groups.get("cancelled") ?? []}
+            allCount={allGroups.get("cancelled")?.length ?? 0}
+            hasActiveFilters={hasActiveFilters}
+            onClearFilters={onClearFilters}
             projectSlug={projectSlug}
             projectLocale={projectLocale}
             currentSlug={currentSlug}
@@ -506,10 +692,106 @@ function TasksKanban({
   );
 }
 
+function groupTasksByStatus(list: ArtifactRef[]): Map<string, ArtifactRef[]> {
+  const groups = new Map<string, ArtifactRef[]>();
+  for (const col of TASK_COLUMNS) groups.set(col.id, []);
+  groups.set("no_status", []);
+  groups.set("cancelled", []);
+  for (const a of list) {
+    const s = a.task_meta?.status;
+    if (s === "cancelled") {
+      groups.get("cancelled")!.push(a);
+    } else if (s && groups.has(s)) {
+      groups.get(s)!.push(a);
+    } else {
+      groups.get("no_status")!.push(a);
+    }
+  }
+  return groups;
+}
+
+function countPendingTasks(list: ArtifactRef[]): number {
+  return list.filter((a) => {
+    const status = a.task_meta?.status;
+    return !status || status === "open";
+  }).length;
+}
+
+function TaskBoardHeader({
+  scopeLabel,
+  totalCount,
+  filteredPendingCount,
+  selectedArea,
+  onClearAreaFilter,
+}: {
+  scopeLabel: string;
+  totalCount: number;
+  filteredPendingCount: number;
+  selectedArea: string | null;
+  onClearAreaFilter: () => void;
+}) {
+  const { t } = useI18n();
+  const title = selectedArea
+    ? t("tasks.scope_title_filtered", scopeLabel, filteredPendingCount, totalCount)
+    : t("tasks.scope_title_all", totalCount);
+  return (
+    <div className="task-board-head">
+      <div>
+        <div className="task-board-head__eyebrow">{t("nav.tasks")}</div>
+        <h1 className="task-board-head__title">{title}</h1>
+      </div>
+      <div className="task-filter-bar" aria-label={t("tasks.filter_bar_label")}>
+        <span className="task-filter-chip task-filter-chip--locked">
+          <span className="task-filter-chip__key">Type</span>
+          <span>Task</span>
+        </span>
+        {selectedArea && (
+          <span className="task-filter-chip">
+            <span className="task-filter-chip__key">Area</span>
+            <span>{scopeLabel}</span>
+            <button
+              type="button"
+              className="task-filter-chip__remove"
+              onClick={onClearAreaFilter}
+              aria-label={t("tasks.filter_remove_area", scopeLabel)}
+              title={t("tasks.filter_remove_area", scopeLabel)}
+            >
+              <X className="lucide" />
+            </button>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TaskFilterEmptyState({
+  allPendingCount,
+  onClearFilters,
+}: {
+  allPendingCount: number;
+  onClearFilters: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="task-empty-state task-empty-state--filtered">
+      <div className="task-empty-state__title">{t("tasks.empty_filtered_head")}</div>
+      <div>{t("tasks.empty_filtered_total_pending", allPendingCount)}</div>
+      <button type="button" className="task-clear-filter" onClick={onClearFilters}>
+        {t("tasks.clear_filters")}
+        <span className="kbd">esc</span>
+      </button>
+    </div>
+  );
+}
+
 function TaskColumn({
   label,
   pill,
   items,
+  allCount,
+  hasActiveFilters,
+  onClearFilters,
   projectSlug,
   projectLocale,
   currentSlug,
@@ -519,12 +801,16 @@ function TaskColumn({
   label: string;
   pill: TaskColumnSpec["pill"];
   items: ArtifactRef[];
+  allCount: number;
+  hasActiveFilters: boolean;
+  onClearFilters: () => void;
   projectSlug: string;
   projectLocale: string;
   currentSlug: string | undefined;
   subtle?: boolean;
   areaNameBySlug: ReadonlyMap<string, string>;
 }) {
+  const { t } = useI18n();
   return (
     <div className={`kanban-col${subtle ? " kanban-col--subtle" : ""}`}>
       <div className="kanban-col__head">
@@ -545,7 +831,19 @@ function TaskColumn({
             areaNameBySlug={areaNameBySlug}
           />
         ))}
-        {items.length === 0 && <div className="kanban-col__empty">—</div>}
+        {items.length === 0 && (
+          hasActiveFilters ? (
+            <div className="kanban-col__empty kanban-col__empty--filtered">
+              <div>{t("tasks.empty_filtered_column", label)}</div>
+              <div>{t("tasks.empty_total_for_column", allCount, label)}</div>
+              <button type="button" className="task-clear-filter task-clear-filter--compact" onClick={onClearFilters}>
+                {t("tasks.clear_filters")}
+              </button>
+            </div>
+          ) : (
+            <div className="kanban-col__empty">—</div>
+          )
+        )}
       </div>
     </div>
   );

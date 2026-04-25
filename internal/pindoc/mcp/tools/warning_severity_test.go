@@ -20,12 +20,14 @@ func TestWarningSeverity(t *testing.T) {
 		"SOURCE_TYPE_UNCLASSIFIED":           SeverityWarn,
 		"BODY_HAS_H1_REDUNDANT":              SeverityWarn,
 		"TITLE_LONG":                         SeverityWarn,
+		"SECTION_DUPLICATES_EDGES":           SeverityWarn,
 		"RECOMMEND_READ_BEFORE_CREATE":       SeverityInfo,
+		"SLUG_VERBOSE":                       SeverityInfo,
 
 		// prefix match — CANONICAL_REWRITE_WITHOUT_EVIDENCE:<sections>
 		// should still resolve via the base code.
 		"CANONICAL_REWRITE_WITHOUT_EVIDENCE:Root cause+Decision": SeverityError,
-		"MISSING_H2:Purpose":                                      SeverityWarn,
+		"MISSING_H2:Purpose": SeverityWarn,
 
 		// unknown defaults to warn
 		"TOTALLY_UNHEARD_OF_CODE": SeverityWarn,

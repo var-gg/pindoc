@@ -240,6 +240,12 @@ AI-agent 운영 모델로 재설계된 상태머신. 기존 `todo | in_progress 
 - `* → archived`: sensitive_op (기존 규칙 유지).
 - `verified → open`: 허용되지만 이 전이는 `VerificationReport`의 supersede 체인을 통해 일어난다 — 후속 verifier가 새 report를 filed하고 기존 것을 superseded로 표시하면 파생되는 결과.
 
+**운영 guardrail**: Reader의 Task 대기열은 `task_meta.status`가 없거나 `open`인
+row다. Agent가 "열린 Task가 없다"고 말하기 전에는 `pindoc.task.queue`
+기본 호출의 `pending_count == 0`을 확인해야 한다. `pindoc.scope.in_flight`는
+acceptance checkbox(`[ ]` / `[~]`) 조회 도구라 이 lifecycle queue를 대체하지
+않는다.
+
 **VerificationReport artifact** (Tier A, migration 0013): type="VerificationReport"로 `artifact.propose`로 생성. body에 판정 키워드(`pass` / `partial` / `fail` / `합격` / `부분` / `불합격`) 중 하나 필수(`VER_NO_VERDICT`). `artifact.verify`에서 이 slug를 `report_id_or_slug`로 참조해 Task에 연결.
 
 **남은 질문** (후속):

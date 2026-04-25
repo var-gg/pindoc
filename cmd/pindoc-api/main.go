@@ -22,6 +22,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/httpapi"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
+	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
 )
 
 var (
@@ -81,6 +82,8 @@ func main() {
 		logger.Error("embed build", "err", err)
 		os.Exit(1)
 	}
+	telemetryStore := telemetry.New(ctx, pool.Pool, logger, telemetry.Options{})
+	defer telemetryStore.Close()
 
 	// Resolve the default project's locale at startup so LegacyRedirect
 	// in the web UI can rebuild pre-Phase-18 URLs into /p/:slug/:locale/
@@ -104,6 +107,7 @@ func main() {
 		MultiProject:         cfg.MultiProject,
 		Embedder:             embedder,
 		Settings:             ssStore,
+		Telemetry:            telemetryStore,
 		Version:              version,
 		BuildCommit:          commit,
 	})

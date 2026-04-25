@@ -11,6 +11,7 @@
 //     (separate Task). This component is display-only.
 
 import type { ArtifactMeta, PinRef, RecentWarning, TaskMeta } from "../api/client";
+import { useI18n } from "../i18n";
 
 type Props = {
   meta?: ArtifactMeta;
@@ -36,13 +37,16 @@ type Chip = {
   title: string;
 };
 
+type TFn = (key: string, ...args: Array<string | number>) => string;
+
 export function TrustCard({ meta, pins, taskStatus, recentWarnings }: Props) {
-  const chips = buildChips(meta, pins);
-  const taskChip = taskStatusChip(taskStatus);
+  const { t } = useI18n();
+  const chips = buildChips(meta, pins, t);
+  const taskChip = taskStatusChip(taskStatus, t);
   if (taskChip) {
     chips.unshift(taskChip);
   }
-  for (const warnChip of warningChips(recentWarnings)) {
+  for (const warnChip of warningChips(recentWarnings, t)) {
     chips.push(warnChip);
   }
   if (chips.length === 0) {
@@ -88,155 +92,158 @@ export function TrustCard({ meta, pins, taskStatus, recentWarnings }: Props) {
   );
 }
 
-function buildChips(meta: ArtifactMeta | undefined, pins: PinRef[] | undefined): Chip[] {
+function buildChips(meta: ArtifactMeta | undefined, pins: PinRef[] | undefined, t: TFn): Chip[] {
   const chips: Chip[] = [];
   if (!meta || Object.keys(meta).length === 0) {
     chips.push({
-      label: "Unclassified",
+      label: t("trust.unclassified.label"),
       tone: "neutral",
-      title: "This artifact has no epistemic metadata. Treat as unverified context.",
+      title: t("trust.unclassified.tip"),
     });
     return chips;
   }
 
   // Trust class — composite of verification_state + source_type + audience.
   // One chip, highest-signal value wins: private > stale-like > verified etc.
-  chips.push(trustClassChip(meta));
+  chips.push(trustClassChip(meta, t));
 
   // Source summary — combines source_type with pins count.
-  chips.push(sourceSummaryChip(meta, pins));
+  chips.push(sourceSummaryChip(meta, pins, t));
 
   // Next-session context policy — always relevant for retrieval reasoning.
-  chips.push(nextSessionChip(meta));
+  chips.push(nextSessionChip(meta, t));
 
   // Confidence — show low as a warning chip, hide medium/high to keep the
   // card quiet. Open question Q from the Task body: "low only" default.
   if (meta.confidence === "low") {
     chips.push({
-      label: "Confidence: low",
+      label: t("trust.confidence.low.label"),
       tone: "warning",
-      title: "Agent self-reported low confidence. Verify before reusing as authority.",
+      title: t("trust.confidence.low.tip"),
     });
   }
 
   // Audience modifier — surfaced only when non-default (owner/approvers).
   if (meta.audience === "owner_only") {
     chips.push({
-      label: "Owner only",
+      label: t("trust.audience.owner_only.label"),
       tone: "danger",
-      title: "Narrow audience — do not share outside the artifact owner.",
+      title: t("trust.audience.owner_only.tip"),
     });
   } else if (meta.audience === "approvers") {
     chips.push({
-      label: "Approvers only",
+      label: t("trust.audience.approvers.label"),
       tone: "warning",
-      title: "Limited audience — approvers-tier readers.",
+      title: t("trust.audience.approvers.tip"),
     });
   }
 
   return chips;
 }
 
-function trustClassChip(meta: ArtifactMeta): Chip {
+function trustClassChip(meta: ArtifactMeta, t: TFn): Chip {
   if (meta.source_type === "user_chat") {
     return {
-      label: "Conversation-derived",
+      label: t("trust.source.user_chat.label"),
       tone: "warning",
-      title: "Derived from user-chat substrate. Canonicalisation needs explicit consent.",
+      title: t("trust.source.user_chat.tip"),
     };
   }
   if (meta.verification_state === "verified") {
     return {
-      label: "Verified",
+      label: t("trust.verification.verified.label"),
       tone: "neutral",
-      title: "Explicitly marked verified against code or authoritative evidence.",
+      title: t("trust.verification.verified.tip"),
     };
   }
   if (meta.verification_state === "unverified") {
     return {
-      label: "Unverified",
+      label: t("trust.verification.unverified.label"),
       tone: "warning",
-      title: "No evidence signal attached. Treat as hypothesis until confirmed.",
+      title: t("trust.verification.unverified.tip"),
     };
   }
   return {
-    label: "Partially verified",
+    label: t("trust.verification.partially_verified.label"),
     tone: "neutral",
-    title: "Some evidence (pins or partial verification). Read before reusing.",
+    title: t("trust.verification.partially_verified.tip"),
   };
 }
 
-function sourceSummaryChip(meta: ArtifactMeta, pins: PinRef[] | undefined): Chip {
+function sourceSummaryChip(meta: ArtifactMeta, pins: PinRef[] | undefined, t: TFn): Chip {
   const count = pins?.length ?? 0;
+  const pinsLabel = pinCountLabel(count, t);
   if (meta.source_type === "code") {
     return {
-      label: count > 0 ? `Code · ${count} pin${count === 1 ? "" : "s"}` : "Code substrate",
+      label: count > 0 ? `${t("trust.source.code.label")} · ${pinsLabel}` : t("trust.source.code.label"),
       tone: "neutral",
-      title: "Grounded in repository code pins.",
+      title: t("trust.source.code.tip"),
     };
   }
   if (meta.source_type === "mixed") {
     return {
-      label: count > 0 ? `Mixed · ${count} pin${count === 1 ? "" : "s"}` : "Mixed substrate",
+      label: count > 0 ? `${t("trust.source.mixed.label")} · ${pinsLabel}` : t("trust.source.mixed.label"),
       tone: "neutral",
-      title: "Combines code, chat, and/or external sources.",
+      title: t("trust.source.mixed.tip"),
     };
   }
   if (meta.source_type === "artifact") {
     return {
-      label: "Artifact-derived",
+      label: t("trust.source.artifact.label"),
       tone: "neutral",
-      title: "Derived from other artifacts (see relates_to).",
+      title: t("trust.source.artifact.tip"),
     };
   }
   if (meta.source_type === "external") {
     return {
-      label: "External",
+      label: t("trust.source.external.label"),
       tone: "neutral",
-      title: "Derived from external references (documentation, specs, URLs).",
+      title: t("trust.source.external.tip"),
     };
   }
   if (meta.source_type === "user_chat") {
     return {
-      label: "User chat",
+      label: t("trust.source.user_chat.short_label"),
       tone: "warning",
-      title: "Derived from a user conversation turn.",
+      title: t("trust.source.user_chat.tip"),
     };
   }
   return {
-    label: count > 0 ? `${count} pin${count === 1 ? "" : "s"}` : "No pins",
+    label: count > 0 ? pinsLabel : t("trust.pins_none"),
     tone: "neutral",
-    title: "Source type not classified.",
+    title: t("trust.source.unclassified.tip"),
   };
 }
 
-function taskStatusChip(status: TaskMeta["status"]): Chip | null {
+function pinCountLabel(count: number, t: TFn): string {
+  return count === 1 ? t("trust.pins_one") : t("trust.pins_many", count);
+}
+
+function taskStatusChip(status: TaskMeta["status"], t: TFn): Chip | null {
   switch (status) {
     case "claimed_done":
       return {
-        label: "Claimed done — unverified",
+        label: t("trust.task.claimed_done.label"),
         tone: "warning",
-        title:
-          "Implementing agent self-attested completion. No verifier agent has filed a VerificationReport yet.",
+        title: t("trust.task.claimed_done.tip"),
       };
     case "verified":
       return {
-        label: "Agent-verified",
+        label: t("trust.task.verified.label"),
         tone: "neutral",
-        title:
-          "A different agent filed a VerificationReport via pindoc.artifact.verify.",
+        title: t("trust.task.verified.tip"),
       };
     case "blocked":
       return {
-        label: "Blocked",
+        label: t("trust.task.blocked.label"),
         tone: "danger",
-        title: "External dependency blocks progress.",
+        title: t("trust.task.blocked.tip"),
       };
     case "cancelled":
       return {
-        label: "Cancelled",
+        label: t("trust.task.cancelled.label"),
         tone: "neutral",
-        title: "Task was abandoned.",
+        title: t("trust.task.cancelled.tip"),
       };
     case "open":
     case undefined:
@@ -252,7 +259,7 @@ function taskStatusChip(status: TaskMeta["status"]): Chip | null {
 // readers. Table kept narrow: unknown codes are skipped rather than
 // producing a cryptic "code: FOO" chip. Task propose-경로-warning-
 // 영속화 §Trust Card 매핑.
-function warningChips(recent: RecentWarning[] | undefined): Chip[] {
+function warningChips(recent: RecentWarning[] | undefined, t: TFn): Chip[] {
   if (!recent || recent.length === 0) return [];
   // Find the max revision_number among delivered events. The server
   // already orders by created_at DESC and caps at 5, which usually
@@ -271,63 +278,60 @@ function warningChips(recent: RecentWarning[] | undefined): Chip[] {
   const chips: Chip[] = [];
   if (codes.has("CANONICAL_REWRITE_WITHOUT_EVIDENCE")) {
     chips.push({
-      label: "Uncertain rewrite",
+      label: t("trust.warning.canonical_rewrite.label"),
       tone: "warning",
-      title:
-        "Canonical section changed on this revision without new evidence (pins, verification bump, or evidence-keyword commit_msg).",
+      title: t("trust.warning.canonical_rewrite.tip"),
     });
   }
   if (codes.has("CONSENT_REQUIRED_FOR_USER_CHAT")) {
     chips.push({
-      label: "Consent pending",
+      label: t("trust.warning.consent_required.label"),
       tone: "warning",
-      title:
-        "source_type=user_chat without explicit consent_state. Author needs to classify before canonicalising.",
+      title: t("trust.warning.consent_required.tip"),
     });
   }
   if (codes.has("SOURCE_TYPE_UNCLASSIFIED")) {
     chips.push({
-      label: "Unclassified source",
+      label: t("trust.warning.source_unclassified.label"),
       tone: "neutral",
-      title: "No code pins and user-chat quote pattern detected — classify source_type on next revision.",
+      title: t("trust.warning.source_unclassified.tip"),
     });
   }
   if (codes.has("RECOMMEND_READ_BEFORE_CREATE")) {
     chips.push({
-      label: "Near-duplicate candidate",
+      label: t("trust.warning.near_duplicate.label"),
       tone: "neutral",
-      title:
-        "Semantic search found a near-neighbour (distance 0.18-0.25). Consider update_of on the existing artifact.",
+      title: t("trust.warning.near_duplicate.tip"),
     });
   }
   return chips;
 }
 
-function nextSessionChip(meta: ArtifactMeta): Chip {
+function nextSessionChip(meta: ArtifactMeta, t: TFn): Chip {
   switch (meta.next_context_policy) {
     case "excluded":
       return {
-        label: "Excluded from context",
+        label: t("trust.next_context.excluded.label"),
         tone: "danger",
-        title: "Server skips this artifact when building next-session context.",
+        title: t("trust.next_context.excluded.tip"),
       };
     case "opt_in":
       return {
-        label: "Context: opt-in",
+        label: t("trust.next_context.opt_in.label"),
         tone: "warning",
-        title: "Surfaces only when explicitly queried, not in default Fast Landing.",
+        title: t("trust.next_context.opt_in.tip"),
       };
     case "default":
       return {
-        label: "Context: default",
+        label: t("trust.next_context.default.label"),
         tone: "neutral",
-        title: "Eligible for default next-session Fast Landing.",
+        title: t("trust.next_context.default.tip"),
       };
     default:
       return {
-        label: "Context: default",
+        label: t("trust.next_context.default.label"),
         tone: "neutral",
-        title: "No explicit policy. Server treats as default-eligible.",
+        title: t("trust.next_context.default_missing.tip"),
       };
   }
 }

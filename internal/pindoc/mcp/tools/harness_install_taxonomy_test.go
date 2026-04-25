@@ -31,3 +31,54 @@ func TestRenderPindocMDAreaTaxonomySection(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderPindocMDSlugGuidance(t *testing.T) {
+	body := renderPindocMD("Pindoc", "pindoc", "ko", "test")
+
+	for _, want := range []string{
+		"## Slug 규약",
+		"25 runes or fewer",
+		"Unicode slugs are allowed",
+		"Slugs are immutable",
+		"task-reader-toc-sidecar-이전",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("rendered PINDOC.md missing slug guidance %q", want)
+		}
+	}
+	if strings.Contains(body, "영문 권장") {
+		t.Fatalf("rendered PINDOC.md should not recommend English-only slugs")
+	}
+}
+
+func TestRenderPindocMDProjectLanguageGuidance(t *testing.T) {
+	body := renderPindocMD("Pindoc", "pindoc", "ko", "test")
+
+	for _, want := range []string{
+		"primary_language=en|ko|ja",
+		"ask the user",
+		"do not infer or default",
+		"immutable after create",
+		"recreating the project",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("rendered PINDOC.md missing project language guidance %q", want)
+		}
+	}
+}
+
+func TestRenderPindocMDBodyVsGraphEdgesGuidance(t *testing.T) {
+	body := renderPindocMD("Pindoc", "pindoc", "ko", "test")
+
+	for _, want := range []string{
+		"## Body vs graph edges",
+		"Relationships belong in the",
+		"relates_to input field",
+		"## 연관",
+		"SECTION_DUPLICATES_EDGES",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("rendered PINDOC.md missing edge guidance %q", want)
+		}
+	}
+}

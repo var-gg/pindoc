@@ -151,6 +151,12 @@ ALTER TABLE artifact_revisions
 닫기 전에 "아직 안 끝난 항목 전부" 점검하거나, deferred trail을 따라갈
 때 쓴다.
 
+주의: 이 도구는 acceptance checkbox view다. Reader Task board의 대기열
+(`task_meta.status` missing 또는 `open`)은 `pindoc.task.queue`가 canonical
+source다. Agent가 "Task queue 완료"를 말하기 전에는 `pindoc.task.queue`
+`pending_count == 0`을 확인해야 하며, `scope.in_flight` 결과만으로 완료를
+판단하지 않는다.
+
 필터:
 - `state_filter`: `open` (기본, `[ ]` + `[~]`) / `unchecked` /
   `partial` / `all`

@@ -23,6 +23,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
+	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
 )
 
 type Deps struct {
@@ -49,6 +50,7 @@ type Deps struct {
 
 	Embedder    embed.Provider
 	Settings    *settings.Store
+	Telemetry   *telemetry.Store
 	Version     string
 	BuildCommit string
 }
@@ -88,6 +90,7 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	// parent_slug per Decision agent-only-write-분할. Status and every
 	// semantic-content field stays on the MCP lane.
 	mux.HandleFunc("POST /api/p/{project}/artifacts/{idOrSlug}/task-meta", d.handleTaskMetaPatch)
+	mux.HandleFunc("POST /api/p/{project}/artifacts/{idOrSlug}/task-assign", d.handleTaskAssign)
 
 	return withCORS(withRecover(mux, d.Logger))
 }

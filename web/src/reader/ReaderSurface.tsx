@@ -1,4 +1,5 @@
-import { ChevronRight } from "lucide-react";
+import { Link } from "react-router";
+import { ChevronLeft, ChevronRight, ListFilter } from "lucide-react";
 import type { Artifact, ArtifactRef } from "../api/client";
 import { useI18n } from "../i18n";
 import { ArtifactByline } from "./ArtifactByline";
@@ -10,9 +11,20 @@ import { typeChipClass } from "./typeChip";
 type Props = {
   detail: Artifact | null;
   emptyMessage: string;
+  scope?: DetailScope | null;
 };
 
-export function ReaderSurface({ detail, emptyMessage }: Props) {
+export type DetailScope = {
+  pathLabels: string[];
+  mismatch: boolean;
+  listHref: string;
+  prev?: ArtifactRef;
+  next?: ArtifactRef;
+  prevHref?: string;
+  nextHref?: string;
+};
+
+export function ReaderSurface({ detail, emptyMessage, scope }: Props) {
   const { t } = useI18n();
 
   if (!detail) {
@@ -29,10 +41,17 @@ export function ReaderSurface({ detail, emptyMessage }: Props) {
     ? new Date(detail.published_at).toLocaleString()
     : "—";
   const areaLabel = localizedAreaName(t, detail.area_slug, detail.area_slug);
+  const hasLiveSidecarData =
+    Boolean(detail.superseded_by) ||
+    (detail.relates_to?.length ?? 0) > 0 ||
+    (detail.related_by?.length ?? 0) > 0 ||
+    (detail.pins?.length ?? 0) > 0;
 
   return (
     <main className="content">
       <article className="reader-article">
+        <DetailScopeBar scope={scope ?? null} />
+
         <div className="crumbs">
           <span>{areaLabel}</span>
           <ChevronRight className="lucide" />
@@ -64,12 +83,67 @@ export function ReaderSurface({ detail, emptyMessage }: Props) {
         </div>
 
         <div className="art-body">
-          <PindocMarkdown source={detail.body_markdown} />
+          <PindocMarkdown
+            source={detail.body_markdown}
+            collapseStructureSections={hasLiveSidecarData}
+          />
         </div>
 
         <RelatedHint detail={detail} />
       </article>
     </main>
+  );
+}
+
+function DetailScopeBar({ scope }: { scope: DetailScope | null }) {
+  const { t } = useI18n();
+  if (!scope) return null;
+  const label = scope.pathLabels.join(" / ");
+  return (
+    <div className="detail-scope-bar">
+      <div className="detail-scope-bar__path" aria-label={t("reader.scope_label")}>
+        {scope.pathLabels.map((part, i) => (
+          <span key={`${part}-${i}`} className="detail-scope-bar__path-part">
+            {i > 0 && <ChevronRight className="lucide" aria-hidden="true" />}
+            <span>{part}</span>
+          </span>
+        ))}
+      </div>
+      {scope.mismatch ? (
+        <div className="detail-scope-bar__hint">
+          <span>{t("reader.scope_mismatch", label)}</span>
+          <Link to={scope.listHref} className="detail-scope-bar__button">
+            <ListFilter className="lucide" />
+            {t("reader.scope_open_list")}
+          </Link>
+        </div>
+      ) : (
+        <div className="detail-scope-bar__nav" aria-label={t("reader.scope_sibling_nav")}>
+          {scope.prev && scope.prevHref ? (
+            <Link to={scope.prevHref} className="detail-scope-bar__button" title={scope.prev.title}>
+              <ChevronLeft className="lucide" />
+              {t("reader.scope_prev")}
+            </Link>
+          ) : (
+            <span className="detail-scope-bar__button is-disabled">
+              <ChevronLeft className="lucide" />
+              {t("reader.scope_prev")}
+            </span>
+          )}
+          {scope.next && scope.nextHref ? (
+            <Link to={scope.nextHref} className="detail-scope-bar__button" title={scope.next.title}>
+              {t("reader.scope_next")}
+              <ChevronRight className="lucide" />
+            </Link>
+          ) : (
+            <span className="detail-scope-bar__button is-disabled">
+              {t("reader.scope_next")}
+              <ChevronRight className="lucide" />
+            </span>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

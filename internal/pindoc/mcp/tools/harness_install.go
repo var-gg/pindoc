@@ -176,6 +176,71 @@ load it on every session start and follow the rules below.
   Glossary (Tier A core) + Feature, APIEndpoint, Screen, DataModel (Tier B
   Web-SaaS pack active on this project).
 
+## Slug 규약
+
+Slug is a short identifier, not a full title. Prefer passing an explicit
+slug on create when the title is long.
+
+- Preserve the project's primary_language script; Unicode slugs are allowed.
+- Keep slugs concise: aim for 25 runes or fewer, with the server hard cap
+  still at 60 runes.
+- Slugs are immutable after publication. Avoid relying on auto-generation
+  when the generated slug would be verbose.
+- Do not translate just to make a slug ASCII. Use the project's natural
+  language and remove filler instead.
+- Example: title "Reader TOC를 Sidecar로 이전" may use
+  "task-reader-toc-sidecar-이전" or "task-reader-toc-이전".
+
+## Body vs graph edges
+
+Artifact body sections are for narrative: Purpose, Scope, Background,
+Decision, Evidence, and similar prose. Relationships belong in the
+relates_to input field, not in duplicate body sections.
+
+Good:
+
+    relates_to=[
+      {target_id:"task-reader-ia-refactor", relation:"implements"}
+    ]
+
+Avoid:
+
+    ## 연관
+    - implements -> task-reader-ia-refactor
+
+The server may accept the artifact but return SECTION_DUPLICATES_EDGES
+when H2 sections like "연관", "역참조", "Dependencies / 선후", or
+"리소스 경로" duplicate graph metadata in the body.
+
+## Task operational metadata shortcuts
+
+Task assignment is operational metadata, not semantic body content. Use
+pindoc.task.assign for a single Task assignee change; use
+pindoc.task.bulk_assign when multiple Tasks move together and share one
+audit reason. Both tools are semantic shortcuts over the Task meta_patch
+lane, so they do not require a search receipt and do not rewrite the
+artifact body.
+
+Examples:
+
+    pindoc.task.assign(
+      slug_or_id="task-reader-ia-refactor",
+      assignee="agent:codex",
+      reason="Codex is taking the UI implementation slice"
+    )
+
+    pindoc.task.bulk_assign(
+      slugs=["task-a", "task-b"],
+      assignee="@alice",
+      reason="Rebalance UI verification tasks to Alice"
+    )
+
+Use artifact.propose(shape="meta_patch") for other operational metadata
+fields such as priority or due_at unless a narrower task-specific tool
+exists. Status changes are not assignment changes: claimed_done still
+goes through artifact.propose with the Task status gate, and verified
+goes through pindoc.artifact.verify.
+
 ## Conversation vs Memory
 
 Conversation is ephemeral by default; project memory is canonical. Six rules
@@ -361,8 +426,12 @@ bare /wiki/... paths redirect to the default project today but may stop
 working once multi-project is fully enabled.
 
 To start a new project, call pindoc.project.create with a kebab-case slug,
-a display name, and primary_language=en|ko. It returns the canonical
-/p/<new-slug>/wiki URL for the user to bookmark.
+a display name, and primary_language=en|ko|ja. Before calling, ask the user
+to confirm primary_language explicitly; do not infer or default it from the
+conversation. Project primary_language is immutable after create. If it is
+wrong, the correction path is recreating the project; no automatic
+artifact/area migration exists. The tool returns the canonical
+/p/<new-slug>/<language>/wiki URL for the user to bookmark.
 
 ## Template-first propose (Phase 13)
 

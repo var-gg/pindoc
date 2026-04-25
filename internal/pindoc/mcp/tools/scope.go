@@ -51,15 +51,15 @@ type scopeInFlightOutput struct {
 	Totals map[string]int `json:"totals"`
 	// Truncated is true if the query had more items than Limit. Agents
 	// retry with a tighter area_slug / state_filter to drill in.
-	Truncated bool `json:"truncated,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
 	Notice    string `json:"notice,omitempty"`
 }
 
 // RegisterScopeInFlight wires pindoc.scope.in_flight — the Phase F graph
 // view of unresolved acceptance items. Surfaces a flat list across every
 // Task / Debug / etc. artifact in the project (optionally narrowed by
-// area_slug) so agents don't have to grep bodies to answer "what's still
-// owed in this project".
+// area_slug). This is intentionally not the Reader Task queue; agents
+// should call pindoc.task.queue for task_meta.status=open/missing rows.
 func RegisterScopeInFlight(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
@@ -68,8 +68,9 @@ func RegisterScopeInFlight(server *sdk.Server, deps Deps) {
 List unresolved acceptance checkboxes ([ ] todo, [~] partial) across the
 project, with optional area filter and include-deferred mode. Deferred
 items ([-]) show the forwarded-to artifact when a scope_defer edge
-exists. Use before claiming_done an epic, or to answer "what's still
-owed in this project" without grepping bodies.
+exists. This is not the Reader Task queue and does not inspect
+task_meta.status; use pindoc.task.queue before saying pending Tasks are
+done.
 `),
 		},
 		func(ctx context.Context, _ *sdk.CallToolRequest, in scopeInFlightInput) (*sdk.CallToolResult, scopeInFlightOutput, error) {
@@ -241,6 +242,7 @@ owed in this project" without grepping bodies.
 				Items:     items,
 				Totals:    totals,
 				Truncated: truncated,
+				Notice:    "This is an acceptance-checkbox view, not the Reader Task queue. Use pindoc.task.queue for task_meta.status open/missing pending Tasks.",
 			}, nil
 		},
 	)

@@ -16,7 +16,7 @@ import (
 type projectCreateInput struct {
 	Slug            string `json:"slug" jsonschema:"lowercase kebab-case slug, 2-40 chars, unique per owner"`
 	Name            string `json:"name" jsonschema:"human-readable display name"`
-	PrimaryLanguage string `json:"primary_language" jsonschema:"en | ko (M1 support); other languages land in V1.5"`
+	PrimaryLanguage string `json:"primary_language" jsonschema:"required; one of en | ko | ja. Must be explicitly confirmed with the user; no default. Immutable after create — recreate the project if wrong"`
 	Description     string `json:"description,omitempty" jsonschema:"one-line description shown on the project switcher; optional"`
 	Color           string `json:"color,omitempty" jsonschema:"CSS color string (hex or oklch) used for the sidebar accent; optional"`
 	// OwnerID is optional; defaults to 'default' for single-owner self-
@@ -26,6 +26,8 @@ type projectCreateInput struct {
 	// permission scopes have something to hang off.
 	OwnerID string `json:"owner_id,omitempty" jsonschema:"optional owner identifier; defaults to 'default'"`
 }
+
+var supportedProjectLanguages = []string{"en", "ko", "ja"}
 
 // reservedProjectSlugs blocks slugs that would collide with routing,
 // future sub-domains, or common admin paths on a self-host or hosted
@@ -72,16 +74,70 @@ type projectAreaSeed struct {
 	IsCrossCutting bool
 }
 
-var projectCreateTopLevelAreaSeeds = []projectAreaSeed{
-	{"", "strategy", "Strategy", "Why this exists: vision, goals, scope, hypotheses, roadmap.", false},
-	{"", "context", "Context", "External facts: users, competitors, literature, standards, external APIs.", false},
-	{"", "experience", "Experience", "What external actors see and do: UI, flows, IA, content, developer experience.", false},
-	{"", "system", "System", "How it works internally: architecture, data, API, integrations, mechanisms, MCP, embedding.", false},
-	{"", "operations", "Operations", "How it ships, runs, and is supported: delivery, release, launch, incidents, editorial ops.", false},
-	{"", "governance", "Governance", "Rules, ownership, compliance, review, and taxonomy policy.", false},
-	{"", "cross-cutting", "Cross-cutting", "Reusable named concerns spanning multiple areas: security, privacy, accessibility, reliability, observability, localization.", true},
-	{"", "misc", "Misc", "Temporary overflow when no better subject area is clear.", false},
-	{"", "_unsorted", "_Unsorted", "Quarantine queue for artifacts that need reclassification.", false},
+type topLevelAreaSeedRow struct {
+	Slug           string
+	Name           string
+	DescriptionEN  string
+	DescriptionKO  string
+	IsCrossCutting bool
+}
+
+var topLevelAreaSeed = []topLevelAreaSeedRow{
+	{
+		Slug:          "strategy",
+		Name:          "Strategy",
+		DescriptionEN: "Why this exists: vision, goals, scope, hypotheses, roadmap.",
+		DescriptionKO: "프로젝트가 왜 존재하는지: 비전, 목표, 범위, 가설, 로드맵.",
+	},
+	{
+		Slug:          "context",
+		Name:          "Context",
+		DescriptionEN: "External facts: users, competitors, literature, standards, external APIs.",
+		DescriptionKO: "외부 사실: 사용자, 경쟁자, 문헌, 표준, 외부 API.",
+	},
+	{
+		Slug:          "experience",
+		Name:          "Experience",
+		DescriptionEN: "What external actors see and do: UI, flows, IA, content, developer experience.",
+		DescriptionKO: "외부 actor가 보고 겪는 것: UI, flow, IA, content, developer experience.",
+	},
+	{
+		Slug:          "system",
+		Name:          "System",
+		DescriptionEN: "How it works internally: architecture, data, API, integrations, mechanisms, MCP, embedding.",
+		DescriptionKO: "내부에서 작동하는 방식: architecture, data, API, integrations, mechanisms, MCP, embedding.",
+	},
+	{
+		Slug:          "operations",
+		Name:          "Operations",
+		DescriptionEN: "How it ships, runs, and is supported: delivery, release, launch, incidents, editorial ops.",
+		DescriptionKO: "출시·운영·지원 방식: delivery, release, launch, incidents, editorial ops.",
+	},
+	{
+		Slug:          "governance",
+		Name:          "Governance",
+		DescriptionEN: "Rules, ownership, compliance, review, and taxonomy policy.",
+		DescriptionKO: "규칙, ownership, compliance, review, taxonomy policy.",
+	},
+	{
+		Slug:           "cross-cutting",
+		Name:           "Cross-cutting",
+		DescriptionEN:  "Reusable named concerns spanning multiple areas: security, privacy, accessibility, reliability, observability, localization.",
+		DescriptionKO:  "여러 area에 반복 적용되는 named concern: security, privacy, accessibility, reliability, observability, localization.",
+		IsCrossCutting: true,
+	},
+	{
+		Slug:          "misc",
+		Name:          "Misc",
+		DescriptionEN: "Temporary overflow when no better subject area is clear.",
+		DescriptionKO: "더 적절한 subject area가 불명확할 때 쓰는 임시 overflow.",
+	},
+	{
+		Slug:          "_unsorted",
+		Name:          "_Unsorted",
+		DescriptionEN: "Quarantine queue for artifacts that need reclassification.",
+		DescriptionKO: "재분류가 필요한 artifact를 잠시 두는 quarantine queue.",
+	},
 }
 
 var projectCreateStarterSubAreaSeeds = []projectAreaSeed{
@@ -135,25 +191,13 @@ var projectCreateStarterSubAreaSeeds = []projectAreaSeed{
 func RegisterProjectCreate(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
-			Name: "pindoc.project.create",
-			Description: strings.TrimSpace(`
-Create a new Pindoc project. Returns the canonical /p/{slug}/wiki URL
-the user should bookmark. Seeds the fixed 8 top-level Area skeleton,
-starter sub-areas, and _unsorted so artifacts can be filed immediately.
-
-When to call: user says "start a new project for X" or asks to split
-docs for a repo that isn't covered by the current Pindoc instance.
-Pick a kebab-case slug tied to the repo or product name.
-
-This tool does not switch the MCP session's active project. The session
-scope stays tied to PINDOC_PROJECT env; a future session starts under
-the new project by launching pindoc-server with PINDOC_PROJECT=<new>.
-`),
+			Name:        "pindoc.project.create",
+			Description: strings.TrimSpace(projectCreateDescription),
 		},
 		func(ctx context.Context, _ *sdk.CallToolRequest, in projectCreateInput) (*sdk.CallToolResult, projectCreateOutput, error) {
 			slug := strings.ToLower(strings.TrimSpace(in.Slug))
 			name := strings.TrimSpace(in.Name)
-			lang := strings.ToLower(strings.TrimSpace(in.PrimaryLanguage))
+			lang, langErr := normalizeProjectLanguage(in.PrimaryLanguage)
 
 			if !projectSlugRe.MatchString(slug) {
 				return nil, projectCreateOutput{}, fmt.Errorf("slug must be lowercase kebab-case (2-40 chars, starts with a letter): got %q", in.Slug)
@@ -164,8 +208,8 @@ the new project by launching pindoc-server with PINDOC_PROJECT=<new>.
 			if name == "" {
 				return nil, projectCreateOutput{}, fmt.Errorf("name is required")
 			}
-			if lang != "en" && lang != "ko" {
-				return nil, projectCreateOutput{}, fmt.Errorf("primary_language must be 'en' or 'ko' in M1 (others land in V1.5); got %q", in.PrimaryLanguage)
+			if langErr != nil {
+				return nil, projectCreateOutput{}, langErr
 			}
 
 			var descPtr, colorPtr *string
@@ -201,7 +245,7 @@ the new project by launching pindoc-server with PINDOC_PROJECT=<new>.
 				return nil, projectCreateOutput{}, fmt.Errorf("project insert: %w", err)
 			}
 
-			if err := seedProjectAreas(ctx, tx, projectID); err != nil {
+			if err := seedProjectAreas(ctx, tx, projectID, lang); err != nil {
 				return nil, projectCreateOutput{}, fmt.Errorf("seed default areas: %w", err)
 			}
 
@@ -276,12 +320,36 @@ artifacts into %q, restart pindoc-server with PINDOC_PROJECT=%s.
 	)
 }
 
-func seedProjectAreas(ctx context.Context, tx pgx.Tx, projectID string) error {
-	for _, seed := range projectCreateTopLevelAreaSeeds {
+const projectCreateDescription = `
+Create a new Pindoc project. Returns the canonical
+/p/{slug}/{primary_language}/wiki URL the user should bookmark.
+Auto-creates 9 top-level/project-root areas
+(Decision area-구조-top-level-고정-골격-depth-2-sub-area만-프로젝트별-자유):
+the fixed 8 concern skeleton plus _unsorted, then starter sub-areas so
+artifacts can be filed immediately.
+
+primary_language is required and must be explicitly confirmed with the
+user. No default: if the user did not specify the project language, ask
+before calling. Supported languages are en, ko, ja. primary_language is
+immutable after creation; if it is wrong, the only correction path is to
+recreate the project (no automatic artifact/area migration).
+
+When to call: user says "start a new project for X" or asks to split
+docs for a repo that isn't covered by the current Pindoc instance.
+Pick a kebab-case slug tied to the repo or product name.
+
+This tool does not switch the MCP session's active project. The session
+scope stays tied to PINDOC_PROJECT env; a future session starts under
+the new project by launching pindoc-server with PINDOC_PROJECT=<new>.
+`
+
+func seedProjectAreas(ctx context.Context, tx pgx.Tx, projectID, lang string) error {
+	for _, seed := range topLevelAreaSeed {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO areas (project_id, slug, name, description, is_cross_cutting)
 			VALUES ($1::uuid, $2, $3, $4, $5)
-		`, projectID, seed.Slug, seed.Name, seed.Description, seed.IsCrossCutting); err != nil {
+			ON CONFLICT (project_id, slug) DO NOTHING
+		`, projectID, seed.Slug, seed.Name, localizedAreaDescription(seed.DescriptionEN, seed.DescriptionKO, lang), seed.IsCrossCutting); err != nil {
 			return fmt.Errorf("seed area %s: %w", seed.Slug, err)
 		}
 	}
@@ -291,9 +359,41 @@ func seedProjectAreas(ctx context.Context, tx pgx.Tx, projectID string) error {
 			SELECT $1::uuid, parent.id, $3, $4, $5, $6
 			FROM areas parent
 			WHERE parent.project_id = $1::uuid AND parent.slug = $2
+			ON CONFLICT (project_id, slug) DO NOTHING
 		`, projectID, seed.ParentSlug, seed.Slug, seed.Name, seed.Description, seed.IsCrossCutting); err != nil {
 			return fmt.Errorf("seed area %s/%s: %w", seed.ParentSlug, seed.Slug, err)
 		}
 	}
 	return nil
+}
+
+func localizedAreaDescription(en, ko, lang string) string {
+	if strings.EqualFold(strings.TrimSpace(lang), "ko") && strings.TrimSpace(ko) != "" {
+		return ko
+	}
+	return en
+}
+
+func normalizeProjectLanguage(raw string) (string, error) {
+	lang := strings.ToLower(strings.TrimSpace(raw))
+	if lang == "" {
+		return "", fmt.Errorf("primary_language is required; default is forbidden. Ask the user before calling project.create. Supported languages: %s. primary_language is immutable after create; if wrong, recreate the project", supportedProjectLanguageList())
+	}
+	if !isSupportedProjectLanguage(lang) {
+		return "", fmt.Errorf("unsupported primary_language %q. Supported languages: %s. primary_language is immutable after create; if wrong, recreate the project", raw, supportedProjectLanguageList())
+	}
+	return lang, nil
+}
+
+func isSupportedProjectLanguage(lang string) bool {
+	for _, supported := range supportedProjectLanguages {
+		if lang == supported {
+			return true
+		}
+	}
+	return false
+}
+
+func supportedProjectLanguageList() string {
+	return strings.Join(supportedProjectLanguages, ", ")
 }

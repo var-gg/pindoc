@@ -51,9 +51,11 @@ var warningSeverityCatalog = map[string]string{
 	"TITLE_VERY_LONG":                SeverityWarn,
 	"PIN_PATH_NONEXISTENT":           SeverityWarn,
 	"PIN_PATH_OUTSIDE_REPO":          SeverityWarn,
+	"SECTION_DUPLICATES_EDGES":       SeverityWarn,
 
 	// INFO — pointer / reminder.
 	"RECOMMEND_READ_BEFORE_CREATE": SeverityInfo,
+	"SLUG_VERBOSE":                 SeverityInfo,
 }
 
 // warningSeverity resolves the severity for one warning code. Handles

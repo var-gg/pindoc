@@ -3,6 +3,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import mermaid from "mermaid";
 import { headingsFromBody, slugifyHeading } from "./slug";
+import { useI18n } from "../i18n";
+import { isStructureOverlapHeading } from "./structureSections";
 
 // Initialize mermaid once per page. Theme follows the Pindoc dark/light
 // class on <html>. We invert the theme selection at render time so fresh
@@ -28,30 +30,48 @@ function ensureMermaid(): void {
  * under `rendering.markdown` so they never render something we don't
  * display.
  */
-export function PindocMarkdown({ source }: { source: string }) {
-  // Derive every H2's final slug up-front from the raw source so the
-  // h2 renderer is a pure lookup instead of a stateful slug ledger.
-  // The previous design kept a `used` Set inside a memoized closure —
-  // harmless in production but under React StrictMode's dev double-render
-  // the Set accumulated across the two passes, so "Purpose" on the second
-  // pass collided and came back as "purpose-2". TOC hrefs (fresh ledger
-  // from headingsFromBody) then pointed at ids that didn't exist, which
-  // is what made the TOC look dead. Index-by-text-occurrence + a local
-  // counter keeps both sides in lock-step and is idempotent per render.
-  const slugsByText = useMemo(() => {
-    const map = new Map<string, string[]>();
-    for (const h of headingsFromBody(source)) {
-      const bucket = map.get(h.text);
-      if (bucket) bucket.push(h.slug);
-      else map.set(h.text, [h.slug]);
-    }
-    return map;
-  }, [source]);
+export function PindocMarkdown({
+  source,
+  collapseStructureSections = false,
+}: {
+  source: string;
+  collapseStructureSections?: boolean;
+}) {
+  const blocks = useMemo(
+    () => markdownBlocks(source, collapseStructureSections),
+    [source, collapseStructureSections],
+  );
 
-  // Per-render counter: a fresh Map every time PindocMarkdown runs, so
-  // StrictMode's double-invoke gets independent state and h2 ids stay
-  // deterministic across both passes.
-  const counters = new Map<string, number>();
+  return (
+    <>
+      {blocks.map((block, i) =>
+        block.kind === "structure" ? (
+          <StructureOverlapSection
+            key={`${block.slug}-${i}`}
+            title={block.title}
+            slug={block.slug}
+            body={block.body}
+          />
+        ) : (
+          <MarkdownBlock
+            key={`md-${i}`}
+            source={block.source}
+            headingSlugs={block.headingSlugs}
+          />
+        ),
+      )}
+    </>
+  );
+}
+
+function MarkdownBlock({
+  source,
+  headingSlugs,
+}: {
+  source: string;
+  headingSlugs: string[];
+}) {
+  let headingIndex = 0;
 
   return (
     <ReactMarkdown
@@ -71,16 +91,125 @@ export function PindocMarkdown({ source }: { source: string }) {
           // used for slug generation. Keeping the rendered children
           // unchanged preserves inline formatting on the heading itself.
           const text = extractHeadingText(children);
-          const slugs = slugsByText.get(text);
-          const n = counters.get(text) ?? 0;
-          counters.set(text, n + 1);
-          const id = slugs?.[n] ?? slugifyHeading(text);
+          const id = headingSlugs[headingIndex++] ?? slugifyHeading(text);
           return <h2 id={id}>{children}</h2>;
         },
       }}
     >
       {source}
     </ReactMarkdown>
+  );
+}
+
+type MarkdownRenderBlock =
+  | { kind: "markdown"; source: string; headingSlugs: string[] }
+  | { kind: "structure"; title: string; slug: string; body: string };
+
+function markdownBlocks(source: string, collapseStructureSections: boolean): MarkdownRenderBlock[] {
+  const headings = headingsFromBody(source);
+  if (!collapseStructureSections || headings.length === 0) {
+    return [{ kind: "markdown", source, headingSlugs: headings.map((h) => h.slug) }];
+  }
+
+  const lines = source.split(/\r?\n/);
+  const blocks: MarkdownRenderBlock[] = [];
+  const pending: string[] = [];
+  const pendingSlugs: string[] = [];
+  let headingIndex = 0;
+  let inFence = false;
+
+  const flushPending = () => {
+    const text = pending.join("\n").trim();
+    if (!text) {
+      pending.length = 0;
+      pendingSlugs.length = 0;
+      return;
+    }
+    blocks.push({
+      kind: "markdown",
+      source: pending.join("\n"),
+      headingSlugs: [...pendingSlugs],
+    });
+    pending.length = 0;
+    pendingSlugs.length = 0;
+  };
+
+  for (let i = 0; i < lines.length; ) {
+    const line = lines[i].trimEnd();
+    if (/^```/.test(line.trim())) {
+      inFence = !inFence;
+      pending.push(lines[i]);
+      i += 1;
+      continue;
+    }
+    const m = !inFence ? /^##\s+(.+?)\s*#*\s*$/.exec(line) : null;
+    if (!m) {
+      pending.push(lines[i]);
+      i += 1;
+      continue;
+    }
+
+    const title = m[1].trim();
+    const heading = headings[headingIndex++];
+    const slug = heading?.slug ?? slugifyHeading(title);
+    let end = i + 1;
+    let sectionFence = false;
+    while (end < lines.length) {
+      const next = lines[end].trimEnd();
+      if (/^```/.test(next.trim())) {
+        sectionFence = !sectionFence;
+      } else if (!sectionFence && /^##\s+(.+?)\s*#*\s*$/.test(next)) {
+        break;
+      }
+      end += 1;
+    }
+
+    if (isStructureOverlapHeading(title)) {
+      flushPending();
+      blocks.push({
+        kind: "structure",
+        title,
+        slug,
+        body: lines.slice(i + 1, end).join("\n").trim(),
+      });
+    } else {
+      pending.push(...lines.slice(i, end));
+      pendingSlugs.push(slug);
+    }
+    i = end;
+  }
+  flushPending();
+  return blocks;
+}
+
+function StructureOverlapSection({
+  title,
+  slug,
+  body,
+}: {
+  title: string;
+  slug: string;
+  body: string;
+}) {
+  const { t } = useI18n();
+  return (
+    <section id={slug} className="structure-overlap-section">
+      <div className="structure-overlap-section__head">
+        <h2>{title}</h2>
+        <a href="#sidecar-live-data" className="structure-overlap-section__chip">
+          {t("reader.structure_sidecar_hint")}
+          <span>{t("reader.structure_sidecar_link")}</span>
+        </a>
+      </div>
+      <details className="structure-overlap-section__details">
+        <summary>{t("reader.structure_expand")}</summary>
+        {body ? (
+          <MarkdownBlock source={body} headingSlugs={[]} />
+        ) : (
+          <p>{t("reader.structure_empty")}</p>
+        )}
+      </details>
+    </section>
   );
 }
 

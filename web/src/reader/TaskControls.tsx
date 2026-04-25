@@ -7,8 +7,8 @@
 // Edit contract:
 //   - only renders when detail.type === "Task"
 //   - auth_mode="trusted_local" → inline-editable; anything else → read-only
-//   - each change does POST /api/p/{project}/artifacts/{slug}/task-meta
-//     which ships a revision_shape=meta_patch revision under the hood
+//   - assignee changes use POST .../task-assign, the browser bridge for
+//     pindoc.task.assign; priority / due_at stay on POST .../task-meta
 //   - expected_version comes from detail.revision_number (added Phase M1.x)
 //
 // The UI is intentionally minimal: priority as four pills, assignee as a
@@ -140,6 +140,27 @@ export function TaskControls({ projectSlug, detail, authMode, agents, users, onU
   }, [assignee, priority, dueAt, taskMeta]);
 
   async function saveOne(field: "assignee" | "priority" | "due_at", value: string) {
+    if (field === "assignee") {
+      setSaving(true);
+      setErrorCode(null);
+      setErrorMsg(null);
+      try {
+        await api.taskAssign(projectSlug, detail.slug, {
+          assignee: value.trim(),
+          reason: commitMsgFor(field, value),
+          author_id: WEB_AUTHOR_ID,
+        });
+        onUpdated();
+      } catch (e) {
+        const err = e as Error & { error_code?: string };
+        setErrorCode(err.error_code ?? "ERROR");
+        setErrorMsg(err.message);
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     if (detail.revision_number == null) {
       setErrorCode("NO_REVISION");
       setErrorMsg(t("task_controls.err_no_revision"));
@@ -153,7 +174,6 @@ export function TaskControls({ projectSlug, detail, authMode, agents, users, onU
       commit_msg: commitMsgFor(field, value),
       author_id: WEB_AUTHOR_ID,
     };
-    if (field === "assignee") input.assignee = value;
     if (field === "priority") input.priority = value as Priority;
     if (field === "due_at") input.due_at = value;
     try {
@@ -183,9 +203,7 @@ export function TaskControls({ projectSlug, detail, authMode, agents, users, onU
       author_id: WEB_AUTHOR_ID,
     };
     const trimmedAssignee = assignee.trim();
-    if (trimmedAssignee !== (taskMeta.assignee ?? "").trim()) {
-      input.assignee = trimmedAssignee;
-    }
+    const assigneeChanged = trimmedAssignee !== (taskMeta.assignee ?? "").trim();
     if (priority && priority !== taskMeta.priority) {
       input.priority = priority;
     }
@@ -193,8 +211,18 @@ export function TaskControls({ projectSlug, detail, authMode, agents, users, onU
     if (dueAt && dueAt !== currentDue) {
       input.due_at = fromDatetimeLocal(dueAt);
     }
+    const hasMetaPatch = Boolean(input.priority || input.due_at);
     try {
-      await api.taskMetaPatch(projectSlug, detail.slug, input);
+      if (hasMetaPatch) {
+        await api.taskMetaPatch(projectSlug, detail.slug, input);
+      }
+      if (assigneeChanged) {
+        await api.taskAssign(projectSlug, detail.slug, {
+          assignee: trimmedAssignee,
+          reason: commitMsgFor("assignee", trimmedAssignee),
+          author_id: WEB_AUTHOR_ID,
+        });
+      }
       onUpdated();
     } catch (e) {
       const err = e as Error & { error_code?: string };

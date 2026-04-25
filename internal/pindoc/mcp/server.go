@@ -151,6 +151,16 @@ func NewServer(opts Options) *Server {
 	// Task status v2 (migration 0013) — agent-to-agent verification.
 	tools.RegisterArtifactVerify(s, deps)
 
+	// Task operation tools — Decision task-operation-tools-task-assign-
+	// 단건-task-bulk-assign-배치-reas. Semantic shortcuts over
+	// artifact.propose(shape="meta_patch", task_meta={assignee}) that
+	// bypass the search_receipt gate (operational-metadata lane).
+	// task.queue is the Reader-parity read model agents should call before
+	// claiming the pending Task queue is empty.
+	tools.RegisterTaskQueue(s, deps)
+	tools.RegisterTaskAssign(s, deps)
+	tools.RegisterTaskBulkAssign(s, deps)
+
 	// Author identity dual (migration 0014) — user row read/update.
 	tools.RegisterUserCurrent(s, deps)
 	tools.RegisterUserUpdate(s, deps)

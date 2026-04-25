@@ -170,6 +170,9 @@ type artifactProposeBasis struct {
 	// that produced this artifact — stored on the revision row for
 	// audit. Not validated.
 	SourceSession string `json:"source_session,omitempty"`
+	// BulkOpID groups revisions emitted by one bulk operational metadata
+	// tool call, such as pindoc.task.bulk_assign.
+	BulkOpID string `json:"bulk_op_id,omitempty"`
 }
 
 // ArtifactPinInput is the agent-facing shape for a single pin. `path` is
@@ -800,7 +803,12 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			warnings = append(warnings, titleLengthWarnings(in.Title)...)
 			warnings = append(warnings, bodyH1Warnings(in.BodyMarkdown)...)
 			warnings = append(warnings, requiredH2Warnings(in.BodyMarkdown, in.Type)...)
+			warnings = append(warnings, sectionDuplicatesEdgesWarnings(in.BodyMarkdown)...)
 			warnings = append(warnings, decisionSubjectAreaWarnings(in)...)
+			slugWarnings, slugSuggestedActions := slugBrevityAdvisory(in, finalSlug)
+			warnings = append(warnings, slugWarnings...)
+			suggestedActions := append([]string{}, slugSuggestedActions...)
+			suggestedActions = append(suggestedActions, sectionDuplicatesEdgesSuggestedActions(warnings)...)
 			if detectUnclassifiedUserChat(resolvedMeta, in.Pins, in.BodyMarkdown) {
 				warnings = append(warnings, "SOURCE_TYPE_UNCLASSIFIED")
 			}
@@ -838,6 +846,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				PinsStored:        pinsStored,
 				EdgesStored:       edgesStored,
 				Superseded:        supersededFlag,
+				SuggestedActions:  suggestedActions,
 				Warnings:          sortedWarnings,
 				WarningSeverities: severities,
 				EmbedderUsed:      embedderInfo(deps),
@@ -1321,6 +1330,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 			"If this is wording cleanup only, mention 'wording cleanup' (or 'verified') in commit_msg so the warning stays quiet next time.",
 		}
 	}
+	suggested = append(suggested, sectionDuplicatesEdgesSuggestedActions(warnings)...)
 
 	// Task propose-경로-warning-영속화: persist update-path warnings +
 	// canonical-rewrite flag into events so Reader Trust Card and future
@@ -1366,6 +1376,7 @@ func updatePathWarnings(deps Deps, in artifactProposeInput) []string {
 	out = append(out, titleLengthWarnings(in.Title)...)
 	out = append(out, bodyH1Warnings(in.BodyMarkdown)...)
 	out = append(out, requiredH2Warnings(in.BodyMarkdown, in.Type)...)
+	out = append(out, sectionDuplicatesEdgesWarnings(in.BodyMarkdown)...)
 	return out
 }
 
@@ -1392,6 +1403,7 @@ func bodyHash(body string) string {
 //   - agent_id: server-issued identity (Phase 12c) — trusted
 //   - reported_author_id: client-reported string — untrusted label
 //   - source_session: agent-supplied free-form session id (basis)
+//   - bulk_op_id: batch operation correlation key
 //
 // Returns nil when there's nothing useful to record so the column stays
 // NULL rather than storing {} everywhere.
@@ -1406,6 +1418,9 @@ func buildSourceSessionRef(deps Deps, in artifactProposeInput) any {
 	if in.Basis != nil {
 		if s := strings.TrimSpace(in.Basis.SourceSession); s != "" {
 			payload["source_session"] = s
+		}
+		if b := strings.TrimSpace(in.Basis.BulkOpID); b != "" {
+			payload["bulk_op_id"] = b
 		}
 		if r := strings.TrimSpace(in.Basis.SearchReceipt); r != "" {
 			payload["search_receipt"] = r
@@ -1761,6 +1776,88 @@ func slugify(s string) string {
 		s = strings.Trim(string(runes[:60]), "-")
 	}
 	return s
+}
+
+const slugBrevityThresholdRunes = 25
+
+func slugBrevityAdvisory(in artifactProposeInput, finalSlug string) ([]string, []string) {
+	if strings.TrimSpace(in.Slug) != "" {
+		return nil, nil
+	}
+	n := utf8.RuneCountInString(finalSlug)
+	if n < slugBrevityThresholdRunes {
+		return nil, nil
+	}
+	actions := []string{
+		fmt.Sprintf("SLUG_VERBOSE: auto-generated slug %q is %d runes; consider passing an explicit shorter slug.", finalSlug, n),
+	}
+	for _, candidate := range conciseSlugCandidates(in.Type, in.Title, finalSlug) {
+		actions = append(actions, fmt.Sprintf("Candidate explicit slug: `%s`", candidate))
+	}
+	return []string{"SLUG_VERBOSE"}, actions
+}
+
+func conciseSlugCandidates(artType, title, finalSlug string) []string {
+	prefix := slugify(artType)
+	if prefix == "" {
+		prefix = "artifact"
+	}
+	titleSlug := slugify(title)
+	parts := splitSlugParts(titleSlug)
+	if len(parts) == 0 {
+		return nil
+	}
+
+	var out []string
+	seen := map[string]struct{}{}
+	add := func(parts []string) {
+		if len(parts) == 0 || len(out) >= 3 {
+			return
+		}
+		candidate := prefix + "-" + strings.Join(parts, "-")
+		candidate = trimSlugRunes(candidate, slugBrevityThresholdRunes)
+		if candidate == "" || candidate == finalSlug {
+			return
+		}
+		if _, ok := seen[candidate]; ok {
+			return
+		}
+		seen[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+
+	if len(parts) >= 3 {
+		add(parts[:3])
+	}
+	if len(parts) >= 2 {
+		add(parts[:2])
+	}
+	if len(parts) >= 4 {
+		add([]string{parts[0], parts[1], parts[len(parts)-1]})
+	}
+	add(parts[:1])
+
+	return out
+}
+
+func splitSlugParts(slug string) []string {
+	raw := strings.Split(slug, "-")
+	parts := make([]string, 0, len(raw))
+	for _, part := range raw {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return parts
+}
+
+func trimSlugRunes(slug string, maxRunes int) string {
+	if utf8.RuneCountInString(slug) <= maxRunes {
+		return strings.Trim(slug, "-")
+	}
+	runes := []rune(slug)
+	return strings.Trim(string(runes[:maxRunes]), "-")
 }
 
 func nullIfEmpty(s string) any {
@@ -2468,6 +2565,58 @@ func bodyH1Warnings(body string) []string {
 	for _, line := range strings.Split(body, "\n") {
 		if strings.HasPrefix(line, "# ") {
 			return []string{"BODY_HAS_H1_REDUNDANT"}
+		}
+	}
+	return nil
+}
+
+const (
+	sectionDuplicatesEdgesWarning = "SECTION_DUPLICATES_EDGES"
+	sectionDuplicatesEdgesAction  = "관계는 relates_to 필드로 제출하세요; 본문은 narrative 전용."
+)
+
+var edgeDuplicateSectionHeadings = map[string]struct{}{
+	"연관":                  {},
+	"역참조":                 {},
+	"선후":                  {},
+	"리소스 경로":              {},
+	"dependencies":        {},
+	"dependencies / 선후":   {},
+	"related":             {},
+	"related artifacts":   {},
+	"relationships":       {},
+	"references":          {},
+	"backreferences":      {},
+	"backlinks":           {},
+	"resource paths":      {},
+	"related resources":   {},
+	"resource references": {},
+}
+
+func sectionDuplicatesEdgesWarnings(body string) []string {
+	for _, line := range strings.Split(body, "\n") {
+		after, ok := strings.CutPrefix(line, "## ")
+		if !ok {
+			continue
+		}
+		heading := normalizeEdgeDuplicateHeading(after)
+		if _, dup := edgeDuplicateSectionHeadings[heading]; dup {
+			return []string{sectionDuplicatesEdgesWarning}
+		}
+	}
+	return nil
+}
+
+func normalizeEdgeDuplicateHeading(heading string) string {
+	heading = strings.ToLower(strings.TrimSpace(strings.TrimRight(heading, "#")))
+	heading = strings.Join(strings.Fields(heading), " ")
+	return heading
+}
+
+func sectionDuplicatesEdgesSuggestedActions(warnings []string) []string {
+	for _, w := range warnings {
+		if w == sectionDuplicatesEdgesWarning {
+			return []string{sectionDuplicatesEdgesAction}
 		}
 	}
 	return nil

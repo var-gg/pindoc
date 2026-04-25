@@ -199,6 +199,12 @@ $ pindoc init
 
 > Reader 는 Surface(뷰 모드) 를 최상위 축으로, Type 과 Area 를 그 위에 얹는 보조 필터 축으로 둔다. Surface 는 URL segment(`/p/:project/wiki` vs `/tasks`) 가 truth 이고, Area·Type 은 `?area=…&type=…` query string 으로 왕복한다 — 링크를 공유하면 필터 조합까지 그대로 복원된다. Wiki Surface 는 Task 를 제외한 모든 type 의 자연 집합이고 Tasks Surface 는 type=Task 로 고정되어 Sidebar 의 Type 섹션이 "Task · locked" 라벨로 바뀐다. Sidebar Area/Type 카운터는 "현재 Surface + 다른 축 필터" 기준으로 재계산되어 "UI 8" 뱃지인데 본문 6개 같은 counter drift 가 구조적으로 생기지 않는다(Linear / GitHub Issues 관습). Surface 전환 시 Area 는 탐색 연속성을 위해 유지되고 Type 은 Wiki↔Tasks 의미가 달라 리셋된다. Graph Surface 는 M1.5 React-ify 전까지 iframe stub 이라 필터 연동은 동일 시점에 들어온다. Decision `decision-reader-ia-hierarchy` + Task `task-reader-ia-refactor` 참조.
 
+Tasks Surface 는 필터 적용 상태를 본문 상단에서 다시 선언한다. `Type=Task` 는 고정 chip 으로 보여 주고 Area 필터는 해제 가능한 chip 으로 표시한다. 필터 때문에 칸반 컬럼이나 전체 결과가 비면 "현재 필터에는 없음"과 "전체에는 몇 건 있음"을 함께 보여 주며, chip의 해제 버튼 또는 `Esc` 로 즉시 전체 scope 로 되돌아가게 한다. 이렇게 sidebar 선택 음영만으로 필터를 암시하지 않고, Task 탭 제목도 `Task · <scope> · 대기 N / 전체 M` 형태로 현재 scope 와 count 를 자기선언한다.
+
+Wiki 상세 Surface 에서 Area 선택은 본문을 닫는 필터가 아니라 **상세 scope** 로 live-bind 된다. 사용자가 상세 화면에서 Area 트리의 다른 항목을 클릭하면 article은 유지하고 상단 scope bar만 새 Area path로 갱신한다. 현재 artifact가 그 Area에 속하면 `[` / `]` 또는 `이전` / `다음` 버튼으로 같은 Area의 sibling artifact를 `updated_at desc` 순서로 순회한다. 현재 artifact가 선택된 Area 밖이면 sibling nav를 비활성화하고 "해당 area 목록 보기" CTA로 목록 전환을 명시한다.
+
+본문 안의 `## 연관`, `## 역참조`, `## 리소스 경로`, `## References` 처럼 Sidecar의 structured data 와 의미가 겹치는 H2 섹션은 Reader render-layer에서 기본 접힘 상태로 표시한다. 원본 markdown 은 유지하되, 해당 블록 상단에 "Sidecar에 live 데이터가 있습니다" chip 을 두어 단일 진실 원본이 Sidecar임을 드러낸다. 단, Sidecar edge·backlink·pin 데이터가 모두 비어 있으면 본문이 유일한 단서일 수 있으므로 collapse 를 적용하지 않는다.
+
 ### 상태 뱃지 단순화
 
 내부 3축(completeness/status/review_state) 조합을 UI 4뱃지로 축약:
@@ -215,6 +221,8 @@ $ pindoc init
 ### Trust Card + Sidecar Provenance
 
 > Reader 상세 화면의 title 바로 아래에 **Trust Card** 1줄(3–5 secondary 뱃지)이 붙어 "이 지식을 믿어도 되는가 / 왜 여기 있는가 / 다음 세션에 들어가나"를 3초 안에 답한다. 구성: Trust class(Verified / Partially verified / Unverified / Conversation-derived) · Source summary(Code · N pins / Mixed / External / User chat) · Next-session policy(default / opt-in / excluded) · Confidence(low만 강조) · Audience(owner_only / approvers만 노출). artifact_meta 가 없는 legacy row 는 "Unclassified" 단일 뱃지로 graceful fallback. Sidecar의 **Provenance 블록**은 pins(kind별 그룹) · source_session_ref · next_context_policy rationale · age-based stale signal을 함께 내려 주며, 기존 draft/live/stale/archived 상태 뱃지와 시각 위계가 겹치지 않도록 secondary 톤을 쓴다. Task `reader-trust-card-sidecar-provenance-...` 참조.
+
+Trust Card 배지는 locale bundle을 통해 label과 tooltip을 모두 현지화한다. Tooltip은 단순 번역이 아니라 **의미 / 나타나는 조건 / 변경 경로** 3요소를 짧게 포함해야 한다. 예를 들어 `source_type=user_chat`은 "대화 기반" label과 함께 consent_state를 명시하라는 변경 경로를 제시하고, `RECOMMEND_READ_BEFORE_CREATE` warning은 "중복 후보" label과 함께 기존 artifact의 `update_of` 사용을 안내한다. Pin count도 영어식 plural 문구를 그대로 노출하지 않고 locale별 규칙(`핀 N`, `N pins`)을 따른다.
 
 ### Cmd+K Palette
 

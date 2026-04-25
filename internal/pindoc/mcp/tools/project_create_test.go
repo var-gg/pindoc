@@ -1,6 +1,9 @@
 package tools
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestProjectCreateAreaSeedsUseConcernSkeleton(t *testing.T) {
 	want := []string{
@@ -15,20 +18,23 @@ func TestProjectCreateAreaSeedsUseConcernSkeleton(t *testing.T) {
 		"_unsorted",
 	}
 
-	if len(projectCreateTopLevelAreaSeeds) != len(want) {
-		t.Fatalf("seed count = %d, want %d", len(projectCreateTopLevelAreaSeeds), len(want))
+	if len(topLevelAreaSeed) != len(want) {
+		t.Fatalf("seed count = %d, want %d", len(topLevelAreaSeed), len(want))
 	}
 
 	seen := map[string]bool{}
-	for i, seed := range projectCreateTopLevelAreaSeeds {
+	for i, seed := range topLevelAreaSeed {
 		if seed.Slug != want[i] {
 			t.Fatalf("seed %d slug = %q, want %q", i, seed.Slug, want[i])
 		}
-		if seed.ParentSlug != "" {
-			t.Fatalf("top-level seed %q has parent %q", seed.Slug, seed.ParentSlug)
-		}
 		if seen[seed.Slug] {
 			t.Fatalf("duplicate seed slug %q", seed.Slug)
+		}
+		if seed.Name == "" {
+			t.Fatalf("seed %q has empty name", seed.Slug)
+		}
+		if seed.DescriptionEN == "" || seed.DescriptionKO == "" {
+			t.Fatalf("seed %q must carry en/ko descriptions", seed.Slug)
 		}
 		seen[seed.Slug] = true
 	}
@@ -39,10 +45,73 @@ func TestProjectCreateAreaSeedsUseConcernSkeleton(t *testing.T) {
 		}
 	}
 
-	for _, seed := range projectCreateTopLevelAreaSeeds {
+	for _, seed := range topLevelAreaSeed {
 		if seed.IsCrossCutting != (seed.Slug == "cross-cutting") {
 			t.Fatalf("seed %q is_cross_cutting = %v", seed.Slug, seed.IsCrossCutting)
 		}
+	}
+}
+
+func TestProjectCreateDescriptionAdvertisesAreaSeed(t *testing.T) {
+	if !strings.Contains(projectCreateDescription, "Auto-creates 9 top-level/project-root areas") {
+		t.Fatalf("project_create description should advertise 9 project-root areas")
+	}
+	if !strings.Contains(projectCreateDescription, "area-구조-top-level-고정-골격-depth-2-sub-area") {
+		t.Fatalf("project_create description should reference the governing Decision slug")
+	}
+}
+
+func TestProjectCreateDescriptionRequiresExplicitImmutableLanguage(t *testing.T) {
+	for _, want := range []string{
+		"primary_language is required",
+		"No default",
+		"Supported languages are en, ko, ja",
+		"immutable after creation",
+		"recreate the project",
+	} {
+		if !strings.Contains(projectCreateDescription, want) {
+			t.Fatalf("project_create description missing locale guidance %q", want)
+		}
+	}
+}
+
+func TestNormalizeProjectLanguage(t *testing.T) {
+	for _, raw := range []string{"en", "ko", "ja", " JA "} {
+		got, err := normalizeProjectLanguage(raw)
+		if err != nil {
+			t.Fatalf("normalizeProjectLanguage(%q) returned error: %v", raw, err)
+		}
+		if got == "" || !isSupportedProjectLanguage(got) {
+			t.Fatalf("normalizeProjectLanguage(%q) = %q, want supported language", raw, got)
+		}
+	}
+
+	for _, raw := range []string{"", "fr"} {
+		_, err := normalizeProjectLanguage(raw)
+		if err == nil {
+			t.Fatalf("normalizeProjectLanguage(%q) expected error", raw)
+		}
+		msg := err.Error()
+		for _, want := range []string{"Supported languages: en, ko, ja", "immutable", "recreate"} {
+			if !strings.Contains(msg, want) {
+				t.Fatalf("normalizeProjectLanguage(%q) error missing %q: %s", raw, want, msg)
+			}
+		}
+	}
+}
+
+func TestLocalizedAreaDescription(t *testing.T) {
+	if got := localizedAreaDescription("English", "한국어", "ko"); got != "한국어" {
+		t.Fatalf("ko description = %q, want 한국어", got)
+	}
+	if got := localizedAreaDescription("English", "한국어", "en"); got != "English" {
+		t.Fatalf("en description = %q, want English", got)
+	}
+	if got := localizedAreaDescription("English", "한국어", "ja"); got != "English" {
+		t.Fatalf("ja description fallback = %q, want English", got)
+	}
+	if got := localizedAreaDescription("English", "", "ko"); got != "English" {
+		t.Fatalf("missing ko fallback = %q, want English", got)
 	}
 }
 

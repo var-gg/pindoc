@@ -292,6 +292,21 @@ export type TaskMetaPatchResp = {
   revision_number: number;
 };
 
+export type TaskAssignInput = {
+  assignee: string;
+  reason?: string;
+  author_id?: string;
+  author_version?: string;
+};
+
+export type TaskAssignResp = {
+  status: "accepted";
+  artifact_id: string;
+  slug: string;
+  revision_number: number;
+  new_assignee: string;
+};
+
 export type TaskMetaPatchError = {
   error_code: string;
   message: string;
@@ -304,7 +319,44 @@ export const api = {
   projectList: () => j<ProjectListResp>("/api/projects"),
   users: () => j<{ users: UserRef[] }>("/api/users"),
 
-  // Operational-metadata write — the one UI-side POST. Throws a
+  // Assignee semantic shortcut. The browser cannot speak stdio MCP
+  // directly, so the HTTP bridge records an ops telemetry row as
+  // tool_name=pindoc.task.assign and writes the same assignee-only
+  // meta_patch revision the MCP tool would produce.
+  taskAssign: async (
+    project: string,
+    idOrSlug: string,
+    input: TaskAssignInput,
+  ): Promise<TaskAssignResp> => {
+    const res = await fetch(
+      `${p(project)}/artifacts/${encodeURIComponent(idOrSlug)}/task-assign`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      },
+    );
+    if (!res.ok) {
+      let parsed: TaskMetaPatchError | null = null;
+      try {
+        parsed = (await res.json()) as TaskMetaPatchError;
+      } catch {
+        // fall through to generic
+      }
+      const err = new Error(
+        parsed?.message ?? `${res.status} ${res.statusText}`,
+      ) as Error & Partial<TaskMetaPatchError>;
+      if (parsed) {
+        err.error_code = parsed.error_code;
+        err.message = parsed.message;
+        err.failed = parsed.failed;
+      }
+      throw err;
+    }
+    return (await res.json()) as TaskAssignResp;
+  },
+
+  // Operational-metadata write — the generic UI-side POST. Throws a
   // TaskMetaPatchError-shaped Error with error_code preserved so callers
   // can surface "status via transition tool" / "version conflict" etc.
   // as first-class UX instead of a generic network error.

@@ -82,7 +82,7 @@ export function Sidecar({ projectSlug, detail, authMode, agents, users, onArtifa
   const hasSupersedes = Boolean(detail.superseded_by && detail.superseded_by !== "");
 
   return (
-    <aside className="sidecar sidecar--detail">
+    <aside id="sidecar-live-data" className="sidecar sidecar--detail">
       <div className="sidecar__head">
         <h3>{t("sidecar.this_artifact")}</h3>
       </div>
