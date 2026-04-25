@@ -210,6 +210,7 @@ export type RevisionRow = {
   completeness: string;
   revision_shape?: RevisionShape;
   revision_type?: RevisionType;
+  bulk_op_id?: string;
   created_at: string;
 };
 

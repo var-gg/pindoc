@@ -32,6 +32,7 @@ type RevisionMeta struct {
 	Completeness   string    `json:"completeness"`
 	RevisionShape  string    `json:"revision_shape,omitempty"`
 	RevisionType   string    `json:"revision_type,omitempty"`
+	BulkOpID       string    `json:"bulk_op_id,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 }
 
@@ -77,7 +78,8 @@ func RegisterArtifactRevisions(server *sdk.Server, deps Deps) {
 
 			rows, err := deps.DB.Query(ctx, `
 				SELECT revision_number, title, body_hash, author_id, author_version,
-				       commit_msg, completeness, tags, revision_shape, shape_payload, created_at
+				       commit_msg, completeness, tags, revision_shape, shape_payload,
+				       COALESCE(source_session_ref->>'bulk_op_id', ''), created_at
 				FROM artifact_revisions
 				WHERE artifact_id = $1
 				ORDER BY revision_number ASC
@@ -97,7 +99,7 @@ func RegisterArtifactRevisions(server *sdk.Server, deps Deps) {
 				var shapePayload []byte
 				if err := rows.Scan(&r.RevisionNumber, &r.Title, &r.BodyHash, &r.AuthorID,
 					&authorVer, &commitMsg, &r.Completeness, &tags, &r.RevisionShape,
-					&shapePayload, &r.CreatedAt); err != nil {
+					&shapePayload, &r.BulkOpID, &r.CreatedAt); err != nil {
 					return nil, artifactRevisionsOutput{}, err
 				}
 				if authorVer != nil {

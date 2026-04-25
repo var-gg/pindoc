@@ -22,6 +22,7 @@ type revisionRow struct {
 	Completeness   string    `json:"completeness"`
 	RevisionShape  string    `json:"revision_shape,omitempty"`
 	RevisionType   string    `json:"revision_type,omitempty"`
+	BulkOpID       string    `json:"bulk_op_id,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 }
 
@@ -51,7 +52,8 @@ func (d Deps) handleArtifactRevisions(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := d.DB.Query(r.Context(), `
 		SELECT revision_number, title, body_hash, author_id, author_version,
-		       commit_msg, completeness, tags, revision_shape, shape_payload, created_at
+		       commit_msg, completeness, tags, revision_shape, shape_payload,
+		       COALESCE(source_session_ref->>'bulk_op_id', ''), created_at
 		FROM artifact_revisions
 		WHERE artifact_id = $1
 		ORDER BY revision_number ASC
@@ -72,7 +74,7 @@ func (d Deps) handleArtifactRevisions(w http.ResponseWriter, r *http.Request) {
 		var shapePayload []byte
 		if err := rows.Scan(&r.RevisionNumber, &r.Title, &r.BodyHash, &r.AuthorID,
 			&authorVer, &commit, &r.Completeness, &tags, &r.RevisionShape, &shapePayload,
-			&r.CreatedAt); err != nil {
+			&r.BulkOpID, &r.CreatedAt); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan failed")
 			return
 		}
