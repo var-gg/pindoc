@@ -1626,3 +1626,179 @@
 .byline__name { color: var(--fg-1); font-weight: 500; }
 .byline__sep { color: var(--fg-4); }
 .byline__agent { color: var(--fg-3); font-family: var(--font-mono); font-size: 11px; }
+
+
+/* CreateProjectPage — Reader's GUI bootstrap entrypoint (Decision
+ * project-bootstrap-canonical-flow-reader-ui-first-class, Task T3).
+ * Standalone layout — no Reader sidebar/topnav — so a fresh install
+ * landing here from the onboarding wizard renders even before the
+ * project-scoped chrome is usable. */
+.cp-page {
+  max-width: 640px;
+  margin: 60px auto;
+  padding: 0 24px 80px;
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+}
+.cp-header { margin-bottom: 32px; }
+.cp-header h1 { font-size: 24px; line-height: 1.2; margin: 0 0 6px; color: var(--fg-0); }
+.cp-success-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.cp-success-title .lucide {
+  width: 22px;
+  height: 22px;
+  color: var(--live);
+}
+.cp-subtitle { color: var(--fg-3); font-size: 13.5px; line-height: 1.55; margin: 0; }
+
+.cp-form { display: flex; flex-direction: column; gap: 20px; }
+.cp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cp-field__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-1);
+  letter-spacing: 0.01em;
+}
+.cp-field__optional {
+  font-weight: 400;
+  color: var(--fg-3);
+}
+.cp-field__hint {
+  font-size: 11.5px;
+  color: var(--fg-3);
+  line-height: 1.5;
+}
+.cp-field__input {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
+}
+.cp-field__input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
+}
+.cp-radio-group { display: flex; gap: 10px; }
+.cp-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-1);
+  background: var(--bg-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+.cp-radio input { margin: 0; cursor: pointer; }
+.cp-radio:has(input:checked) {
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 12%, var(--bg-2));
+  color: var(--fg-0);
+}
+
+.cp-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 16px;
+}
+.cp-submit {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-1);
+  cursor: pointer;
+}
+.cp-submit:disabled { opacity: 0.7; cursor: default; }
+.cp-spinner { width: 14px; height: 14px; animation: cp-spin 1s linear infinite; }
+@keyframes cp-spin { to { transform: rotate(360deg); } }
+
+.cp-link-primary {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-1);
+  text-decoration: none;
+}
+.cp-link-secondary {
+  padding: 8px 14px;
+  font-size: 13px;
+  background: transparent;
+  color: var(--fg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-1);
+  cursor: pointer;
+}
+
+.cp-error {
+  padding: 8px 12px;
+  border-radius: var(--r-1);
+  background: color-mix(in oklch, var(--danger, #d33) 12%, transparent);
+  color: var(--danger, #d33);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.cp-error strong { font-family: var(--font-mono); }
+
+/* Snippet success block — copy-paste-ready .mcp.json. */
+.cp-snippet { margin: 24px 0; }
+.cp-snippet__intro { font-size: 13px; color: var(--fg-2); margin: 0 0 8px; }
+.cp-snippet__box { position: relative; }
+.cp-snippet__pre {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  padding: 14px 16px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-1);
+  overflow-x: auto;
+  margin: 0;
+  color: var(--fg-1);
+}
+.cp-snippet__copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  background: var(--bg-1);
+  color: var(--fg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-1);
+  cursor: pointer;
+}
+.cp-snippet__copy .lucide { width: 12px; height: 12px; }
+.cp-snippet__harness {
+  font-size: 12px;
+  color: var(--fg-3);
+  line-height: 1.55;
+  margin: 8px 0 0;
+}

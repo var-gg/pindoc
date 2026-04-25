@@ -3,6 +3,7 @@ import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation, useParams 
 import { api } from "./api/client";
 import { useI18n } from "./i18n";
 import { Telemetry } from "./ops/Telemetry";
+import { CreateProjectPage } from "./reader/CreateProjectPage";
 import { Diff } from "./reader/Diff";
 import { History } from "./reader/History";
 import { ReaderShell } from "./reader/ReaderShell";
@@ -32,6 +33,14 @@ export function App() {
       <Route path="/p/:project/:locale/graph" element={<ReaderShell view="graph" />} />
       <Route path="/p/:project/:locale/inbox" element={<ReaderShell view="inbox" />} />
       <Route path="/help/design-legend" element={<DesignLegendRedirect />} />
+
+      {/* Project bootstrap (Decision project-bootstrap-canonical-flow-
+          reader-ui-first-class). The 1급 사용자 진입점 for new
+          installs — fresh users land here from the onboarding wizard
+          (T4) or by direct URL. Hits POST /api/projects, then shows a
+          copy-paste-ready .mcp.json snippet so the user finishes by
+          opening Claude Code in the workspace they pasted into. */}
+      <Route path="/projects/new" element={<CreateProjectPage />} />
 
       {/* Legacy /p/:project/... routes redirect into the project's
           declared locale segment. Keeps pre-Phase-18 bookmarks and

@@ -361,11 +361,76 @@ export type TaskMetaPatchError = {
   failed?: string[];
 };
 
+// Project bootstrap (Decision project-bootstrap-canonical-flow-reader-ui-
+// first-class). primary_language is required and immutable post-create —
+// the form makes the user pick deliberately; defaulting to a guessed
+// language would silently break agents that hit the artifact later.
+export type CreateProjectInput = {
+  slug: string;
+  name: string;
+  primary_language: "en" | "ko" | "ja";
+  description?: string;
+  color?: string;
+  owner_id?: string;
+};
+
+export type CreateProjectResp = {
+  project_id: string;
+  slug: string;
+  name: string;
+  primary_language: string;
+  url: string;
+  default_area: string;
+  areas_created: number;
+  templates_created: number;
+};
+
+// ProjectCreateError mirrors the REST envelope from
+// internal/pindoc/httpapi/projects.go. error_code values: SLUG_INVALID /
+// SLUG_RESERVED / SLUG_TAKEN / NAME_REQUIRED / LANG_REQUIRED /
+// LANG_INVALID / BAD_JSON / INTERNAL_ERROR. The form maps each to an
+// i18n key for inline display.
+export type ProjectCreateError = {
+  error_code: string;
+  message: string;
+};
+
 export const api = {
   // Instance-wide
   config: () => j<ServerConfig>("/api/config"),
   projectList: () => j<ProjectListResp>("/api/projects"),
   users: () => j<{ users: UserRef[] }>("/api/users"),
+
+  // Project bootstrap (Decision project-bootstrap-canonical-flow-reader-
+  // ui-first-class). The Reader's "+ New project" page calls this; the
+  // pindoc-admin CLI and pindoc.project.create MCP tool share the same
+  // backend function (projects.CreateProject in Go). On 4xx the server
+  // returns { error_code, message } — this throws a typed Error so the
+  // page can map error_code → i18n key for inline form errors.
+  createProject: async (input: CreateProjectInput): Promise<CreateProjectResp> => {
+    const res = await fetch("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      let parsed: ProjectCreateError | null = null;
+      try {
+        parsed = (await res.json()) as ProjectCreateError;
+      } catch {
+        // fall through to generic
+      }
+      const err = new Error(
+        parsed?.message ?? `${res.status} ${res.statusText}`,
+      ) as Error & Partial<ProjectCreateError>;
+      if (parsed) {
+        err.error_code = parsed.error_code;
+        err.message = parsed.message;
+      }
+      throw err;
+    }
+    return (await res.json()) as CreateProjectResp;
+  },
 
   // Assignee semantic shortcut. The browser cannot speak stdio MCP
   // directly, so the HTTP bridge records an ops telemetry row as
