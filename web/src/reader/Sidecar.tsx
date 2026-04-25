@@ -1,6 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
-import { ArrowUpRight, History as HistoryIcon } from "lucide-react";
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Clipboard,
+  History as HistoryIcon,
+  Pencil,
+  Share2,
+} from "lucide-react";
 import {
   api,
   type Artifact,
@@ -19,6 +29,7 @@ import { localizedAreaName } from "./areaLocale";
 import { TaskControls } from "./TaskControls";
 import { Toc } from "./Toc";
 import { headingsFromBody } from "./slug";
+import { typeChipClass } from "./typeChip";
 
 type Props = {
   projectSlug: string;
@@ -43,8 +54,23 @@ type Props = {
   onArtifactUpdated?: () => void;
 };
 
+type CollapsibleKey = "provenance" | "policy" | "timeline" | "meta";
+
+type CollapsedState = Record<CollapsibleKey, boolean>;
+
+const SIDECAR_COLLAPSE_STORAGE_KEY = "pindoc.reader.sidecar.sections.v1";
+
+const DEFAULT_COLLAPSED_STATE: CollapsedState = {
+  provenance: true,
+  policy: true,
+  timeline: true,
+  meta: true,
+};
+
 export function Sidecar({ projectSlug, detail, authMode, agents, users, onArtifactUpdated }: Props) {
   const { t } = useI18n();
+  const { locale = "" } = useParams<{ locale?: string }>();
+  const [collapsed, toggleSection] = useSidecarCollapseState();
   // TOC feeds off body_markdown; Markdown.tsx independently derives the
   // same slugs via the same uniqueSlug ledger so `<h2 id>` matches
   // `href="#..."` without a DOM round-trip. Computed here (not ReaderSurface)
@@ -74,6 +100,7 @@ export function Sidecar({ projectSlug, detail, authMode, agents, users, onArtifa
     ? new Date(detail.published_at).toLocaleString()
     : "—";
   const areaLabel = localizedAreaName(t, detail.area_slug, detail.area_slug);
+  const artifactHref = `/p/${projectSlug}/${locale}/wiki/${detail.slug}`;
 
   // Graph edges aren't derived yet (Phase 3+ pipeline populates these via
   // artifact.superseded_by + future artifact_edges). Show placeholder
@@ -83,9 +110,9 @@ export function Sidecar({ projectSlug, detail, authMode, agents, users, onArtifa
 
   return (
     <aside id="sidecar-live-data" className="sidecar sidecar--detail">
-      <div className="sidecar__head">
-        <h3>{t("sidecar.this_artifact")}</h3>
-      </div>
+      <IdentityStrip detail={detail} />
+
+      <QuickActions detail={detail} artifactHref={artifactHref} />
 
       {headings.length >= 2 && <Toc headings={headings} />}
 
@@ -133,54 +160,209 @@ export function Sidecar({ projectSlug, detail, authMode, agents, users, onArtifa
         </div>
       </div>
 
-      <ConnectedArtifacts
-        projectSlug={projectSlug}
-        relates={detail.relates_to ?? []}
-        relatedBy={detail.related_by ?? []}
-        hasSupersedes={hasSupersedes}
-        supersededBy={detail.superseded_by ?? ""}
-      />
+      <SidecarStaticSection title={t("sidecar.relations")}>
+        <ConnectedArtifacts
+          projectSlug={projectSlug}
+          relates={detail.relates_to ?? []}
+          relatedBy={detail.related_by ?? []}
+          hasSupersedes={hasSupersedes}
+          supersededBy={detail.superseded_by ?? ""}
+        />
+      </SidecarStaticSection>
 
-      <ProvenanceBlock
-        meta={detail.artifact_meta}
-        pins={detail.pins}
-        sourceSession={detail.source_session_ref}
-        updatedAt={detail.updated_at}
-      />
+      <SidecarCollapsibleSection
+        id="provenance"
+        title={t("sidecar.provenance")}
+        collapsed={collapsed.provenance}
+        onToggle={toggleSection}
+      >
+        <ProvenanceBlock
+          pins={detail.pins}
+          sourceSession={detail.source_session_ref}
+          updatedAt={detail.updated_at}
+        />
+      </SidecarCollapsibleSection>
 
-      <RecentChanges projectSlug={projectSlug} slug={detail.slug} />
+      <SidecarCollapsibleSection
+        id="policy"
+        title={t("sidecar.policy")}
+        collapsed={collapsed.policy}
+        onToggle={toggleSection}
+      >
+        <PolicyBlock meta={detail.artifact_meta} />
+      </SidecarCollapsibleSection>
 
-      <div className="provenance">
-        <div className="provenance__row">
-          <span className="k">{t("sidecar.prov_author")}</span>
-          <span className="v" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span className={av.className} style={{ width: 14, height: 14, fontSize: 8 }}>
-              {av.initials}
-            </span>
-            {detail.author_id}
-            {detail.author_version ? `@${detail.author_version}` : ""}
-          </span>
-        </div>
-        <div className="provenance__row">
-          <span className="k">{t("sidecar.prov_area")}</span>
-          <span className="v">{areaLabel}</span>
-        </div>
-        <div className="provenance__row">
-          <span className="k">{t("sidecar.prov_status")}</span>
-          <span className="v">
-            {detail.status} · {detail.completeness}
-          </span>
-        </div>
-        <div className="provenance__row">
-          <span className="k">{t("sidecar.prov_published")}</span>
-          <span className="v">{publishedAt}</span>
-        </div>
-        <div className="provenance__row">
-          <span className="k">{t("sidecar.prov_id")}</span>
-          <span className="v">{detail.slug}</span>
-        </div>
-      </div>
+      <SidecarCollapsibleSection
+        id="timeline"
+        title={t("sidecar.timeline")}
+        collapsed={collapsed.timeline}
+        onToggle={toggleSection}
+      >
+        <RecentChanges projectSlug={projectSlug} slug={detail.slug} />
+      </SidecarCollapsibleSection>
+
+      <SidecarCollapsibleSection
+        id="meta"
+        title={t("sidecar.meta")}
+        collapsed={collapsed.meta}
+        onToggle={toggleSection}
+      >
+        <MetaBlock
+          avClassName={av.className}
+          avInitials={av.initials}
+          authorID={detail.author_id}
+          authorVersion={detail.author_version}
+          areaLabel={areaLabel}
+          status={detail.status}
+          completeness={detail.completeness}
+          publishedAt={publishedAt}
+          slug={detail.slug}
+        />
+      </SidecarCollapsibleSection>
     </aside>
+  );
+}
+
+function useSidecarCollapseState(): [CollapsedState, (key: CollapsibleKey) => void] {
+  const [collapsed, setCollapsed] = useState<CollapsedState>(() => {
+    if (typeof window === "undefined") return DEFAULT_COLLAPSED_STATE;
+    try {
+      const raw = window.localStorage.getItem(SIDECAR_COLLAPSE_STORAGE_KEY);
+      if (!raw) return DEFAULT_COLLAPSED_STATE;
+      const parsed = JSON.parse(raw) as Partial<CollapsedState>;
+      return { ...DEFAULT_COLLAPSED_STATE, ...parsed };
+    } catch {
+      return DEFAULT_COLLAPSED_STATE;
+    }
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(SIDECAR_COLLAPSE_STORAGE_KEY, JSON.stringify(collapsed));
+  }, [collapsed]);
+
+  const toggle = (key: CollapsibleKey) => {
+    setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  return [collapsed, toggle];
+}
+
+function IdentityStrip({ detail }: { detail: Artifact }) {
+  const lifecycle = detail.type === "Task" && detail.task_meta?.status
+    ? detail.task_meta.status
+    : `${detail.status} · ${detail.completeness}`;
+  return (
+    <div className="sidecar-identity">
+      <span className={typeChipClass(detail.type)}>{detail.type}</span>
+      <span className="sidecar-identity__slug" title={detail.slug}>
+        {detail.slug}
+      </span>
+      <span className="sidecar-identity__status">{lifecycle}</span>
+    </div>
+  );
+}
+
+function QuickActions({ detail, artifactHref }: { detail: Artifact; artifactHref: string }) {
+  const { t } = useI18n();
+  const agentRef = `pindoc://${detail.slug}`;
+  const absoluteHref = typeof window === "undefined"
+    ? artifactHref
+    : `${window.location.origin}${artifactHref}`;
+  return (
+    <div className="sidecar-actions" aria-label={t("sidecar.quick_actions")}>
+      <button
+        type="button"
+        className="sidecar-action"
+        title={t("sidecar.quick_verify_request")}
+        aria-label={t("sidecar.quick_verify_request")}
+        onClick={() => copyToClipboard(`Verify ${agentRef}`)}
+      >
+        <CheckCircle2 className="lucide" />
+      </button>
+      <button
+        type="button"
+        className="sidecar-action"
+        title={t("sidecar.quick_update_request")}
+        aria-label={t("sidecar.quick_update_request")}
+        onClick={() => copyToClipboard(`Update ${agentRef}`)}
+      >
+        <Pencil className="lucide" />
+      </button>
+      <button
+        type="button"
+        className="sidecar-action"
+        title={t("sidecar.quick_copy_link")}
+        aria-label={t("sidecar.quick_copy_link")}
+        onClick={() => copyToClipboard(absoluteHref)}
+      >
+        <Share2 className="lucide" />
+      </button>
+      <button
+        type="button"
+        className="sidecar-action"
+        title={t("sidecar.quick_copy_agent_ref")}
+        aria-label={t("sidecar.quick_copy_agent_ref")}
+        onClick={() => copyToClipboard(agentRef)}
+      >
+        <Clipboard className="lucide" />
+      </button>
+      <Link
+        className="sidecar-action"
+        title={t("sidecar.quick_history")}
+        aria-label={t("sidecar.quick_history")}
+        to={`${artifactHref}/history`}
+      >
+        <HistoryIcon className="lucide" />
+      </Link>
+    </div>
+  );
+}
+
+function copyToClipboard(text: string) {
+  if (typeof navigator === "undefined" || !navigator.clipboard) return;
+  void navigator.clipboard.writeText(text);
+}
+
+function SidecarStaticSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="sidecar-section">
+      <div className="sidecar-section__head sidecar-section__head--static">
+        <span>{title}</span>
+      </div>
+      <div className="sidecar-section__body">{children}</div>
+    </section>
+  );
+}
+
+function SidecarCollapsibleSection({
+  id,
+  title,
+  collapsed,
+  onToggle,
+  children,
+}: {
+  id: CollapsibleKey;
+  title: string;
+  collapsed: boolean;
+  onToggle: (key: CollapsibleKey) => void;
+  children: ReactNode;
+}) {
+  const { t } = useI18n();
+  return (
+    <section className="sidecar-section">
+      <button
+        type="button"
+        className="sidecar-section__head"
+        aria-expanded={!collapsed}
+        title={collapsed ? t("sidecar.expand_section") : t("sidecar.collapse_section")}
+        onClick={() => onToggle(id)}
+      >
+        {collapsed ? <ChevronRight className="lucide" /> : <ChevronDown className="lucide" />}
+        <span>{title}</span>
+      </button>
+      {!collapsed && <div className="sidecar-section__body">{children}</div>}
+    </section>
   );
 }
 
@@ -209,19 +391,12 @@ function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: strin
   const remainder = revs.length - shown.length;
 
   return (
-    <div className="provenance" style={{ paddingBottom: 6 }}>
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        marginBottom: 8,
-      }}>
-        <div className="provenance__row" style={{ gridTemplateColumns: "1fr", margin: 0, padding: 0 }}>
-          <span className="k" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
-            {t("history.recent_changes")}
-          </span>
-        </div>
+    <div className="sidecar-stack">
+      <div className="sidecar-timeline-head">
+        <span>{t("history.recent_changes")}</span>
         <Link
           to={`/p/${projectSlug}/${locale}/wiki/${slug}/history`}
-          style={{ color: "var(--fg-2)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontFamily: "var(--font-mono)" }}
+          className="sidecar-timeline-head__link"
         >
           <HistoryIcon className="lucide" style={{ width: 11, height: 11 }} />
           {shown.length < revs.length ? t("history.count", revs.length) : ""}
@@ -280,57 +455,70 @@ function ConnectedArtifacts({
   supersededBy: string;
 }) {
   const { t } = useI18n();
+  const { locale = "" } = useParams<{ locale?: string }>();
   const nothing = !hasSupersedes && relates.length === 0 && relatedBy.length === 0;
 
   if (nothing) {
     return (
-      <div className="relations">
+      <div className="relations relations--merged">
         <div className="relations__empty">{t("sidecar.no_relations")}</div>
       </div>
     );
   }
 
+  const rows = [
+    ...relates.map((edge) => ({ edge, direction: "out" as const })),
+    ...relatedBy.map((edge) => ({ edge, direction: "in" as const })),
+  ];
+
   return (
-    <div className="relations" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    <div className="relations relations--merged">
       {hasSupersedes && (
-        <div className="relation">
+        <div className="relation relation--supersedes">
+          <span className="relation__dir" aria-hidden="true">
+            <ArrowUpRight className="lucide" />
+          </span>
           <span className="relation__label">{t("sidecar.rel_supersedes")}</span>
           <span className="relation__target">
-            <ArrowUpRight className="lucide" />
             {supersededBy}
           </span>
         </div>
       )}
-      {relates.length > 0 && (
-        <EdgeGroup
-          title={t("sidecar.rel_outgoing")}
-          edges={relates}
-          projectSlug={projectSlug}
-        />
-      )}
-      {relatedBy.length > 0 && (
-        <EdgeGroup
-          title={t("sidecar.rel_incoming")}
-          edges={relatedBy}
-          projectSlug={projectSlug}
-        />
-      )}
+      <ul className="relation-list">
+        {rows.map(({ edge, direction }) => (
+          <li key={`${direction}-${edge.relation}-${edge.artifact_id}`}>
+            <Link
+              to={`/p/${projectSlug}/${locale}/wiki/${edge.slug}`}
+              className="relation-card"
+              title={direction === "out" ? t("sidecar.rel_outgoing") : t("sidecar.rel_incoming")}
+            >
+              <span className="relation-card__dir" aria-hidden="true">
+                {direction === "out" ? (
+                  <ArrowUpRight className="lucide" />
+                ) : (
+                  <ArrowDownLeft className="lucide" />
+                )}
+              </span>
+              <span className="chip relation-card__relation">{edge.relation}</span>
+              <span className="relation-card__type">{edge.type}</span>
+              <span className="relation-card__title">{edge.title}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
 
 // ProvenanceBlock renders the epistemic + evidence data the Trust Card
-// alludes to: pins list grouped by kind, source_session_ref summary, stale
-// signal, and next_context_policy rationale. Section is skipped entirely
-// when none of the signals carry information — legacy artifacts without
-// artifact_meta keep the old sidecar layout untouched.
+// alludes to: pins list grouped by kind, source_session_ref summary, and
+// stale signal. Policy fields are separated into their own collapsed
+// section so the sidecar hierarchy stays scannable.
 function ProvenanceBlock({
-  meta,
   pins,
   sourceSession,
   updatedAt,
 }: {
-  meta?: ArtifactMeta;
   pins?: PinRef[];
   sourceSession?: SourceSessionRef;
   updatedAt: string;
@@ -338,30 +526,99 @@ function ProvenanceBlock({
   const { t } = useI18n();
   const hasPins = (pins?.length ?? 0) > 0;
   const hasSource = Boolean(sourceSession && (sourceSession.agent_id || sourceSession.source_session));
-  const hasMetaContent = meta && Object.keys(meta).length > 0;
   const stale = staleFromAge(updatedAt);
-  if (!hasPins && !hasSource && !hasMetaContent && !stale) {
-    return null;
+  if (!hasPins && !hasSource && !stale) {
+    return <div className="sidecar-empty-line">{t("sidecar.no_provenance")}</div>;
   }
 
   return (
-    <div className="provenance" style={{ display: "flex", flexDirection: "column", gap: 10, paddingBottom: 6 }}>
-      <div
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 10,
-          color: "var(--fg-3)",
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-        }}
-      >
-        {t("sidecar.provenance") || "Provenance"}
-      </div>
-
+    <div className="sidecar-stack">
       {hasPins && <PinsList pins={pins!} />}
       {hasSource && <SourceSessionLine session={sourceSession!} />}
-      {hasMetaContent && <NextContextLine meta={meta!} />}
       {stale && <StaleLine reason={stale.reason} days={stale.days} />}
+    </div>
+  );
+}
+
+function PolicyBlock({ meta }: { meta?: ArtifactMeta }) {
+  const { t } = useI18n();
+  if (!meta || Object.keys(meta).length === 0) {
+    return <div className="sidecar-empty-line">{t("sidecar.no_policy")}</div>;
+  }
+  return (
+    <div className="sidecar-stack">
+      <NextContextLine meta={meta} />
+      <PolicyRow label="source" value={meta.source_type} />
+      <PolicyRow label="consent" value={meta.consent_state} />
+      <PolicyRow label="confidence" value={meta.confidence} />
+      <PolicyRow label="audience" value={meta.audience} />
+      <PolicyRow label="verification" value={meta.verification_state} />
+    </div>
+  );
+}
+
+function PolicyRow({ label, value }: { label: string; value?: string }) {
+  if (!value) return null;
+  return (
+    <div className="provenance__row">
+      <span className="k">{label}</span>
+      <span className="v">{value}</span>
+    </div>
+  );
+}
+
+function MetaBlock({
+  avClassName,
+  avInitials,
+  authorID,
+  authorVersion,
+  areaLabel,
+  status,
+  completeness,
+  publishedAt,
+  slug,
+}: {
+  avClassName: string;
+  avInitials: string;
+  authorID: string;
+  authorVersion?: string;
+  areaLabel: string;
+  status: string;
+  completeness: string;
+  publishedAt: string;
+  slug: string;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="sidecar-stack">
+      <div className="provenance__row">
+        <span className="k">{t("sidecar.prov_author")}</span>
+        <span className="v sidecar-meta-author">
+          <span className={avClassName}>
+            {avInitials}
+          </span>
+          {authorID}
+          {authorVersion ? `@${authorVersion}` : ""}
+        </span>
+      </div>
+      <div className="provenance__row">
+        <span className="k">{t("sidecar.prov_area")}</span>
+        <span className="v">{areaLabel}</span>
+      </div>
+      <div className="provenance__row">
+        <span className="k">{t("sidecar.prov_status")}</span>
+        <span className="v">
+          {status} · {completeness}
+        </span>
+      </div>
+      <div className="provenance__row">
+        <span className="k">{t("sidecar.prov_published")}</span>
+        <span className="v">{publishedAt}</span>
+      </div>
+      <div className="provenance__row">
+        <span className="k">{t("sidecar.prov_id")}</span>
+        <span className="v">{slug}</span>
+      </div>
     </div>
   );
 }
@@ -475,65 +732,4 @@ function staleFromAge(updatedAt: string): { reason: string; days: number } | nul
   const days = Math.floor((Date.now() - t) / (1000 * 60 * 60 * 24));
   if (days <= 60) return null;
   return { reason: `not updated in ${days} days`, days };
-}
-
-function EdgeGroup({
-  title,
-  edges,
-  projectSlug,
-}: {
-  title: string;
-  edges: EdgeRef[];
-  projectSlug: string;
-}) {
-  const { locale = "" } = useParams<{ locale?: string }>();
-  return (
-    <div>
-      <div
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 10,
-          color: "var(--fg-3)",
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          marginBottom: 4,
-        }}
-      >
-        {title}
-      </div>
-      <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 4 }}>
-        {edges.map((e) => (
-          <li key={`${e.relation}-${e.artifact_id}`}>
-            <Link
-              to={`/p/${projectSlug}/${locale}/wiki/${e.slug}`}
-              style={{
-                display: "flex",
-                gap: 6,
-                alignItems: "baseline",
-                padding: "4px 6px",
-                borderRadius: "var(--r-1)",
-                textDecoration: "none",
-                color: "var(--fg-1)",
-                fontSize: 12,
-              }}
-            >
-              <span
-                className="chip"
-                style={{
-                  fontSize: 9,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.03em",
-                }}
-                title={e.relation}
-              >
-                {e.relation}
-              </span>
-              <span style={{ fontSize: 10, color: "var(--fg-3)", fontFamily: "var(--font-mono)" }}>{e.type}</span>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{e.title}</span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
 }

@@ -222,6 +222,8 @@ Wiki 상세 Surface 에서 Area 선택은 본문을 닫는 필터가 아니라 *
 
 > Reader 상세 화면의 title 바로 아래에 **Trust Card** 1줄(3–5 secondary 뱃지)이 붙어 "이 지식을 믿어도 되는가 / 왜 여기 있는가 / 다음 세션에 들어가나"를 3초 안에 답한다. 구성: Trust class(Verified / Partially verified / Unverified / Conversation-derived) · Source summary(Code · N pins / Mixed / External / User chat) · Next-session policy(default / opt-in / excluded) · Confidence(low만 강조) · Audience(owner_only / approvers만 노출). artifact_meta 가 없는 legacy row 는 "Unclassified" 단일 뱃지로 graceful fallback. Sidecar의 **Provenance 블록**은 pins(kind별 그룹) · source_session_ref · next_context_policy rationale · age-based stale signal을 함께 내려 주며, 기존 draft/live/stale/archived 상태 뱃지와 시각 위계가 겹치지 않도록 secondary 톤을 쓴다. Task `reader-trust-card-sidecar-provenance-...` 참조.
 
+Sidecar 섹션 위계는 C1 이후 **Identity strip → Quick actions → Relations → Provenance → Policy → Timeline → Meta** 순서다. Identity는 type chip + slug + lifecycle status를 한 줄/두 줄로 압축하고, Quick actions는 verify/update/share/agent-ref/history 같은 agent workflow 진입점만 아이콘 버튼으로 둔다. Relations는 outgoing/incoming을 하나의 섹션으로 합치고 방향 아이콘(`→` / `←`)으로 구분한다. Provenance, Policy, Timeline, Meta는 low-frequency 정보라 기본 collapsed이며, 펼침 상태는 localStorage에 저장한다.
+
 Trust Card 배지는 locale bundle을 통해 label과 tooltip을 모두 현지화한다. Tooltip은 단순 번역이 아니라 **의미 / 나타나는 조건 / 변경 경로** 3요소를 짧게 포함해야 한다. 예를 들어 `source_type=user_chat`은 "대화 기반" label과 함께 consent_state를 명시하라는 변경 경로를 제시하고, `RECOMMEND_READ_BEFORE_CREATE` warning은 "중복 후보" label과 함께 기존 artifact의 `update_of` 사용을 안내한다. Pin count도 영어식 plural 문구를 그대로 노출하지 않고 locale별 규칙(`핀 N`, `N pins`)을 따른다.
 
 ### Cmd+K Palette
