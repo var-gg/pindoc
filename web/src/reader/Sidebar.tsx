@@ -69,6 +69,15 @@ function subtreeArtifactCount(node: AreaNode): number {
   return node.artifact_count + node.children.reduce((sum, child) => sum + subtreeArtifactCount(child), 0);
 }
 
+function areaNodeTitle(node: AreaNode, subtreeCount: number): string | undefined {
+  if (node.children.length === 0) return node.description || undefined;
+  const childCount = subtreeCount - node.artifact_count;
+  const countSummary = node.artifact_count > 0
+    ? `직접: ${node.artifact_count} / 자식: ${childCount} / 합계: ${subtreeCount}`
+    : `직접: 0 / 자식: ${childCount}`;
+  return [node.description, countSummary].filter(Boolean).join("\n") || undefined;
+}
+
 function containsSelected(node: AreaNode, selectedArea: string | null): boolean {
   if (!selectedArea) return false;
   if (node.slug === selectedArea) return true;
@@ -232,7 +241,8 @@ function AreaTreeNode({
   const [expanded, setExpanded] = useState(() => selectedInside);
   const hasChildren = node.children.length > 0;
   const active = selectedArea === node.slug;
-  const empty = subtreeArtifactCount(node) === 0;
+  const subtreeCount = subtreeArtifactCount(node);
+  const empty = subtreeCount === 0;
   const indent = { paddingLeft: 8 + level * 14 } as React.CSSProperties;
 
   useEffect(() => {
@@ -246,7 +256,7 @@ function AreaTreeNode({
         className={`side-item${active ? " active" : ""}${empty ? " empty" : ""}`}
         style={indent}
         onClick={() => onSelectArea(active ? null : node.slug)}
-        title={node.description || undefined}
+        title={areaNodeTitle(node, subtreeCount)}
       >
         {hasChildren ? (
           <span
@@ -274,7 +284,7 @@ function AreaTreeNode({
         )}
         {active ? <FolderOpen className="lucide" /> : <Folder className="lucide" />}
         <span>{localizedAreaName(t, node.slug, node.name)}</span>
-        <span className="side-item__count">{node.artifact_count}</span>
+        <span className="side-item__count">{subtreeCount}</span>
       </button>
       {hasChildren && expanded && node.children.map((child) => (
         <AreaTreeNode

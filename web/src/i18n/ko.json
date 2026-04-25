@@ -186,7 +186,6 @@
   "trust.source.artifact.label": "Artifact 기반",
   "trust.source.artifact.tip": "의미: 다른 artifact에서 파생됨. 나타나는 경우: source_type=artifact. 변경 경로: relates_to와 source_type을 함께 정리하세요.",
   "trust.source.user_chat.label": "대화 기반",
-  "trust.source.user_chat.short_label": "사용자 대화",
   "trust.source.user_chat.tip": "의미: 사용자 대화 turn에서 파생됨. 나타나는 경우: source_type=user_chat. 변경 경로: consent_state와 canonicalization 근거를 명시하세요.",
   "trust.source.external.label": "외부 자료",
   "trust.source.external.tip": "의미: 외부 문서, 스펙, URL에서 파생됨. 나타나는 경우: source_type=external. 변경 경로: URL pin 또는 출처 설명을 추가하세요.",

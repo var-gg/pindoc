@@ -90,7 +90,8 @@ function buildChips(meta: ArtifactMeta | undefined, pins: PinRef[] | undefined, 
   chips.push(trustClassChip(meta, t));
 
   // Source summary — combines source_type with pins count.
-  chips.push(sourceSummaryChip(meta, pins, t));
+  const sourceChip = sourceSummaryChip(meta, pins, t);
+  if (sourceChip) chips.push(sourceChip);
 
   // Next-session context policy — always relevant for retrieval reasoning.
   chips.push(nextSessionChip(meta, t));
@@ -166,7 +167,7 @@ function trustClassChip(meta: ArtifactMeta, t: TFn): Chip {
   };
 }
 
-function sourceSummaryChip(meta: ArtifactMeta, pins: PinRef[] | undefined, t: TFn): Chip {
+function sourceSummaryChip(meta: ArtifactMeta, pins: PinRef[] | undefined, t: TFn): Chip | null {
   const count = pins?.length ?? 0;
   const pinsLabel = pinCountLabel(count, t);
   if (meta.source_type === "code") {
@@ -206,12 +207,11 @@ function sourceSummaryChip(meta: ArtifactMeta, pins: PinRef[] | undefined, t: TF
     };
   }
   if (meta.source_type === "user_chat") {
-    const label = t("trust.source.user_chat.label");
+    if (count === 0) return null;
     return {
-      label: t("trust.source.user_chat.short_label"),
-      tone: "warning",
+      label: pinsLabel,
+      tone: "neutral",
       title: t("trust.source.user_chat.tip"),
-      filter: { key: "source_type", value: "user_chat", label },
     };
   }
   return {

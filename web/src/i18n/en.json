@@ -186,7 +186,6 @@
   "trust.source.artifact.label": "Artifact-derived",
   "trust.source.artifact.tip": "Meaning: derived from other artifacts. Appears on: source_type=artifact. Change path: maintain relates_to together with source_type.",
   "trust.source.user_chat.label": "Conversation-derived",
-  "trust.source.user_chat.short_label": "User chat",
   "trust.source.user_chat.tip": "Meaning: derived from a user conversation turn. Appears on: source_type=user_chat. Change path: set consent_state and canonicalization evidence.",
   "trust.source.external.label": "External",
   "trust.source.external.tip": "Meaning: derived from external docs, specs, or URLs. Appears on: source_type=external. Change path: add a URL pin or source note.",
