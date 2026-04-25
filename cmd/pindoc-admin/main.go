@@ -14,6 +14,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -24,8 +25,15 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
+	"github.com/var-gg/pindoc/internal/pindoc/projects"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
 )
+
+// errProjectValidation tags user-input failures so main() can map to
+// exit 2 (vs exit 1 for DB / internal). Wrapped around the underlying
+// projects sentinel error so callers can still errors.Is to the
+// specific code (ErrSlugInvalid, ErrLangInvalid, ...) when needed.
+var errProjectValidation = errors.New("project validation failed")
 
 func main() {
 	flag.Usage = func() {
@@ -35,6 +43,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "  get <key>            — print current value")
 		fmt.Fprintln(os.Stderr, "  set <key> <value>    — update a setting (hot, no restart)")
 		fmt.Fprintln(os.Stderr, "  relabel-artifacts    — batch move artifact area_slug from a TSV mapping")
+		fmt.Fprintln(os.Stderr, "  project create <slug> --name \"...\" --language ko [--description \"...\"] [--color \"#...\"]")
+		fmt.Fprintln(os.Stderr, "                       — create a new project (no MCP session needed)")
 	}
 	flag.Parse()
 
@@ -113,6 +123,18 @@ func main() {
 	case "relabel-artifacts":
 		if err := runRelabelArtifacts(ctx, pool, cfg.ProjectSlug, args[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(1)
+		}
+
+	case "project":
+		if err := runProjectCommand(ctx, pool, args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error: "+err.Error())
+			// Validation failures exit 2, infra/DB failures exit 1.
+			// runProjectCommand returns errProjectValidation-wrapped
+			// errors for the former so we can split here.
+			if errors.Is(err, errProjectValidation) {
+				os.Exit(2)
+			}
 			os.Exit(1)
 		}
 
@@ -293,4 +315,96 @@ func readRelabelMappings(path, batchReason string) ([]relabelMapping, error) {
 		return nil, fmt.Errorf("read mapping: %w", err)
 	}
 	return out, nil
+}
+
+// runProjectCommand dispatches `pindoc-admin project <subcommand>`. V1
+// only carries `create`; future subs (rename, delete, archive) plug in
+// here. Mirrors the MCP / REST entrypoints — all three call
+// projects.CreateProject so behavior stays identical regardless of
+// surface.
+func runProjectCommand(ctx context.Context, pool *db.Pool, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("%w: project: missing subcommand (try `project create <slug> ...`)", errProjectValidation)
+	}
+	switch args[0] {
+	case "create":
+		return runProjectCreate(ctx, pool, args[1:])
+	default:
+		return fmt.Errorf("%w: project: unknown subcommand %q", errProjectValidation, args[0])
+	}
+}
+
+// runProjectCreate implements `pindoc-admin project create <slug> --name
+// "..." --language ko [--description "..."] [--color "#..."]`. Begins
+// its own tx (the MCP path uses its existing tx; CLI is the boundary
+// here). Stable error_code mapping for stderr output mirrors the REST
+// envelope so a wrapper script can tee results.
+func runProjectCreate(ctx context.Context, pool *db.Pool, args []string) error {
+	fs := flag.NewFlagSet("project create", flag.ContinueOnError)
+	name := fs.String("name", "", "human-readable display name (required)")
+	language := fs.String("language", "", "primary_language: en | ko | ja (required, immutable after create)")
+	description := fs.String("description", "", "optional one-line description")
+	color := fs.String("color", "", "optional sidebar accent color (hex / oklch / css color)")
+	owner := fs.String("owner", "", "optional owner identifier; defaults to 'default'")
+
+	// Slug is the first positional arg. Push everything before the
+	// first flag into a single positional slot so the FlagSet can
+	// parse the rest.
+	if len(args) == 0 {
+		fs.Usage()
+		return fmt.Errorf("%w: project create: missing <slug> positional argument", errProjectValidation)
+	}
+	slug := args[0]
+	if err := fs.Parse(args[1:]); err != nil {
+		return fmt.Errorf("%w: %s", errProjectValidation, err)
+	}
+
+	if strings.TrimSpace(*name) == "" {
+		return fmt.Errorf("%w: project create: --name is required", errProjectValidation)
+	}
+	if strings.TrimSpace(*language) == "" {
+		return fmt.Errorf("%w: project create: --language is required (en | ko | ja). Immutable after create — pick deliberately", errProjectValidation)
+	}
+
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	out, err := projects.CreateProject(ctx, tx, projects.CreateProjectInput{
+		Slug:            slug,
+		Name:            *name,
+		Description:     *description,
+		Color:           *color,
+		PrimaryLanguage: *language,
+		OwnerID:         *owner,
+	})
+	if err != nil {
+		// Map sentinel errors to errProjectValidation so main()
+		// returns exit 2. Non-sentinel errors stay bare → exit 1.
+		switch {
+		case errors.Is(err, projects.ErrSlugInvalid),
+			errors.Is(err, projects.ErrSlugReserved),
+			errors.Is(err, projects.ErrSlugTaken),
+			errors.Is(err, projects.ErrNameRequired),
+			errors.Is(err, projects.ErrLangRequired),
+			errors.Is(err, projects.ErrLangInvalid):
+			return fmt.Errorf("%w: %s", errProjectValidation, err)
+		default:
+			return fmt.Errorf("project create: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+
+	fmt.Printf("created project: %s (id=%s)\n", out.Slug, out.ID)
+	fmt.Printf("  name:      %s\n", out.Name)
+	fmt.Printf("  language:  %s\n", out.PrimaryLanguage)
+	fmt.Printf("  url:       /p/%s/%s/wiki\n", out.Slug, out.PrimaryLanguage)
+	fmt.Printf("  areas:     %d\n", out.AreasCreated)
+	fmt.Printf("  templates: %d\n", out.TemplatesCreated)
+	return nil
 }

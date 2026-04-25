@@ -62,6 +62,12 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/health", d.handleHealth)
 	mux.HandleFunc("GET /api/config", d.handleConfig)
 	mux.HandleFunc("GET /api/projects", d.handleProjectList)
+	// POST /api/projects creates a new project (Decision
+	// project-bootstrap-canonical-flow-reader-ui-first-class). Behind the
+	// wire it calls projects.CreateProject — same source of truth as the
+	// MCP tool and the pindoc-admin CLI. Locked to trusted_local via the
+	// pindoc-api 127.0.0.1 bind today; OAuth comes with V1.5.
+	mux.HandleFunc("POST /api/projects", d.handleProjectCreate)
 	// users is an instance-wide table (migration 0014). Surfaced read-only
 	// so Reader TaskControls can offer a real assignee dropdown next to
 	// the agents aggregate (Decision agent-only-write-분할 AC).
