@@ -5,7 +5,7 @@
 // trivial to read. Build:
 //
 //	go build -o bin/probe-mcp-http.exe ./cmd/probe-mcp-http
-//	./bin/probe-mcp-http.exe http://127.0.0.1:5832/mcp/p/pindoc
+//	./bin/probe-mcp-http.exe http://127.0.0.1:5830/mcp/p/pindoc
 package main
 
 import (

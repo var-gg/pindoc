@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -868,4 +871,67 @@ func (d Deps) handleHealth(w http.ResponseWriter, r *http.Request) {
 		info["embedder"] = map[string]any{"name": ei.Name, "model": ei.ModelID, "dim": ei.Dimension}
 	}
 	writeJSON(w, http.StatusOK, info)
+}
+
+// handleSPA serves the Reader UI build output as static files with a
+// client-side-routing fallback. Anything that resolves to an existing
+// file under d.SPADistDir (assets/, favicon, etc.) is served directly;
+// every other path returns index.html so React Router can render the
+// page client-side. d.SPADistDir is trusted to be an absolute path —
+// the resolver guards against `..` traversal anyway since the daemon
+// is exposed on loopback only and we'd rather refuse than guess.
+func (d Deps) handleSPA(w http.ResponseWriter, r *http.Request) {
+	if d.SPADistDir == "" {
+		http.NotFound(w, r)
+		return
+	}
+	distAbs, err := filepath.Abs(d.SPADistDir)
+	if err != nil {
+		d.Logger.Error("spa dist abs failed", "err", err, "dir", d.SPADistDir)
+		http.Error(w, "spa misconfigured", http.StatusInternalServerError)
+		return
+	}
+	// Reject obvious traversal before joining; filepath.Clean("/foo/../bar")
+	// collapses but a leading `..` segment is the easiest tell.
+	rel := strings.TrimPrefix(filepath.Clean("/"+strings.TrimPrefix(r.URL.Path, "/")), "/")
+	if strings.HasPrefix(rel, "..") {
+		http.NotFound(w, r)
+		return
+	}
+	candidate := filepath.Join(distAbs, rel)
+	if !strings.HasPrefix(candidate, distAbs) {
+		http.NotFound(w, r)
+		return
+	}
+	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+		http.ServeFile(w, r, candidate)
+		return
+	}
+	// Fallback — let React Router resolve the path. index.html itself
+	// covers `/`, `/p/...`, `/wiki/...`, etc.
+	http.ServeFile(w, r, filepath.Join(distAbs, "index.html"))
+}
+
+// handleSimpleHealth is the minimal liveness probe NSSM (and any external
+// monitor) hits — process-up + DB reachable, no embedder spinup, no
+// project lookup. Always returns 200 so a transient DB blip surfaces as
+// `db: degraded` in the body rather than tripping monitor alerts;
+// process-down is what those monitors should treat as failure.
+func (d Deps) handleSimpleHealth(w http.ResponseWriter, r *http.Request) {
+	dbStatus := "ok"
+	if d.DB == nil {
+		dbStatus = "degraded"
+	} else if err := d.DB.Ping(r.Context()); err != nil {
+		dbStatus = "degraded"
+	}
+	uptime := int64(0)
+	if !d.StartTime.IsZero() {
+		uptime = int64(time.Since(d.StartTime).Seconds())
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":     "ok",
+		"version":    d.Version,
+		"uptime_sec": uptime,
+		"db":         dbStatus,
+	})
 }

@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
@@ -48,12 +49,30 @@ type Deps struct {
 	Telemetry   *telemetry.Store
 	Version     string
 	BuildCommit string
+
+	// StartTime stamps when the daemon process began running. Surfaced
+	// via GET /health as uptime_sec so operators can spot-check that
+	// the NSSM-managed service hasn't been silently restart-looped.
+	// Zero value is OK — the health handler reports uptime_sec=0.
+	StartTime time.Time
+
+	// SPADistDir is the absolute filesystem path to the Reader UI build
+	// output (web/dist). When set, the daemon serves /, /assets/...,
+	// /p/{project}/{locale}/... etc. as static files with a fallback to
+	// index.html so React Router can pick up unknown paths client-side.
+	// Empty disables SPA serving — useful in tests or when a Vite dev
+	// server is fronting the daemon.
+	SPADistDir string
 }
 
 func New(cfg *config.Config, d Deps) http.Handler {
 	mux := http.NewServeMux()
 
 	// Unscoped reads — apply to the whole instance.
+	// /health is the lightweight liveness probe (NSSM / external
+	// monitor); /api/health is the verbose embedder-aware variant the
+	// Reader uses internally.
+	mux.HandleFunc("GET /health", d.handleSimpleHealth)
 	mux.HandleFunc("GET /api/health", d.handleHealth)
 	mux.HandleFunc("GET /api/config", d.handleConfig)
 	mux.HandleFunc("GET /api/projects", d.handleProjectList)
@@ -93,6 +112,15 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	// and claimed_done requires acceptance completion.
 	mux.HandleFunc("POST /api/p/{project}/artifacts/{idOrSlug}/task-meta", d.handleTaskMetaPatch)
 	mux.HandleFunc("POST /api/p/{project}/artifacts/{idOrSlug}/task-assign", d.handleTaskAssign)
+
+	// Reader SPA. Catch-all `/` is the lowest-priority pattern in
+	// Go 1.22's ServeMux, so /api/..., /mcp/p/..., /health all match
+	// first. Disabled when SPADistDir is empty — typical in tests or
+	// when the operator wants the daemon to be API-only and a Vite dev
+	// server in front handles assets.
+	if d.SPADistDir != "" {
+		mux.HandleFunc("/", d.handleSPA)
+	}
 
 	return withCORS(withRecover(mux, d.Logger))
 }

@@ -109,24 +109,26 @@ cd web && pnpm install && pnpm dev   # http://localhost:5830
 
 ### 데몬 모드 — 다수 워크스페이스에서 같은 Pindoc 인스턴스 attach
 
-여러 워크스페이스에서 각자 다른 프로젝트를 다루려면 `pindoc-server`를 streamable-HTTP 데몬으로 띄우고 `.mcp.json`을 워크스페이스마다 다른 `url`로 가리킨다. 한 데몬이 모든 세션을 받으며 connection별로 프로젝트가 격리된다.
+여러 워크스페이스에서 각자 다른 프로젝트를 다루려면 `pindoc-server`를 HTTP 데몬으로 띄우고 `.mcp.json`을 워크스페이스마다 다른 `url`로 가리킨다. 한 데몬이 모든 세션을 받으며 connection별로 프로젝트가 격리된다. 같은 포트가 Reader API(`/api/...`)와 liveness probe(`/health`)도 함께 서빙하므로 별도 `pindoc-api` 데몬을 띄울 필요가 없다.
 
 ```bash
 # 데몬 띄우기 (1회만)
 go build -o bin/pindoc-server ./cmd/pindoc-server
-./bin/pindoc-server -http 127.0.0.1:5832
-# 또는 PINDOC_HTTP_MCP_ADDR=127.0.0.1:5832 ./bin/pindoc-server
+./bin/pindoc-server -http 127.0.0.1:5830
+# 또는 PINDOC_HTTP_MCP_ADDR=127.0.0.1:5830 ./bin/pindoc-server
 ```
 
 워크스페이스별 `.mcp.json`:
 
 ```jsonc
 // workspaceA/.mcp.json
-{ "mcpServers": { "pindoc": { "url": "http://127.0.0.1:5832/mcp/p/pindoc" } } }
+{ "mcpServers": { "pindoc": { "url": "http://127.0.0.1:5830/mcp/p/pindoc" } } }
 
 // workspaceB/.mcp.json
-{ "mcpServers": { "pindoc": { "url": "http://127.0.0.1:5832/mcp/p/projB" } } }
+{ "mcpServers": { "pindoc": { "url": "http://127.0.0.1:5830/mcp/p/projB" } } }
 ```
+
+Windows에서는 `scripts/install-service.ps1` 을 관리자 PowerShell로 실행하면 NSSM을 받아서 `pindoc-server` 서비스로 등록한다 — 부팅 시 자동 시작 + 실패 시 재기동 + stdout/stderr를 `logs/service.{out,err}.log` 로 분리.
 
 각 세션에서 `pindoc.project.current`가 자기 URL의 프로젝트를 반환하고 capabilities가 `transport=streamable_http`, `scope_mode=per_connection`으로 advertise한다. 미존재 project slug는 HTTP 404로 거절. 데몬은 loopback(`127.0.0.1`)에 bind되어 외부에서 접근 불가 — 자기-호스팅 공개 시 인증 도입은 별 작업.
 

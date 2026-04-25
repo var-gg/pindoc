@@ -8,10 +8,10 @@
       "port": 5830
     },
     {
-      "name": "api",
-      "runtimeExecutable": "A:\\vargg-workspace\\pindoc\\bin\\pindoc-api.exe",
-      "runtimeArgs": [],
-      "port": 5831
+      "name": "daemon",
+      "runtimeExecutable": "A:\\vargg-workspace\\pindoc\\bin\\pindoc-server.exe",
+      "runtimeArgs": ["-http", "127.0.0.1:5830"],
+      "port": 5830
     }
   ]
 }

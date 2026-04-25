@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -36,6 +37,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
+	"github.com/var-gg/pindoc/internal/pindoc/httpapi"
 	pmcp "github.com/var-gg/pindoc/internal/pindoc/mcp"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
 	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
@@ -48,16 +50,19 @@ var (
 )
 
 func main() {
+	startTime := time.Now()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 
-	// `-http <addr>` flips the binary into streamable-HTTP daemon mode. A
-	// single daemon serves many Claude Code sessions, each pinned to a
-	// project via /mcp/p/{project}. Empty (default) keeps the legacy
+	// `-http <addr>` flips the binary into HTTP daemon mode. The same
+	// address serves the streamable-HTTP MCP transport (/mcp/p/{project}),
+	// the Reader's read-only API (/api/...), and a liveness probe
+	// (/health) on a single mux — all loopback-only, all gated by
+	// auth_mode=trusted_local for V1. Empty (default) keeps the legacy
 	// subprocess-per-session stdio path. PINDOC_HTTP_MCP_ADDR env is the
 	// equivalent for setups (Docker, systemd) that prefer envs over args.
-	httpAddrFlag := flag.String("http", "", "When set, run as a streamable-HTTP MCP daemon binding this address (e.g. 127.0.0.1:5832). Empty = stdio mode.")
+	httpAddrFlag := flag.String("http", "", "When set, run as an HTTP daemon binding this address (e.g. 127.0.0.1:5830) — serves /mcp/p/{project}, /api/..., /health. Empty = stdio mode.")
 	flag.Parse()
 	httpAddr := strings.TrimSpace(*httpAddrFlag)
 	if httpAddr == "" {
@@ -155,6 +160,54 @@ func main() {
 	defer tele.Close()
 
 	if httpAddr != "" {
+		// Resolve the default project's locale once so the Reader can
+		// rebuild legacy /wiki/... URLs into /p/<slug>/<locale>/...
+		// without an extra round-trip — same lookup pindoc-api does on
+		// boot, kept here so the merged daemon retains identical
+		// behaviour (Task task-phase-18-project-locale-implementation).
+		var defaultLocale string
+		if err := pool.QueryRow(ctx,
+			`SELECT locale FROM projects WHERE slug = $1 LIMIT 1`, cfg.ProjectSlug,
+		).Scan(&defaultLocale); err != nil {
+			logger.Info("default project locale lookup skipped",
+				"project_slug", cfg.ProjectSlug, "err", err)
+		}
+
+		// Reader SPA dist dir. PINDOC_SPA_DIST overrides; otherwise we
+		// look for `<cwd>/web/dist`, which is where `pnpm --dir web build`
+		// drops it and what the NSSM service's AppDirectory points at.
+		// Empty when neither resolves — daemon stays API-only and the
+		// operator is expected to front it with a Vite dev server.
+		spaDist := strings.TrimSpace(os.Getenv("PINDOC_SPA_DIST"))
+		if spaDist == "" {
+			if cwd, err := os.Getwd(); err == nil {
+				candidate := filepath.Join(cwd, "web", "dist")
+				if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+					spaDist = candidate
+				}
+			}
+		}
+		if spaDist != "" {
+			logger.Info("Reader SPA enabled", "dist_dir", spaDist)
+		} else {
+			logger.Info("Reader SPA disabled — set PINDOC_SPA_DIST or `pnpm --dir web build` to enable")
+		}
+
+		apiHandler := httpapi.New(cfg, httpapi.Deps{
+			DB:                   pool,
+			Logger:               logger,
+			DefaultProjectSlug:   cfg.ProjectSlug,
+			DefaultProjectLocale: defaultLocale,
+			MultiProject:         cfg.MultiProject,
+			Embedder:             embedder,
+			Settings:             ssStore,
+			Telemetry:            tele,
+			Version:              version,
+			BuildCommit:          commit,
+			StartTime:            startTime,
+			SPADistDir:           spaDist,
+		})
+
 		runHTTPDaemon(ctx, logger, httpAddr, pmcp.Options{
 			Name:      "pindoc",
 			Version:   version,
@@ -165,7 +218,7 @@ func main() {
 			AgentID:   agentID,
 			Settings:  ssStore,
 			Telemetry: tele,
-		})
+		}, apiHandler)
 		return
 	}
 
@@ -200,15 +253,19 @@ func main() {
 	}
 }
 
-// runHTTPDaemon serves the streamable-HTTP MCP transport on addr. Multiple
-// Claude Code sessions can attach to a single daemon, each pinned to one
-// project via the /mcp/p/{project} URL path. The getServer callback is
-// invoked once per connection: it parses the slug, validates against the
-// projects table, and builds a fresh project-scoped Server for the rest
-// of that session. baseOpts carries the long-lived dependencies (DB pool,
-// embedder, settings, telemetry, agent identity) shared across every
-// connection — only ProjectSlug and Transport vary per request.
-func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOpts pmcp.Options) {
+// runHTTPDaemon serves the streamable-HTTP MCP transport, the Reader
+// read-only HTTP API, and the /health liveness probe on a single addr.
+// Multiple Claude Code sessions can attach via /mcp/p/{project}, each
+// pinned to one project; the same port also serves /api/... so the
+// Reader UI no longer needs a second pindoc-api process. The getServer
+// callback is invoked once per MCP connection: it parses the slug,
+// validates against the projects table, and builds a fresh project-
+// scoped Server for the rest of that session. baseOpts carries the
+// long-lived MCP dependencies; apiHandler carries the Reader API mux
+// (httpapi.New) — Go 1.22's ServeMux picks the more-specific
+// /mcp/p/{project} pattern over the catch-all `/` so the routing is
+// unambiguous.
+func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOpts pmcp.Options, apiHandler http.Handler) {
 	pool := baseOpts.DB
 
 	getServer := func(req *http.Request) *sdk.Server {
@@ -257,6 +314,10 @@ func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOp
 		}
 		streamHandler.ServeHTTP(w, r)
 	})
+	// Catch-all delegates everything else (/, /health, /api/...) to the
+	// Reader API mux. ServeMux picks /mcp/p/{project} over `/` because it
+	// is the more specific pattern.
+	mux.Handle("/", apiHandler)
 
 	srv := &http.Server{
 		Addr:              addr,
@@ -265,9 +326,11 @@ func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOp
 	}
 
 	go func() {
-		logger.Info("pindoc-server listening (streamable_http)",
+		logger.Info("pindoc-server listening",
 			"addr", addr,
-			"path_pattern", "/mcp/p/{project}",
+			"mcp_path", "/mcp/p/{project}",
+			"api_path", "/api/...",
+			"health_path", "/health",
 		)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("http listen failed", "err", err)
@@ -276,7 +339,7 @@ func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOp
 	}()
 
 	<-ctx.Done()
-	logger.Info("pindoc-server shutting down (streamable_http)")
+	logger.Info("pindoc-server shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
