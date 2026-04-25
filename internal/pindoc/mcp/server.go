@@ -88,6 +88,20 @@ type Options struct {
 	// (tool, duration, bytes, tokens) lands in mcp_tool_calls without
 	// impacting response latency.
 	Telemetry *telemetry.Store
+
+	// ProjectSlug overrides Config.ProjectSlug for this Server instance.
+	// Streamable-HTTP daemons populate this per-connection from the
+	// /mcp/p/{project} URL so each MCP session lands in its own project.
+	// Empty falls back to Config.ProjectSlug — the stdio path. Caller is
+	// responsible for validating the slug (e.g. exists in `projects`)
+	// before calling NewServer.
+	ProjectSlug string
+
+	// Transport identifies which transport built this Server, propagated
+	// into Deps and surfaced in pindoc.project.current capabilities. One
+	// of "stdio" | "streamable_http". Empty falls back to "stdio" so the
+	// existing subprocess path keeps advertising fixed_session.
+	Transport string
 }
 
 type Server struct {
@@ -103,12 +117,24 @@ func NewServer(opts Options) *Server {
 	}
 	s := sdk.NewServer(impl, nil)
 
+	// Resolve the active project slug for this Server. ProjectSlug from
+	// Options wins so streamable-HTTP daemons can pin per-connection;
+	// stdio callers leave it empty and inherit Config.ProjectSlug.
+	projectSlug := opts.ProjectSlug
+	if projectSlug == "" {
+		projectSlug = opts.Config.ProjectSlug
+	}
+	transport := opts.Transport
+	if transport == "" {
+		transport = "stdio"
+	}
+
 	// Phase 2 read-side: project context + scope enumeration + artifact fetch.
 	deps := tools.Deps{
 		DB:           opts.DB,
 		Logger:       opts.Logger,
 		Version:      opts.Version,
-		ProjectSlug:  opts.Config.ProjectSlug,
+		ProjectSlug:  projectSlug,
 		UserLanguage: opts.Config.UserLanguage,
 		Embedder:     opts.Embedder,
 		MultiProject: opts.Config.MultiProject,
@@ -117,6 +143,7 @@ func NewServer(opts Options) *Server {
 		Settings:     opts.Settings,
 		RepoRoot:     opts.Config.RepoRoot,
 		Telemetry:    opts.Telemetry,
+		Transport:    transport,
 	}
 	deps.UserID = upsertStartupUserID(context.Background(), opts.Logger, deps, opts.Config)
 	deps.ProjectLocale = resolveStartupProjectLocale(context.Background(), opts.Logger, deps)
@@ -128,7 +155,7 @@ func NewServer(opts Options) *Server {
 		UserLanguage: opts.Config.UserLanguage,
 		Telemetry:    opts.Telemetry,
 		AgentID:      opts.AgentID,
-		ProjectSlug:  opts.Config.ProjectSlug,
+		ProjectSlug:  projectSlug,
 	})
 
 	tools.RegisterProjectCurrent(s, deps)
@@ -183,4 +210,13 @@ func (s *Server) Run(ctx context.Context, transport sdk.Transport) error {
 		"toolset_version", tools.ToolsetVersion(),
 	)
 	return s.sdk.Run(ctx, transport)
+}
+
+// SDK returns the underlying go-sdk Server for callers that need to plug
+// it into a transport other than (*Server).Run — most notably the
+// streamable-HTTP `getServer(req) *sdk.Server` callback in daemon mode,
+// which builds a fresh project-scoped Server per HTTP connection. The
+// stdio path keeps using Run() and never needs this.
+func (s *Server) SDK() *sdk.Server {
+	return s.sdk
 }

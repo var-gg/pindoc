@@ -81,6 +81,14 @@ type Deps struct {
 	// — Instrument() no-ops when absent, so tests that don't care
 	// about observability can leave it unset.
 	Telemetry *telemetry.Store
+
+	// Transport identifies which transport this Server instance was built
+	// for. "stdio" = subprocess-per-session (legacy), "streamable_http" =
+	// long-running daemon serving multiple connections, each pinned to one
+	// project via /mcp/p/{project} URL. Drives capability advertisement in
+	// pindoc.project.current — stdio reports `scope_mode=fixed_session`,
+	// http reports `scope_mode=per_connection`. Empty defaults to "stdio".
+	Transport string
 }
 
 // AbsHumanURL builds an absolute share URL from the current settings. Empty

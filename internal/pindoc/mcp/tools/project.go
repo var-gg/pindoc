@@ -58,6 +58,15 @@ type Capabilities struct {
 	// security at all" but the actual model is "trust the local
 	// subprocess".
 	AuthMode string `json:"auth_mode"`
+	// Transport identifies how the agent reached this server. "stdio" =
+	// classic subprocess-per-session model where Claude Code launches
+	// pindoc-server as a child process. "streamable_http" = daemon mode
+	// where many MCP sessions connect to one long-running pindoc-server
+	// over HTTP, each pinned to its project via /mcp/p/{project} URL.
+	// Drives ScopeMode and NewProjectRequiresReconnect; agents can branch
+	// their UX (e.g. "switch project means open a new url" vs "restart
+	// subprocess"). Added with the streamable-HTTP transport rollout.
+	Transport string `json:"transport"`
 	// UpdateVia: name of the propose field that triggers a revision append.
 	// Agents can grep for this token so a future rename doesn't silently
 	// reroute update flows to "create a new artifact".
@@ -162,12 +171,29 @@ func buildCapabilities(deps Deps) Capabilities {
 	if deps.Settings != nil {
 		publicBase = deps.Settings.Get().PublicBaseURL
 	}
+	transport := deps.Transport
+	if transport == "" {
+		transport = "stdio"
+	}
+	// Transport drives the scope-mode pair. Streamable-HTTP daemons accept
+	// many connections, each scoped to one project via the /mcp/p/{project}
+	// URL, so a "new project" is just a new url — no reconnect of the
+	// daemon itself. Stdio binds the project at process start, so
+	// switching projects means tearing down the subprocess and launching
+	// a new one with a different PINDOC_PROJECT env.
+	scopeMode := "fixed_session"
+	requiresReconnect := true
+	if transport == "streamable_http" {
+		scopeMode = "per_connection"
+		requiresReconnect = false
+	}
 	return Capabilities{
 		MultiProject:                deps.MultiProject,
-		ScopeMode:                   "fixed_session",
-		NewProjectRequiresReconnect: true,
+		ScopeMode:                   scopeMode,
+		NewProjectRequiresReconnect: requiresReconnect,
 		RetrievalQuality:            quality,
 		AuthMode:                    "trusted_local",
+		Transport:                   transport,
 		UpdateVia:                   "update_of",
 		RequiresExpectedVersion:     true,
 		ReviewQueueSupported:        false,

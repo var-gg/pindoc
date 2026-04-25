@@ -82,16 +82,19 @@ MCP = write (write-only), Wiki UI = read + (엣지) approve. REST API = 3차.
 
 Tier A core 강제 + Tier B Domain Pack + Tier C Custom(V2+).
 
-### 원칙 7. Multi-project by Design (V1 runtime: one MCP session = one project)
+### 원칙 7. Multi-project by Design (transport에 따라 두 운영 모델)
 
 한 Pindoc 인스턴스는 복수 Project를 호스팅하도록 **설계**됐다 (schema, URL, Web UI 모두 `/p/:project/…` 스코프). Solo 사이드 프로젝트 / FE·BE 분리 / 영세 2~3명 복수 프로젝트가 1급 시민.
 
-**V1 runtime 제약**: MCP subprocess 하나는 **한 프로젝트에 고정**된다 (`PINDOC_PROJECT` env로 결정, 세션 중 switch 불가). 이유:
-- stdio MCP transport에서 session-level scope switching은 SDK 수준 지원이 제한적
-- "wrong-project write"는 치명적 UX 실패 — hidden state switching보다 **"새 프로젝트를 쓰려면 새 MCP subprocess"** 가 안전
-- V1.5 agent token + per-project 권한 모델 도입 시 `pindoc.project.switch` 재검토
+`pindoc-server`는 두 transport를 지원하며 모델이 다르다:
 
-Web UI는 멀티프로젝트 switcher를 이미 지원 (`/p/:project/…` canonical URL). MCP 쪽 single-project scope는 V1 구현의 의도적 단순화이며, 외부 에이전트가 프로젝트 간 전환하려면 새 MCP 연결을 여는 게 현재 운영 모델.
+**stdio (기본, subprocess-per-session)** — `pindoc-server` 단독 실행. Claude Code가 `.mcp.json`의 `command` entry로 launch. `PINDOC_PROJECT` env가 그 subprocess의 active project로 고정되며 세션 중 switch 불가. 워크스페이스마다 별도 entry로 별도 subprocess가 떠야 멀티프로젝트가 된다. `capabilities`: `scope_mode="fixed_session"`, `new_project_requires_reconnect=true`, `transport="stdio"`.
+
+**streamable_http (데몬, V1 멀티프로젝트 운영 모델)** — `pindoc-server -http 127.0.0.1:5832` 단일 데몬을 띄우면 다수 Claude Code 세션이 attach. `.mcp.json`의 `url` entry가 `http://127.0.0.1:5832/mcp/p/{project}` — URL 경로가 connection의 active project를 결정한다. 데몬 내부 `getServer(req)` 콜백이 매 연결마다 project slug를 path에서 추출 + DB 검증 후 project-scoped Server를 빌드해 SDK에 반환. 한 데몬에서 RAM·embedder·telemetry가 공유되고, 새 프로젝트 = 새 url(.mcp.json 추가)이지 데몬 재기동 아님. `capabilities`: `scope_mode="per_connection"`, `new_project_requires_reconnect=false`, `transport="streamable_http"`. Decision `pindoc-mcp-transport-streamable-http-per-connection-scope`.
+
+두 모드 다 `auth_mode="trusted_local"` — V1은 단일 사용자/loopback 신뢰 모델. 자기-호스팅 공개(타 사용자가 데몬에 직접 attach) 시 `project_token` / OAuth 도입은 별 Decision으로 이어진다.
+
+Web UI(`pindoc-api`)는 두 transport와 무관하게 멀티프로젝트 switcher를 지원 (`/p/:project/…` canonical URL).
 
 ### 원칙 8. Customization via Slots, Not Forks
 

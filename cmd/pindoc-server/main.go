@@ -1,9 +1,18 @@
 // Pindoc MCP server entry point.
 //
-// Runs over stdio — the transport every MCP-capable coding agent (Claude
-// Code, Cursor, Codex, Cline) already speaks. An HTTP read API and a
-// streamable-HTTP MCP transport land in later phases; for M1 Phase 1 we
-// only need stdio + a handshake tool so Claude Code can attach.
+// Default transport is stdio — the channel every MCP-capable coding agent
+// (Claude Code, Cursor, Codex, Cline) already speaks; the binary is
+// launched as a subprocess by the agent and the project is pinned at
+// startup via PINDOC_PROJECT.
+//
+// `-http <addr>` (or PINDOC_HTTP_MCP_ADDR env) flips the binary into
+// long-running daemon mode. A single daemon serves multiple Claude Code
+// sessions over streamable-HTTP, with each session pinned to its project
+// via the URL path /mcp/p/{project}. The getServer callback resolves
+// that slug per-connection so writes always land in the URL's project
+// — see docs/03-architecture.md and Decision
+// pindoc-mcp-transport-streamable-http-per-connection-scope for the
+// rationale.
 package main
 
 import (
@@ -11,12 +20,16 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"flag"
+	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -39,6 +52,22 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 
+	// `-http <addr>` flips the binary into streamable-HTTP daemon mode. A
+	// single daemon serves many Claude Code sessions, each pinned to a
+	// project via /mcp/p/{project}. Empty (default) keeps the legacy
+	// subprocess-per-session stdio path. PINDOC_HTTP_MCP_ADDR env is the
+	// equivalent for setups (Docker, systemd) that prefer envs over args.
+	httpAddrFlag := flag.String("http", "", "When set, run as a streamable-HTTP MCP daemon binding this address (e.g. 127.0.0.1:5832). Empty = stdio mode.")
+	flag.Parse()
+	httpAddr := strings.TrimSpace(*httpAddrFlag)
+	if httpAddr == "" {
+		httpAddr = strings.TrimSpace(os.Getenv("PINDOC_HTTP_MCP_ADDR"))
+	}
+	transportName := "stdio"
+	if httpAddr != "" {
+		transportName = "streamable_http"
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		logger.Error("config load failed", "err", err)
@@ -48,7 +77,7 @@ func main() {
 	logger.Info("pindoc-server starting",
 		"version", version,
 		"commit", commit,
-		"transport", "stdio",
+		"transport", transportName,
 		"db_configured", cfg.DatabaseURL != "",
 	)
 
@@ -125,6 +154,21 @@ func main() {
 	tele := telemetry.New(ctx, pool.Pool, logger, telemetry.Options{})
 	defer tele.Close()
 
+	if httpAddr != "" {
+		runHTTPDaemon(ctx, logger, httpAddr, pmcp.Options{
+			Name:      "pindoc",
+			Version:   version,
+			Logger:    logger,
+			Config:    cfg,
+			DB:        pool,
+			Embedder:  embedder,
+			AgentID:   agentID,
+			Settings:  ssStore,
+			Telemetry: tele,
+		})
+		return
+	}
+
 	server := pmcp.NewServer(pmcp.Options{
 		Name:      "pindoc",
 		Version:   version,
@@ -135,6 +179,7 @@ func main() {
 		AgentID:   agentID,
 		Settings:  ssStore,
 		Telemetry: tele,
+		Transport: "stdio",
 	})
 
 	err = server.Run(ctx, &sdk.StdioTransport{})
@@ -153,6 +198,91 @@ func main() {
 		logger.Error("server exited with error", "err", err)
 		os.Exit(1)
 	}
+}
+
+// runHTTPDaemon serves the streamable-HTTP MCP transport on addr. Multiple
+// Claude Code sessions can attach to a single daemon, each pinned to one
+// project via the /mcp/p/{project} URL path. The getServer callback is
+// invoked once per connection: it parses the slug, validates against the
+// projects table, and builds a fresh project-scoped Server for the rest
+// of that session. baseOpts carries the long-lived dependencies (DB pool,
+// embedder, settings, telemetry, agent identity) shared across every
+// connection — only ProjectSlug and Transport vary per request.
+func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOpts pmcp.Options) {
+	pool := baseOpts.DB
+
+	getServer := func(req *http.Request) *sdk.Server {
+		project := strings.TrimSpace(req.PathValue("project"))
+		if project == "" {
+			// Should never happen because the mux pattern requires the
+			// segment, but guard anyway so a malformed mount doesn't
+			// crash the daemon.
+			logger.Warn("getServer called with empty project slug")
+			return nil
+		}
+		opts := baseOpts
+		opts.ProjectSlug = project
+		opts.Transport = "streamable_http"
+		return pmcp.NewServer(opts).SDK()
+	}
+
+	streamHandler := sdk.NewStreamableHTTPHandler(getServer, nil)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/mcp/p/{project}", func(w http.ResponseWriter, r *http.Request) {
+		project := strings.TrimSpace(r.PathValue("project"))
+		if project == "" {
+			http.Error(w, "project slug required", http.StatusBadRequest)
+			return
+		}
+		// Validate project exists before delegating to the SDK so the
+		// failure mode is a plain HTTP 404 the operator can grep for in
+		// access logs, not an opaque transport error inside the MCP
+		// session.
+		var exists bool
+		if err := pool.QueryRow(r.Context(),
+			`SELECT EXISTS(SELECT 1 FROM projects WHERE slug = $1)`,
+			project,
+		).Scan(&exists); err != nil {
+			logger.Error("project existence check failed",
+				"project_slug", project, "err", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if !exists {
+			logger.Warn("rejected MCP connection — unknown project slug",
+				"project_slug", project, "remote", r.RemoteAddr)
+			http.Error(w, fmt.Sprintf("project %q not found", project), http.StatusNotFound)
+			return
+		}
+		streamHandler.ServeHTTP(w, r)
+	})
+
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	go func() {
+		logger.Info("pindoc-server listening (streamable_http)",
+			"addr", addr,
+			"path_pattern", "/mcp/p/{project}",
+		)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("http listen failed", "err", err)
+			os.Exit(1)
+		}
+	}()
+
+	<-ctx.Done()
+	logger.Info("pindoc-server shutting down (streamable_http)")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Warn("http shutdown returned error", "err", err)
+	}
+	logger.Info("pindoc-server stopped cleanly", "reason", "context done")
 }
 
 func errReason(err error) string {

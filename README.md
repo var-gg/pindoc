@@ -50,7 +50,7 @@ Agent Session ── checkpoint ──▶ Promote ──▶ Artifact ──▶ G
 - **Typed Documents (Tier A/B/C)** — Decision/Analysis/Debug/Flow/Task/TC/Glossary + Domain Pack.
 - **Git-pinned artifacts** — 커밋/PR/파일 경로 고정. 코드 변경 시 stale 자동.
 - **Fast Landing** — 완벽 인덱스 아님. 핵심 리소스 1~3개로의 빠른 착륙. M7 자가 검증.
-- **Multi-project by Design** — 한 인스턴스 = 복수 프로젝트 (schema/URL/UI 모두 `/p/:project/…` 스코프). V1 MCP runtime은 "1 subprocess = 1 project" 제약 — 프로젝트 전환은 새 MCP 연결로. FE/BE 분리·Solo 사이드 프로젝트·영세 팀 현실 지원.
+- **Multi-project by Design** — 한 인스턴스 = 복수 프로젝트 (schema/URL/UI 모두 `/p/:project/…` 스코프). `pindoc-server`는 두 transport를 지원: stdio(기본, subprocess-per-session)는 `PINDOC_PROJECT`로 프로젝트 고정. `pindoc-server -http <addr>` 데몬 모드는 `/mcp/p/{project}` URL로 connection-scoped 분리 — 한 데몬에 다수 워크스페이스가 attach. FE/BE 분리·Solo 사이드 프로젝트·영세 팀 현실 지원.
 
 ## Target Users
 
@@ -106,6 +106,31 @@ cd web && pnpm install && pnpm dev   # http://localhost:5830
 ```
 
 **Claude Code에 등록**: `.mcp.json.example` 을 `~/.claude/mcp.json` 에 복사 (또는 병합) 후 Claude Code 재시작. `claude mcp list` 로 `pindoc` 확인. 새 세션에서 `pindoc.ping` 실행하면 handshake 성공.
+
+### 데몬 모드 — 다수 워크스페이스에서 같은 Pindoc 인스턴스 attach
+
+여러 워크스페이스에서 각자 다른 프로젝트를 다루려면 `pindoc-server`를 streamable-HTTP 데몬으로 띄우고 `.mcp.json`을 워크스페이스마다 다른 `url`로 가리킨다. 한 데몬이 모든 세션을 받으며 connection별로 프로젝트가 격리된다.
+
+```bash
+# 데몬 띄우기 (1회만)
+go build -o bin/pindoc-server ./cmd/pindoc-server
+./bin/pindoc-server -http 127.0.0.1:5832
+# 또는 PINDOC_HTTP_MCP_ADDR=127.0.0.1:5832 ./bin/pindoc-server
+```
+
+워크스페이스별 `.mcp.json`:
+
+```jsonc
+// workspaceA/.mcp.json
+{ "mcpServers": { "pindoc": { "url": "http://127.0.0.1:5832/mcp/p/pindoc" } } }
+
+// workspaceB/.mcp.json
+{ "mcpServers": { "pindoc": { "url": "http://127.0.0.1:5832/mcp/p/projB" } } }
+```
+
+각 세션에서 `pindoc.project.current`가 자기 URL의 프로젝트를 반환하고 capabilities가 `transport=streamable_http`, `scope_mode=per_connection`으로 advertise한다. 미존재 project slug는 HTTP 404로 거절. 데몬은 loopback(`127.0.0.1`)에 bind되어 외부에서 접근 불가 — 자기-호스팅 공개 시 인증 도입은 별 작업.
+
+상세 설계: Decision `pindoc-mcp-transport-streamable-http-per-connection-scope`.
 
 ## Read the design
 

@@ -392,8 +392,10 @@ func (d Deps) applyTaskMetaPatch(
 	// Need title, body, tags, completeness to stamp the revision row — the
 	// revision carries body_hash of the *current* body so diffs pick it up
 	// as a no-body-change revision. Pull them inside the tx so we don't
-	// race a concurrent body_patch.
-	var currentTitle, currentBody, currentCompleteness string
+	// race a concurrent body_patch. currentBody is already declared in the
+	// outer scope (used for acceptance gate) — Scan rebinds it here so the
+	// transactional read wins, matching the rest of these tx-local fields.
+	var currentTitle, currentCompleteness string
 	var currentTags []string
 	if err := tx.QueryRow(ctx, `
 		SELECT title, body_markdown, tags, completeness
