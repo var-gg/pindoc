@@ -38,11 +38,6 @@ type Deps struct {
 	// search / context.for_task. Phase 3+.
 	Embedder embed.Provider
 
-	// MultiProject mirrors config.MultiProject so tools can advertise
-	// whether the instance expects a Project Switcher UI. Independent of
-	// the URL scope model.
-	MultiProject bool
-
 	// Receipts is the in-memory search-receipt store used to enforce
 	// search-before-propose (Phase 11b). Nil-safe: every call site checks
 	// before dereferencing, and nil disables the gate (useful for tests).

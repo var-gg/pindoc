@@ -161,7 +161,10 @@ claude mcp list           # pindoc 있음
 - `/wiki/...`, `/tasks/...`, `/graph`, `/inbox`, `/` 모두 기본 프로젝트로 302
 - TopNav Project Switcher 드롭다운 활성화 (현재 프로젝트 목록 + "새 프로젝트는
   에이전트에게" 안내)
-- `PINDOC_MULTI_PROJECT=true|false` env — V1.5 권한 모델 확장 지점
+- `multi_project` capability 는 DB의 visible 프로젝트 수에서 자동 도출
+  (`projects.CountVisible > 1`). env flag 없음 — 두 번째 프로젝트가 생기는
+  즉시 switcher 가 켜진다. V1.5 권한 모델이 들어오면 같은 헬퍼가 ACL 필터를
+  추가하는 확장 지점이 된다.
 - Home / design-system 스캐폴드는 `/design`, `/design/preview/:slug` 로 이동
 
 ## Phase 9 — Referenced Confirmation hardening (완료 · 2026-04-22)

@@ -22,7 +22,7 @@
 
 | 지적 (P0) | 해소 근거 |
 |---|---|
-| "multi-project 약속과 single-project env runtime 충돌" | Phase 8에서 `/p/:project/…` canonical URL + `PINDOC_MULTI_PROJECT` 토글 + V1.5 권한 모델로 연기 명시. Review B §13.6 "single-project now" 포지셔닝 권고는 자연 수용. |
+| "multi-project 약속과 single-project env runtime 충돌" | Phase 8에서 `/p/:project/…` canonical URL + `multi_project` capability 노출 + V1.5 권한 모델로 연기 명시. (당시 `PINDOC_MULTI_PROJECT` env flag 였으나 2026-04-26 derived value 로 교체 — `projects.CountVisible(...) > 1`. 두 번째 프로젝트가 생기는 즉시 switcher 가 켜진다.) Review B §13.6 "single-project now" 포지셔닝 권고는 자연 수용. |
 | "Project Switcher UI가 inert chip" | Phase 8에서 드롭다운 실제 작동. |
 | "pindoc.project.create 부재" | Phase 8에서 MCP tool 추가. 프로젝트 row + `misc` area seed + canonical URL 반환. |
 | "share URL 규약 부재 / 레거시 호환 부재" | Phase 8에서 `/`, `/wiki/*`, `/tasks/*`, `/graph`, `/inbox` 모두 `/p/{default}/…` 302. PINDOC.md 템플릿에 URL convention 섹션 추가. |

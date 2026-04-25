@@ -33,11 +33,6 @@ type Config struct {
 	// via PINDOC_PROJECT.
 	ProjectSlug string
 
-	// MultiProject toggles the Web UI's project switcher. Default false so
-	// single-project installs stay chromeless; flip to true once pindoc.project.create
-	// is run to introduce a second project.
-	MultiProject bool
-
 	// Embed controls which embedding provider is built at startup.
 	Embed embed.Config
 
@@ -70,7 +65,6 @@ func Load() (*Config, error) {
 		LogLevel:     env("PINDOC_LOG_LEVEL", "info"),
 		UserLanguage: strings.ToLower(env("PINDOC_USER_LANGUAGE", "en")),
 		ProjectSlug:  env("PINDOC_PROJECT", "pindoc"),
-		MultiProject: envBool("PINDOC_MULTI_PROJECT", false),
 		RepoRoot:     env("PINDOC_REPO_ROOT", ""),
 		UserName:     strings.TrimSpace(env("PINDOC_USER_NAME", "")),
 		UserEmail:    strings.TrimSpace(env("PINDOC_USER_EMAIL", "")),
