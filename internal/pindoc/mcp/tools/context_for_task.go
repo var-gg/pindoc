@@ -10,6 +10,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 )
 
@@ -137,7 +138,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.context.for_task",
 			Description: "Given a natural-language task description, return the 1–3 most relevant artifacts in this project. Call this at the start of any non-trivial task before grepping code or writing new artifacts. Tuning: smaller TopK than artifact.search because this optimises for first-hop precision, not recall.",
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in contextForTaskInput) (*sdk.CallToolResult, contextForTaskOutput, error) {
+		func(ctx context.Context, p *auth.Principal, in contextForTaskInput) (*sdk.CallToolResult, contextForTaskOutput, error) {
 			if strings.TrimSpace(in.TaskDescription) == "" {
 				return nil, contextForTaskOutput{}, fmt.Errorf("task_description is required")
 			}
@@ -198,7 +199,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			if len(in.Areas) > 0 {
 				areasArg = in.Areas
 			}
-			rows, err := deps.DB.Query(ctx, sql, qVec, deps.ProjectSlug, areasArg, in.TopK, in.IncludeTemplates)
+			rows, err := deps.DB.Query(ctx, sql, qVec, p.ProjectSlug, areasArg, in.TopK, in.IncludeTemplates)
 			if err != nil {
 				return nil, contextForTaskOutput{}, fmt.Errorf("query: %w", err)
 			}
@@ -222,8 +223,8 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 					return nil, contextForTaskOutput{}, fmt.Errorf("scan: %w", err)
 				}
 				l.AgentRef = "pindoc://" + l.Slug
-				l.HumanURL = HumanURL(deps.ProjectSlug, deps.ProjectLocale, l.Slug)
-				l.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, l.Slug)
+				l.HumanURL = HumanURL(p.ProjectSlug, p.ProjectLocale, l.Slug)
+				l.HumanURLAbs = AbsHumanURL(deps.Settings, p.ProjectSlug, p.ProjectLocale, l.Slug)
 				if bestHeading != "" {
 					l.Rationale = "Best-matching section: " + bestHeading
 				} else {
@@ -274,7 +275,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			if info.Name == "stub" {
 				out.Notice = "stub embedder active — landings are hash-ranked, not semantic."
 			}
-			if areaCounts, err := areaArtifactCounts(ctx, deps); err == nil {
+			if areaCounts, err := areaArtifactCounts(ctx, deps, p.ProjectSlug); err == nil {
 				out.SuggestedAreas = suggestAreasForTaskDescription(in.TaskDescription, out.Landings, areaCounts)
 			}
 			if deps.Receipts != nil {
@@ -285,11 +286,11 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 				for _, l := range out.Landings {
 					ids = append(ids, l.ArtifactID)
 				}
-				out.SearchReceipt = deps.Receipts.Issue(deps.ProjectSlug, in.TaskDescription,
+				out.SearchReceipt = deps.Receipts.Issue(p.ProjectSlug, in.TaskDescription,
 					headSnapshotsForArtifacts(ctx, deps, ids),
 				)
 			}
-			if err := recordAreaSuggestionEvent(ctx, deps, out.SearchReceipt, in.TaskDescription, out.SuggestedAreas); err != nil && deps.Logger != nil {
+			if err := recordAreaSuggestionEvent(ctx, deps, p.ProjectSlug, out.SearchReceipt, in.TaskDescription, out.SuggestedAreas); err != nil && deps.Logger != nil {
 				deps.Logger.Warn("area suggestion event failed", "err", err)
 			}
 			return nil, out, rows.Err()
@@ -437,7 +438,7 @@ func suggestAreasForTaskDescription(desc string, landings []ContextLanding, area
 	return out
 }
 
-func areaArtifactCounts(ctx context.Context, deps Deps) (map[string]int, error) {
+func areaArtifactCounts(ctx context.Context, deps Deps, projectSlug string) (map[string]int, error) {
 	rows, err := deps.DB.Query(ctx, `
 		SELECT ar.slug, count(a.id)::int
 		FROM areas ar
@@ -445,7 +446,7 @@ func areaArtifactCounts(ctx context.Context, deps Deps) (map[string]int, error) 
 		LEFT JOIN artifacts a ON a.area_id = ar.id AND a.status <> 'archived'
 		WHERE p.slug = $1
 		GROUP BY ar.slug
-	`, deps.ProjectSlug)
+	`, projectSlug)
 	if err != nil {
 		return nil, err
 	}
@@ -462,7 +463,7 @@ func areaArtifactCounts(ctx context.Context, deps Deps) (map[string]int, error) 
 	return out, rows.Err()
 }
 
-func recordAreaSuggestionEvent(ctx context.Context, deps Deps, correlationID, taskDescription string, suggestions []AreaSuggestion) error {
+func recordAreaSuggestionEvent(ctx context.Context, deps Deps, projectSlug, correlationID, taskDescription string, suggestions []AreaSuggestion) error {
 	if deps.DB == nil {
 		return nil
 	}
@@ -482,6 +483,6 @@ func recordAreaSuggestionEvent(ctx context.Context, deps Deps, correlationID, ta
 		SELECT p.id, 'agent.area_suggestion_proposed', NULL, $2::jsonb
 		FROM projects p
 		WHERE p.slug = $1
-	`, deps.ProjectSlug, string(payload))
+	`, projectSlug, string(payload))
 	return err
 }

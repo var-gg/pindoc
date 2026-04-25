@@ -11,6 +11,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
@@ -21,23 +22,23 @@ import (
 )
 
 // resolveStartupProjectLocale reads projects.locale for the active
-// PINDOC_PROJECT slug and returns it so HumanURL / AbsHumanURL can embed
-// the locale segment in response URLs (Task task-phase-18-project-locale-
+// project slug and returns it so HumanURL / AbsHumanURL can embed the
+// locale segment in response URLs (Task task-phase-18-project-locale-
 // implementation). Falls back to empty string when the project row is
 // missing or DB unreachable; HumanURL then falls back to its own "en"
 // default so share links still render without blocking the server boot.
-func resolveStartupProjectLocale(ctx context.Context, logger *slog.Logger, deps tools.Deps) string {
-	if deps.DB == nil {
+func resolveStartupProjectLocale(ctx context.Context, logger *slog.Logger, pool *db.Pool, projectSlug string) string {
+	if pool == nil {
 		return ""
 	}
 	var locale string
-	err := deps.DB.QueryRow(ctx,
+	err := pool.QueryRow(ctx,
 		`SELECT locale FROM projects WHERE slug = $1 LIMIT 1`,
-		deps.ProjectSlug,
+		projectSlug,
 	).Scan(&locale)
 	if err != nil {
 		logger.Warn("project locale lookup failed; HumanURL uses 'en' fallback",
-			"project_slug", deps.ProjectSlug, "err", err)
+			"project_slug", projectSlug, "err", err)
 		return ""
 	}
 	return locale
@@ -98,9 +99,10 @@ type Options struct {
 	ProjectSlug string
 
 	// Transport identifies which transport built this Server, propagated
-	// into Deps and surfaced in pindoc.project.current capabilities. One
-	// of "stdio" | "streamable_http". Empty falls back to "stdio" so the
-	// existing subprocess path keeps advertising fixed_session.
+	// into the auth chain's TrustedLocalResolver and surfaced in
+	// pindoc.project.current capabilities. One of "stdio" |
+	// "streamable_http". Empty falls back to "stdio" so the existing
+	// subprocess path keeps advertising fixed_session.
 	Transport string
 }
 
@@ -129,34 +131,38 @@ func NewServer(opts Options) *Server {
 		transport = "stdio"
 	}
 
-	// Phase 2 read-side: project context + scope enumeration + artifact fetch.
+	// Deps carries pure infrastructure — caller-identity / scope live on
+	// the Principal that the AuthChain produces per call (Decision
+	// principal-resolver-architecture). Build deps first so
+	// upsertStartupUserID can use it for the env-anchored user upsert,
+	// then layer the chain on top once we know UserID + ProjectLocale.
 	deps := tools.Deps{
 		DB:           opts.DB,
 		Logger:       opts.Logger,
 		Version:      opts.Version,
-		ProjectSlug:  projectSlug,
 		UserLanguage: opts.Config.UserLanguage,
 		Embedder:     opts.Embedder,
 		MultiProject: opts.Config.MultiProject,
 		Receipts:     receipts.New(0), // DefaultTTL applies
-		AgentID:      opts.AgentID,
 		Settings:     opts.Settings,
 		RepoRoot:     opts.Config.RepoRoot,
 		Telemetry:    opts.Telemetry,
-		Transport:    transport,
 	}
-	deps.UserID = upsertStartupUserID(context.Background(), opts.Logger, deps, opts.Config)
-	deps.ProjectLocale = resolveStartupProjectLocale(context.Background(), opts.Logger, deps)
+	userID := upsertStartupUserID(context.Background(), opts.Logger, deps, opts.Config)
+	projectLocale := resolveStartupProjectLocale(context.Background(), opts.Logger, opts.DB, projectSlug)
 
-	// Phase 1 handshake (Ping has its own Deps subset — still
-	// instrumented via the shared Telemetry store passed in opts).
-	tools.RegisterPing(s, tools.PingDeps{
-		Version:      opts.Version,
-		UserLanguage: opts.Config.UserLanguage,
-		Telemetry:    opts.Telemetry,
-		AgentID:      opts.AgentID,
-		ProjectSlug:  projectSlug,
-	})
+	// V1 chain holds a single TrustedLocalResolver built from env-derived
+	// state. V1.5 adds BearerTokenResolver / OAuthSessionResolver in front
+	// of trusted_local — the prepended resolvers either match (and we
+	// short-circuit) or pass through to trusted_local for OSS self-host
+	// fallback. Handlers downstream are mode-blind.
+	deps.AuthChain = auth.NewChain(
+		auth.NewTrustedLocalResolver(userID, opts.AgentID, "", projectSlug, projectLocale, transport),
+	)
+
+	// Phase 1 handshake — same registration path as every other tool so
+	// the auth chain runs and telemetry records the call.
+	tools.RegisterPing(s, deps)
 
 	tools.RegisterProjectCurrent(s, deps)
 	tools.RegisterProjectCreate(s, deps)

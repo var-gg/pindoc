@@ -3,6 +3,7 @@ package tools
 import (
 	"log/slog"
 
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/receipts"
@@ -10,24 +11,30 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
 )
 
-// Deps is the shared context every tool handler needs. Keeping this tiny on
-// purpose — anything added here shows up in every tool's signature and
-// becomes an implicit dependency you cannot avoid paying for.
+// Deps is the shared infrastructure every tool handler needs. Caller-
+// identity / scope (UserID, AgentID, ProjectSlug, ProjectLocale,
+// Transport) used to live here too — those moved to *auth.Principal,
+// which the AddInstrumentedTool wrapper resolves per-call via AuthChain
+// and threads as an explicit handler argument. Decision
+// principal-resolver-architecture; the migration kept handler bodies
+// blind to auth_mode so adding BearerToken / OAuth resolvers later
+// changes zero handler code.
+//
+// Keeping this struct small on purpose — anything added here shows up
+// in every tool's signature and becomes an implicit dependency you
+// cannot avoid paying for.
 type Deps struct {
 	DB      *db.Pool
 	Logger  *slog.Logger
 	Version string
 
-	// ProjectSlug is resolved on server startup from PINDOC_PROJECT.
-	// For Phase 2 the MCP server treats it as "the" project.
-	ProjectSlug string
-
-	// ProjectLocale is the `projects.locale` column value for the active
-	// ProjectSlug (Task task-phase-18-project-locale-implementation,
-	// migration 0015). Same slug can live under multiple locales, so the
-	// canonical identity is (slug, locale). Empty until server boot
-	// resolves it; HumanURL / AbsHumanURL embed it in the URL path.
-	ProjectLocale string
+	// AuthChain resolves the calling Principal for each tool invocation.
+	// V1 wires a single TrustedLocalResolver; V1.5+ prepends
+	// BearerTokenResolver / OAuthSessionResolver. Nil chains short-
+	// circuit AddInstrumentedTool with ErrNoResolverMatched so partial
+	// wiring fails loud at first request rather than silently
+	// authenticating as nobody.
+	AuthChain *auth.Chain
 
 	// UserLanguage is the PINDOC.md / env fallback language the server uses
 	// when selecting NOT_READY / suggested_action templates. Phase 5
@@ -48,14 +55,6 @@ type Deps struct {
 	// before dereferencing, and nil disables the gate (useful for tests).
 	Receipts *receipts.Store
 
-	// AgentID is the server-issued identity for this MCP subprocess
-	// (Phase 12c). Set once at startup from PINDOC_AGENT_ID env, or
-	// generated fresh if unset. Persisted on every artifact_revisions
-	// row via source_session_ref so provenance is server-trusted rather
-	// than agent-asserted. `author_id` in propose input remains a
-	// client-reported display label.
-	AgentID string
-
 	// Settings is the operator-editable config store (Phase 14a). Nil-
 	// safe: capability reporting falls back to defaults, and human_url_abs
 	// is simply omitted when PublicBaseURL is empty.
@@ -69,26 +68,10 @@ type Deps struct {
 	// takes over). Pure warning, never blocks.
 	RepoRoot string
 
-	// UserID is the uuid of the `users` row bound to this MCP session
-	// (Decision `decision-author-identity-dual`). Populated at server
-	// startup by upserting on PINDOC_USER_NAME; empty when the operator
-	// skipped identity setup (artifact.propose then leaves
-	// author_user_id NULL). V1.5 OAuth replaces this with a session-
-	// resolved principal rather than an env-anchored single user.
-	UserID string
-
 	// Telemetry is the async MCP tool-call logger (Phase J). Nil-safe
 	// — Instrument() no-ops when absent, so tests that don't care
 	// about observability can leave it unset.
 	Telemetry *telemetry.Store
-
-	// Transport identifies which transport this Server instance was built
-	// for. "stdio" = subprocess-per-session (legacy), "streamable_http" =
-	// long-running daemon serving multiple connections, each pinned to one
-	// project via /mcp/p/{project} URL. Drives capability advertisement in
-	// pindoc.project.current — stdio reports `scope_mode=fixed_session`,
-	// http reports `scope_mode=per_connection`. Empty defaults to "stdio".
-	Transport string
 }
 
 // AbsHumanURL builds an absolute share URL from the current settings. Empty

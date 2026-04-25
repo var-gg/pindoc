@@ -11,6 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 )
 
 type artifactReadInput struct {
@@ -114,14 +116,14 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.artifact.read",
 			Description: "Fetch an artifact by UUID, slug, or share URL, including /p/{project}/{locale}/wiki/{slug} paths and their absolute URLs. view=brief returns title/summary/pins/stale without the full body; view=continuation adds recent revisions and typed edges; view=full (default) returns everything.",
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in artifactReadInput) (*sdk.CallToolResult, artifactReadOutput, error) {
-			ref := normalizeArtifactReadRef(in.IDOrSlug, deps.ProjectSlug, deps.ProjectLocale)
+		func(ctx context.Context, p *auth.Principal, in artifactReadInput) (*sdk.CallToolResult, artifactReadOutput, error) {
+			ref := normalizeArtifactReadRef(in.IDOrSlug, p.ProjectSlug, p.ProjectLocale)
 			idOrSlug := ref.Value
 			if idOrSlug == "" {
 				return nil, artifactReadOutput{}, errors.New("id_or_slug is required")
 			}
 			if ref.ScopeMismatch {
-				return nil, artifactReadOutput{}, artifactReadNotFoundError(in.IDOrSlug, deps, ref)
+				return nil, artifactReadOutput{}, artifactReadNotFoundError(in.IDOrSlug, p, ref)
 			}
 			view := strings.ToLower(strings.TrimSpace(in.View))
 			if view == "" {
@@ -163,7 +165,7 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 				  AND ($2 = '' OR proj.locale = $2)
 				  AND (a.id::text = $3 OR a.slug = $3)
 				LIMIT 1
-			`, deps.ProjectSlug, deps.ProjectLocale, idOrSlug).Scan(
+			`, p.ProjectSlug, p.ProjectLocale, idOrSlug).Scan(
 				&out.ID, &out.ProjectSlug, &out.AreaSlug, &out.Slug,
 				&out.Type, &out.Title, &out.BodyMarkdown, &out.Tags,
 				&out.Completeness, &out.Status, &out.ReviewState,
@@ -172,7 +174,7 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			)
 			_ = desc // reserved; project.description not part of read response
 			if errors.Is(err, pgx.ErrNoRows) {
-				return nil, artifactReadOutput{}, artifactReadNotFoundError(in.IDOrSlug, deps, ref)
+				return nil, artifactReadOutput{}, artifactReadNotFoundError(in.IDOrSlug, p, ref)
 			}
 			if err != nil {
 				return nil, artifactReadOutput{}, fmt.Errorf("read: %w", err)
@@ -193,8 +195,8 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 				}
 			}
 			out.AgentRef = "pindoc://" + out.Slug
-			out.HumanURL = HumanURL(out.ProjectSlug, deps.ProjectLocale, out.Slug)
-			out.HumanURLAbs = AbsHumanURL(deps.Settings, out.ProjectSlug, deps.ProjectLocale, out.Slug)
+			out.HumanURL = HumanURL(out.ProjectSlug, p.ProjectLocale, out.Slug)
+			out.HumanURLAbs = AbsHumanURL(deps.Settings, out.ProjectSlug, p.ProjectLocale, out.Slug)
 			out.View = view
 
 			// view=brief / continuation: drop the heavy body, add summary.
@@ -226,7 +228,7 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 				}
 				out.RecentRevisions = revs
 
-				rel, relBy, err := loadEdges(ctx, deps, out.ID)
+				rel, relBy, err := loadEdges(ctx, deps, p, out.ID)
 				if err != nil {
 					deps.Logger.Warn("edges lookup failed", "artifact_id", out.ID, "err", err)
 				}
@@ -341,7 +343,7 @@ func loadRecentRevisions(ctx context.Context, deps Deps, artifactID string, limi
 	return out, rows.Err()
 }
 
-func loadEdges(ctx context.Context, deps Deps, artifactID string) ([]EdgeRef, []EdgeRef, error) {
+func loadEdges(ctx context.Context, deps Deps, p *auth.Principal, artifactID string) ([]EdgeRef, []EdgeRef, error) {
 	out := []EdgeRef{}
 	outBy := []EdgeRef{}
 
@@ -363,8 +365,8 @@ func loadEdges(ctx context.Context, deps Deps, artifactID string) ([]EdgeRef, []
 			return nil, nil, err
 		}
 		e.AgentRef = "pindoc://" + e.Slug
-		e.HumanURL = HumanURL(deps.ProjectSlug, deps.ProjectLocale, e.Slug)
-		e.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, e.Slug)
+		e.HumanURL = HumanURL(p.ProjectSlug, p.ProjectLocale, e.Slug)
+		e.HumanURLAbs = AbsHumanURL(deps.Settings, p.ProjectSlug, p.ProjectLocale, e.Slug)
 		out = append(out, e)
 	}
 	rows.Close()
@@ -387,8 +389,8 @@ func loadEdges(ctx context.Context, deps Deps, artifactID string) ([]EdgeRef, []
 			return out, nil, err
 		}
 		e.AgentRef = "pindoc://" + e.Slug
-		e.HumanURL = HumanURL(deps.ProjectSlug, deps.ProjectLocale, e.Slug)
-		e.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, e.Slug)
+		e.HumanURL = HumanURL(p.ProjectSlug, p.ProjectLocale, e.Slug)
+		e.HumanURLAbs = AbsHumanURL(deps.Settings, p.ProjectSlug, p.ProjectLocale, e.Slug)
 		outBy = append(outBy, e)
 	}
 
@@ -496,10 +498,10 @@ func splitPathSegments(path string) []string {
 	return segments
 }
 
-func artifactReadNotFoundError(raw string, deps Deps, ref artifactReadRef) error {
-	projectScope := deps.ProjectSlug
-	if deps.ProjectLocale != "" {
-		projectScope += "/" + deps.ProjectLocale
+func artifactReadNotFoundError(raw string, p *auth.Principal, ref artifactReadRef) error {
+	projectScope := p.ProjectSlug
+	if p.ProjectLocale != "" {
+		projectScope += "/" + p.ProjectLocale
 	}
 	msg := fmt.Sprintf("artifact %q not found in project %q", raw, projectScope)
 	if ref.LooksLikeShareURL {

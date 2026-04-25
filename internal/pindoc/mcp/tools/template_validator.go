@@ -86,11 +86,11 @@ func parseValidatorHints(body string) *validatorHints {
 }
 
 // getValidatorHints resolves hints for an artifact.type, caching both
-// positive and negative lookups. Lookups are scoped to deps.ProjectSlug
-// because the _template_* seed lives per-project (migration 0006 seeds
-// pindoc, pindoc.project.create seeds subsequent projects).
-func getValidatorHints(ctx context.Context, deps Deps, artType string) *validatorHints {
-	key := validatorHintsKey(deps.ProjectSlug, artType)
+// positive and negative lookups. Lookups are scoped to projectSlug because
+// the _template_* seed lives per-project (migration 0006 seeds pindoc,
+// pindoc.project.create seeds subsequent projects).
+func getValidatorHints(ctx context.Context, deps Deps, projectSlug, artType string) *validatorHints {
+	key := validatorHintsKey(projectSlug, artType)
 	validatorHintsMu.RLock()
 	hints := validatorHintsCache[key]
 	loaded := validatorHintsLoaded[key]
@@ -98,7 +98,7 @@ func getValidatorHints(ctx context.Context, deps Deps, artType string) *validato
 	if loaded {
 		return hints
 	}
-	hints = loadTemplateHints(ctx, deps, artType)
+	hints = loadTemplateHints(ctx, deps, projectSlug, artType)
 	validatorHintsMu.Lock()
 	validatorHintsCache[key] = hints
 	validatorHintsLoaded[key] = true
@@ -133,7 +133,7 @@ func validatorHintsKey(projectSlug, artType string) string {
 // the current project and returns parsed hints. Returns nil when the
 // row is missing, the DB is unreachable, or the body carries no
 // validator comment — callers fall back to hard-coded defaults.
-func loadTemplateHints(ctx context.Context, deps Deps, artType string) *validatorHints {
+func loadTemplateHints(ctx context.Context, deps Deps, projectSlug, artType string) *validatorHints {
 	if deps.DB == nil {
 		return nil
 	}
@@ -145,7 +145,7 @@ func loadTemplateHints(ctx context.Context, deps Deps, artType string) *validato
 		  JOIN projects p ON p.id = a.project_id
 		 WHERE p.slug = $1 AND a.slug = $2
 		 LIMIT 1
-	`, deps.ProjectSlug, slug).Scan(&body)
+	`, projectSlug, slug).Scan(&body)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}

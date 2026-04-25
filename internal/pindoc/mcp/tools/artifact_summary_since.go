@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/diff"
 )
 
@@ -35,7 +36,7 @@ func RegisterArtifactSummary(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.artifact.summary_since",
 			Description: "List every revision since a reference point (since_rev OR since_time) with per-step section_deltas and aggregate stats. Use this when a user asks 'what changed recently on X?' — the steps array is designed to be read aloud directly.",
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in summarySinceInput) (*sdk.CallToolResult, summarySinceOutput, error) {
+		func(ctx context.Context, p *auth.Principal, in summarySinceInput) (*sdk.CallToolResult, summarySinceOutput, error) {
 			ref := normalizeRef(in.IDOrSlug)
 			if ref == "" {
 				return nil, summarySinceOutput{}, errors.New("id_or_slug is required")
@@ -47,7 +48,7 @@ func RegisterArtifactSummary(server *sdk.Server, deps Deps) {
 				FROM artifacts a
 				JOIN projects p ON p.id = a.project_id
 				WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
-			`, deps.ProjectSlug, ref).Scan(&artifactID, &slug)
+			`, p.ProjectSlug, ref).Scan(&artifactID, &slug)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, summarySinceOutput{}, fmt.Errorf("artifact %q not found", ref)
 			}

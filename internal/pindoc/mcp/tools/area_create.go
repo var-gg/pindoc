@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/i18n"
 )
 
@@ -63,7 +64,7 @@ func RegisterAreaCreate(server *sdk.Server, deps Deps) {
 Create a project-specific sub-area under an existing top-level area. Implements Decision area-구조-top-level-고정-골격-depth-2-sub-area만-프로젝트별-자유: parent_slug is required and must name a current-project top-level area (parent_id IS NULL). This tool never creates top-level areas; those are seeded by project.create/migrations.
 `),
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in areaCreateInput) (*sdk.CallToolResult, areaCreateOutput, error) {
+		func(ctx context.Context, p *auth.Principal, in areaCreateInput) (*sdk.CallToolResult, areaCreateOutput, error) {
 			lang := deps.UserLanguage
 			norm, notReady := validateAreaCreateInput(in, lang)
 			if notReady != nil {
@@ -84,7 +85,7 @@ Create a project-specific sub-area under an existing top-level area. Implements 
 				  LEFT JOIN areas a ON a.project_id = p.id AND a.slug = $2
 				 WHERE p.slug = $1
 				 LIMIT 1
-			`, deps.ProjectSlug, norm.ParentSlug).Scan(&projectID, &parentID, &parentParentID)
+			`, p.ProjectSlug, norm.ParentSlug).Scan(&projectID, &parentID, &parentParentID)
 			if err != nil {
 				return nil, areaCreateOutput{}, fmt.Errorf("resolve parent area: %w", err)
 			}
@@ -114,7 +115,7 @@ Create a project-specific sub-area under an existing top-level area. Implements 
 				return nil, areaCreateOutput{}, fmt.Errorf("insert area: %w", err)
 			}
 
-			actorID := strings.TrimSpace(deps.AgentID)
+			actorID := strings.TrimSpace(p.AgentID)
 			if actorID == "" {
 				actorID = "unassigned"
 			}
@@ -135,7 +136,7 @@ Create a project-specific sub-area under an existing top-level area. Implements 
 			}
 
 			out.Status = "accepted"
-			out.ProjectSlug = deps.ProjectSlug
+			out.ProjectSlug = p.ProjectSlug
 			out.ParentSlug = norm.ParentSlug
 			return nil, out, nil
 		},

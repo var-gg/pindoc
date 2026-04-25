@@ -28,7 +28,7 @@ func TestPreflightExpectedVersionReserved(t *testing.T) {
 			CommitMsg:       "update",
 			ExpectedVersion: &zero,
 		}
-		_, failed, _ := preflight(context.Background(), Deps{}, &in, "en")
+		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
 		if !containsCode(failed, "FIELD_VALUE_RESERVED") {
 			t.Fatalf("expected FIELD_VALUE_RESERVED in failed=%v", failed)
 		}
@@ -48,7 +48,7 @@ func TestPreflightExpectedVersionReserved(t *testing.T) {
 			CommitMsg:       "update",
 			ExpectedVersion: &negative,
 		}
-		_, failed, _ := preflight(context.Background(), Deps{}, &in, "en")
+		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
 		if !containsCode(failed, "VER_INVALID") {
 			t.Fatalf("expected VER_INVALID in failed=%v", failed)
 		}
@@ -68,7 +68,7 @@ func TestPreflightExpectedVersionReserved(t *testing.T) {
 			CommitMsg:       "update",
 			ExpectedVersion: &one,
 		}
-		_, failed, _ := preflight(context.Background(), Deps{}, &in, "en")
+		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
 		if containsCode(failed, "FIELD_VALUE_RESERVED") || containsCode(failed, "VER_INVALID") {
 			t.Fatalf("expected_version=1 should pass zero/negative gates, got %v", failed)
 		}
