@@ -44,7 +44,7 @@ func TestBuildCapabilities_TransportBranching(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			caps := buildCapabilities(Deps{Transport: c.transport})
+			caps := buildCapabilities(Deps{Transport: c.transport}, false)
 			if caps.Transport != c.wantTransport {
 				t.Errorf("Transport = %q, want %q", caps.Transport, c.wantTransport)
 			}
@@ -65,6 +65,30 @@ func TestBuildCapabilities_TransportBranching(t *testing.T) {
 			}
 			if caps.UpdateVia != "update_of" {
 				t.Errorf("UpdateVia = %q, want update_of (transport-independent)", caps.UpdateVia)
+			}
+		})
+	}
+}
+
+// TestBuildCapabilities_MultiProjectPassThrough locks the read-side
+// contract that the `multi_project` bool the call site derives from
+// projects.CountVisible flows verbatim into the Capabilities payload.
+// Reader UI keys the project switcher off this flag, so a future
+// refactor that accidentally hard-codes false here would silently hide
+// the switcher even after the operator creates a second project.
+func TestBuildCapabilities_MultiProjectPassThrough(t *testing.T) {
+	cases := []struct {
+		name         string
+		multiProject bool
+	}{
+		{"single project visible", false},
+		{"two or more projects visible", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			caps := buildCapabilities(Deps{Transport: "stdio"}, c.multiProject)
+			if caps.MultiProject != c.multiProject {
+				t.Errorf("MultiProject = %v, want %v", caps.MultiProject, c.multiProject)
 			}
 		})
 	}

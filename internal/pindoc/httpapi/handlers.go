@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
+	"github.com/var-gg/pindoc/internal/pindoc/projects"
 )
 
 type projectInfo struct {
@@ -63,7 +64,7 @@ func (d Deps) handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"default_project_slug":   d.DefaultProjectSlug,
 		"default_project_locale": d.DefaultProjectLocale,
-		"multi_project":          d.MultiProject,
+		"multi_project":          d.deriveMultiProject(r.Context()),
 		"public_base_url":        publicBase,
 		"version":                d.Version,
 		// auth_mode mirrors the Capabilities.AuthMode surfaced by
@@ -81,6 +82,28 @@ func (d Deps) handleConfig(w http.ResponseWriter, r *http.Request) {
 		// the wizard returns. Acceptable for V1 single-user self-host.
 		"onboarding_required": d.checkOnboardingRequired(r.Context()),
 	})
+}
+
+// deriveMultiProject is the HTTP-side mirror of mcp/tools.deriveMultiProject.
+// Called once per /api/config, /api/projects, and /api/health response so
+// the wire `multi_project` field tracks the real project row count
+// without the operator flipping an env flag. Errors and a missing DB
+// pool fall back to false — Reader chrome stays single-project rather
+// than spuriously showing a switcher when the lookup hiccups.
+func (d Deps) deriveMultiProject(ctx context.Context) bool {
+	if d.DB == nil {
+		return false
+	}
+	n, err := projects.CountVisible(ctx, d.DB, "")
+	if err != nil {
+		if d.Logger != nil {
+			d.Logger.Warn("multi_project derivation failed; defaulting to false",
+				"err", err,
+			)
+		}
+		return false
+	}
+	return projects.IsMultiProject(n)
 }
 
 // checkOnboardingRequired returns true when the instance has no projects
@@ -204,7 +227,7 @@ func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"projects":             out,
 		"default_project_slug": d.DefaultProjectSlug,
-		"multi_project":        d.MultiProject,
+		"multi_project":        d.deriveMultiProject(r.Context()),
 	})
 }
 
@@ -838,7 +861,7 @@ func (d Deps) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"ok":                   true,
 		"version":              d.Version,
 		"default_project_slug": d.DefaultProjectSlug,
-		"multi_project":        d.MultiProject,
+		"multi_project":        d.deriveMultiProject(r.Context()),
 	}
 	if d.Embedder != nil {
 		ei := d.Embedder.Info()

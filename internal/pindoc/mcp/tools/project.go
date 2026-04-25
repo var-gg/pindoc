@@ -6,6 +6,8 @@ import (
 	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/var-gg/pindoc/internal/pindoc/projects"
 )
 
 type projectCurrentInput struct{}
@@ -35,9 +37,11 @@ type projectCurrentOutput struct {
 // currently honours. Lets a prompt branch without probing each tool. Fields
 // are intentionally flat — every string value is a stable enum, not prose.
 type Capabilities struct {
-	// MultiProject: does this instance expect >1 project in the UI
-	// switcher? MCP tool calls are still scoped per-subprocess to the
-	// PINDOC_PROJECT env; this flag is advisory for chat UX only.
+	// MultiProject is derived per call from the projects table — true
+	// when more than one project is visible to the caller (V1: row
+	// count; V1.5+: ACL-filtered count). Reader uses it to decide
+	// whether to render the project switcher; advisory for chat UX
+	// only since MCP scope is pinned per-connection by the URL.
 	MultiProject bool `json:"multi_project"`
 	// ScopeMode describes how an MCP session maps to projects.
 	// "fixed_session" = one subprocess binds to one project for life.
@@ -154,13 +158,37 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 				out.Color = *color
 			}
 			out.Rendering = pindocRenderingCaps
-			out.Capabilities = buildCapabilities(deps)
+			out.Capabilities = buildCapabilities(deps, deriveMultiProject(ctx, deps))
 			return nil, out, nil
 		},
 	)
 }
 
-func buildCapabilities(deps Deps) Capabilities {
+// deriveMultiProject queries the projects table on every capability
+// advertisement. The cost is a single COUNT, run once per
+// pindoc.project.current call (which agents call rarely — bootstrap +
+// the occasional explicit re-check), so we don't bother caching at V1.
+// Errors and a missing DB pool both fall back to false so a transient
+// DB hiccup hides the switcher rather than crashing the tool call —
+// the UI falling back to single-project chrome is preferable to a
+// bootstrap failure.
+func deriveMultiProject(ctx context.Context, deps Deps) bool {
+	if deps.DB == nil {
+		return false
+	}
+	n, err := projects.CountVisible(ctx, deps.DB, deps.UserID)
+	if err != nil {
+		if deps.Logger != nil {
+			deps.Logger.Warn("multi_project derivation failed; defaulting to false",
+				"err", err,
+			)
+		}
+		return false
+	}
+	return projects.IsMultiProject(n)
+}
+
+func buildCapabilities(deps Deps, multiProject bool) Capabilities {
 	quality := "stub"
 	if deps.Embedder != nil {
 		if name := deps.Embedder.Info().Name; name != "" && name != "stub" {
@@ -188,7 +216,7 @@ func buildCapabilities(deps Deps) Capabilities {
 		requiresReconnect = false
 	}
 	return Capabilities{
-		MultiProject:                deps.MultiProject,
+		MultiProject:                multiProject,
 		ScopeMode:                   scopeMode,
 		NewProjectRequiresReconnect: requiresReconnect,
 		RetrievalQuality:            quality,

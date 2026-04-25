@@ -113,6 +113,8 @@
 - **MCP tool 신규**: `pindoc.project.create(slug, name, primary_language[, color, description])` — 프로젝트 row + `misc` area seed + canonical URL 반환.
 - **TopNav**: Project Switcher 드롭다운 실제로 열리게 구현. 현재 프로젝트 + 기타 프로젝트 목록 + "새 프로젝트는 에이전트에게 요청" 안내. inert placeholder 제거.
 - **env 토글**: `PINDOC_MULTI_PROJECT=true|false` — V1.5 권한 모델 확장 지점.
+  *(2026-04-26 후속: env 제거. `multi_project` 는 `projects.CountVisible(...) > 1`
+  로 자동 도출. 두 번째 프로젝트가 생기는 즉시 switcher 가 켜진다.)*
 - **Home 이동**: 기존 `/` Home 페이지는 `/design` 로 이동 (design-system preview scaffold 접근성 유지).
 - **PINDOC.md 템플릿**: URL 규약 섹션 추가, `pindoc.project.create` 호출 방법 명시.
 - **docs/03-architecture.md**: "URL convention" 섹션 신규.
@@ -196,6 +198,8 @@ V1.5+로 미뤄졌지만 URL 구조는 **지금** 박아야 미래에 안 깨짐
 - `internal/pindoc/mcp/server.go` — `RegisterProjectCreate` 등록.
 - 멀티프로젝트 모드 토글: `PINDOC_MULTI_PROJECT=true|false` env (default false).
   false면 Project Switcher 숨김, 새 프로젝트 생성은 허용되되 경고 로그.
+  *(2026-04-26 후속: env 제거. switcher 가시성은 `projects.CountVisible > 1`
+  derived value 로 일원화.)*
 
 **Frontend (`web/`)**:
 - `src/App.tsx` 라우트 전면 개편:
@@ -238,7 +242,8 @@ V1.5+로 미뤄졌지만 URL 구조는 **지금** 박아야 미래에 안 깨짐
 - [ ] 기존 `/wiki/decisions-log` 가 `/p/pindoc/wiki/decisions-log` 로 감
 - [ ] 탑 네비 project chip 드롭다운 열림 (inert 아님)
 - [ ] `pindoc.project.create` tool 스모크 — 새 slug 넣으면 DB에 row 생성
-- [ ] `PINDOC_MULTI_PROJECT=true` 환경에서 두 번째 프로젝트 URL `/p/<new>/wiki` 정상
+- [ ] 두 번째 프로젝트 row 가 생기면 `/api/config.multi_project` 가 자동 true,
+  Reader switcher 가 노출되고 `/p/<new>/wiki` URL 이 정상 동작
 
 ---
 

@@ -137,7 +137,6 @@ func NewServer(opts Options) *Server {
 		ProjectSlug:  projectSlug,
 		UserLanguage: opts.Config.UserLanguage,
 		Embedder:     opts.Embedder,
-		MultiProject: opts.Config.MultiProject,
 		Receipts:     receipts.New(0), // DefaultTTL applies
 		AgentID:      opts.AgentID,
 		Settings:     opts.Settings,

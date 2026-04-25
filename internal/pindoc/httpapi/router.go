@@ -43,11 +43,6 @@ type Deps struct {
 	// web/src/api/client.ts).
 	DefaultProjectLocale string
 
-	// MultiProject toggles UI switcher visibility. Read: does this
-	// instance expect to host >1 project? False keeps the switcher
-	// hidden even if extra rows exist in the projects table.
-	MultiProject bool
-
 	Embedder    embed.Provider
 	Settings    *settings.Store
 	Telemetry   *telemetry.Store

@@ -104,7 +104,6 @@ func main() {
 		Logger:               logger,
 		DefaultProjectSlug:   cfg.ProjectSlug,
 		DefaultProjectLocale: defaultLocale,
-		MultiProject:         cfg.MultiProject,
 		Embedder:             embedder,
 		Settings:             ssStore,
 		Telemetry:            telemetryStore,
