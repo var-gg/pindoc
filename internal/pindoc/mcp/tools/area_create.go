@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -11,6 +12,12 @@ import (
 
 	"github.com/var-gg/pindoc/internal/pindoc/i18n"
 )
+
+// areaSlugRe enforces the same URL-safe shape used by project slugs
+// (lowercase letter + kebab tail, 2-40 chars). Areas live under
+// /p/{project}/{locale}/wiki/{slug} alongside artifacts so the same cap
+// keeps the URL bar readable.
+var areaSlugRe = regexp.MustCompile(`^[a-z][a-z0-9-]{1,39}$`)
 
 type areaCreateInput struct {
 	ParentSlug     string `json:"parent_slug" jsonschema:"required top-level area slug that will own the new sub-area"`
@@ -146,7 +153,7 @@ func validateAreaCreateInput(in areaCreateInput, lang string) (normalizedAreaCre
 	switch {
 	case out.ParentSlug == "":
 		return out, ptrAreaCreateNotReady(lang, "PARENT_REQUIRED")
-	case !projectSlugRe.MatchString(out.Slug):
+	case !areaSlugRe.MatchString(out.Slug):
 		return out, ptrAreaCreateNotReady(lang, "SLUG_INVALID", in.Slug)
 	case len([]rune(out.Name)) < 2 || len([]rune(out.Name)) > 60:
 		return out, ptrAreaCreateNotReady(lang, "AREA_NAME_INVALID")

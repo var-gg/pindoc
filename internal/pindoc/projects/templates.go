@@ -1,9 +1,9 @@
-package tools
+package projects
 
 // TemplateSeed describes one "best practice structure" artifact that every
 // project gets on creation. Seeded for the pindoc project by migration
-// 0006_template_artifacts.sql; seeded for new projects by
-// pindoc.project.create via seedProjectTemplates below.
+// 0006_template_artifacts.sql; seeded for new projects by CreateProject
+// via seedTemplates below.
 //
 // Bodies below mirror revision 1 of each _template_* artifact on the
 // pindoc-self instance (Task task-templates-prose-first-redesign). Prose-
@@ -17,10 +17,10 @@ type TemplateSeed struct {
 	Body  string
 }
 
-// templateSeeds is the V1 default set. Tier A core types only (Feature /
+// TemplateSeeds is the V1 default set. Tier A core types only (Feature /
 // APIEndpoint / Screen / DataModel get templates in V1.x once the
 // Web-SaaS Domain Pack matures).
-var templateSeeds = []TemplateSeed{
+var TemplateSeeds = []TemplateSeed{
 	{Slug: "_template_debug", Type: "Debug", Title: "Template — Debug artifact", Body: templateDebugBody},
 	{Slug: "_template_decision", Type: "Decision", Title: "Template — Decision (ADR-style) artifact", Body: templateDecisionBody},
 	{Slug: "_template_analysis", Type: "Analysis", Title: "Template — Analysis artifact", Body: templateAnalysisBody},
