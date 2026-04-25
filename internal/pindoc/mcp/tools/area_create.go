@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/i18n"
 )
 
@@ -20,6 +21,7 @@ import (
 var areaSlugRe = regexp.MustCompile(`^[a-z][a-z0-9-]{1,39}$`)
 
 type areaCreateInput struct {
+	ProjectSlug    string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
 	ParentSlug     string `json:"parent_slug" jsonschema:"required top-level area slug that will own the new sub-area"`
 	Slug           string `json:"slug" jsonschema:"lowercase kebab-case slug, 2-40 chars, unique within the project"`
 	Name           string `json:"name" jsonschema:"display name, 2-60 chars"`
@@ -63,7 +65,12 @@ func RegisterAreaCreate(server *sdk.Server, deps Deps) {
 Create a project-specific sub-area under an existing top-level area. Implements Decision area-구조-top-level-고정-골격-depth-2-sub-area만-프로젝트별-자유: parent_slug is required and must name a current-project top-level area (parent_id IS NULL). This tool never creates top-level areas; those are seeded by project.create/migrations.
 `),
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in areaCreateInput) (*sdk.CallToolResult, areaCreateOutput, error) {
+		func(ctx context.Context, p *auth.Principal, in areaCreateInput) (*sdk.CallToolResult, areaCreateOutput, error) {
+			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			if err != nil {
+				return nil, areaCreateOutput{}, fmt.Errorf("area.create: %w", err)
+			}
+
 			lang := deps.UserLanguage
 			norm, notReady := validateAreaCreateInput(in, lang)
 			if notReady != nil {
@@ -84,7 +91,7 @@ Create a project-specific sub-area under an existing top-level area. Implements 
 				  LEFT JOIN areas a ON a.project_id = p.id AND a.slug = $2
 				 WHERE p.slug = $1
 				 LIMIT 1
-			`, deps.ProjectSlug, norm.ParentSlug).Scan(&projectID, &parentID, &parentParentID)
+			`, scope.ProjectSlug, norm.ParentSlug).Scan(&projectID, &parentID, &parentParentID)
 			if err != nil {
 				return nil, areaCreateOutput{}, fmt.Errorf("resolve parent area: %w", err)
 			}
@@ -114,7 +121,7 @@ Create a project-specific sub-area under an existing top-level area. Implements 
 				return nil, areaCreateOutput{}, fmt.Errorf("insert area: %w", err)
 			}
 
-			actorID := strings.TrimSpace(deps.AgentID)
+			actorID := strings.TrimSpace(p.AgentID)
 			if actorID == "" {
 				actorID = "unassigned"
 			}
@@ -135,7 +142,7 @@ Create a project-specific sub-area under an existing top-level area. Implements 
 			}
 
 			out.Status = "accepted"
-			out.ProjectSlug = deps.ProjectSlug
+			out.ProjectSlug = scope.ProjectSlug
 			out.ParentSlug = norm.ParentSlug
 			return nil, out, nil
 		},

@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/i18n"
 )
@@ -41,6 +42,10 @@ var validArtifactTypes = map[string]struct{}{
 }
 
 type artifactProposeInput struct {
+	// ProjectSlug picks which project this artifact lands in (account-
+	// level scope, Decision mcp-scope-account-level-industry-standard).
+	// Required.
+	ProjectSlug   string   `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
 	Type          string   `json:"type" jsonschema:"one of Decision|Analysis|Debug|Flow|Task|TC|Glossary|Feature|APIEndpoint|Screen|DataModel"`
 	AreaSlug      string   `json:"area_slug" jsonschema:"slug from pindoc.area.list; use 'misc' or '_unsorted' if unsure"`
 	Title         string   `json:"title"`
@@ -385,7 +390,12 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.artifact.propose",
 			Description: "Propose a new artifact (the only write path humans use — always via an agent). Create path (both update_of and supersede_of omitted) requires basis.search_receipt from pindoc.artifact.search or pindoc.context.for_task in the same session; update/supersede paths do not. Returns Status=accepted + artifact_id on success, or Status=not_ready + checklist + suggested_actions if Pre-flight fails. Always read the checklist; never surface the raw error to the user without trying the suggested actions first.",
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in artifactProposeInput) (*sdk.CallToolResult, artifactProposeOutput, error) {
+		func(ctx context.Context, p *auth.Principal, in artifactProposeInput) (*sdk.CallToolResult, artifactProposeOutput, error) {
+			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			if err != nil {
+				return nil, artifactProposeOutput{}, fmt.Errorf("artifact.propose: %w", err)
+			}
+
 			// Create / supersede-create Task rows should never land without
 			// the lifecycle's baseline metadata. Updates intentionally skip
 			// this so existing task_meta is preserved unless the caller
@@ -394,7 +404,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 
 			// --- Pre-flight ----------------------------------------------
 			lang := deps.UserLanguage
-			checklist, failed, code := preflight(ctx, deps, &in, lang)
+			checklist, failed, code := preflight(ctx, deps, scope.ProjectSlug, &in, lang)
 			if len(checklist) > 0 {
 				return nil, artifactProposeOutput{
 					Status:    "not_ready",
@@ -427,7 +437,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 
 			// --- Update path (update_of set) -----------------------------
 			if strings.TrimSpace(in.UpdateOf) != "" {
-				return handleUpdate(ctx, deps, in, lang)
+				return handleUpdate(ctx, deps, p, scope, in, lang)
 			}
 
 			// --- Supersede path (supersede_of set) -----------------------
@@ -438,18 +448,18 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 
 			// --- Resolve area + project ----------------------------------
 			var projectID, areaID string
-			err := deps.DB.QueryRow(ctx, `
+			err = deps.DB.QueryRow(ctx, `
 				SELECT proj.id::text, area.id::text
 				FROM projects proj
 				JOIN areas area ON area.project_id = proj.id
 				WHERE proj.slug = $1 AND area.slug = $2
-			`, deps.ProjectSlug, in.AreaSlug).Scan(&projectID, &areaID)
+			`, scope.ProjectSlug, in.AreaSlug).Scan(&projectID, &areaID)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, artifactProposeOutput{
 					Status:    "not_ready",
 					ErrorCode: "AREA_UNKNOWN",
 					Failed:    []string{"AREA_UNKNOWN"},
-					Checklist: areaUnknownChecklist(ctx, deps, lang, in.AreaSlug),
+					Checklist: areaUnknownChecklist(ctx, deps, scope, lang, in.AreaSlug),
 					SuggestedActions: []string{
 						i18n.T(lang, "suggested.list_areas"),
 						i18n.T(lang, "suggested.area_or_misc"),
@@ -484,7 +494,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						PatchableFields:  patchFieldsFor("NO_SRCH"),
 					}, nil
 				}
-				res := deps.Receipts.Verify(receipt, deps.ProjectSlug)
+				res := deps.Receipts.Verify(receipt, scope.ProjectSlug)
 				switch {
 				case res.Unknown:
 					return nil, artifactProposeOutput{
@@ -555,7 +565,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 					WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 					  AND a.status <> 'archived'
 					LIMIT 1
-				`, deps.ProjectSlug, ref).Scan(&supersedeTargetID)
+				`, scope.ProjectSlug, ref).Scan(&supersedeTargetID)
 				if errors.Is(err, pgx.ErrNoRows) {
 					return nil, artifactProposeOutput{
 						Status:    "not_ready",
@@ -602,7 +612,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						NextTools:       defaultNextTools("CONFLICT_EXACT_TITLE"),
 						PatchableFields: patchFieldsFor("CONFLICT_EXACT_TITLE"),
 						Related: []RelatedRef{
-							makeRelated(deps, existingSlug, existingID, "", in.Title, "exact title match"),
+							makeRelated(deps, scope, existingSlug, existingID, "", in.Title, "exact title match"),
 						},
 					}, nil
 				}
@@ -625,9 +635,9 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						rel := make([]string, 0, len(candidates))
 						related := make([]RelatedRef, 0, len(candidates))
 						for _, c := range candidates {
-							rel = append(rel, fmt.Sprintf("[%s] %s — /p/%s/wiki/%s (distance %.3f)", c.Type, c.Title, deps.ProjectSlug, c.Slug, c.Distance))
+							rel = append(rel, fmt.Sprintf("[%s] %s — /p/%s/wiki/%s (distance %.3f)", c.Type, c.Title, scope.ProjectSlug, c.Slug, c.Distance))
 							related = append(related, makeRelated(
-								deps, c.Slug, c.ArtifactID, c.Type, c.Title,
+								deps, scope, c.Slug, c.ArtifactID, c.Type, c.Title,
 								fmt.Sprintf("cosine distance %.3f", c.Distance),
 							))
 						}
@@ -696,7 +706,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 					) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'published', 'auto_published', 'agent', $9, $10, NULLIF($11, '')::uuid, $12, $13::jsonb, now())
 					RETURNING id::text, published_at
 				`, projectID, areaID, finalSlug, in.Type, in.Title, in.BodyMarkdown, in.Tags,
-					completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), deps.UserID, taskMetaJSON, artifactMetaJSON).Scan(&newID, &publishedAt)
+					completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), p.UserID, taskMetaJSON, artifactMetaJSON).Scan(&newID, &publishedAt)
 				if err == nil {
 					break
 				}
@@ -737,7 +747,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			}
 
 			// --- relates_to: resolve targets, then insert edges ----------
-			relTargets, relErr := resolveRelatesTo(ctx, tx, deps.ProjectSlug, in.RelatesTo, lang)
+			relTargets, relErr := resolveRelatesTo(ctx, tx, scope.ProjectSlug, in.RelatesTo, lang)
 			if relErr != nil {
 				return nil, *relErr, nil
 			}
@@ -789,7 +799,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				) VALUES ($1, 1, $2, $3, $4, $5, $6, 'agent', $7, $8, 'initial', $9, 'body_patch')
 			`, newID, in.Title, in.BodyMarkdown, bodyHash(in.BodyMarkdown), in.Tags,
 				completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion),
-				buildSourceSessionRef(deps, in),
+				buildSourceSessionRef(p, in),
 			); err != nil {
 				return nil, artifactProposeOutput{}, fmt.Errorf("initial revision insert: %w", err)
 			}
@@ -819,7 +829,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			// — the pre-insert cache may have a negative-cache entry for
 			// this type that we need to clear so the next propose picks
 			// up the template's meta comment.
-			invalidateValidatorHints(deps.ProjectSlug, finalSlug)
+			invalidateValidatorHints(scope.ProjectSlug, finalSlug)
 
 			// Task propose-경로-warning-영속화: persist the accepted-path
 			// warnings into events so Reader Trust Card and future
@@ -838,8 +848,8 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				ArtifactID:        newID,
 				Slug:              finalSlug,
 				AgentRef:          "pindoc://" + finalSlug,
-				HumanURL:          HumanURL(deps.ProjectSlug, deps.ProjectLocale, finalSlug),
-				HumanURLAbs:       AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, finalSlug),
+				HumanURL:          HumanURL(scope.ProjectSlug, scope.ProjectLocale, finalSlug),
+				HumanURLAbs:       AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, finalSlug),
 				PublishedAt:       publishedAt,
 				Created:           true,
 				RevisionNumber:    1,
@@ -865,7 +875,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 // preflight) decides which writer runs. Phase B wired body_patch only;
 // Phase C adds meta_patch. acceptance_transition / scope_defer return
 // SHAPE_NOT_IMPLEMENTED until Phase D / F light them up.
-func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang string) (*sdk.CallToolResult, artifactProposeOutput, error) {
+func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth.ProjectScope, in artifactProposeInput, lang string) (*sdk.CallToolResult, artifactProposeOutput, error) {
 	shape, _ := parseShape(in.Shape) // preflight already validated
 	switch shape {
 	case ShapeBodyPatch, ShapeAcceptanceTransition, ShapeScopeDefer:
@@ -874,7 +884,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		// synthesises an acceptance transition to [-] plus an edge insert
 		// in the same tx. All three travel the body-update flow.
 	case ShapeMetaPatch:
-		return handleUpdateMetaPatch(ctx, deps, in, lang)
+		return handleUpdateMetaPatch(ctx, deps, p, scope, in, lang)
 	default:
 		return nil, artifactProposeOutput{
 			Status:          "not_ready",
@@ -912,7 +922,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		JOIN projects p ON p.id = a.project_id
 		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 		LIMIT 1
-	`, deps.ProjectSlug, ref).Scan(
+	`, scope.ProjectSlug, ref).Scan(
 		&artifactID, &projectID, &currentBody, &currentTitle, &currentType, &currentSlug,
 		&currentTags, &currentCompleteness, &currentMetaRaw, &lastRev,
 	)
@@ -954,7 +964,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 			NextTools:       defaultNextTools("UPDATE_TARGET_NOT_FOUND"), // artifact.revisions / artifact.search
 			PatchableFields: patchFieldsFor("NEED_VER"),
 			Related: []RelatedRef{
-				makeRelated(deps, ref, artifactID, "", currentTitle, fmt.Sprintf("current revision = %d; pass expected_version = %d", lastRev, lastRev)),
+				makeRelated(deps, scope, ref, artifactID, "", currentTitle, fmt.Sprintf("current revision = %d; pass expected_version = %d", lastRev, lastRev)),
 			},
 		}, nil
 	}
@@ -1001,7 +1011,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 				WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 				  AND a.status <> 'archived'
 				LIMIT 1
-			`, deps.ProjectSlug, targetRef).Scan(&scopeDeferTargetID, &scopeDeferTargetSlug)
+			`, scope.ProjectSlug, targetRef).Scan(&scopeDeferTargetID, &scopeDeferTargetSlug)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, artifactProposeOutput{
 					Status:    "not_ready",
@@ -1108,7 +1118,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 			NextTools:       defaultNextTools("VER_CONFLICT"),
 			PatchableFields: patchFieldsFor("VER_CONFLICT"),
 			Related: []RelatedRef{
-				makeRelated(deps, ref, artifactID, "", currentTitle, fmt.Sprintf("current revision = %d, not %d", lastRev, *in.ExpectedVersion)),
+				makeRelated(deps, scope, ref, artifactID, "", currentTitle, fmt.Sprintf("current revision = %d, not %d", lastRev, *in.ExpectedVersion)),
 			},
 		}, nil
 	}
@@ -1137,12 +1147,12 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		SELECT area.id::text FROM areas area
 		JOIN projects p ON p.id = area.project_id
 		WHERE p.slug = $1 AND area.slug = $2
-	`, deps.ProjectSlug, in.AreaSlug).Scan(&areaID); err != nil {
+	`, scope.ProjectSlug, in.AreaSlug).Scan(&areaID); err != nil {
 		return nil, artifactProposeOutput{
 			Status:          "not_ready",
 			ErrorCode:       "AREA_UNKNOWN",
 			Failed:          []string{"AREA_UNKNOWN"},
-			Checklist:       areaUnknownChecklist(ctx, deps, lang, in.AreaSlug),
+			Checklist:       areaUnknownChecklist(ctx, deps, scope, lang, in.AreaSlug),
 			NextTools:       defaultNextTools("AREA_UNKNOWN"),
 			PatchableFields: patchFieldsFor("AREA_UNKNOWN"),
 		}, nil
@@ -1180,7 +1190,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		RETURNING id::text
 	`, artifactID, newRev, in.Title, in.BodyMarkdown, bodyHash(in.BodyMarkdown),
 		in.Tags, completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), in.CommitMsg,
-		buildSourceSessionRef(deps, in), string(shape), shapePayloadArg,
+		buildSourceSessionRef(p, in), string(shape), shapePayloadArg,
 	).Scan(&revID)
 	if err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("insert revision: %w", err)
@@ -1263,7 +1273,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 			) VALUES ($1::uuid, $2, $3::uuid, $4, NULLIF($5, '')::uuid, $6)
 			ON CONFLICT (from_artifact_id, from_item_ref, to_artifact_id) DO NOTHING
 		`, artifactID, fromItemRef, scopeDeferTargetID,
-			strings.TrimSpace(in.ScopeDefer.Reason), deps.UserID, in.AuthorID,
+			strings.TrimSpace(in.ScopeDefer.Reason), p.UserID, in.AuthorID,
 		); err != nil {
 			return nil, artifactProposeOutput{}, fmt.Errorf("scope edge insert: %w", err)
 		}
@@ -1272,7 +1282,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 	// pins and edges are additive on update (append new pins; edges are
 	// idempotent on (source, target, relation)). If an agent needs to
 	// "replace" all pins they should supersede rather than update.
-	relTargets, relErr := resolveRelatesTo(ctx, tx, deps.ProjectSlug, in.RelatesTo, lang)
+	relTargets, relErr := resolveRelatesTo(ctx, tx, scope.ProjectSlug, in.RelatesTo, lang)
 	if relErr != nil {
 		return nil, *relErr, nil
 	}
@@ -1292,7 +1302,7 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 	// Template validator cache invalidation — revising `_template_*`
 	// should re-anchor the per-type preflight rules without a server
 	// restart (Task preflight-template-drift-통합 §cache invalidation).
-	invalidateValidatorHints(deps.ProjectSlug, slug)
+	invalidateValidatorHints(scope.ProjectSlug, slug)
 
 	var updateMetaOut *ResolvedArtifactMeta
 	if in.ArtifactMeta != nil {
@@ -1348,8 +1358,8 @@ func handleUpdate(ctx context.Context, deps Deps, in artifactProposeInput, lang 
 		ArtifactID:                      artifactID,
 		Slug:                            slug,
 		AgentRef:                        "pindoc://" + slug,
-		HumanURL:                        HumanURL(deps.ProjectSlug, deps.ProjectLocale, slug),
-		HumanURLAbs:                     AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, slug),
+		HumanURL:                        HumanURL(scope.ProjectSlug, scope.ProjectLocale, slug),
+		HumanURLAbs:                     AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, slug),
 		PublishedAt:                     publishedAt,
 		Created:                         false,
 		RevisionNumber:                  newRev,
@@ -1407,10 +1417,10 @@ func bodyHash(body string) string {
 //
 // Returns nil when there's nothing useful to record so the column stays
 // NULL rather than storing {} everywhere.
-func buildSourceSessionRef(deps Deps, in artifactProposeInput) any {
+func buildSourceSessionRef(p *auth.Principal, in artifactProposeInput) any {
 	payload := map[string]any{}
-	if strings.TrimSpace(deps.AgentID) != "" {
-		payload["agent_id"] = deps.AgentID
+	if p != nil && strings.TrimSpace(p.AgentID) != "" {
+		payload["agent_id"] = p.AgentID
 	}
 	if strings.TrimSpace(in.AuthorID) != "" {
 		payload["reported_author_id"] = in.AuthorID
@@ -1467,7 +1477,7 @@ func recordAreaSuggestionResolvedEvent(ctx context.Context, tx pgx.Tx, projectID
 // Phase 11a change: every check now emits both a natural-language line
 // (legacy) AND a stable code (Phase 12-style). Phase 12 will make codes
 // primary and prose optional.
-func preflight(ctx context.Context, deps Deps, in *artifactProposeInput, lang string) (checklist []string, failed []string, code string) {
+func preflight(ctx context.Context, deps Deps, projectSlug string, in *artifactProposeInput, lang string) (checklist []string, failed []string, code string) {
 	push := func(line, failCode string) {
 		checklist = append(checklist, line)
 		failed = append(failed, failCode)
@@ -1564,7 +1574,7 @@ func preflight(ctx context.Context, deps Deps, in *artifactProposeInput, lang st
 	// its required_keywords from the matching `_template_<type>` body's
 	// validator meta comment. A nil hint set (no template, no comment,
 	// DB unreachable) falls back to the hard-coded defaults below.
-	hints := getValidatorHints(ctx, deps, in.Type)
+	hints := getValidatorHints(ctx, deps, projectSlug, in.Type)
 	switch in.Type {
 	case "Task":
 		needed := []string{"acceptance"}
@@ -1935,9 +1945,9 @@ func embedAndStoreChunks(ctx context.Context, tx pgx.Tx, provider embed.Provider
 	return nil
 }
 
-func areaUnknownChecklist(ctx context.Context, deps Deps, lang, areaSlug string) []string {
+func areaUnknownChecklist(ctx context.Context, deps Deps, scope *auth.ProjectScope, lang, areaSlug string) []string {
 	out := []string{
-		fmt.Sprintf(i18n.T(lang, "preflight.area_not_found"), areaSlug, deps.ProjectSlug),
+		fmt.Sprintf(i18n.T(lang, "preflight.area_not_found"), areaSlug, scope.ProjectSlug),
 	}
 	if deps.DB == nil {
 		return out
@@ -1949,7 +1959,7 @@ func areaUnknownChecklist(ctx context.Context, deps Deps, lang, areaSlug string)
 		WHERE p.slug = $1
 		ORDER BY CASE WHEN area.parent_id IS NULL THEN 0 ELSE 1 END, area.slug
 		LIMIT 24
-	`, deps.ProjectSlug)
+	`, scope.ProjectSlug)
 	if err != nil {
 		return out
 	}
@@ -1996,15 +2006,15 @@ func defaultNextTools(code string) []string {
 // makeRelated builds a RelatedRef from the minimal fields most not_ready
 // sites have on hand. Empty ID is fine — slug alone is stable for URL
 // construction.
-func makeRelated(deps Deps, slug, id, artType, title, reason string) RelatedRef {
+func makeRelated(deps Deps, scope *auth.ProjectScope, slug, id, artType, title, reason string) RelatedRef {
 	return RelatedRef{
 		ID:          id,
 		Slug:        slug,
 		Type:        artType,
 		Title:       title,
 		AgentRef:    "pindoc://" + slug,
-		HumanURL:    HumanURL(deps.ProjectSlug, deps.ProjectLocale, slug),
-		HumanURLAbs: AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, slug),
+		HumanURL:    HumanURL(scope.ProjectSlug, scope.ProjectLocale, slug),
+		HumanURLAbs: AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, slug),
 		Reason:      reason,
 	}
 }

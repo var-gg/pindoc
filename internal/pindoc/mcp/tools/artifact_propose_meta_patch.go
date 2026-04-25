@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/i18n"
 )
 
@@ -26,7 +27,7 @@ import (
 // either produces false positives or wastes work. Copying the tx shell
 // is a few dozen lines; bending handleUpdate around both paths would be
 // more.
-func handleUpdateMetaPatch(ctx context.Context, deps Deps, in artifactProposeInput, lang string) (*sdk.CallToolResult, artifactProposeOutput, error) {
+func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, scope *auth.ProjectScope, in artifactProposeInput, lang string) (*sdk.CallToolResult, artifactProposeOutput, error) {
 	if strings.TrimSpace(in.CommitMsg) == "" {
 		return nil, artifactProposeOutput{
 			Status:    "not_ready",
@@ -99,7 +100,7 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, in artifactProposeInp
 		JOIN projects p ON p.id = a.project_id
 		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 		LIMIT 1
-	`, deps.ProjectSlug, ref).Scan(
+	`, scope.ProjectSlug, ref).Scan(
 		&artifactID, &projectID, &currentBody, &currentTitle, &currentType, &currentSlug,
 		&currentTags, &currentCompleteness, &lastRev,
 	)
@@ -134,7 +135,7 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, in artifactProposeInp
 			NextTools:       defaultNextTools("UPDATE_TARGET_NOT_FOUND"),
 			PatchableFields: patchFieldsFor("NEED_VER"),
 			Related: []RelatedRef{
-				makeRelated(deps, ref, artifactID, "", currentTitle, fmt.Sprintf("current revision = %d; pass expected_version = %d", lastRev, lastRev)),
+				makeRelated(deps, scope, ref, artifactID, "", currentTitle, fmt.Sprintf("current revision = %d; pass expected_version = %d", lastRev, lastRev)),
 			},
 		}, nil
 	}
@@ -224,7 +225,7 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, in artifactProposeInp
 		) VALUES ($1, $2, $3, NULL, $4, $5, $6, 'agent', $7, $8, $9, $10, 'meta_patch', $11::jsonb)
 	`, artifactID, newRev, currentTitle, prevBodyHash, effectiveTags, effectiveCompleteness,
 		in.AuthorID, nullIfEmpty(in.AuthorVersion), in.CommitMsg,
-		buildSourceSessionRef(deps, in), string(shapePayloadJSON),
+		buildSourceSessionRef(p, in), string(shapePayloadJSON),
 	); err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("insert meta_patch revision: %w", err)
 	}
@@ -282,8 +283,8 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, in artifactProposeInp
 		ArtifactID:     artifactID,
 		Slug:           currentSlug,
 		AgentRef:       "pindoc://" + currentSlug,
-		HumanURL:       HumanURL(deps.ProjectSlug, deps.ProjectLocale, currentSlug),
-		HumanURLAbs:    AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, currentSlug),
+		HumanURL:       HumanURL(scope.ProjectSlug, scope.ProjectLocale, currentSlug),
+		HumanURLAbs:    AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, currentSlug),
 		Created:        false,
 		RevisionNumber: newRev,
 		ArtifactMeta:   metaOut,

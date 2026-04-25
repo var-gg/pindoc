@@ -7,6 +7,8 @@ import (
 	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 )
 
 const (
@@ -19,6 +21,8 @@ const (
 )
 
 type taskQueueInput struct {
+	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+
 	// Status selects the task lifecycle bucket to return. The default
 	// "pending" intentionally matches the Reader header count:
 	// task_meta.status missing OR task_meta.status == "open".
@@ -95,7 +99,11 @@ not the same as pindoc.scope.in_flight, which lists unresolved acceptance
 checkboxes.
 `),
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in taskQueueInput) (*sdk.CallToolResult, taskQueueOutput, error) {
+		func(ctx context.Context, p *auth.Principal, in taskQueueInput) (*sdk.CallToolResult, taskQueueOutput, error) {
+			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			if err != nil {
+				return nil, taskQueueOutput{}, fmt.Errorf("task.queue: %w", err)
+			}
 			statusFilter, ok := normalizeTaskQueueStatusFilter(in.Status)
 			if !ok {
 				return nil, taskQueueOutput{}, fmt.Errorf("status must be one of: pending | all | open | missing_status | missing | claimed_done | verified | blocked | cancelled")
@@ -134,7 +142,7 @@ checkboxes.
 				  AND ($3::text = '' OR a.task_meta->>'priority' = $3)
 				  AND ($4::text = '' OR a.task_meta->>'assignee' = $4)
 				ORDER BY a.updated_at DESC
-			`, deps.ProjectSlug, strings.TrimSpace(in.AreaSlug), priority, strings.TrimSpace(in.Assignee))
+			`, scope.ProjectSlug, strings.TrimSpace(in.AreaSlug), priority, strings.TrimSpace(in.Assignee))
 			if err != nil {
 				return nil, taskQueueOutput{}, fmt.Errorf("task.queue query: %w", err)
 			}
@@ -183,8 +191,8 @@ checkboxes.
 				}
 				item.Warnings = itemWarnings
 				item.AgentRef = "pindoc://" + item.Slug
-				item.HumanURL = HumanURL(deps.ProjectSlug, deps.ProjectLocale, item.Slug)
-				item.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, item.Slug)
+				item.HumanURL = HumanURL(scope.ProjectSlug, scope.ProjectLocale, item.Slug)
+				item.HumanURLAbs = AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, item.Slug)
 				items = append(items, item)
 			}
 			if err := rows.Err(); err != nil {

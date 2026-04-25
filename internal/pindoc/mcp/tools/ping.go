@@ -14,16 +14,8 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 )
-
-type PingDeps struct {
-	Version      string
-	UserLanguage string
-	Telemetry    *telemetry.Store
-	AgentID      string
-	ProjectSlug  string
-}
 
 type pingInput struct {
 	// Message is echoed back so callers can distinguish their probe packets
@@ -46,30 +38,27 @@ type pingOutput struct {
 
 // RegisterPing wires pindoc.ping — the Phase-1 handshake tool. Its job is
 // small and fixed: prove the stdio transport works and return a few server
-// facts an agent can surface in a startup log line.
-func RegisterPing(server *sdk.Server, deps PingDeps) {
-	const name = "pindoc.ping"
-	handler := func(ctx context.Context, _ *sdk.CallToolRequest, in pingInput) (*sdk.CallToolResult, pingOutput, error) {
-		echo := "pong"
-		if in.Message != "" {
-			echo = fmt.Sprintf("pong: %s", in.Message)
-		}
-		return nil, pingOutput{
-			Pong:           echo,
-			Version:        deps.Version,
-			ServerTime:     time.Now().UTC(),
-			UserLanguage:   deps.UserLanguage,
-			ToolsetVersion: ToolsetVersion(),
-		}, nil
-	}
-	// Ping carries its own slim Deps subset so the telemetry wrap is
-	// synthesised here rather than reusing the main Deps struct.
-	shimDeps := Deps{AgentID: deps.AgentID, ProjectSlug: deps.ProjectSlug}
-	sdk.AddTool(server,
+// facts an agent can surface in a startup log line. Goes through the same
+// AddInstrumentedTool path as every other tool so the auth chain runs
+// (trusted_local always matches) and telemetry records the call.
+func RegisterPing(server *sdk.Server, deps Deps) {
+	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
-			Name:        name,
+			Name:        "pindoc.ping",
 			Description: "Handshake probe. Returns pong + server version + configured user language. Use this to verify the Pindoc MCP connection is live before calling any write tools.",
 		},
-		Instrument(name, deps.Telemetry, shimDeps, handler),
+		func(_ context.Context, _ *auth.Principal, in pingInput) (*sdk.CallToolResult, pingOutput, error) {
+			echo := "pong"
+			if in.Message != "" {
+				echo = fmt.Sprintf("pong: %s", in.Message)
+			}
+			return nil, pingOutput{
+				Pong:           echo,
+				Version:        deps.Version,
+				ServerTime:     time.Now().UTC(),
+				UserLanguage:   deps.UserLanguage,
+				ToolsetVersion: ToolsetVersion(),
+			}, nil
+		},
 	)
 }

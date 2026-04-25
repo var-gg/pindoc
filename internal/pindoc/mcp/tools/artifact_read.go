@@ -11,9 +11,16 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 )
 
 type artifactReadInput struct {
+	// ProjectSlug picks which project to look the artifact up in
+	// (account-level scope, Decision mcp-scope-account-level-industry-
+	// standard). Required — empty surfaces PROJECT_SLUG_REQUIRED.
+	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+
 	// One of IDOrSlug (UUID or project-scoped slug) must be set.
 	// URLs coming from Wiki Reader share links (pindoc://... or
 	// /p/{project}/{locale}/wiki/{slug}) are accepted here too and
@@ -114,14 +121,18 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.artifact.read",
 			Description: "Fetch an artifact by UUID, slug, or share URL, including /p/{project}/{locale}/wiki/{slug} paths and their absolute URLs. view=brief returns title/summary/pins/stale without the full body; view=continuation adds recent revisions and typed edges; view=full (default) returns everything.",
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in artifactReadInput) (*sdk.CallToolResult, artifactReadOutput, error) {
-			ref := normalizeArtifactReadRef(in.IDOrSlug, deps.ProjectSlug, deps.ProjectLocale)
+		func(ctx context.Context, p *auth.Principal, in artifactReadInput) (*sdk.CallToolResult, artifactReadOutput, error) {
+			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			if err != nil {
+				return nil, artifactReadOutput{}, fmt.Errorf("artifact.read: %w", err)
+			}
+			ref := normalizeArtifactReadRef(in.IDOrSlug, scope.ProjectSlug, scope.ProjectLocale)
 			idOrSlug := ref.Value
 			if idOrSlug == "" {
 				return nil, artifactReadOutput{}, errors.New("id_or_slug is required")
 			}
 			if ref.ScopeMismatch {
-				return nil, artifactReadOutput{}, artifactReadNotFoundError(in.IDOrSlug, deps, ref)
+				return nil, artifactReadOutput{}, artifactReadNotFoundError(in.IDOrSlug, scope, ref)
 			}
 			view := strings.ToLower(strings.TrimSpace(in.View))
 			if view == "" {
@@ -135,7 +146,7 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			var desc, authorVer, superseded *string
 			var publishedAt *time.Time
 			var metaRaw []byte
-			err := deps.DB.QueryRow(ctx, `
+			err = deps.DB.QueryRow(ctx, `
 				SELECT
 					a.id::text,
 					proj.slug,
@@ -163,7 +174,7 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 				  AND ($2 = '' OR proj.locale = $2)
 				  AND (a.id::text = $3 OR a.slug = $3)
 				LIMIT 1
-			`, deps.ProjectSlug, deps.ProjectLocale, idOrSlug).Scan(
+			`, scope.ProjectSlug, scope.ProjectLocale, idOrSlug).Scan(
 				&out.ID, &out.ProjectSlug, &out.AreaSlug, &out.Slug,
 				&out.Type, &out.Title, &out.BodyMarkdown, &out.Tags,
 				&out.Completeness, &out.Status, &out.ReviewState,
@@ -172,7 +183,7 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			)
 			_ = desc // reserved; project.description not part of read response
 			if errors.Is(err, pgx.ErrNoRows) {
-				return nil, artifactReadOutput{}, artifactReadNotFoundError(in.IDOrSlug, deps, ref)
+				return nil, artifactReadOutput{}, artifactReadNotFoundError(in.IDOrSlug, scope, ref)
 			}
 			if err != nil {
 				return nil, artifactReadOutput{}, fmt.Errorf("read: %w", err)
@@ -193,8 +204,8 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 				}
 			}
 			out.AgentRef = "pindoc://" + out.Slug
-			out.HumanURL = HumanURL(out.ProjectSlug, deps.ProjectLocale, out.Slug)
-			out.HumanURLAbs = AbsHumanURL(deps.Settings, out.ProjectSlug, deps.ProjectLocale, out.Slug)
+			out.HumanURL = HumanURL(out.ProjectSlug, scope.ProjectLocale, out.Slug)
+			out.HumanURLAbs = AbsHumanURL(deps.Settings, out.ProjectSlug, scope.ProjectLocale, out.Slug)
 			out.View = view
 
 			// view=brief / continuation: drop the heavy body, add summary.
@@ -226,7 +237,7 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 				}
 				out.RecentRevisions = revs
 
-				rel, relBy, err := loadEdges(ctx, deps, out.ID)
+				rel, relBy, err := loadEdges(ctx, deps, scope, out.ID)
 				if err != nil {
 					deps.Logger.Warn("edges lookup failed", "artifact_id", out.ID, "err", err)
 				}
@@ -341,7 +352,7 @@ func loadRecentRevisions(ctx context.Context, deps Deps, artifactID string, limi
 	return out, rows.Err()
 }
 
-func loadEdges(ctx context.Context, deps Deps, artifactID string) ([]EdgeRef, []EdgeRef, error) {
+func loadEdges(ctx context.Context, deps Deps, scope *auth.ProjectScope, artifactID string) ([]EdgeRef, []EdgeRef, error) {
 	out := []EdgeRef{}
 	outBy := []EdgeRef{}
 
@@ -363,8 +374,8 @@ func loadEdges(ctx context.Context, deps Deps, artifactID string) ([]EdgeRef, []
 			return nil, nil, err
 		}
 		e.AgentRef = "pindoc://" + e.Slug
-		e.HumanURL = HumanURL(deps.ProjectSlug, deps.ProjectLocale, e.Slug)
-		e.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, e.Slug)
+		e.HumanURL = HumanURL(scope.ProjectSlug, scope.ProjectLocale, e.Slug)
+		e.HumanURLAbs = AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, e.Slug)
 		out = append(out, e)
 	}
 	rows.Close()
@@ -387,8 +398,8 @@ func loadEdges(ctx context.Context, deps Deps, artifactID string) ([]EdgeRef, []
 			return out, nil, err
 		}
 		e.AgentRef = "pindoc://" + e.Slug
-		e.HumanURL = HumanURL(deps.ProjectSlug, deps.ProjectLocale, e.Slug)
-		e.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, e.Slug)
+		e.HumanURL = HumanURL(scope.ProjectSlug, scope.ProjectLocale, e.Slug)
+		e.HumanURLAbs = AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, e.Slug)
 		outBy = append(outBy, e)
 	}
 
@@ -496,10 +507,13 @@ func splitPathSegments(path string) []string {
 	return segments
 }
 
-func artifactReadNotFoundError(raw string, deps Deps, ref artifactReadRef) error {
-	projectScope := deps.ProjectSlug
-	if deps.ProjectLocale != "" {
-		projectScope += "/" + deps.ProjectLocale
+func artifactReadNotFoundError(raw string, scope *auth.ProjectScope, ref artifactReadRef) error {
+	projectScope := ""
+	if scope != nil {
+		projectScope = scope.ProjectSlug
+		if scope.ProjectLocale != "" {
+			projectScope += "/" + scope.ProjectLocale
+		}
 	}
 	msg := fmt.Sprintf("artifact %q not found in project %q", raw, projectScope)
 	if ref.LooksLikeShareURL {

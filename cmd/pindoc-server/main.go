@@ -2,17 +2,17 @@
 //
 // Default transport is stdio — the channel every MCP-capable coding agent
 // (Claude Code, Cursor, Codex, Cline) already speaks; the binary is
-// launched as a subprocess by the agent and the project is pinned at
-// startup via PINDOC_PROJECT.
+// launched as a subprocess by the agent and the operator's default
+// project is read from PINDOC_PROJECT (per-call inputs may override).
 //
 // `-http <addr>` (or PINDOC_HTTP_MCP_ADDR env) flips the binary into
-// long-running daemon mode. A single daemon serves multiple Claude Code
-// sessions over streamable-HTTP, with each session pinned to its project
-// via the URL path /mcp/p/{project}. The getServer callback resolves
-// that slug per-connection so writes always land in the URL's project
-// — see docs/03-architecture.md and Decision
-// pindoc-mcp-transport-streamable-http-per-connection-scope for the
-// rationale.
+// long-running daemon mode. A single daemon serves multiple agent
+// sessions over streamable-HTTP at one account-level URL: /mcp.
+// Connections are no longer scoped to a project (Decision
+// mcp-scope-account-level-industry-standard supersedes the per-
+// connection /mcp/p/{project} pattern); each tool input carries
+// project_slug and the handler resolves it per call. See
+// docs/03-architecture.md.
 package main
 
 import (
@@ -21,7 +21,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"flag"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -56,13 +55,14 @@ func main() {
 	}))
 
 	// `-http <addr>` flips the binary into HTTP daemon mode. The same
-	// address serves the streamable-HTTP MCP transport (/mcp/p/{project}),
-	// the Reader's read-only API (/api/...), and a liveness probe
-	// (/health) on a single mux — all loopback-only, all gated by
-	// auth_mode=trusted_local for V1. Empty (default) keeps the legacy
-	// subprocess-per-session stdio path. PINDOC_HTTP_MCP_ADDR env is the
-	// equivalent for setups (Docker, systemd) that prefer envs over args.
-	httpAddrFlag := flag.String("http", "", "When set, run as an HTTP daemon binding this address (e.g. 127.0.0.1:5830) — serves /mcp/p/{project}, /api/..., /health. Empty = stdio mode.")
+	// address serves the streamable-HTTP MCP transport (/mcp — single
+	// account-level endpoint), the Reader's read-only API (/api/...),
+	// and a liveness probe (/health) on a single mux — all loopback-
+	// only, all gated by auth_mode=trusted_local for V1. Empty
+	// (default) keeps the legacy subprocess-per-session stdio path.
+	// PINDOC_HTTP_MCP_ADDR env is the equivalent for setups (Docker,
+	// systemd) that prefer envs over args.
+	httpAddrFlag := flag.String("http", "", "When set, run as an HTTP daemon binding this address (e.g. 127.0.0.1:5830) — serves /mcp, /api/..., /health. Empty = stdio mode.")
 	flag.Parse()
 	httpAddr := strings.TrimSpace(*httpAddrFlag)
 	if httpAddr == "" {
@@ -162,9 +162,11 @@ func main() {
 	if httpAddr != "" {
 		// Resolve the default project's locale once so the Reader can
 		// rebuild legacy /wiki/... URLs into /p/<slug>/<locale>/...
-		// without an extra round-trip — same lookup pindoc-api does on
-		// boot, kept here so the merged daemon retains identical
-		// behaviour (Task task-phase-18-project-locale-implementation).
+		// without an extra round-trip — kept on the Reader API side
+		// because share-link rendering remains "default project of the
+		// instance" even though MCP scope is now per-call (Decision
+		// mcp-scope-account-level-industry-standard). Task task-phase-
+		// 18-project-locale-implementation.
 		var defaultLocale string
 		if err := pool.QueryRow(ctx,
 			`SELECT locale FROM projects WHERE slug = $1 LIMIT 1`, cfg.ProjectSlug,
@@ -217,6 +219,7 @@ func main() {
 			AgentID:   agentID,
 			Settings:  ssStore,
 			Telemetry: tele,
+			Transport: "streamable_http",
 		}, apiHandler)
 		return
 	}
@@ -254,68 +257,27 @@ func main() {
 
 // runHTTPDaemon serves the streamable-HTTP MCP transport, the Reader
 // read-only HTTP API, and the /health liveness probe on a single addr.
-// Multiple Claude Code sessions can attach via /mcp/p/{project}, each
-// pinned to one project; the same port also serves /api/... so the
-// Reader UI no longer needs a second pindoc-api process. The getServer
-// callback is invoked once per MCP connection: it parses the slug,
-// validates against the projects table, and builds a fresh project-
-// scoped Server for the rest of that session. baseOpts carries the
-// long-lived MCP dependencies; apiHandler carries the Reader API mux
-// (httpapi.New) — Go 1.22's ServeMux picks the more-specific
-// /mcp/p/{project} pattern over the catch-all `/` so the routing is
-// unambiguous.
+// Account-level scope (Decision mcp-scope-account-level-industry-
+// standard) means every MCP session attaches to the same /mcp endpoint
+// and each tool call carries a project_slug input that the handler
+// resolves per call. The MCP server is built once at boot and the
+// getServer callback returns the same *sdk.Server for every request —
+// no per-connection rebuild. baseOpts carries the long-lived MCP
+// dependencies; apiHandler carries the Reader API mux (httpapi.New) —
+// Go 1.22's ServeMux picks /mcp over the catch-all `/` so the routing
+// is unambiguous.
 func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOpts pmcp.Options, apiHandler http.Handler) {
-	pool := baseOpts.DB
-
-	getServer := func(req *http.Request) *sdk.Server {
-		project := strings.TrimSpace(req.PathValue("project"))
-		if project == "" {
-			// Should never happen because the mux pattern requires the
-			// segment, but guard anyway so a malformed mount doesn't
-			// crash the daemon.
-			logger.Warn("getServer called with empty project slug")
-			return nil
-		}
-		opts := baseOpts
-		opts.ProjectSlug = project
-		opts.Transport = "streamable_http"
-		return pmcp.NewServer(opts).SDK()
+	mcpServer := pmcp.NewServer(baseOpts).SDK()
+	getServer := func(_ *http.Request) *sdk.Server {
+		return mcpServer
 	}
-
 	streamHandler := sdk.NewStreamableHTTPHandler(getServer, nil)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/mcp/p/{project}", func(w http.ResponseWriter, r *http.Request) {
-		project := strings.TrimSpace(r.PathValue("project"))
-		if project == "" {
-			http.Error(w, "project slug required", http.StatusBadRequest)
-			return
-		}
-		// Validate project exists before delegating to the SDK so the
-		// failure mode is a plain HTTP 404 the operator can grep for in
-		// access logs, not an opaque transport error inside the MCP
-		// session.
-		var exists bool
-		if err := pool.QueryRow(r.Context(),
-			`SELECT EXISTS(SELECT 1 FROM projects WHERE slug = $1)`,
-			project,
-		).Scan(&exists); err != nil {
-			logger.Error("project existence check failed",
-				"project_slug", project, "err", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		if !exists {
-			logger.Warn("rejected MCP connection — unknown project slug",
-				"project_slug", project, "remote", r.RemoteAddr)
-			http.Error(w, fmt.Sprintf("project %q not found", project), http.StatusNotFound)
-			return
-		}
-		streamHandler.ServeHTTP(w, r)
-	})
+	mux.Handle("/mcp", streamHandler)
 	// Catch-all delegates everything else (/, /health, /api/...) to the
-	// Reader API mux. ServeMux picks /mcp/p/{project} over `/` because it
-	// is the more specific pattern.
+	// Reader API mux. ServeMux picks /mcp over `/` because it is the
+	// more specific pattern.
 	mux.Handle("/", apiHandler)
 
 	srv := &http.Server{
@@ -327,7 +289,7 @@ func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOp
 	go func() {
 		logger.Info("pindoc-server listening",
 			"addr", addr,
-			"mcp_path", "/mcp/p/{project}",
+			"mcp_path", "/mcp",
 			"api_path", "/api/...",
 			"health_path", "/health",
 		)

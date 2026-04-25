@@ -113,7 +113,7 @@ mark complete
 			AuthorID:     "test-agent",
 			TaskMeta:     &TaskMetaInput{Status: "verified"},
 		}
-		_, failed, _ := preflight(context.Background(), Deps{}, &in, "en")
+		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
 		if !containsCode(failed, "VER_VIA_VERIFY_TOOL_ONLY") {
 			t.Fatalf("expected VER_VIA_VERIFY_TOOL_ONLY in failed=%v", failed)
 		}
@@ -128,7 +128,7 @@ mark complete
 			AuthorID:     "test-agent",
 			TaskMeta:     &TaskMetaInput{Status: "claimed_done"},
 		}
-		_, failed, _ := preflight(context.Background(), Deps{}, &in, "en")
+		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
 		if !containsCode(failed, "CLAIMED_DONE_INCOMPLETE") {
 			t.Fatalf("expected CLAIMED_DONE_INCOMPLETE in failed=%v", failed)
 		}
@@ -143,7 +143,7 @@ mark complete
 			AuthorID:     "test-agent",
 			TaskMeta:     &TaskMetaInput{Status: "claimed_done"},
 		}
-		_, failed, _ := preflight(context.Background(), Deps{}, &in, "en")
+		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
 		if containsCode(failed, "CLAIMED_DONE_INCOMPLETE") || containsCode(failed, "VER_VIA_VERIFY_TOOL_ONLY") {
 			t.Fatalf("claimed_done with complete checkboxes should pass status gates, got failed=%v", failed)
 		}
@@ -161,7 +161,7 @@ mark complete
 			AuthorID:     "test-agent",
 			TaskMeta:     &TaskMetaInput{Status: "done"},
 		}
-		_, failed, _ := preflight(context.Background(), Deps{}, &in, "en")
+		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
 		if !containsCode(failed, "TASK_STATUS_INVALID") {
 			t.Fatalf("expected TASK_STATUS_INVALID for legacy 'done', got %v", failed)
 		}
@@ -268,7 +268,7 @@ func TestPreflightVerificationReport(t *testing.T) {
 			AreaSlug:     "misc",
 			AuthorID:     "verifier",
 		}
-		_, failed, _ := preflight(context.Background(), Deps{}, &in, "en")
+		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
 		if !containsCode(failed, "VER_NO_VERDICT") {
 			t.Fatalf("expected VER_NO_VERDICT, got %v", failed)
 		}
@@ -282,7 +282,7 @@ func TestPreflightVerificationReport(t *testing.T) {
 			AreaSlug:     "misc",
 			AuthorID:     "verifier",
 		}
-		_, failed, _ := preflight(context.Background(), Deps{}, &in, "en")
+		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
 		if containsCode(failed, "VER_NO_VERDICT") {
 			t.Fatalf("verdict keyword present but gate fired: %v", failed)
 		}
@@ -296,7 +296,7 @@ func TestPreflightVerificationReport(t *testing.T) {
 			AreaSlug:     "misc",
 			AuthorID:     "verifier",
 		}
-		_, failed, _ := preflight(context.Background(), Deps{}, &in, "en")
+		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
 		if containsCode(failed, "VER_NO_VERDICT") {
 			t.Fatalf("korean verdict present but gate fired: %v", failed)
 		}

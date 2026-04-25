@@ -3,6 +3,8 @@ package tools
 import (
 	"strings"
 	"testing"
+
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 )
 
 func TestNormalizeArtifactReadRef(t *testing.T) {
@@ -113,7 +115,7 @@ func TestArtifactReadNotFoundErrorHintsForShareURL(t *testing.T) {
 
 	err := artifactReadNotFoundError(
 		"/p/pindoc/ko/wiki/missing-artifact",
-		Deps{ProjectSlug: "pindoc", ProjectLocale: "ko"},
+		&auth.ProjectScope{ProjectSlug: "pindoc", ProjectLocale: "ko"},
 		ref,
 	)
 	msg := err.Error()

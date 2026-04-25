@@ -9,6 +9,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/projects"
 )
 
@@ -38,12 +39,15 @@ type projectCreateOutput struct {
 	URL         string `json:"url" jsonschema:"canonical UI path to the project's wiki — share this, not /wiki/..."`
 	DefaultArea string `json:"default_area" jsonschema:"slug of the 'misc' area seeded so artifacts can be filed immediately"`
 	Message     string `json:"message"`
-	// ReconnectRequired + Activation + NextSteps advertise the Phase 14b
-	// onboarding contract: project.create writes a row but does NOT
-	// activate the new project in the current MCP session. Agents must
-	// reconnect with PINDOC_PROJECT=<slug> to write into it.
+	// ReconnectRequired + Activation + NextSteps describe how the new
+	// project becomes addressable. Account-level scope (Decision
+	// mcp-scope-account-level-industry-standard) means the new slug is
+	// usable immediately — every subsequent tool call carries
+	// project_slug in its input, so no MCP reconnect is needed. Kept
+	// here for backward compat with agents that still branch on the
+	// flag.
 	ReconnectRequired bool     `json:"reconnect_required"`
-	Activation        string   `json:"activation" jsonschema:"one of: not_in_this_session"`
+	Activation        string   `json:"activation" jsonschema:"one of: in_this_session"`
 	NextSteps         []string `json:"next_steps"`
 }
 
@@ -64,7 +68,7 @@ func RegisterProjectCreate(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.project.create",
 			Description: strings.TrimSpace(projectCreateDescription),
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in projectCreateInput) (*sdk.CallToolResult, projectCreateOutput, error) {
+		func(ctx context.Context, _ *auth.Principal, in projectCreateInput) (*sdk.CallToolResult, projectCreateOutput, error) {
 			tx, err := deps.DB.BeginTx(ctx, pgx.TxOptions{})
 			if err != nil {
 				return nil, projectCreateOutput{}, fmt.Errorf("begin tx: %w", err)
@@ -96,17 +100,18 @@ func RegisterProjectCreate(server *sdk.Server, deps Deps) {
 				Name:              out.Name,
 				URL:               fmt.Sprintf("/p/%s/%s/wiki", out.Slug, out.PrimaryLanguage),
 				DefaultArea:       out.DefaultArea,
-				ReconnectRequired: true,
-				Activation:        "not_in_this_session",
+				ReconnectRequired: false,
+				Activation:        "in_this_session",
 				NextSteps: []string{
-					fmt.Sprintf("Restart pindoc-server with PINDOC_PROJECT=%s to make this MCP session write into the new project.", out.Slug),
-					fmt.Sprintf("Open the Reader at /p/%s/%s/wiki once pindoc-api reloads.", out.Slug, out.PrimaryLanguage),
+					fmt.Sprintf("Pass project_slug=%q on subsequent project-scoped tool calls (artifact.propose, area.list, ...) to write into the new project.", out.Slug),
+					fmt.Sprintf("Open the Reader at /p/%s/%s/wiki to verify.", out.Slug, out.PrimaryLanguage),
 				},
 				Message: strings.TrimSpace(fmt.Sprintf(`
 Project %q (%s locale) created. Share this URL with the user: /p/%s/%s/wiki
-Note: this MCP session is still scoped to the old project — to write
-artifacts into %q, restart pindoc-server with PINDOC_PROJECT=%s.
-`, out.Slug, out.PrimaryLanguage, out.Slug, out.PrimaryLanguage, out.Slug, out.Slug)),
+The new slug is usable immediately — pass project_slug=%q in subsequent
+tool inputs to write into it; no MCP reconnect needed (account-level
+scope, Decision mcp-scope-account-level-industry-standard).
+`, out.Slug, out.PrimaryLanguage, out.Slug, out.PrimaryLanguage, out.Slug)),
 			}, nil
 		},
 	)
@@ -130,7 +135,8 @@ When to call: user says "start a new project for X" or asks to split
 docs for a repo that isn't covered by the current Pindoc instance.
 Pick a kebab-case slug tied to the repo or product name.
 
-This tool does not switch the MCP session's active project. The session
-scope stays tied to PINDOC_PROJECT env; a future session starts under
-the new project by launching pindoc-server with PINDOC_PROJECT=<new>.
+The new slug is addressable immediately on this MCP connection —
+account-level scope (Decision mcp-scope-account-level-industry-
+standard) means every project-scoped tool takes a project_slug input
+and the new slug works on the very next call without reconnect.
 `

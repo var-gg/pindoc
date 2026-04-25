@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/diff"
 )
 
@@ -18,8 +19,9 @@ import (
 // ---------------------------------------------------------------------------
 
 type artifactRevisionsInput struct {
-	IDOrSlug string `json:"id_or_slug" jsonschema:"artifact UUID, slug, or pindoc:// URL"`
-	Limit    int    `json:"limit,omitempty" jsonschema:"max rows; default 30, cap 200"`
+	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	IDOrSlug    string `json:"id_or_slug" jsonschema:"artifact UUID, slug, or pindoc:// URL"`
+	Limit       int    `json:"limit,omitempty" jsonschema:"max rows; default 30, cap 200"`
 }
 
 type RevisionMeta struct {
@@ -49,7 +51,11 @@ func RegisterArtifactRevisions(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.artifact.revisions",
 			Description: "List every revision of an artifact (newest first). Returns metadata only — call pindoc.artifact.diff for actual body diffs. Use this to answer 'how many times has this been edited and why?'",
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in artifactRevisionsInput) (*sdk.CallToolResult, artifactRevisionsOutput, error) {
+		func(ctx context.Context, princ *auth.Principal, in artifactRevisionsInput) (*sdk.CallToolResult, artifactRevisionsOutput, error) {
+			scope, err := auth.ResolveProject(ctx, deps.DB, princ, in.ProjectSlug)
+			if err != nil {
+				return nil, artifactRevisionsOutput{}, fmt.Errorf("artifact.revisions: %w", err)
+			}
 			ref := normalizeRef(in.IDOrSlug)
 			if ref == "" {
 				return nil, artifactRevisionsOutput{}, errors.New("id_or_slug is required")
@@ -63,12 +69,12 @@ func RegisterArtifactRevisions(server *sdk.Server, deps Deps) {
 			}
 
 			var artifactID, slug, title string
-			err := deps.DB.QueryRow(ctx, `
+			err = deps.DB.QueryRow(ctx, `
 				SELECT a.id::text, a.slug, a.title
 				FROM artifacts a
 				JOIN projects p ON p.id = a.project_id
 				WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
-			`, deps.ProjectSlug, ref).Scan(&artifactID, &slug, &title)
+			`, scope.ProjectSlug, ref).Scan(&artifactID, &slug, &title)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, artifactRevisionsOutput{}, fmt.Errorf("artifact %q not found", in.IDOrSlug)
 			}
@@ -143,9 +149,10 @@ func RegisterArtifactRevisions(server *sdk.Server, deps Deps) {
 // ---------------------------------------------------------------------------
 
 type artifactDiffInput struct {
-	IDOrSlug string `json:"id_or_slug"`
-	FromRev  int    `json:"from_rev,omitempty" jsonschema:"optional; default = to_rev - 1"`
-	ToRev    int    `json:"to_rev,omitempty" jsonschema:"optional; default = latest revision"`
+	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	IDOrSlug    string `json:"id_or_slug"`
+	FromRev     int    `json:"from_rev,omitempty" jsonschema:"optional; default = to_rev - 1"`
+	ToRev       int    `json:"to_rev,omitempty" jsonschema:"optional; default = latest revision"`
 }
 
 type artifactDiffOutput struct {
@@ -167,13 +174,17 @@ func RegisterArtifactDiff(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.artifact.diff",
 			Description: "Compute the diff between two revisions of an artifact. Returns revision_type, meta_delta, acceptance_checklist, and section_deltas before unified_diff; prefer reading those summaries before consuming the full unified_diff. from_rev defaults to latest-1, to_rev to latest.",
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in artifactDiffInput) (*sdk.CallToolResult, artifactDiffOutput, error) {
+		func(ctx context.Context, princ *auth.Principal, in artifactDiffInput) (*sdk.CallToolResult, artifactDiffOutput, error) {
+			scope, err := auth.ResolveProject(ctx, deps.DB, princ, in.ProjectSlug)
+			if err != nil {
+				return nil, artifactDiffOutput{}, fmt.Errorf("artifact.diff: %w", err)
+			}
 			ref := normalizeRef(in.IDOrSlug)
 			if ref == "" {
 				return nil, artifactDiffOutput{}, errors.New("id_or_slug is required")
 			}
 
-			from, to, artifactID, slug, err := resolveDiffRevs(ctx, deps, ref, in.FromRev, in.ToRev)
+			from, to, artifactID, slug, err := resolveDiffRevs(ctx, deps, scope.ProjectSlug, ref, in.FromRev, in.ToRev)
 			if err != nil {
 				return nil, artifactDiffOutput{}, err
 			}
@@ -232,7 +243,7 @@ type loadedRev struct {
 	snapshot diff.RevisionMetaSnapshot
 }
 
-func resolveDiffRevs(ctx context.Context, deps Deps, ref string, fromRev, toRev int) (loadedRev, loadedRev, string, string, error) {
+func resolveDiffRevs(ctx context.Context, deps Deps, projectSlug, ref string, fromRev, toRev int) (loadedRev, loadedRev, string, string, error) {
 	var artifactID, slug string
 	var latest int
 	err := deps.DB.QueryRow(ctx, `
@@ -241,7 +252,7 @@ func resolveDiffRevs(ctx context.Context, deps Deps, ref string, fromRev, toRev 
 		FROM artifacts a
 		JOIN projects p ON p.id = a.project_id
 		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
-	`, deps.ProjectSlug, ref).Scan(&artifactID, &slug, &latest)
+	`, projectSlug, ref).Scan(&artifactID, &slug, &latest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return loadedRev{}, loadedRev{}, "", "", fmt.Errorf("artifact %q not found", ref)
 	}

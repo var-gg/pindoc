@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 )
 
 // artifactVerifyInput is the agent-facing shape for pindoc.artifact.verify
@@ -16,6 +18,11 @@ import (
 // verified by linking a VerificationReport artifact filed by a *different*
 // agent than the one(s) who wrote the Task revisions.
 type artifactVerifyInput struct {
+	// ProjectSlug picks which project owns the Task / VerificationReport
+	// (account-level scope, Decision mcp-scope-account-level-industry-
+	// standard). Required.
+	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+
 	// TaskIDOrSlug identifies the Task being verified. Accepts UUID,
 	// project-scoped slug, or pindoc://slug URL.
 	TaskIDOrSlug string `json:"task_id_or_slug" jsonschema:"Task artifact UUID, slug, or pindoc:// URL"`
@@ -30,8 +37,8 @@ type artifactVerifyInput struct {
 
 	// VerifierAgentID is the display-label the verifier agent wants shown
 	// in the event payload. The server still uses its own trusted
-	// agent_id (deps.AgentID) for the Implementer ≠ Verifier check; the
-	// client-reported label is informational.
+	// agent_id (Principal.AgentID) for the Implementer ≠ Verifier check;
+	// the client-reported label is informational.
 	VerifierAgentID string `json:"verifier_agent_id,omitempty" jsonschema:"e.g. 'claude-code:verifier-session', 'codex-reviewer'"`
 
 	// CommitMsg is a short one-liner stored on the verify event for
@@ -61,7 +68,7 @@ type artifactVerifyOutput struct {
 //
 //   - Task exists + type='Task' + current status is claimed_done
 //   - VerificationReport exists + type='VerificationReport'
-//   - verifier agent (server-issued deps.AgentID) differs from every
+//   - verifier agent (server-issued Principal.AgentID) differs from every
 //     agent_id that authored the Task's revisions (self-verification block)
 //   - Links Task ↔ Report via artifact_edges relation='verified_by'
 //   - Flips Task's task_meta.status to 'verified' + emits
@@ -75,7 +82,11 @@ func RegisterArtifactVerify(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.artifact.verify",
 			Description: "Move a Task from claimed_done to verified by linking a VerificationReport filed by a different agent than the Task's implementers. The only way to reach task_meta.status='verified' — artifact.propose rejects that transition directly. Call this once the VerificationReport artifact is already created (via artifact.propose type=VerificationReport).",
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in artifactVerifyInput) (*sdk.CallToolResult, artifactVerifyOutput, error) {
+		func(ctx context.Context, p *auth.Principal, in artifactVerifyInput) (*sdk.CallToolResult, artifactVerifyOutput, error) {
+			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			if err != nil {
+				return nil, artifactVerifyOutput{}, fmt.Errorf("artifact.verify: %w", err)
+			}
 			taskRef := normalizeRef(in.TaskIDOrSlug)
 			reportRef := normalizeRef(in.ReportIDOrSlug)
 			if taskRef == "" || reportRef == "" {
@@ -104,19 +115,19 @@ func RegisterArtifactVerify(server *sdk.Server, deps Deps) {
 			// --- Resolve Task ---
 			var taskID, taskSlug, taskType string
 			var taskMetaRaw []byte
-			err := deps.DB.QueryRow(ctx, `
+			err = deps.DB.QueryRow(ctx, `
 				SELECT a.id::text, a.slug, a.type, a.task_meta
 				FROM artifacts a
 				JOIN projects p ON p.id = a.project_id
 				WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 				LIMIT 1
-			`, deps.ProjectSlug, taskRef).Scan(&taskID, &taskSlug, &taskType, &taskMetaRaw)
+			`, scope.ProjectSlug, taskRef).Scan(&taskID, &taskSlug, &taskType, &taskMetaRaw)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, artifactVerifyOutput{
 					Status:    "not_ready",
 					ErrorCode: "VERIFY_TASK_NOT_FOUND",
 					Failed:    []string{"VERIFY_TASK_NOT_FOUND"},
-					Checklist: []string{fmt.Sprintf("Task %q not found in project %q", in.TaskIDOrSlug, deps.ProjectSlug)},
+					Checklist: []string{fmt.Sprintf("Task %q not found in project %q", in.TaskIDOrSlug, scope.ProjectSlug)},
 				}, nil
 			}
 			if err != nil {
@@ -161,7 +172,7 @@ func RegisterArtifactVerify(server *sdk.Server, deps Deps) {
 				JOIN projects p ON p.id = a.project_id
 				WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 				LIMIT 1
-			`, deps.ProjectSlug, reportRef).Scan(&reportID, &reportSlug, &reportType)
+			`, scope.ProjectSlug, reportRef).Scan(&reportID, &reportSlug, &reportType)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, artifactVerifyOutput{
 					Status:    "not_ready",
@@ -183,12 +194,12 @@ func RegisterArtifactVerify(server *sdk.Server, deps Deps) {
 			}
 
 			// --- Implementer ≠ Verifier check ---
-			// Server-trusted agent_id (deps.AgentID) must not be among the
-			// Task's revision authors. If deps.AgentID is empty the server
+			// Server-trusted agent_id (p.AgentID) must not be among the
+			// Task's revision authors. If p.AgentID is empty the server
 			// has no trusted identity to compare — fall back to the
 			// client-reported VerifierAgentID but flag it with a warning
 			// so operators know the invariant was weakened.
-			verifierID := strings.TrimSpace(deps.AgentID)
+			verifierID := strings.TrimSpace(p.AgentID)
 			fallbackUsed := false
 			if verifierID == "" {
 				verifierID = strings.TrimSpace(in.VerifierAgentID)
@@ -277,8 +288,8 @@ func RegisterArtifactVerify(server *sdk.Server, deps Deps) {
 				ReportID:    reportID,
 				ReportSlug:  reportSlug,
 				NewStatus:   "verified",
-				HumanURL:    HumanURL(deps.ProjectSlug, deps.ProjectLocale, taskSlug),
-				HumanURLAbs: AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, taskSlug),
+				HumanURL:    HumanURL(scope.ProjectSlug, scope.ProjectLocale, taskSlug),
+				HumanURLAbs: AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, taskSlug),
 			}, nil
 		},
 	)
