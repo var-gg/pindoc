@@ -2,36 +2,55 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/projects"
 )
 
-type projectCurrentInput struct{}
+// projectCurrentInput accepts an optional ProjectSlug. Account-level
+// scope (Decision mcp-scope-account-level-industry-standard) means the
+// MCP connection is no longer pinned to a project — agents pass the
+// slug they want metadata for. Empty falls back to deps.DefaultProjectSlug
+// (PINDOC_PROJECT env) so existing single-project setups keep working
+// without harness updates.
+type projectCurrentInput struct {
+	ProjectSlug string `json:"project_slug,omitempty" jsonschema:"projects.slug to inspect; omit to use the server's default project (PINDOC_PROJECT env)"`
+}
 
 type projectCurrentOutput struct {
-	ID              string        `json:"id"`
-	Slug            string        `json:"slug"`
-	Name            string        `json:"name"`
-	OwnerID         string        `json:"owner_id"`
-	Description     string        `json:"description,omitempty"`
-	Color           string        `json:"color,omitempty"`
-	PrimaryLanguage string        `json:"primary_language"`
+	// not_ready surface — populated when the server can't pick a project
+	// (no input slug, no PINDOC_PROJECT env, no projects table row).
+	Status           string   `json:"status,omitempty"`
+	ErrorCode        string   `json:"error_code,omitempty"`
+	Failed           []string `json:"failed,omitempty"`
+	Checklist        []string `json:"checklist,omitempty"`
+	SuggestedActions []string `json:"suggested_actions,omitempty"`
+
+	ID          string `json:"id,omitempty"`
+	Slug        string `json:"slug,omitempty"`
+	Name        string `json:"name,omitempty"`
+	OwnerID     string `json:"owner_id,omitempty"`
+	Description string `json:"description,omitempty"`
+	Color       string `json:"color,omitempty"`
+	PrimaryLanguage string `json:"primary_language,omitempty"`
 	// Locale is the authoritative canonical-key field (Task task-phase-
 	// 18-project-locale-implementation, migration 0015). primary_language
 	// is retained as a soft back-compat column; new code should branch
 	// on locale. Same slug may exist across locales —
 	// `(owner_id, slug, locale)` is the unique key.
-	Locale          string        `json:"locale"`
-	AreasCount      int           `json:"areas_count"`
-	ArtifactsCount  int           `json:"artifacts_count"`
-	CreatedAt       time.Time     `json:"created_at"`
-	Rendering       RenderingCaps `json:"rendering"`
-	Capabilities    Capabilities  `json:"capabilities"`
+	Locale          string        `json:"locale,omitempty"`
+	AreasCount      int           `json:"areas_count,omitempty"`
+	ArtifactsCount  int           `json:"artifacts_count,omitempty"`
+	CreatedAt       time.Time     `json:"created_at,omitzero"`
+	Rendering       RenderingCaps `json:"rendering,omitzero"`
+	Capabilities    Capabilities  `json:"capabilities,omitzero"`
 }
 
 // Capabilities tells the agent which optional features the server
@@ -41,18 +60,21 @@ type Capabilities struct {
 	// MultiProject is derived per call from the projects table — true
 	// when more than one project is visible to the caller (V1: row
 	// count; V1.5+: ACL-filtered count). Reader uses it to decide
-	// whether to render the project switcher; advisory for chat UX
-	// only since MCP scope is pinned per-connection by the URL.
+	// whether to render the project switcher; advisory for chat UX.
 	MultiProject bool `json:"multi_project"`
 	// ScopeMode describes how an MCP session maps to projects.
-	// "fixed_session" = one subprocess binds to one project for life.
-	// Agents must not try switching project inside a session; new
-	// project = new MCP connection.
+	// "per_call" = the connection is account-level and each tool input
+	// carries project_slug (Decision mcp-scope-account-level-industry-
+	// standard, supersedes per_connection). Always per_call now;
+	// the field stays for forward compatibility with future scope
+	// modes (e.g. tenant-pinned SaaS).
 	ScopeMode string `json:"scope_mode"`
-	// NewProjectRequiresReconnect advertises the runtime fact that
-	// pindoc.project.create makes a row but does NOT change the active
-	// scope of the current MCP subprocess. Paired with project.create's
-	// `reconnect_required` field in the response body.
+	// NewProjectRequiresReconnect was meaningful when scope was
+	// per-connection — pindoc.project.create wrote a row but didn't
+	// activate the slug for the current MCP subprocess. With account-
+	// level scope the new slug is usable on the very next tool call,
+	// so this is always false. Kept in the schema so older agents that
+	// branch on it don't crash; remove in V2 once consumers migrate.
 	NewProjectRequiresReconnect bool `json:"new_project_requires_reconnect"`
 	// RetrievalQuality: "stub" → hash-based (dev only), "http" → real
 	// embedder backing pindoc.artifact.search / context.for_task.
@@ -67,10 +89,9 @@ type Capabilities struct {
 	// classic subprocess-per-session model where Claude Code launches
 	// pindoc-server as a child process. "streamable_http" = daemon mode
 	// where many MCP sessions connect to one long-running pindoc-server
-	// over HTTP, each pinned to its project via /mcp/p/{project} URL.
-	// Drives ScopeMode and NewProjectRequiresReconnect; agents can branch
-	// their UX (e.g. "switch project means open a new url" vs "restart
-	// subprocess"). Added with the streamable-HTTP transport rollout.
+	// over HTTP, all sharing the single account-level /mcp endpoint.
+	// Carried for telemetry / debugging only — scope_mode is per_call
+	// regardless of transport.
 	Transport string `json:"transport"`
 	// UpdateVia: name of the propose field that triggers a revision append.
 	// Agents can grep for this token so a future rename doesn't silently
@@ -115,20 +136,55 @@ var pindocRenderingCaps = RenderingCaps{
 	Notes:         "Headings H1-H6, ordered/unordered lists, blockquotes, inline code, fenced code, links. Mermaid via ```mermaid fence. Math/KaTeX not supported (M1.x).",
 }
 
-// RegisterProjectCurrent wires pindoc.project.current. Returns the active
-// project the MCP server is pointed at (by PINDOC_PROJECT env). Agents call
-// this on session start to pin their subsequent write scope.
+// RegisterProjectCurrent wires pindoc.project.current. Returns metadata
+// for the project named by input.project_slug (or the server's default
+// project when omitted). Agents call this once per session for the
+// capability advertisement; with account-level scope the call no longer
+// pins the connection to one project.
 func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.project.current",
-			Description: "Return the active Pindoc project (id, slug, name, primary language, area/artifact counts). Call this once per session before any write tool so the agent knows which project scope its propose calls will land in.",
+			Description: "Return Pindoc project metadata (id, slug, name, primary language, area/artifact counts, capabilities). Pass project_slug to inspect a specific project; omit to fall back to the server's default (PINDOC_PROJECT env). Returns not_ready with PROJECT_SLUG_REQUIRED when neither is set.",
 		},
-		func(ctx context.Context, princ *auth.Principal, _ projectCurrentInput) (*sdk.CallToolResult, projectCurrentOutput, error) {
+		func(ctx context.Context, princ *auth.Principal, in projectCurrentInput) (*sdk.CallToolResult, projectCurrentOutput, error) {
+			slug := strings.TrimSpace(in.ProjectSlug)
+			if slug == "" {
+				slug = strings.TrimSpace(deps.DefaultProjectSlug)
+			}
+			if slug == "" {
+				return nil, projectCurrentOutput{
+					Status:    "not_ready",
+					ErrorCode: "PROJECT_SLUG_REQUIRED",
+					Failed:    []string{"PROJECT_SLUG_REQUIRED"},
+					Checklist: []string{
+						"project_slug input was empty and the server has no PINDOC_PROJECT default — pass project_slug explicitly.",
+					},
+					SuggestedActions: []string{
+						"Retry with project_slug set to one of your project slugs (call pindoc.project.create first if no project exists).",
+					},
+				}, nil
+			}
+
+			scope, err := auth.ResolveProject(ctx, deps.DB, princ, slug)
+			if err != nil {
+				if errors.Is(err, auth.ErrProjectNotFound) {
+					return nil, projectCurrentOutput{
+						Status:    "not_ready",
+						ErrorCode: "PROJECT_NOT_FOUND",
+						Failed:    []string{"PROJECT_NOT_FOUND"},
+						Checklist: []string{fmt.Sprintf("project %q does not exist on this server", slug)},
+						SuggestedActions: []string{
+							"List available projects with the Reader's project switcher, or call pindoc.project.create to create it.",
+						},
+					}, nil
+				}
+				return nil, projectCurrentOutput{}, fmt.Errorf("project.current: %w", err)
+			}
+
 			var out projectCurrentOutput
 			var desc, color *string
-
-			err := deps.DB.QueryRow(ctx, `
+			err = deps.DB.QueryRow(ctx, `
 				SELECT
 					p.id::text,
 					p.slug,
@@ -143,14 +199,24 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 					(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
 				FROM projects p
 				WHERE p.slug = $1
-			`, princ.ProjectSlug).Scan(
+			`, scope.ProjectSlug).Scan(
 				&out.ID, &out.Slug, &out.Name, &out.OwnerID,
 				&desc, &color,
 				&out.PrimaryLanguage, &out.Locale, &out.CreatedAt,
 				&out.AreasCount, &out.ArtifactsCount,
 			)
+			if errors.Is(err, pgx.ErrNoRows) {
+				// Race: ResolveProject saw the row but it was deleted before
+				// we read the rest. Surface as PROJECT_NOT_FOUND for symmetry.
+				return nil, projectCurrentOutput{
+					Status:    "not_ready",
+					ErrorCode: "PROJECT_NOT_FOUND",
+					Failed:    []string{"PROJECT_NOT_FOUND"},
+					Checklist: []string{fmt.Sprintf("project %q vanished between ACL check and read; retry", scope.ProjectSlug)},
+				}, nil
+			}
 			if err != nil {
-				return nil, projectCurrentOutput{}, fmt.Errorf("project %q not found: %w", princ.ProjectSlug, err)
+				return nil, projectCurrentOutput{}, fmt.Errorf("project %q lookup: %w", scope.ProjectSlug, err)
 			}
 			if desc != nil {
 				out.Description = *desc
@@ -158,6 +224,7 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 			if color != nil {
 				out.Color = *color
 			}
+			out.Status = "accepted"
 			out.Rendering = pindocRenderingCaps
 			out.Capabilities = buildCapabilities(deps, princ, deriveMultiProject(ctx, deps, princ))
 			return nil, out, nil
@@ -189,6 +256,11 @@ func deriveMultiProject(ctx context.Context, deps Deps, p *auth.Principal) bool 
 	return projects.IsMultiProject(n)
 }
 
+// buildCapabilities composes the Capabilities block returned by
+// pindoc.project.current. ScopeMode is always "per_call" and
+// NewProjectRequiresReconnect always false now — Decision mcp-scope-
+// account-level-industry-standard. Transport is reported for
+// telemetry / debugging but no longer drives scope branching.
 func buildCapabilities(deps Deps, p *auth.Principal, multiProject bool) Capabilities {
 	quality := "stub"
 	if deps.Embedder != nil {
@@ -200,33 +272,18 @@ func buildCapabilities(deps Deps, p *auth.Principal, multiProject bool) Capabili
 	if deps.Settings != nil {
 		publicBase = deps.Settings.Get().PublicBaseURL
 	}
-	transport := ""
 	authMode := auth.AuthModeTrustedLocal
-	if p != nil {
-		transport = p.Transport
-		if p.AuthMode != "" {
-			authMode = p.AuthMode
-		}
+	if p != nil && p.AuthMode != "" {
+		authMode = p.AuthMode
 	}
+	transport := strings.TrimSpace(deps.Transport)
 	if transport == "" {
 		transport = "stdio"
 	}
-	// Transport drives the scope-mode pair. Streamable-HTTP daemons accept
-	// many connections, each scoped to one project via the /mcp/p/{project}
-	// URL, so a "new project" is just a new url — no reconnect of the
-	// daemon itself. Stdio binds the project at process start, so
-	// switching projects means tearing down the subprocess and launching
-	// a new one with a different PINDOC_PROJECT env.
-	scopeMode := "fixed_session"
-	requiresReconnect := true
-	if transport == "streamable_http" {
-		scopeMode = "per_connection"
-		requiresReconnect = false
-	}
 	return Capabilities{
 		MultiProject:                multiProject,
-		ScopeMode:                   scopeMode,
-		NewProjectRequiresReconnect: requiresReconnect,
+		ScopeMode:                   "per_call",
+		NewProjectRequiresReconnect: false,
 		RetrievalQuality:            quality,
 		AuthMode:                    authMode,
 		Transport:                   transport,

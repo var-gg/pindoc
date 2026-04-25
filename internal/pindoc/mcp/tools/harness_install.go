@@ -11,6 +11,11 @@ import (
 )
 
 type harnessInstallInput struct {
+	// ProjectSlug picks which project the PINDOC.md is rendered for
+	// (account-level scope, Decision mcp-scope-account-level-industry-
+	// standard). Required.
+	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+
 	// Language can override the project's primary_language for this PINDOC.md
 	// render. Optional; falls back to the project setting.
 	Language string `json:"language,omitempty" jsonschema:"en|ko|auto; default = project primary_language"`
@@ -98,10 +103,14 @@ func RegisterHarnessInstall(server *sdk.Server, deps Deps) {
 			Description: "Return the PINDOC.md body this project should adopt and the one-line CLAUDE.md include that loads it. Write the returned body to PINDOC.md at the repo root, and append the include line to CLAUDE.md (or AGENTS.md). Re-run to regenerate after upgrading the server — the spec evolves with the server version.",
 		},
 		func(ctx context.Context, p *auth.Principal, in harnessInstallInput) (*sdk.CallToolResult, harnessInstallOutput, error) {
+			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			if err != nil {
+				return nil, harnessInstallOutput{}, fmt.Errorf("harness.install: %w", err)
+			}
 			var projName, projLang string
-			err := deps.DB.QueryRow(ctx, `
+			err = deps.DB.QueryRow(ctx, `
 				SELECT name, primary_language FROM projects WHERE slug = $1
-			`, p.ProjectSlug).Scan(&projName, &projLang)
+			`, scope.ProjectSlug).Scan(&projName, &projLang)
 			if err != nil {
 				return nil, harnessInstallOutput{}, fmt.Errorf("project lookup: %w", err)
 			}
@@ -111,7 +120,7 @@ func RegisterHarnessInstall(server *sdk.Server, deps Deps) {
 				lang = projLang
 			}
 
-			body := renderPindocMD(projName, p.ProjectSlug, lang, deps.Version)
+			body := renderPindocMD(projName, scope.ProjectSlug, lang, deps.Version)
 
 			var snippetBody string
 			if lang == "ko" {
@@ -142,7 +151,7 @@ rules (Pre-flight Check before writes, Referenced Confirmation when
 asking the user for approval, agent-only write surface).
 `, styleSnippetMarkerBegin)),
 				RenderedFor: RenderedFor{
-					ProjectSlug:     p.ProjectSlug,
+					ProjectSlug:     scope.ProjectSlug,
 					PrimaryLanguage: lang,
 					Version:         deps.Version,
 				},

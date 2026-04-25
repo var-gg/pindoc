@@ -21,29 +21,6 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
 )
 
-// resolveStartupProjectLocale reads projects.locale for the active
-// project slug and returns it so HumanURL / AbsHumanURL can embed the
-// locale segment in response URLs (Task task-phase-18-project-locale-
-// implementation). Falls back to empty string when the project row is
-// missing or DB unreachable; HumanURL then falls back to its own "en"
-// default so share links still render without blocking the server boot.
-func resolveStartupProjectLocale(ctx context.Context, logger *slog.Logger, pool *db.Pool, projectSlug string) string {
-	if pool == nil {
-		return ""
-	}
-	var locale string
-	err := pool.QueryRow(ctx,
-		`SELECT locale FROM projects WHERE slug = $1 LIMIT 1`,
-		projectSlug,
-	).Scan(&locale)
-	if err != nil {
-		logger.Warn("project locale lookup failed; HumanURL uses 'en' fallback",
-			"project_slug", projectSlug, "err", err)
-		return ""
-	}
-	return locale
-}
-
 // upsertStartupUserID resolves the users.id row this MCP session should
 // bind to (Decision `decision-author-identity-dual`, migration 0014). Any
 // failure to reach the DB or upsert is logged and treated as "no user
@@ -90,19 +67,11 @@ type Options struct {
 	// impacting response latency.
 	Telemetry *telemetry.Store
 
-	// ProjectSlug overrides Config.ProjectSlug for this Server instance.
-	// Streamable-HTTP daemons populate this per-connection from the
-	// /mcp/p/{project} URL so each MCP session lands in its own project.
-	// Empty falls back to Config.ProjectSlug — the stdio path. Caller is
-	// responsible for validating the slug (e.g. exists in `projects`)
-	// before calling NewServer.
-	ProjectSlug string
-
-	// Transport identifies which transport built this Server, propagated
-	// into the auth chain's TrustedLocalResolver and surfaced in
-	// pindoc.project.current capabilities. One of "stdio" |
-	// "streamable_http". Empty falls back to "stdio" so the existing
-	// subprocess path keeps advertising fixed_session.
+	// Transport identifies which transport built this Server. Carried
+	// purely for telemetry / capability advertisement; account-level
+	// scope (Decision mcp-scope-account-level-industry-standard) means
+	// scope_mode no longer branches on it. One of "stdio" |
+	// "streamable_http"; empty falls back to "stdio".
 	Transport string
 }
 
@@ -119,44 +88,42 @@ func NewServer(opts Options) *Server {
 	}
 	s := sdk.NewServer(impl, nil)
 
-	// Resolve the active project slug for this Server. ProjectSlug from
-	// Options wins so streamable-HTTP daemons can pin per-connection;
-	// stdio callers leave it empty and inherit Config.ProjectSlug.
-	projectSlug := opts.ProjectSlug
-	if projectSlug == "" {
-		projectSlug = opts.Config.ProjectSlug
-	}
 	transport := opts.Transport
 	if transport == "" {
 		transport = "stdio"
 	}
 
-	// Deps carries pure infrastructure — caller-identity / scope live on
-	// the Principal that the AuthChain produces per call (Decision
-	// principal-resolver-architecture). Build deps first so
-	// upsertStartupUserID can use it for the env-anchored user upsert,
-	// then layer the chain on top once we know UserID + ProjectLocale.
+	// Deps carries pure infrastructure — caller-identity lives on the
+	// Principal that the AuthChain produces per call (Decision
+	// principal-resolver-architecture); per-call project scope lives
+	// on auth.ProjectScope which handlers resolve from each tool
+	// input's project_slug field (Decision mcp-scope-account-level-
+	// industry-standard). Build deps first so upsertStartupUserID can
+	// use it for the env-anchored user upsert, then layer the chain on
+	// top once we know UserID.
 	deps := tools.Deps{
-		DB:           opts.DB,
-		Logger:       opts.Logger,
-		Version:      opts.Version,
-		UserLanguage: opts.Config.UserLanguage,
-		Embedder:     opts.Embedder,
-		Receipts:     receipts.New(0), // DefaultTTL applies
-		Settings:     opts.Settings,
-		RepoRoot:     opts.Config.RepoRoot,
-		Telemetry:    opts.Telemetry,
+		DB:                 opts.DB,
+		Logger:             opts.Logger,
+		Version:            opts.Version,
+		UserLanguage:       opts.Config.UserLanguage,
+		Embedder:           opts.Embedder,
+		Receipts:           receipts.New(0), // DefaultTTL applies
+		Settings:           opts.Settings,
+		RepoRoot:           opts.Config.RepoRoot,
+		Telemetry:          opts.Telemetry,
+		DefaultProjectSlug: opts.Config.ProjectSlug,
+		Transport:          transport,
 	}
 	userID := upsertStartupUserID(context.Background(), opts.Logger, deps, opts.Config)
-	projectLocale := resolveStartupProjectLocale(context.Background(), opts.Logger, opts.DB, projectSlug)
 
-	// V1 chain holds a single TrustedLocalResolver built from env-derived
-	// state. V1.5 adds BearerTokenResolver / OAuthSessionResolver in front
-	// of trusted_local — the prepended resolvers either match (and we
-	// short-circuit) or pass through to trusted_local for OSS self-host
-	// fallback. Handlers downstream are mode-blind.
+	// V1 chain holds a single TrustedLocalResolver built from the
+	// env-derived account user. V1.5 adds BearerTokenResolver /
+	// OAuthSessionResolver in front of trusted_local — the prepended
+	// resolvers either match (and we short-circuit) or pass through to
+	// trusted_local for OSS self-host fallback. Handlers downstream are
+	// mode-blind.
 	deps.AuthChain = auth.NewChain(
-		auth.NewTrustedLocalResolver(userID, opts.AgentID, "", projectSlug, projectLocale, transport),
+		auth.NewTrustedLocalResolver(userID, opts.AgentID),
 	)
 
 	// Phase 1 handshake — same registration path as every other tool so
@@ -219,9 +186,11 @@ func (s *Server) Run(ctx context.Context, transport sdk.Transport) error {
 
 // SDK returns the underlying go-sdk Server for callers that need to plug
 // it into a transport other than (*Server).Run — most notably the
-// streamable-HTTP `getServer(req) *sdk.Server` callback in daemon mode,
-// which builds a fresh project-scoped Server per HTTP connection. The
-// stdio path keeps using Run() and never needs this.
+// streamable-HTTP `getServer(req) *sdk.Server` callback in daemon mode.
+// Account-level scope (Decision mcp-scope-account-level-industry-
+// standard) means one Server instance handles every connection — the
+// callback returns the same *sdk.Server for every request rather than
+// rebuilding per-project.
 func (s *Server) SDK() *sdk.Server {
 	return s.sdk
 }

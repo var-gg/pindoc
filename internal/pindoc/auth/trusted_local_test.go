@@ -5,20 +5,14 @@ import (
 	"testing"
 )
 
-// TestTrustedLocalResolver_StampsAllFields verifies the resolver
+// TestTrustedLocalResolver_StampsAccountFields verifies the resolver
 // faithfully copies the constructor inputs onto the Principal it
-// returns. This is the contract the V1 server relies on — the
-// env-derived UserID / project scope must reach handlers exactly as
-// boot-time wiring set them.
-func TestTrustedLocalResolver_StampsAllFields(t *testing.T) {
-	r := NewTrustedLocalResolver(
-		"user-uuid",
-		"claude-code-A",
-		"proj-uuid",
-		"pindoc",
-		"ko",
-		"streamable_http",
-	)
+// returns. Account-level (Decision mcp-scope-account-level-industry-
+// standard) means only UserID + AgentID + AuthMode travel on the
+// Principal — project info comes from each tool input via
+// ResolveProject.
+func TestTrustedLocalResolver_StampsAccountFields(t *testing.T) {
+	r := NewTrustedLocalResolver("user-uuid", "claude-code-A")
 	p, err := r.Resolve(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Resolve returned error: %v", err)
@@ -32,21 +26,6 @@ func TestTrustedLocalResolver_StampsAllFields(t *testing.T) {
 	if p.AgentID != "claude-code-A" {
 		t.Errorf("AgentID = %q; want claude-code-A", p.AgentID)
 	}
-	if p.ProjectID != "proj-uuid" {
-		t.Errorf("ProjectID = %q; want proj-uuid", p.ProjectID)
-	}
-	if p.ProjectSlug != "pindoc" {
-		t.Errorf("ProjectSlug = %q; want pindoc", p.ProjectSlug)
-	}
-	if p.ProjectLocale != "ko" {
-		t.Errorf("ProjectLocale = %q; want ko", p.ProjectLocale)
-	}
-	if p.Transport != "streamable_http" {
-		t.Errorf("Transport = %q; want streamable_http", p.Transport)
-	}
-	if p.Role != RoleOwner {
-		t.Errorf("Role = %q; want %q (V1 trusted_local always emits owner)", p.Role, RoleOwner)
-	}
 	if p.AuthMode != AuthModeTrustedLocal {
 		t.Errorf("AuthMode = %q; want %q", p.AuthMode, AuthModeTrustedLocal)
 	}
@@ -59,7 +38,7 @@ func TestTrustedLocalResolver_StampsAllFields(t *testing.T) {
 // and surface USER_NOT_SET. Returning nil here would 401 the entire
 // session, which is too aggressive for OSS first-boot UX.
 func TestTrustedLocalResolver_EmptyUserIDStillMatches(t *testing.T) {
-	r := NewTrustedLocalResolver("", "agent-x", "", "pindoc", "ko", "stdio")
+	r := NewTrustedLocalResolver("", "agent-x")
 	p, err := r.Resolve(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Resolve returned error: %v", err)
@@ -70,23 +49,23 @@ func TestTrustedLocalResolver_EmptyUserIDStillMatches(t *testing.T) {
 	if p.UserID != "" {
 		t.Errorf("UserID = %q; want empty", p.UserID)
 	}
-	if p.Role != RoleOwner {
-		t.Errorf("Role = %q; want owner — empty UserID should not demote role", p.Role)
+	if p.AuthMode != AuthModeTrustedLocal {
+		t.Errorf("AuthMode = %q; want %q (empty UserID should not change mode)", p.AuthMode, AuthModeTrustedLocal)
 	}
 }
 
 // TestTrustedLocalResolver_ReturnsCopy verifies handlers can safely
 // mutate the returned Principal without bleeding state across
 // requests. Important for any future debug code that augments the
-// principal mid-call (e.g. rewriting Role for testing).
+// principal mid-call.
 func TestTrustedLocalResolver_ReturnsCopy(t *testing.T) {
-	r := NewTrustedLocalResolver("u", "a", "", "pindoc", "ko", "stdio")
+	r := NewTrustedLocalResolver("u", "a")
 	first, _ := r.Resolve(context.Background(), nil)
-	first.Role = "viewer" // mutate the returned struct
+	first.UserID = "mutated"
 
 	second, _ := r.Resolve(context.Background(), nil)
-	if second.Role != RoleOwner {
-		t.Fatalf("second Resolve Role = %q; mutation on first call leaked into resolver state", second.Role)
+	if second.UserID != "u" {
+		t.Fatalf("second Resolve UserID = %q; mutation on first call leaked into resolver state", second.UserID)
 	}
 }
 

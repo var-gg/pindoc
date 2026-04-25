@@ -29,8 +29,8 @@ func (s *stubResolver) Resolve(_ context.Context, _ *sdk.CallToolRequest) (*Prin
 // TrustedLocal — without TrustedLocal silently overriding bearer
 // auth.
 func TestChainResolve_FirstMatchWins(t *testing.T) {
-	first := &stubResolver{principal: &Principal{UserID: "first", Role: "owner"}}
-	second := &stubResolver{principal: &Principal{UserID: "second", Role: "viewer"}}
+	first := &stubResolver{principal: &Principal{UserID: "first"}}
+	second := &stubResolver{principal: &Principal{UserID: "second"}}
 
 	c := NewChain(first, second)
 	got, err := c.Resolve(context.Background(), nil)

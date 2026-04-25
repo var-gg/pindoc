@@ -12,13 +12,16 @@ import (
 )
 
 // Deps is the shared infrastructure every tool handler needs. Caller-
-// identity / scope (UserID, AgentID, ProjectSlug, ProjectLocale,
-// Transport) used to live here too — those moved to *auth.Principal,
-// which the AddInstrumentedTool wrapper resolves per-call via AuthChain
-// and threads as an explicit handler argument. Decision
-// principal-resolver-architecture; the migration kept handler bodies
-// blind to auth_mode so adding BearerToken / OAuth resolvers later
-// changes zero handler code.
+// identity (UserID, AgentID) lives on *auth.Principal which the
+// AddInstrumentedTool wrapper resolves per-call via AuthChain and
+// threads as an explicit handler argument (Decision principal-
+// resolver-architecture). Per-call project scope (ProjectID,
+// ProjectSlug, ProjectLocale, Role) lives on *auth.ProjectScope which
+// handlers resolve from each tool input's project_slug field via
+// auth.ResolveProject (Decision mcp-scope-account-level-industry-
+// standard). Both abstractions keep handler bodies blind to auth_mode
+// so adding BearerToken / OAuth resolvers later changes zero handler
+// code.
 //
 // Keeping this struct small on purpose — anything added here shows up
 // in every tool's signature and becomes an implicit dependency you
@@ -40,6 +43,24 @@ type Deps struct {
 	// when selecting NOT_READY / suggested_action templates. Phase 5
 	// replaces this with a per-project lookup.
 	UserLanguage string
+
+	// DefaultProjectSlug is the env-derived (PINDOC_PROJECT) project
+	// the operator considers their primary one. Account-level scope
+	// (Decision mcp-scope-account-level-industry-standard) means tools
+	// take a project_slug input — this default is the fallback when the
+	// caller passes an empty slug to project.current / user.update so
+	// existing single-project setups keep working without harness
+	// changes. Empty when the env isn't set; handlers must then surface
+	// a stable not_ready code rather than guess.
+	DefaultProjectSlug string
+
+	// Transport identifies which MCP transport built this Server.
+	// Carried purely so capability advertisement can echo it for
+	// telemetry / debugging — account-level scope means the value no
+	// longer drives scope_mode branching. One of "stdio" |
+	// "streamable_http"; empty falls back to "stdio" inside
+	// buildCapabilities.
+	Transport string
 
 	// Embedder generates vectors for chunking on write and for query-side
 	// search / context.for_task. Phase 3+.

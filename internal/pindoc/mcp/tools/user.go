@@ -99,6 +99,16 @@ type userUpdateInput struct {
 	// GithubHandle is optional, filled by V1.5 OAuth flow. V1 manual
 	// edits are accepted for early use cases but uniqueness applies.
 	GithubHandle string `json:"github_handle,omitempty" jsonschema:"new github handle; empty string clears, omit to leave unchanged"`
+
+	// ProjectSlug is the optional project that should own the
+	// user_rename event row. Account-level scope (Decision mcp-scope-
+	// account-level-industry-standard) means user identity is
+	// instance-wide, but events.project_id is NOT NULL, so we still
+	// need a project to attribute the audit event to. Empty falls back
+	// to deps.DefaultProjectSlug (PINDOC_PROJECT env); when neither is
+	// set the rename succeeds and the event is skipped with a logged
+	// warning rather than blocking the user-facing update.
+	ProjectSlug string `json:"project_slug,omitempty" jsonschema:"optional project_slug to attribute the user_rename event to; defaults to PINDOC_PROJECT env"`
 }
 
 type userUpdateOutput struct {
@@ -204,13 +214,32 @@ func RegisterUserUpdate(server *sdk.Server, deps Deps) {
 			}
 
 			// Resolve project_id for the events audit row. events requires
-			// project_id; identity is per-server today but we write the
-			// event under the active project scope so audit queries stay
-			// project-bounded.
+			// project_id; identity is account-level (Decision
+			// mcp-scope-account-level-industry-standard) but the audit
+			// event needs SOME project to live under. Resolution order:
+			// caller-provided in.ProjectSlug > deps.DefaultProjectSlug
+			// (PINDOC_PROJECT env) > skip event (log warn). The rename
+			// itself proceeds either way so identity work isn't blocked
+			// when no project exists yet.
+			eventProjectSlug := strings.TrimSpace(in.ProjectSlug)
+			if eventProjectSlug == "" {
+				eventProjectSlug = strings.TrimSpace(deps.DefaultProjectSlug)
+			}
 			var projectID string
-			err = deps.DB.QueryRow(ctx, `SELECT id::text FROM projects WHERE slug = $1`, p.ProjectSlug).Scan(&projectID)
-			if err != nil {
-				return nil, userUpdateOutput{}, fmt.Errorf("resolve project_id: %w", err)
+			if eventProjectSlug != "" {
+				err = deps.DB.QueryRow(ctx, `SELECT id::text FROM projects WHERE slug = $1`, eventProjectSlug).Scan(&projectID)
+				if err != nil {
+					if errors.Is(err, pgx.ErrNoRows) {
+						projectID = ""
+						if deps.Logger != nil {
+							deps.Logger.Warn("user.update: event attribution project missing — skipping event row",
+								"requested_slug", eventProjectSlug,
+							)
+						}
+					} else {
+						return nil, userUpdateOutput{}, fmt.Errorf("resolve project_id: %w", err)
+					}
+				}
 			}
 
 			tx, err := deps.DB.Begin(ctx)
@@ -250,23 +279,25 @@ func RegisterUserUpdate(server *sdk.Server, deps Deps) {
 				return nil, userUpdateOutput{}, fmt.Errorf("update user: %w", err)
 			}
 
-			payload := map[string]any{
-				"user_id":        p.UserID,
-				"changed_fields": fieldsChanged,
-				"previous":       prev,
-				"new": map[string]string{
-					"display_name":  newDisplay,
-					"email":         newEmail,
-					"github_handle": newGithub,
-				},
-			}
-			payloadJSON, _ := json.Marshal(payload)
-			_, err = tx.Exec(ctx, `
-				INSERT INTO events (project_id, kind, subject_id, payload)
-				VALUES ($1, 'user_rename', $2::uuid, $3::jsonb)
-			`, projectID, p.UserID, payloadJSON)
-			if err != nil {
-				return nil, userUpdateOutput{}, fmt.Errorf("event insert: %w", err)
+			if projectID != "" {
+				payload := map[string]any{
+					"user_id":        p.UserID,
+					"changed_fields": fieldsChanged,
+					"previous":       prev,
+					"new": map[string]string{
+						"display_name":  newDisplay,
+						"email":         newEmail,
+						"github_handle": newGithub,
+					},
+				}
+				payloadJSON, _ := json.Marshal(payload)
+				_, err = tx.Exec(ctx, `
+					INSERT INTO events (project_id, kind, subject_id, payload)
+					VALUES ($1, 'user_rename', $2::uuid, $3::jsonb)
+				`, projectID, p.UserID, payloadJSON)
+				if err != nil {
+					return nil, userUpdateOutput{}, fmt.Errorf("event insert: %w", err)
+				}
 			}
 
 			if err := tx.Commit(ctx); err != nil {

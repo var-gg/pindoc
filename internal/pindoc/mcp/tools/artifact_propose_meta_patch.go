@@ -27,7 +27,7 @@ import (
 // either produces false positives or wastes work. Copying the tx shell
 // is a few dozen lines; bending handleUpdate around both paths would be
 // more.
-func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, in artifactProposeInput, lang string) (*sdk.CallToolResult, artifactProposeOutput, error) {
+func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, scope *auth.ProjectScope, in artifactProposeInput, lang string) (*sdk.CallToolResult, artifactProposeOutput, error) {
 	if strings.TrimSpace(in.CommitMsg) == "" {
 		return nil, artifactProposeOutput{
 			Status:    "not_ready",
@@ -100,7 +100,7 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, in
 		JOIN projects p ON p.id = a.project_id
 		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 		LIMIT 1
-	`, p.ProjectSlug, ref).Scan(
+	`, scope.ProjectSlug, ref).Scan(
 		&artifactID, &projectID, &currentBody, &currentTitle, &currentType, &currentSlug,
 		&currentTags, &currentCompleteness, &lastRev,
 	)
@@ -135,7 +135,7 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, in
 			NextTools:       defaultNextTools("UPDATE_TARGET_NOT_FOUND"),
 			PatchableFields: patchFieldsFor("NEED_VER"),
 			Related: []RelatedRef{
-				makeRelated(deps, p, ref, artifactID, "", currentTitle, fmt.Sprintf("current revision = %d; pass expected_version = %d", lastRev, lastRev)),
+				makeRelated(deps, scope, ref, artifactID, "", currentTitle, fmt.Sprintf("current revision = %d; pass expected_version = %d", lastRev, lastRev)),
 			},
 		}, nil
 	}
@@ -283,8 +283,8 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, in
 		ArtifactID:     artifactID,
 		Slug:           currentSlug,
 		AgentRef:       "pindoc://" + currentSlug,
-		HumanURL:       HumanURL(p.ProjectSlug, p.ProjectLocale, currentSlug),
-		HumanURLAbs:    AbsHumanURL(deps.Settings, p.ProjectSlug, p.ProjectLocale, currentSlug),
+		HumanURL:       HumanURL(scope.ProjectSlug, scope.ProjectLocale, currentSlug),
+		HumanURLAbs:    AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, currentSlug),
 		Created:        false,
 		RevisionNumber: newRev,
 		ArtifactMeta:   metaOut,

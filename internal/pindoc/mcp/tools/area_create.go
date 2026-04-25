@@ -21,6 +21,7 @@ import (
 var areaSlugRe = regexp.MustCompile(`^[a-z][a-z0-9-]{1,39}$`)
 
 type areaCreateInput struct {
+	ProjectSlug    string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
 	ParentSlug     string `json:"parent_slug" jsonschema:"required top-level area slug that will own the new sub-area"`
 	Slug           string `json:"slug" jsonschema:"lowercase kebab-case slug, 2-40 chars, unique within the project"`
 	Name           string `json:"name" jsonschema:"display name, 2-60 chars"`
@@ -65,6 +66,11 @@ Create a project-specific sub-area under an existing top-level area. Implements 
 `),
 		},
 		func(ctx context.Context, p *auth.Principal, in areaCreateInput) (*sdk.CallToolResult, areaCreateOutput, error) {
+			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			if err != nil {
+				return nil, areaCreateOutput{}, fmt.Errorf("area.create: %w", err)
+			}
+
 			lang := deps.UserLanguage
 			norm, notReady := validateAreaCreateInput(in, lang)
 			if notReady != nil {
@@ -85,7 +91,7 @@ Create a project-specific sub-area under an existing top-level area. Implements 
 				  LEFT JOIN areas a ON a.project_id = p.id AND a.slug = $2
 				 WHERE p.slug = $1
 				 LIMIT 1
-			`, p.ProjectSlug, norm.ParentSlug).Scan(&projectID, &parentID, &parentParentID)
+			`, scope.ProjectSlug, norm.ParentSlug).Scan(&projectID, &parentID, &parentParentID)
 			if err != nil {
 				return nil, areaCreateOutput{}, fmt.Errorf("resolve parent area: %w", err)
 			}
@@ -136,7 +142,7 @@ Create a project-specific sub-area under an existing top-level area. Implements 
 			}
 
 			out.Status = "accepted"
-			out.ProjectSlug = p.ProjectSlug
+			out.ProjectSlug = scope.ProjectSlug
 			out.ParentSlug = norm.ParentSlug
 			return nil, out, nil
 		},

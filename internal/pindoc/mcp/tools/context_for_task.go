@@ -15,6 +15,7 @@ import (
 )
 
 type contextForTaskInput struct {
+	ProjectSlug     string   `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
 	TaskDescription string   `json:"task_description" jsonschema:"free-form natural language description of what the agent is about to do"`
 	TopK            int      `json:"top_k,omitempty" jsonschema:"number of artifacts to return; default 3, max 10"`
 	Areas           []string `json:"areas,omitempty" jsonschema:"optional area_slug filter"`
@@ -139,6 +140,10 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			Description: "Given a natural-language task description, return the 1–3 most relevant artifacts in this project. Call this at the start of any non-trivial task before grepping code or writing new artifacts. Tuning: smaller TopK than artifact.search because this optimises for first-hop precision, not recall.",
 		},
 		func(ctx context.Context, p *auth.Principal, in contextForTaskInput) (*sdk.CallToolResult, contextForTaskOutput, error) {
+			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			if err != nil {
+				return nil, contextForTaskOutput{}, fmt.Errorf("context.for_task: %w", err)
+			}
 			if strings.TrimSpace(in.TaskDescription) == "" {
 				return nil, contextForTaskOutput{}, fmt.Errorf("task_description is required")
 			}
@@ -199,7 +204,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			if len(in.Areas) > 0 {
 				areasArg = in.Areas
 			}
-			rows, err := deps.DB.Query(ctx, sql, qVec, p.ProjectSlug, areasArg, in.TopK, in.IncludeTemplates)
+			rows, err := deps.DB.Query(ctx, sql, qVec, scope.ProjectSlug, areasArg, in.TopK, in.IncludeTemplates)
 			if err != nil {
 				return nil, contextForTaskOutput{}, fmt.Errorf("query: %w", err)
 			}
@@ -223,8 +228,8 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 					return nil, contextForTaskOutput{}, fmt.Errorf("scan: %w", err)
 				}
 				l.AgentRef = "pindoc://" + l.Slug
-				l.HumanURL = HumanURL(p.ProjectSlug, p.ProjectLocale, l.Slug)
-				l.HumanURLAbs = AbsHumanURL(deps.Settings, p.ProjectSlug, p.ProjectLocale, l.Slug)
+				l.HumanURL = HumanURL(scope.ProjectSlug, scope.ProjectLocale, l.Slug)
+				l.HumanURLAbs = AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, l.Slug)
 				if bestHeading != "" {
 					l.Rationale = "Best-matching section: " + bestHeading
 				} else {
@@ -275,7 +280,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			if info.Name == "stub" {
 				out.Notice = "stub embedder active — landings are hash-ranked, not semantic."
 			}
-			if areaCounts, err := areaArtifactCounts(ctx, deps, p.ProjectSlug); err == nil {
+			if areaCounts, err := areaArtifactCounts(ctx, deps, scope.ProjectSlug); err == nil {
 				out.SuggestedAreas = suggestAreasForTaskDescription(in.TaskDescription, out.Landings, areaCounts)
 			}
 			if deps.Receipts != nil {
@@ -286,11 +291,11 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 				for _, l := range out.Landings {
 					ids = append(ids, l.ArtifactID)
 				}
-				out.SearchReceipt = deps.Receipts.Issue(p.ProjectSlug, in.TaskDescription,
+				out.SearchReceipt = deps.Receipts.Issue(scope.ProjectSlug, in.TaskDescription,
 					headSnapshotsForArtifacts(ctx, deps, ids),
 				)
 			}
-			if err := recordAreaSuggestionEvent(ctx, deps, p.ProjectSlug, out.SearchReceipt, in.TaskDescription, out.SuggestedAreas); err != nil && deps.Logger != nil {
+			if err := recordAreaSuggestionEvent(ctx, deps, scope.ProjectSlug, out.SearchReceipt, in.TaskDescription, out.SuggestedAreas); err != nil && deps.Logger != nil {
 				deps.Logger.Warn("area suggestion event failed", "err", err)
 			}
 			return nil, out, rows.Err()

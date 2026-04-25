@@ -115,7 +115,7 @@ func TestArtifactReadNotFoundErrorHintsForShareURL(t *testing.T) {
 
 	err := artifactReadNotFoundError(
 		"/p/pindoc/ko/wiki/missing-artifact",
-		&auth.Principal{ProjectSlug: "pindoc", ProjectLocale: "ko"},
+		&auth.ProjectScope{ProjectSlug: "pindoc", ProjectLocale: "ko"},
 		ref,
 	)
 	msg := err.Error()

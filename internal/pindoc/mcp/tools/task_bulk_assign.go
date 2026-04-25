@@ -19,6 +19,11 @@ import (
 // shared by every generated revision). Partial success is allowed: per-
 // slug failures land in Results[].ErrorCode and don't abort the batch.
 type taskBulkAssignInput struct {
+	// ProjectSlug picks which project owns the Tasks (account-level
+	// scope, Decision mcp-scope-account-level-industry-standard).
+	// Required.
+	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+
 	// Slugs is the list of Task references to update. Order is preserved
 	// in the response. Accepts UUID, slug, or pindoc:// URL.
 	Slugs []string `json:"slugs" jsonschema:"list of Task slugs or IDs (min 1, recommended ≤ 50 per call)"`
@@ -84,6 +89,10 @@ func RegisterTaskBulkAssign(server *sdk.Server, deps Deps) {
 			Description: "Change the assignee of multiple Tasks in one batch. Reason is required (one-line rationale shared by every revision's commit_msg). Each accepted slug produces a revision prefixed with a shared bulk_op_id for audit. Partial success allowed: per-slug failures land in results[].error_code and do not abort the batch. For a single Task use pindoc.task.assign.",
 		},
 		func(ctx context.Context, p *auth.Principal, in taskBulkAssignInput) (*sdk.CallToolResult, taskBulkAssignOutput, error) {
+			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			if err != nil {
+				return nil, taskBulkAssignOutput{}, fmt.Errorf("task.bulk_assign: %w", err)
+			}
 			// --- Batch-level validation (fail-fast, no bulk_op_id issued). ---
 			reason := strings.TrimSpace(in.Reason)
 			if reason == "" {
@@ -131,7 +140,7 @@ func RegisterTaskBulkAssign(server *sdk.Server, deps Deps) {
 			results := make([]taskBulkAssignResult, 0, len(in.Slugs))
 			successCount, failCount := 0, 0
 			for _, slug := range in.Slugs {
-				single, sErr := assignOneTask(ctx, deps, p, slug, assignee, reason, in.AuthorID, in.AuthorVersion, bulkOpID)
+				single, sErr := assignOneTask(ctx, deps, p, scope, slug, assignee, reason, in.AuthorID, in.AuthorVersion, bulkOpID)
 				if sErr != nil {
 					// Server-side fault on this slug — record and move on.
 					// Not aborting the batch because other slugs may still be

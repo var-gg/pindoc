@@ -18,6 +18,10 @@ import (
 // task_meta={assignee}) — Decision task-operation-tools-task-assign-단건-
 // task-bulk-assign-배치-reas. Single-task variant; reason is optional.
 type taskAssignInput struct {
+	// ProjectSlug picks which project owns the Task (account-level scope,
+	// Decision mcp-scope-account-level-industry-standard). Required.
+	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+
 	// SlugOrID identifies the Task. Accepts UUID, project-scoped slug, or
 	// pindoc://slug URL.
 	SlugOrID string `json:"slug_or_id" jsonschema:"Task artifact UUID, slug, or pindoc:// URL"`
@@ -105,6 +109,10 @@ func RegisterTaskAssign(server *sdk.Server, deps Deps) {
 			Description: "Change the assignee of a single Task. Semantic shortcut over artifact.propose(shape='meta_patch', task_meta={assignee}) — bypasses search_receipt gating (operational metadata lane). Assignee format: agent:<id> | user:<id> | @<handle>, or empty to clear. Reason is optional (stored as commit_msg). For batch rebalance use pindoc.task.bulk_assign instead.",
 		},
 		func(ctx context.Context, p *auth.Principal, in taskAssignInput) (*sdk.CallToolResult, taskAssignOutput, error) {
+			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			if err != nil {
+				return nil, taskAssignOutput{}, fmt.Errorf("task.assign: %w", err)
+			}
 			assignee, ok := validateAssignee(in.Assignee)
 			if !ok {
 				return nil, taskAssignOutput{
@@ -114,7 +122,7 @@ func RegisterTaskAssign(server *sdk.Server, deps Deps) {
 					Checklist: []string{"assignee must match agent:<id> | user:<id> | @<handle>, or be empty string to clear"},
 				}, nil
 			}
-			res, err := assignOneTask(ctx, deps, p, in.SlugOrID, assignee, in.Reason, in.AuthorID, in.AuthorVersion, "")
+			res, err := assignOneTask(ctx, deps, p, scope, in.SlugOrID, assignee, in.Reason, in.AuthorID, in.AuthorVersion, "")
 			if err != nil {
 				return nil, taskAssignOutput{}, err
 			}
@@ -133,6 +141,7 @@ func assignOneTask(
 	ctx context.Context,
 	deps Deps,
 	p *auth.Principal,
+	scope *auth.ProjectScope,
 	slugOrID, assignee, reason, authorID, authorVersion, bulkOpID string,
 ) (taskAssignOutput, error) {
 	ref := normalizeRef(slugOrID)
@@ -158,13 +167,13 @@ func assignOneTask(
 		JOIN projects p ON p.id = a.project_id
 		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 		LIMIT 1
-	`, p.ProjectSlug, ref).Scan(&artifactID, &resolvedSlug, &artifactType, &lastRev)
+	`, scope.ProjectSlug, ref).Scan(&artifactID, &resolvedSlug, &artifactType, &lastRev)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return taskAssignOutput{
 			Status:    "not_ready",
 			ErrorCode: "ASSIGN_TARGET_NOT_FOUND",
 			Failed:    []string{"ASSIGN_TARGET_NOT_FOUND"},
-			Checklist: []string{fmt.Sprintf("Task %q not found in project %q", slugOrID, p.ProjectSlug)},
+			Checklist: []string{fmt.Sprintf("Task %q not found in project %q", slugOrID, scope.ProjectSlug)},
 		}, nil
 	}
 	if err != nil {
@@ -221,7 +230,7 @@ func assignOneTask(
 		}
 	}
 
-	_, out, err := handleUpdateMetaPatch(ctx, deps, p, propIn, deps.UserLanguage)
+	_, out, err := handleUpdateMetaPatch(ctx, deps, p, scope, propIn, deps.UserLanguage)
 	if err != nil {
 		return taskAssignOutput{}, err
 	}

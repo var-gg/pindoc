@@ -13,6 +13,7 @@ import (
 )
 
 type artifactSearchInput struct {
+	ProjectSlug      string   `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
 	Query            string   `json:"query" jsonschema:"user's natural-language question"`
 	TopK             int      `json:"top_k,omitempty" jsonschema:"default 5, max 20"`
 	Types            []string `json:"types,omitempty" jsonschema:"filter by artifact type (Decision, Debug, ...)"`
@@ -77,6 +78,10 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 			Description: "Semantic search over Pindoc artifacts. Returns the best matching chunk per artifact with distance (lower = closer). Use before writing a new artifact to avoid duplicates. Filters on type and area_slug.",
 		},
 		func(ctx context.Context, p *auth.Principal, in artifactSearchInput) (*sdk.CallToolResult, artifactSearchOutput, error) {
+			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			if err != nil {
+				return nil, artifactSearchOutput{}, fmt.Errorf("artifact.search: %w", err)
+			}
 			if strings.TrimSpace(in.Query) == "" {
 				return nil, artifactSearchOutput{}, fmt.Errorf("query is required")
 			}
@@ -153,7 +158,7 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 				areasArg = in.Areas
 			}
 
-			rows, err := deps.DB.Query(ctx, sql, qVec, p.ProjectSlug, typesArg, areasArg, in.TopK, in.IncludeTemplates)
+			rows, err := deps.DB.Query(ctx, sql, qVec, scope.ProjectSlug, typesArg, areasArg, in.TopK, in.IncludeTemplates)
 			if err != nil {
 				return nil, artifactSearchOutput{}, fmt.Errorf("search query: %w", err)
 			}
@@ -178,8 +183,8 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 				// fetch full body via artifact.read if needed.
 				h.Snippet = trimSnippet(h.Snippet, 400)
 				h.AgentRef = "pindoc://" + h.Slug
-				h.HumanURL = HumanURL(p.ProjectSlug, p.ProjectLocale, h.Slug)
-				h.HumanURLAbs = AbsHumanURL(deps.Settings, p.ProjectSlug, p.ProjectLocale, h.Slug)
+				h.HumanURL = HumanURL(scope.ProjectSlug, scope.ProjectLocale, h.Slug)
+				h.HumanURLAbs = AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, h.Slug)
 				if len(metaRaw) > 0 {
 					var meta ResolvedArtifactMeta
 					if err := json.Unmarshal(metaRaw, &meta); err == nil {
@@ -206,7 +211,7 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 				for _, h := range out.Hits {
 					ids = append(ids, h.ArtifactID)
 				}
-				out.SearchReceipt = deps.Receipts.Issue(p.ProjectSlug, in.Query,
+				out.SearchReceipt = deps.Receipts.Issue(scope.ProjectSlug, in.Query,
 					headSnapshotsForArtifacts(ctx, deps, ids),
 				)
 			}

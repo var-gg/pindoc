@@ -11,7 +11,8 @@ import (
 )
 
 type scopeInFlightInput struct {
-	AreaSlug string `json:"area_slug,omitempty" jsonschema:"optional — restrict to one area; default is project-wide"`
+	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	AreaSlug    string `json:"area_slug,omitempty" jsonschema:"optional — restrict to one area; default is project-wide"`
 	// StateFilter: which acceptance states to include. "open" = [ ] +
 	// [~] (the default — "work still owed"); "unchecked" = [ ] only;
 	// "partial" = [~] only; "all" = [ ] + [~] + [-] (includes deferred
@@ -76,6 +77,10 @@ done.
 `),
 		},
 		func(ctx context.Context, p *auth.Principal, in scopeInFlightInput) (*sdk.CallToolResult, scopeInFlightOutput, error) {
+			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			if err != nil {
+				return nil, scopeInFlightOutput{}, fmt.Errorf("scope.in_flight: %w", err)
+			}
 			limit := in.Limit
 			if limit <= 0 {
 				limit = 50
@@ -110,7 +115,7 @@ done.
 			if s := strings.TrimSpace(in.AreaSlug); s != "" {
 				areaArg = s
 			}
-			rows, err := deps.DB.Query(ctx, sql, p.ProjectSlug, areaArg)
+			rows, err := deps.DB.Query(ctx, sql, scope.ProjectSlug, areaArg)
 			if err != nil {
 				return nil, scopeInFlightOutput{}, fmt.Errorf("in_flight query: %w", err)
 			}
@@ -184,8 +189,8 @@ done.
 						State:         state,
 						LineText:      lineText,
 						AgentRef:      "pindoc://" + slug,
-						HumanURL:      HumanURL(p.ProjectSlug, p.ProjectLocale, slug),
-						HumanURLAbs:   AbsHumanURL(deps.Settings, p.ProjectSlug, p.ProjectLocale, slug),
+						HumanURL:      HumanURL(scope.ProjectSlug, scope.ProjectLocale, slug),
+						HumanURLAbs:   AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, slug),
 					}
 					items = append(items, item)
 					if bucket == "deferred" {

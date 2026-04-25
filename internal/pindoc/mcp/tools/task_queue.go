@@ -21,6 +21,8 @@ const (
 )
 
 type taskQueueInput struct {
+	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+
 	// Status selects the task lifecycle bucket to return. The default
 	// "pending" intentionally matches the Reader header count:
 	// task_meta.status missing OR task_meta.status == "open".
@@ -98,6 +100,10 @@ checkboxes.
 `),
 		},
 		func(ctx context.Context, p *auth.Principal, in taskQueueInput) (*sdk.CallToolResult, taskQueueOutput, error) {
+			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			if err != nil {
+				return nil, taskQueueOutput{}, fmt.Errorf("task.queue: %w", err)
+			}
 			statusFilter, ok := normalizeTaskQueueStatusFilter(in.Status)
 			if !ok {
 				return nil, taskQueueOutput{}, fmt.Errorf("status must be one of: pending | all | open | missing_status | missing | claimed_done | verified | blocked | cancelled")
@@ -136,7 +142,7 @@ checkboxes.
 				  AND ($3::text = '' OR a.task_meta->>'priority' = $3)
 				  AND ($4::text = '' OR a.task_meta->>'assignee' = $4)
 				ORDER BY a.updated_at DESC
-			`, p.ProjectSlug, strings.TrimSpace(in.AreaSlug), priority, strings.TrimSpace(in.Assignee))
+			`, scope.ProjectSlug, strings.TrimSpace(in.AreaSlug), priority, strings.TrimSpace(in.Assignee))
 			if err != nil {
 				return nil, taskQueueOutput{}, fmt.Errorf("task.queue query: %w", err)
 			}
@@ -185,8 +191,8 @@ checkboxes.
 				}
 				item.Warnings = itemWarnings
 				item.AgentRef = "pindoc://" + item.Slug
-				item.HumanURL = HumanURL(p.ProjectSlug, p.ProjectLocale, item.Slug)
-				item.HumanURLAbs = AbsHumanURL(deps.Settings, p.ProjectSlug, p.ProjectLocale, item.Slug)
+				item.HumanURL = HumanURL(scope.ProjectSlug, scope.ProjectLocale, item.Slug)
+				item.HumanURLAbs = AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, item.Slug)
 				items = append(items, item)
 			}
 			if err := rows.Err(); err != nil {

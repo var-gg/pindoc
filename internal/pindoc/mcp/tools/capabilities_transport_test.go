@@ -6,62 +6,41 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 )
 
-// TestBuildCapabilities_TransportBranching locks the contract that
-// `pindoc.project.current` advertises capability values keyed off the
-// MCP transport that built the Server. Stdio (the legacy
-// subprocess-per-session path) keeps `fixed_session` + reconnect=true so
-// existing agents don't change behaviour. Streamable-HTTP daemons advertise
-// `per_connection` + reconnect=false because the transport already binds
-// a different project per URL — switching projects is "open another url"
-// not "tear down the daemon". Decision
-// pindoc-mcp-transport-streamable-http-per-connection-scope.
-//
-// Transport now flows through *auth.Principal rather than tools.Deps —
-// the Principal carries every per-call caller-context value (Decision
-// principal-resolver-architecture). The capability shape is unchanged.
-func TestBuildCapabilities_TransportBranching(t *testing.T) {
+// TestBuildCapabilities_AlwaysPerCall locks the post-pivot contract:
+// account-level scope (Decision mcp-scope-account-level-industry-
+// standard) makes scope_mode = "per_call" and
+// new_project_requires_reconnect = false on every transport. Transport
+// is still echoed for telemetry/debugging but no longer drives scope
+// branching. The previous TransportBranching test (stdio →
+// fixed_session, streamable_http → per_connection) is now obsolete —
+// per_connection was a cover for "URL pin per project" which no
+// longer exists.
+func TestBuildCapabilities_AlwaysPerCall(t *testing.T) {
 	cases := []struct {
-		name              string
-		transport         string
-		wantTransport     string
-		wantScopeMode     string
-		wantRequiresReco  bool
+		name          string
+		transport     string
+		wantTransport string
 	}{
-		{
-			name:             "empty defaults to stdio",
-			transport:        "",
-			wantTransport:    "stdio",
-			wantScopeMode:    "fixed_session",
-			wantRequiresReco: true,
-		},
-		{
-			name:             "explicit stdio",
-			transport:        "stdio",
-			wantTransport:    "stdio",
-			wantScopeMode:    "fixed_session",
-			wantRequiresReco: true,
-		},
-		{
-			name:             "streamable_http daemon",
-			transport:        "streamable_http",
-			wantTransport:    "streamable_http",
-			wantScopeMode:    "per_connection",
-			wantRequiresReco: false,
-		},
+		{"empty defaults to stdio", "", "stdio"},
+		{"explicit stdio", "stdio", "stdio"},
+		{"streamable_http daemon", "streamable_http", "streamable_http"},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			caps := buildCapabilities(Deps{}, &auth.Principal{Transport: c.transport, AuthMode: auth.AuthModeTrustedLocal}, false)
+			caps := buildCapabilities(
+				Deps{Transport: c.transport},
+				&auth.Principal{AuthMode: auth.AuthModeTrustedLocal},
+				false,
+			)
 			if caps.Transport != c.wantTransport {
 				t.Errorf("Transport = %q, want %q", caps.Transport, c.wantTransport)
 			}
-			if caps.ScopeMode != c.wantScopeMode {
-				t.Errorf("ScopeMode = %q, want %q", caps.ScopeMode, c.wantScopeMode)
+			if caps.ScopeMode != "per_call" {
+				t.Errorf("ScopeMode = %q, want per_call (account-level always)", caps.ScopeMode)
 			}
-			if caps.NewProjectRequiresReconnect != c.wantRequiresReco {
-				t.Errorf("NewProjectRequiresReconnect = %v, want %v",
-					caps.NewProjectRequiresReconnect, c.wantRequiresReco)
+			if caps.NewProjectRequiresReconnect {
+				t.Errorf("NewProjectRequiresReconnect = true, want false (account-level always)")
 			}
 			// Invariants — these don't depend on transport, but if a
 			// future refactor accidentally drops them the multi-project
@@ -94,7 +73,11 @@ func TestBuildCapabilities_MultiProjectPassThrough(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			caps := buildCapabilities(Deps{}, &auth.Principal{Transport: "stdio", AuthMode: auth.AuthModeTrustedLocal}, c.multiProject)
+			caps := buildCapabilities(
+				Deps{Transport: "stdio"},
+				&auth.Principal{AuthMode: auth.AuthModeTrustedLocal},
+				c.multiProject,
+			)
 			if caps.MultiProject != c.multiProject {
 				t.Errorf("MultiProject = %v, want %v", caps.MultiProject, c.multiProject)
 			}

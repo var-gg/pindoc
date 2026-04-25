@@ -18,6 +18,11 @@ import (
 // verified by linking a VerificationReport artifact filed by a *different*
 // agent than the one(s) who wrote the Task revisions.
 type artifactVerifyInput struct {
+	// ProjectSlug picks which project owns the Task / VerificationReport
+	// (account-level scope, Decision mcp-scope-account-level-industry-
+	// standard). Required.
+	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+
 	// TaskIDOrSlug identifies the Task being verified. Accepts UUID,
 	// project-scoped slug, or pindoc://slug URL.
 	TaskIDOrSlug string `json:"task_id_or_slug" jsonschema:"Task artifact UUID, slug, or pindoc:// URL"`
@@ -78,6 +83,10 @@ func RegisterArtifactVerify(server *sdk.Server, deps Deps) {
 			Description: "Move a Task from claimed_done to verified by linking a VerificationReport filed by a different agent than the Task's implementers. The only way to reach task_meta.status='verified' — artifact.propose rejects that transition directly. Call this once the VerificationReport artifact is already created (via artifact.propose type=VerificationReport).",
 		},
 		func(ctx context.Context, p *auth.Principal, in artifactVerifyInput) (*sdk.CallToolResult, artifactVerifyOutput, error) {
+			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			if err != nil {
+				return nil, artifactVerifyOutput{}, fmt.Errorf("artifact.verify: %w", err)
+			}
 			taskRef := normalizeRef(in.TaskIDOrSlug)
 			reportRef := normalizeRef(in.ReportIDOrSlug)
 			if taskRef == "" || reportRef == "" {
@@ -106,19 +115,19 @@ func RegisterArtifactVerify(server *sdk.Server, deps Deps) {
 			// --- Resolve Task ---
 			var taskID, taskSlug, taskType string
 			var taskMetaRaw []byte
-			err := deps.DB.QueryRow(ctx, `
+			err = deps.DB.QueryRow(ctx, `
 				SELECT a.id::text, a.slug, a.type, a.task_meta
 				FROM artifacts a
 				JOIN projects p ON p.id = a.project_id
 				WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 				LIMIT 1
-			`, p.ProjectSlug, taskRef).Scan(&taskID, &taskSlug, &taskType, &taskMetaRaw)
+			`, scope.ProjectSlug, taskRef).Scan(&taskID, &taskSlug, &taskType, &taskMetaRaw)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, artifactVerifyOutput{
 					Status:    "not_ready",
 					ErrorCode: "VERIFY_TASK_NOT_FOUND",
 					Failed:    []string{"VERIFY_TASK_NOT_FOUND"},
-					Checklist: []string{fmt.Sprintf("Task %q not found in project %q", in.TaskIDOrSlug, p.ProjectSlug)},
+					Checklist: []string{fmt.Sprintf("Task %q not found in project %q", in.TaskIDOrSlug, scope.ProjectSlug)},
 				}, nil
 			}
 			if err != nil {
@@ -163,7 +172,7 @@ func RegisterArtifactVerify(server *sdk.Server, deps Deps) {
 				JOIN projects p ON p.id = a.project_id
 				WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 				LIMIT 1
-			`, p.ProjectSlug, reportRef).Scan(&reportID, &reportSlug, &reportType)
+			`, scope.ProjectSlug, reportRef).Scan(&reportID, &reportSlug, &reportType)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, artifactVerifyOutput{
 					Status:    "not_ready",
@@ -279,8 +288,8 @@ func RegisterArtifactVerify(server *sdk.Server, deps Deps) {
 				ReportID:    reportID,
 				ReportSlug:  reportSlug,
 				NewStatus:   "verified",
-				HumanURL:    HumanURL(p.ProjectSlug, p.ProjectLocale, taskSlug),
-				HumanURLAbs: AbsHumanURL(deps.Settings, p.ProjectSlug, p.ProjectLocale, taskSlug),
+				HumanURL:    HumanURL(scope.ProjectSlug, scope.ProjectLocale, taskSlug),
+				HumanURLAbs: AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, taskSlug),
 			}, nil
 		},
 	)

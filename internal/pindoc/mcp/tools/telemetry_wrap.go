@@ -84,32 +84,37 @@ func instrumentCall[I, O any](
 		errorCode = code
 	}
 
-	store.Record(telemetryEntry(start, name, p, inputJSON, outputJSON, errorCode, store))
+	store.Record(telemetryEntry(start, name, p, input, inputJSON, outputJSON, errorCode, store))
 
 	return result, output, err
 }
 
 // telemetryEntry packages the per-call fields into a telemetry.Entry,
-// pulling user / agent / project from the resolved Principal so the
-// downstream mcp_tool_calls schema stays identical to the V1 (deps-
-// fed) shape — the regression check on row format is "fields look the
-// same as before this Task". Nil principals fall back to empty strings
-// so capability probes that ran before chain resolution still record
-// cleanly.
+// pulling user / agent from the resolved Principal and project_slug
+// from the tool input via reflection (account-level scope, Decision
+// mcp-scope-account-level-industry-standard — Principal no longer
+// carries ProjectSlug). The downstream mcp_tool_calls schema stays
+// identical to the V1 (deps-fed) shape — the regression check on row
+// format is "fields look the same as before this Task". Nil principals
+// fall back to empty strings so capability probes that ran before
+// chain resolution still record cleanly. Tool inputs without a
+// `ProjectSlug` field (instance-wide tools like ping / user.current)
+// log empty project_slug, which is the correct semantic.
 func telemetryEntry(
 	start time.Time,
 	name string,
 	p *auth.Principal,
+	input any,
 	inputJSON, outputJSON []byte,
 	errorCode string,
 	store *telemetry.Store,
 ) telemetry.Entry {
-	var agentID, userID, projectSlug string
+	var agentID, userID string
 	if p != nil {
 		agentID = p.AgentID
 		userID = p.UserID
-		projectSlug = p.ProjectSlug
 	}
+	projectSlug := extractProjectSlug(input)
 	return telemetry.Entry{
 		StartedAt:       start,
 		DurationMs:      time.Since(start).Milliseconds(),
@@ -145,6 +150,30 @@ func extractErrorCode(v any) string {
 		return ""
 	}
 	f := rv.FieldByName("ErrorCode")
+	if !f.IsValid() || f.Kind() != reflect.String {
+		return ""
+	}
+	return f.String()
+}
+
+// extractProjectSlug pulls the input's ProjectSlug field via reflection
+// so telemetry stays project-attributed even though Principal no longer
+// carries the slug (Decision mcp-scope-account-level-industry-standard
+// puts project_slug on every project-scoped tool input). Returns ""
+// when the input has no such field — instance-wide tools (ping,
+// user.current) log no project_slug, which is the right semantic.
+func extractProjectSlug(v any) string {
+	rv := reflect.ValueOf(v)
+	for rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return ""
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return ""
+	}
+	f := rv.FieldByName("ProjectSlug")
 	if !f.IsValid() || f.Kind() != reflect.String {
 		return ""
 	}
