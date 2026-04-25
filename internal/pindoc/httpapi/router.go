@@ -60,6 +60,14 @@ type Deps struct {
 	// the NSSM-managed service hasn't been silently restart-looped.
 	// Zero value is OK — the health handler reports uptime_sec=0.
 	StartTime time.Time
+
+	// SPADistDir is the absolute filesystem path to the Reader UI build
+	// output (web/dist). When set, the daemon serves /, /assets/...,
+	// /p/{project}/{locale}/... etc. as static files with a fallback to
+	// index.html so React Router can pick up unknown paths client-side.
+	// Empty disables SPA serving — useful in tests or when a Vite dev
+	// server is fronting the daemon.
+	SPADistDir string
 }
 
 func New(cfg *config.Config, d Deps) http.Handler {
@@ -109,6 +117,15 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	// and claimed_done requires acceptance completion.
 	mux.HandleFunc("POST /api/p/{project}/artifacts/{idOrSlug}/task-meta", d.handleTaskMetaPatch)
 	mux.HandleFunc("POST /api/p/{project}/artifacts/{idOrSlug}/task-assign", d.handleTaskAssign)
+
+	// Reader SPA. Catch-all `/` is the lowest-priority pattern in
+	// Go 1.22's ServeMux, so /api/..., /mcp/p/..., /health all match
+	// first. Disabled when SPADistDir is empty — typical in tests or
+	// when the operator wants the daemon to be API-only and a Vite dev
+	// server in front handles assets.
+	if d.SPADistDir != "" {
+		mux.HandleFunc("/", d.handleSPA)
+	}
 
 	return withCORS(withRecover(mux, d.Logger))
 }

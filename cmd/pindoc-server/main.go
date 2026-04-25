@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -172,6 +173,26 @@ func main() {
 				"project_slug", cfg.ProjectSlug, "err", err)
 		}
 
+		// Reader SPA dist dir. PINDOC_SPA_DIST overrides; otherwise we
+		// look for `<cwd>/web/dist`, which is where `pnpm --dir web build`
+		// drops it and what the NSSM service's AppDirectory points at.
+		// Empty when neither resolves — daemon stays API-only and the
+		// operator is expected to front it with a Vite dev server.
+		spaDist := strings.TrimSpace(os.Getenv("PINDOC_SPA_DIST"))
+		if spaDist == "" {
+			if cwd, err := os.Getwd(); err == nil {
+				candidate := filepath.Join(cwd, "web", "dist")
+				if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+					spaDist = candidate
+				}
+			}
+		}
+		if spaDist != "" {
+			logger.Info("Reader SPA enabled", "dist_dir", spaDist)
+		} else {
+			logger.Info("Reader SPA disabled — set PINDOC_SPA_DIST or `pnpm --dir web build` to enable")
+		}
+
 		apiHandler := httpapi.New(cfg, httpapi.Deps{
 			DB:                   pool,
 			Logger:               logger,
@@ -184,6 +205,7 @@ func main() {
 			Version:              version,
 			BuildCommit:          commit,
 			StartTime:            startTime,
+			SPADistDir:           spaDist,
 		})
 
 		runHTTPDaemon(ctx, logger, httpAddr, pmcp.Options{
