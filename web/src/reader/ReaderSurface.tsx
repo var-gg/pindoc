@@ -3,15 +3,21 @@ import { ChevronLeft, ChevronRight, ListFilter } from "lucide-react";
 import type { Artifact, ArtifactRef } from "../api/client";
 import { useI18n } from "../i18n";
 import { ArtifactByline } from "./ArtifactByline";
+import { BadgePopoverChip } from "./BadgePopoverChip";
 import { PindocMarkdown } from "./Markdown";
 import { TrustCard } from "./TrustCard";
 import { localizedAreaName } from "./areaLocale";
+import type { BadgeFilter } from "./badgeFilters";
 import { typeChipClass } from "./typeChip";
 
 type Props = {
   detail: Artifact | null;
   emptyMessage: string;
   scope?: DetailScope | null;
+  projectSlug?: string;
+  projectLocale?: string;
+  onApplyBadgeFilter?: (filter: BadgeFilter) => void;
+  onApplyAreaFilter?: (areaSlug: string) => void;
 };
 
 export type DetailScope = {
@@ -24,7 +30,15 @@ export type DetailScope = {
   nextHref?: string;
 };
 
-export function ReaderSurface({ detail, emptyMessage, scope }: Props) {
+export function ReaderSurface({
+  detail,
+  emptyMessage,
+  scope,
+  projectSlug,
+  projectLocale,
+  onApplyBadgeFilter,
+  onApplyAreaFilter,
+}: Props) {
   const { t } = useI18n();
 
   if (!detail) {
@@ -41,6 +55,10 @@ export function ReaderSurface({ detail, emptyMessage, scope }: Props) {
     ? new Date(detail.published_at).toLocaleString()
     : "—";
   const areaLabel = localizedAreaName(t, detail.area_slug, detail.area_slug);
+  const legendHref =
+    projectSlug && projectLocale
+      ? `/p/${projectSlug}/${projectLocale}/wiki/reader-design-legend-glossary-artifact`
+      : undefined;
   const hasLiveSidecarData =
     Boolean(detail.superseded_by) ||
     (detail.relates_to?.length ?? 0) > 0 ||
@@ -67,6 +85,8 @@ export function ReaderSurface({ detail, emptyMessage, scope }: Props) {
           pins={detail.pins}
           taskStatus={detail.type === "Task" ? detail.task_meta?.status : undefined}
           recentWarnings={detail.recent_warnings}
+          onApplyFilter={onApplyBadgeFilter}
+          legendHref={legendHref}
         />
 
         <div className="art-meta">
@@ -75,7 +95,13 @@ export function ReaderSurface({ detail, emptyMessage, scope }: Props) {
             {detail.status}
           </span>
           <span className={typeChipClass(detail.type)}>{detail.type}</span>
-          <span className="chip chip--area">{areaLabel}</span>
+          <BadgePopoverChip
+            label={areaLabel}
+            title={t("reader.badge_area_tip", areaLabel)}
+            className="chip chip--area"
+            onApply={onApplyAreaFilter ? () => onApplyAreaFilter(detail.area_slug) : undefined}
+            legendHref={legendHref}
+          />
           <span className="art-meta__sep">·</span>
           <ArtifactByline artifact={detail} />
           <span className="art-meta__sep">·</span>

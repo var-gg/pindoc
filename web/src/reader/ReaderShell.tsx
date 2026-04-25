@@ -14,6 +14,17 @@ import { useReaderData } from "./useReaderData";
 import { typeChipClass } from "./typeChip";
 import { initReaderWidth, setReaderWidth as applyReaderWidth, type ReaderWidth } from "./readerWidth";
 import { localizedAreaName } from "./areaLocale";
+import {
+  appendBadgeFilters,
+  artifactMatchesBadgeFilters,
+  badgeFilterKeyLabel,
+  clearAllBadgeFilterParams,
+  clearBadgeFilterParam,
+  readBadgeFilters,
+  setBadgeFilterParam,
+  type BadgeFilter,
+  type BadgeFilterKey,
+} from "./badgeFilters";
 import "../styles/reader.css";
 
 export type ReaderView = "reader" | "inbox" | "graph" | "tasks";
@@ -72,6 +83,10 @@ export function ReaderShell({ view }: Props) {
   const [selectedType, setSelectedTypeState] = useState<string | null>(
     () => (view === "tasks" ? null : searchParams.get("type")),
   );
+  const badgeFilters = useMemo(
+    () => readBadgeFilters(searchParams, t),
+    [searchParams, t],
+  );
 
   // Surface transition policy (Decision `decision-reader-ia-hierarchy`):
   // Area carries across surfaces (exploration continuity — "UI area in
@@ -101,6 +116,15 @@ export function ReaderShell({ view }: Props) {
 
   const baseRoute = `/p/${project}/${locale}/${view === "tasks" ? "tasks" : "wiki"}`;
 
+  function writeSearchParams(next: URLSearchParams, opts?: { toList?: boolean }) {
+    const qs = next.toString();
+    if (opts?.toList && slug) {
+      navigate(`${baseRoute}${qs ? `?${qs}` : ""}`, { replace: true });
+      return;
+    }
+    setSearchParams(next, { replace: true });
+  }
+
   // In Wiki detail mode, Area selection is a live scope for the detail
   // header and sibling nav; the article stays mounted. Other surfaces
   // still return to their list/board so the filter effect is obvious.
@@ -114,12 +138,43 @@ export function ReaderShell({ view }: Props) {
   }
   function clearAreaFilter() {
     setSelectedArea(null);
-    if (slug) navigate(baseRoute);
+    const next = new URLSearchParams(searchParams);
+    next.delete("area");
+    writeSearchParams(next, { toList: true });
+  }
+  function clearTypeFilter() {
+    setSelectedTypeState(null);
+    const next = new URLSearchParams(searchParams);
+    next.delete("type");
+    writeSearchParams(next, { toList: true });
   }
   function clearFilters() {
     setSelectedArea(null);
     setSelectedTypeState(null);
-    if (slug) navigate(baseRoute);
+    const next = new URLSearchParams(searchParams);
+    next.delete("area");
+    next.delete("type");
+    clearAllBadgeFilterParams(next);
+    writeSearchParams(next, { toList: true });
+  }
+  function applyBadgeFilter(filter: BadgeFilter) {
+    const next = new URLSearchParams(searchParams);
+    setBadgeFilterParam(next, filter);
+    if (selectedArea) next.set("area", selectedArea);
+    if (selectedType && view !== "tasks") next.set("type", selectedType);
+    writeSearchParams(next, { toList: true });
+  }
+  function clearBadgeFilter(key: BadgeFilterKey) {
+    const next = new URLSearchParams(searchParams);
+    clearBadgeFilterParam(next, key);
+    writeSearchParams(next);
+  }
+  function applyAreaFilterFromBadge(areaSlug: string) {
+    setSelectedArea(areaSlug);
+    const next = new URLSearchParams(searchParams);
+    next.set("area", areaSlug);
+    if (selectedType && view !== "tasks") next.set("type", selectedType);
+    writeSearchParams(next, { toList: true });
   }
 
   // ⌘K listener — global-level so palette opens from any surface.
@@ -140,13 +195,13 @@ export function ReaderShell({ view }: Props) {
       if (paletteOpen || e.key !== "Escape") return;
       const target = e.target as HTMLElement | null;
       if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
-      if (!selectedArea && !selectedType) return;
+      if (!selectedArea && !selectedType && badgeFilters.length === 0) return;
       e.preventDefault();
       clearFilters();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [view, paletteOpen, selectedArea, selectedType, slug, baseRoute, navigate]);
+  }, [view, paletteOpen, selectedArea, selectedType, badgeFilters.length, slug, baseRoute, navigate]);
 
   const toggleTheme = () => {
     const next: Theme = theme === "dark" ? "light" : "dark";
@@ -165,7 +220,7 @@ export function ReaderShell({ view }: Props) {
   //
   // Pipeline ordering (Decision `decision-reader-ia-hierarchy`):
   //   baseList → surfaceList (Surface defines the natural set)
-  //            → filteredArtifacts (Type + Area layered on top)
+  //            → filteredArtifacts (Type + Area + Badge layered on top)
   // Counters derive from surfaceList with the *other* axis still applied
   // so the selected axis behaves as "show everything" — Linear/Issues
   // convention.
@@ -180,28 +235,31 @@ export function ReaderShell({ view }: Props) {
       surfaceList.filter((a) => {
         if (selectedArea && a.area_slug !== selectedArea) return false;
         if (selectedType && a.type !== selectedType) return false;
+        if (!artifactMatchesBadgeFilters(a, badgeFilters)) return false;
         return true;
       }),
-    [surfaceList, selectedArea, selectedType],
+    [surfaceList, selectedArea, selectedType, badgeFilters],
   );
   const areaCountMap = useMemo(() => {
     const map = new Map<string, number>();
     for (const a of surfaceList) {
       if (selectedType && a.type !== selectedType) continue;
+      if (!artifactMatchesBadgeFilters(a, badgeFilters)) continue;
       map.set(a.area_slug, (map.get(a.area_slug) ?? 0) + 1);
     }
     return map;
-  }, [surfaceList, selectedType]);
+  }, [surfaceList, selectedType, badgeFilters]);
   const typeCounts = useMemo<Aggregate[]>(() => {
     const map = new Map<string, number>();
     for (const a of surfaceList) {
       if (selectedArea && a.area_slug !== selectedArea) continue;
+      if (!artifactMatchesBadgeFilters(a, badgeFilters)) continue;
       map.set(a.type, (map.get(a.type) ?? 0) + 1);
     }
     return Array.from(map, ([key, count]) => ({ key, count })).sort(
       (a, b) => b.count - a.count,
     );
-  }, [surfaceList, selectedArea]);
+  }, [surfaceList, selectedArea, badgeFilters]);
 
   if (state.kind === "loading") {
     return <div className="reader-state">{t("wiki.loading")}</div>;
@@ -272,10 +330,15 @@ export function ReaderShell({ view }: Props) {
           currentSlug={slug}
           selectedArea={selectedArea}
           selectedType={selectedType}
+          badgeFilters={badgeFilters}
           areaNameBySlug={areaNameBySlug}
           areaPathBySlug={areaPathBySlug}
           onClearAreaFilter={clearAreaFilter}
+          onClearTypeFilter={clearTypeFilter}
+          onClearBadgeFilter={clearBadgeFilter}
           onClearFilters={clearFilters}
+          onApplyBadgeFilter={applyBadgeFilter}
+          onApplyAreaFilter={applyAreaFilterFromBadge}
         />
         <Sidecar
           projectSlug={project}
@@ -316,6 +379,7 @@ function buildDetailScope({
   list,
   selectedArea,
   selectedType,
+  badgeFilters,
   areaNameBySlug,
   areaPathBySlug,
   baseRoute,
@@ -324,6 +388,7 @@ function buildDetailScope({
   list: ArtifactRef[];
   selectedArea: string | null;
   selectedType: string | null;
+  badgeFilters: BadgeFilter[];
   areaNameBySlug: ReadonlyMap<string, string>;
   areaPathBySlug: ReadonlyMap<string, string[]>;
   baseRoute: string;
@@ -332,7 +397,7 @@ function buildDetailScope({
   const pathLabels =
     areaPathBySlug.get(scopeArea) ?? [areaNameBySlug.get(scopeArea) ?? scopeArea];
   const mismatch = Boolean(selectedArea && detail.area_slug !== selectedArea);
-  const listHref = filteredReaderHref(baseRoute, undefined, selectedArea ?? scopeArea, selectedType);
+  const listHref = filteredReaderHref(baseRoute, undefined, selectedArea ?? scopeArea, selectedType, badgeFilters);
   if (mismatch) {
     return { pathLabels, mismatch, listHref };
   }
@@ -350,8 +415,8 @@ function buildDetailScope({
     listHref,
     prev,
     next,
-    prevHref: prev ? filteredReaderHref(baseRoute, prev.slug, selectedArea, selectedType) : undefined,
-    nextHref: next ? filteredReaderHref(baseRoute, next.slug, selectedArea, selectedType) : undefined,
+    prevHref: prev ? filteredReaderHref(baseRoute, prev.slug, selectedArea, selectedType, badgeFilters) : undefined,
+    nextHref: next ? filteredReaderHref(baseRoute, next.slug, selectedArea, selectedType, badgeFilters) : undefined,
   };
 }
 
@@ -360,10 +425,12 @@ function filteredReaderHref(
   slug: string | undefined,
   selectedArea: string | null,
   selectedType: string | null,
+  badgeFilters: BadgeFilter[] = [],
 ): string {
   const params = new URLSearchParams();
   if (selectedArea) params.set("area", selectedArea);
   if (selectedType) params.set("type", selectedType);
+  appendBadgeFilters(params, badgeFilters);
   const qs = params.toString();
   return `${baseRoute}${slug ? `/${slug}` : ""}${qs ? `?${qs}` : ""}`;
 }
@@ -378,10 +445,15 @@ function Body({
   currentSlug,
   selectedArea,
   selectedType,
+  badgeFilters,
   areaNameBySlug,
   areaPathBySlug,
   onClearAreaFilter,
+  onClearTypeFilter,
+  onClearBadgeFilter,
   onClearFilters,
+  onApplyBadgeFilter,
+  onApplyAreaFilter,
 }: {
   view: ReaderView;
   projectSlug: string;
@@ -392,10 +464,15 @@ function Body({
   currentSlug: string | undefined;
   selectedArea: string | null;
   selectedType: string | null;
+  badgeFilters: BadgeFilter[];
   areaNameBySlug: ReadonlyMap<string, string>;
   areaPathBySlug: ReadonlyMap<string, string[]>;
   onClearAreaFilter: () => void;
+  onClearTypeFilter: () => void;
+  onClearBadgeFilter: (key: BadgeFilterKey) => void;
   onClearFilters: () => void;
+  onApplyBadgeFilter: (filter: BadgeFilter) => void;
+  onApplyAreaFilter: (areaSlug: string) => void;
 }) {
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -406,6 +483,7 @@ function Body({
         list: allList,
         selectedArea,
         selectedType,
+        badgeFilters,
         areaNameBySlug,
         areaPathBySlug,
         baseRoute,
@@ -467,6 +545,10 @@ function Body({
         detail={detail}
         emptyMessage={view === "tasks" ? t("wiki.empty_tasks_detail") : t("wiki.empty_detail")}
         scope={detailScope}
+        projectSlug={projectSlug}
+        projectLocale={projectLocale}
+        onApplyBadgeFilter={onApplyBadgeFilter}
+        onApplyAreaFilter={onApplyAreaFilter}
       />
     );
   }
@@ -488,8 +570,10 @@ function Body({
         currentSlug={currentSlug}
         empty={empty}
         selectedArea={selectedArea}
+        badgeFilters={badgeFilters}
         areaNameBySlug={areaNameBySlug}
         onClearAreaFilter={onClearAreaFilter}
+        onClearBadgeFilter={onClearBadgeFilter}
         onClearFilters={onClearFilters}
       />
     );
@@ -501,6 +585,17 @@ function Body({
         <div className="side-section" style={{ padding: "0 0 12px" }}>
           {t("wiki.section_artifacts")} · {list.length}
         </div>
+        {(selectedArea || selectedType || badgeFilters.length > 0) && (
+          <AppliedFilterBar
+            selectedArea={selectedArea}
+            selectedAreaLabel={selectedArea ? areaNameBySlug.get(selectedArea) ?? selectedArea : null}
+            selectedType={selectedType}
+            badgeFilters={badgeFilters}
+            onClearAreaFilter={onClearAreaFilter}
+            onClearTypeFilter={onClearTypeFilter}
+            onClearBadgeFilter={onClearBadgeFilter}
+          />
+        )}
         {list.length === 0 ? (
           <div style={{ color: "var(--fg-3)", fontSize: 13 }}>{empty}</div>
         ) : (
@@ -511,7 +606,7 @@ function Body({
               return (
                 <Link
                   key={a.id}
-                  to={`${linkBase}/${a.slug}`}
+                  to={filteredReaderHref(linkBase, a.slug, selectedArea, selectedType, badgeFilters)}
                   className={`backlink${isActive ? " is-active" : ""}`}
                   style={isActive ? {
                     borderColor: "var(--accent)",
@@ -577,8 +672,10 @@ function TasksKanban({
   currentSlug,
   empty,
   selectedArea,
+  badgeFilters,
   areaNameBySlug,
   onClearAreaFilter,
+  onClearBadgeFilter,
   onClearFilters,
 }: {
   projectSlug: string;
@@ -588,15 +685,17 @@ function TasksKanban({
   currentSlug: string | undefined;
   empty: string;
   selectedArea: string | null;
+  badgeFilters: BadgeFilter[];
   areaNameBySlug: ReadonlyMap<string, string>;
   onClearAreaFilter: () => void;
+  onClearBadgeFilter: (key: BadgeFilterKey) => void;
   onClearFilters: () => void;
 }) {
   const { t } = useI18n();
 
   const groups = groupTasksByStatus(list);
   const allGroups = groupTasksByStatus(allList);
-  const hasActiveFilters = Boolean(selectedArea);
+  const hasActiveFilters = Boolean(selectedArea || badgeFilters.length > 0);
   const scopeLabel = selectedArea
     ? areaNameBySlug.get(selectedArea) ?? selectedArea
     : t("wiki.area_all");
@@ -612,7 +711,9 @@ function TasksKanban({
             totalCount={0}
             filteredPendingCount={0}
             selectedArea={selectedArea}
+            badgeFilters={badgeFilters}
             onClearAreaFilter={onClearAreaFilter}
+            onClearBadgeFilter={onClearBadgeFilter}
           />
           <div className="task-empty-state">
             <div className="task-empty-state__title">{empty}</div>
@@ -629,7 +730,9 @@ function TasksKanban({
         totalCount={allList.length}
         filteredPendingCount={filteredPendingCount}
         selectedArea={selectedArea}
+        badgeFilters={badgeFilters}
         onClearAreaFilter={onClearAreaFilter}
+        onClearBadgeFilter={onClearBadgeFilter}
       />
       {list.length === 0 && hasActiveFilters && (
         <TaskFilterEmptyState
@@ -722,13 +825,17 @@ function TaskBoardHeader({
   totalCount,
   filteredPendingCount,
   selectedArea,
+  badgeFilters,
   onClearAreaFilter,
+  onClearBadgeFilter,
 }: {
   scopeLabel: string;
   totalCount: number;
   filteredPendingCount: number;
   selectedArea: string | null;
+  badgeFilters: BadgeFilter[];
   onClearAreaFilter: () => void;
+  onClearBadgeFilter: (key: BadgeFilterKey) => void;
 }) {
   const { t } = useI18n();
   const title = selectedArea
@@ -760,8 +867,94 @@ function TaskBoardHeader({
             </button>
           </span>
         )}
+        {badgeFilters.map((filter) => (
+          <FilterChip
+            key={`${filter.key}:${filter.value}`}
+            keyLabel={badgeFilterKeyLabel(filter.key, t)}
+            label={filter.label}
+            onRemove={() => onClearBadgeFilter(filter.key)}
+            removeLabel={t("reader.filter_remove_badge", filter.label)}
+          />
+        ))}
       </div>
     </div>
+  );
+}
+
+function AppliedFilterBar({
+  selectedArea,
+  selectedAreaLabel,
+  selectedType,
+  badgeFilters,
+  onClearAreaFilter,
+  onClearTypeFilter,
+  onClearBadgeFilter,
+}: {
+  selectedArea: string | null;
+  selectedAreaLabel: string | null;
+  selectedType: string | null;
+  badgeFilters: BadgeFilter[];
+  onClearAreaFilter: () => void;
+  onClearTypeFilter: () => void;
+  onClearBadgeFilter: (key: BadgeFilterKey) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="task-filter-bar reader-filter-bar" aria-label={t("reader.filter_bar_label")}>
+      {selectedType && (
+        <FilterChip
+          keyLabel="Type"
+          label={selectedType}
+          onRemove={onClearTypeFilter}
+          removeLabel={t("reader.filter_remove_type", selectedType)}
+        />
+      )}
+      {selectedArea && selectedAreaLabel && (
+        <FilterChip
+          keyLabel="Area"
+          label={selectedAreaLabel}
+          onRemove={onClearAreaFilter}
+          removeLabel={t("tasks.filter_remove_area", selectedAreaLabel)}
+        />
+      )}
+      {badgeFilters.map((filter) => (
+        <FilterChip
+          key={`${filter.key}:${filter.value}`}
+          keyLabel={badgeFilterKeyLabel(filter.key, t)}
+          label={filter.label}
+          onRemove={() => onClearBadgeFilter(filter.key)}
+          removeLabel={t("reader.filter_remove_badge", filter.label)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function FilterChip({
+  keyLabel,
+  label,
+  onRemove,
+  removeLabel,
+}: {
+  keyLabel: string;
+  label: string;
+  onRemove: () => void;
+  removeLabel: string;
+}) {
+  return (
+    <span className="task-filter-chip">
+      <span className="task-filter-chip__key">{keyLabel}</span>
+      <span>{label}</span>
+      <button
+        type="button"
+        className="task-filter-chip__remove"
+        onClick={onRemove}
+        aria-label={removeLabel}
+        title={removeLabel}
+      >
+        <X className="lucide" />
+      </button>
+    </span>
   );
 }
 

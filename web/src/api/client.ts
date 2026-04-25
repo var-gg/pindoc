@@ -159,6 +159,7 @@ export type ArtifactRef = {
   task_meta?: TaskMeta;
   artifact_meta?: ArtifactMeta;
   author_user?: AuthorUserRef;
+  recent_warnings?: RecentWarning[];
 };
 
 // RecentWarning mirrors one events.artifact.warning_raised row for the

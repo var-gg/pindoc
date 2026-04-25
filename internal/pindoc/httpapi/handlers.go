@@ -13,22 +13,22 @@ import (
 )
 
 type projectInfo struct {
-	ID              string        `json:"id"`
-	Slug            string        `json:"slug"`
-	Name            string        `json:"name"`
-	OwnerID         string        `json:"owner_id"`
-	Description     string        `json:"description,omitempty"`
-	Color           string        `json:"color,omitempty"`
-	PrimaryLanguage string        `json:"primary_language"`
+	ID              string `json:"id"`
+	Slug            string `json:"slug"`
+	Name            string `json:"name"`
+	OwnerID         string `json:"owner_id"`
+	Description     string `json:"description,omitempty"`
+	Color           string `json:"color,omitempty"`
+	PrimaryLanguage string `json:"primary_language"`
 	// Locale is the authoritative canonical-key column added by Phase 18
 	// (migration 0015, Task task-phase-18-project-locale-implementation).
 	// Reader URL embeds it between the project slug and the view verb so
 	// the same slug across locales stays uniquely addressable.
-	Locale          string        `json:"locale"`
-	AreasCount      int           `json:"areas_count"`
-	ArtifactsCount  int           `json:"artifacts_count"`
-	CreatedAt       time.Time     `json:"created_at"`
-	Rendering       RenderingCaps `json:"rendering"`
+	Locale         string        `json:"locale"`
+	AreasCount     int           `json:"areas_count"`
+	ArtifactsCount int           `json:"artifacts_count"`
+	CreatedAt      time.Time     `json:"created_at"`
+	Rendering      RenderingCaps `json:"rendering"`
 }
 
 // RenderingCaps tells an agent which markdown features actually render in
@@ -311,6 +311,10 @@ type artifactRow struct {
 	// server ran without PINDOC_USER_NAME. Reader falls back to
 	// "(unknown) via {author_id}" byline in that case.
 	AuthorUser *authorUserRef `json:"author_user,omitempty"`
+	// RecentWarnings mirrors the detail payload's current warning chips so
+	// the Reader can filter list views by warning badges without fetching
+	// every artifact detail.
+	RecentWarnings []recentWarningRow `json:"recent_warnings,omitempty"`
 }
 
 // authorUserRef is the thin join projection of users → artifact list.
@@ -336,11 +340,29 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 			a.id::text, a.slug, a.type, a.title, ar.slug,
 			a.completeness, a.status, a.review_state,
 			a.author_id, a.published_at, a.updated_at, a.task_meta, a.artifact_meta,
+			wr.recent_warnings,
 			u.id::text, u.display_name, u.github_handle
 		FROM artifacts a
 		JOIN projects p  ON p.id  = a.project_id
 		JOIN areas    ar ON ar.id = a.area_id
 		LEFT JOIN users u ON u.id = a.author_user_id
+		LEFT JOIN LATERAL (
+			SELECT COALESCE(jsonb_agg(jsonb_build_object(
+				'codes', COALESCE(e.payload->'codes', '[]'::jsonb),
+				'revision_number', COALESCE(NULLIF(e.payload->>'revision_number', '')::int, 0),
+				'author_id', NULLIF(e.payload->>'author_id', ''),
+				'canonical_rewrite_without_evidence',
+					COALESCE((e.payload->>'canonical_rewrite_without_evidence')::boolean, false),
+				'created_at', e.created_at
+			) ORDER BY e.created_at DESC), '[]'::jsonb) AS recent_warnings
+			FROM (
+				SELECT payload, created_at
+				  FROM events
+				 WHERE subject_id = a.id AND kind = 'artifact.warning_raised'
+				 ORDER BY created_at DESC
+				 LIMIT 5
+			) e
+		) wr ON true
 		WHERE p.slug = $1
 		  AND a.status <> 'archived'
 		  AND ($2 = '' OR ar.slug = $2)
@@ -360,12 +382,13 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var a artifactRow
 		var publishedAt *time.Time
-		var taskMeta, artifactMeta []byte
+		var taskMeta, artifactMeta, recentWarnings []byte
 		var userID, userDisplay, userGithub *string
 		if err := rows.Scan(
 			&a.ID, &a.Slug, &a.Type, &a.Title, &a.AreaSlug,
 			&a.Completeness, &a.Status, &a.ReviewState,
 			&a.AuthorID, &publishedAt, &a.UpdatedAt, &taskMeta, &artifactMeta,
+			&recentWarnings,
 			&userID, &userDisplay, &userGithub,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan failed")
@@ -379,6 +402,12 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(artifactMeta) > 0 {
 			a.ArtifactMeta = json.RawMessage(artifactMeta)
+		}
+		if len(recentWarnings) > 0 && string(recentWarnings) != "[]" {
+			if err := json.Unmarshal(recentWarnings, &a.RecentWarnings); err != nil {
+				d.Logger.Warn("artifact list warning payload unmarshal failed",
+					"artifact_id", a.ID, "err", err)
+			}
 		}
 		if userID != nil && userDisplay != nil {
 			ref := &authorUserRef{ID: *userID, DisplayName: *userDisplay}
@@ -437,11 +466,11 @@ type artifactDetail struct {
 // suppress badges from older revisions when the latest revision is
 // clean.
 type recentWarningRow struct {
-	Codes                          []string  `json:"codes"`
-	RevisionNumber                 int       `json:"revision_number"`
-	AuthorID                       string    `json:"author_id,omitempty"`
-	CanonicalRewriteWithoutEvidence bool     `json:"canonical_rewrite_without_evidence,omitempty"`
-	CreatedAt                      time.Time `json:"created_at"`
+	Codes                           []string  `json:"codes"`
+	RevisionNumber                  int       `json:"revision_number"`
+	AuthorID                        string    `json:"author_id,omitempty"`
+	CanonicalRewriteWithoutEvidence bool      `json:"canonical_rewrite_without_evidence,omitempty"`
+	CreatedAt                       time.Time `json:"created_at"`
 }
 
 type edgeRef struct {
@@ -586,10 +615,10 @@ func (d Deps) loadRecentWarnings(ctx context.Context, artifactID string) ([]rece
 			return nil, err
 		}
 		var parsed struct {
-			Codes                          []string `json:"codes"`
-			RevisionNumber                 int      `json:"revision_number"`
-			AuthorID                       string   `json:"author_id"`
-			CanonicalRewriteWithoutEvidence bool    `json:"canonical_rewrite_without_evidence"`
+			Codes                           []string `json:"codes"`
+			RevisionNumber                  int      `json:"revision_number"`
+			AuthorID                        string   `json:"author_id"`
+			CanonicalRewriteWithoutEvidence bool     `json:"canonical_rewrite_without_evidence"`
 		}
 		if err := json.Unmarshal(payload, &parsed); err != nil {
 			// Skip malformed rows rather than 500 — an older payload
@@ -599,11 +628,11 @@ func (d Deps) loadRecentWarnings(ctx context.Context, artifactID string) ([]rece
 			continue
 		}
 		out = append(out, recentWarningRow{
-			Codes:                          parsed.Codes,
-			RevisionNumber:                 parsed.RevisionNumber,
-			AuthorID:                       parsed.AuthorID,
+			Codes:                           parsed.Codes,
+			RevisionNumber:                  parsed.RevisionNumber,
+			AuthorID:                        parsed.AuthorID,
 			CanonicalRewriteWithoutEvidence: parsed.CanonicalRewriteWithoutEvidence,
-			CreatedAt:                      createdAt,
+			CreatedAt:                       createdAt,
 		})
 	}
 	return out, nil

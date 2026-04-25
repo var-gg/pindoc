@@ -3,15 +3,11 @@
 // is it here / will the next agent see it" within three seconds. Missing
 // axes gracefully fall back to a single "unclassified" chip so legacy rows
 // (predating migration 0012 / artifact_meta) still read cleanly.
-//
-// Scope boundary (see Task reader-trust-card-...):
-//   - Keep the colour palette SECONDARY so the existing draft/live/stale
-//     lifecycle chip stays the primary visual anchor.
-//   - No interactivity here — filtering by trust lives on the Sidebar
-//     (separate Task). This component is display-only.
 
 import type { ArtifactMeta, PinRef, RecentWarning, TaskMeta } from "../api/client";
 import { useI18n } from "../i18n";
+import { BadgePopoverChip } from "./BadgePopoverChip";
+import type { BadgeFilter } from "./badgeFilters";
 
 type Props = {
   meta?: ArtifactMeta;
@@ -27,6 +23,8 @@ type Props = {
   // revision codes stay in the history but don't clutter the card for
   // an artifact whose current revision is clean.
   recentWarnings?: RecentWarning[];
+  onApplyFilter?: (filter: BadgeFilter) => void;
+  legendHref?: string;
 };
 
 type ChipTone = "neutral" | "warning" | "danger";
@@ -35,11 +33,19 @@ type Chip = {
   label: string;
   tone: ChipTone;
   title: string;
+  filter?: BadgeFilter;
 };
 
 type TFn = (key: string, ...args: Array<string | number>) => string;
 
-export function TrustCard({ meta, pins, taskStatus, recentWarnings }: Props) {
+export function TrustCard({
+  meta,
+  pins,
+  taskStatus,
+  recentWarnings,
+  onApplyFilter,
+  legendHref,
+}: Props) {
   const { t } = useI18n();
   const chips = buildChips(meta, pins, t);
   const taskChip = taskStatusChip(taskStatus, t);
@@ -53,40 +59,16 @@ export function TrustCard({ meta, pins, taskStatus, recentWarnings }: Props) {
     return null;
   }
   return (
-    <div
-      className="trust-card"
-      aria-label="Trust summary"
-      style={{
-        display: "flex",
-        flexWrap: "wrap",
-        alignItems: "center",
-        gap: 6,
-        margin: "4px 0 12px",
-      }}
-    >
-      {chips.map((c) => (
-        <span
-          key={c.label}
-          className={`chip chip--trust chip--trust-${c.tone}`}
+    <div className="trust-card" aria-label="Trust summary">
+      {chips.map((c, i) => (
+        <BadgePopoverChip
+          key={`${c.label}-${i}`}
+          label={c.label}
           title={c.title}
-          style={{
-            fontSize: 10.5,
-            letterSpacing: "0.02em",
-            textTransform: "none",
-            padding: "2px 7px",
-            borderRadius: 999,
-            border: "1px solid var(--fg-4)",
-            background:
-              c.tone === "danger"
-                ? "color-mix(in oklch, var(--danger, #d86b6b) 14%, var(--bg-2))"
-                : c.tone === "warning"
-                ? "color-mix(in oklch, var(--warning, #c68a2a) 12%, var(--bg-2))"
-                : "var(--bg-2)",
-            color: "var(--fg-2)",
-          }}
-        >
-          {c.label}
-        </span>
+          className={`chip chip--trust chip--trust-${c.tone}`}
+          onApply={c.filter && onApplyFilter ? () => onApplyFilter(c.filter!) : undefined}
+          legendHref={legendHref}
+        />
       ))}
     </div>
   );
@@ -116,25 +98,31 @@ function buildChips(meta: ArtifactMeta | undefined, pins: PinRef[] | undefined, 
   // Confidence — show low as a warning chip, hide medium/high to keep the
   // card quiet. Open question Q from the Task body: "low only" default.
   if (meta.confidence === "low") {
+    const label = t("trust.confidence.low.label");
     chips.push({
-      label: t("trust.confidence.low.label"),
+      label,
       tone: "warning",
       title: t("trust.confidence.low.tip"),
+      filter: { key: "confidence", value: "low", label },
     });
   }
 
   // Audience modifier — surfaced only when non-default (owner/approvers).
   if (meta.audience === "owner_only") {
+    const label = t("trust.audience.owner_only.label");
     chips.push({
-      label: t("trust.audience.owner_only.label"),
+      label,
       tone: "danger",
       title: t("trust.audience.owner_only.tip"),
+      filter: { key: "audience", value: "owner_only", label },
     });
   } else if (meta.audience === "approvers") {
+    const label = t("trust.audience.approvers.label");
     chips.push({
-      label: t("trust.audience.approvers.label"),
+      label,
       tone: "warning",
       title: t("trust.audience.approvers.tip"),
+      filter: { key: "audience", value: "approvers", label },
     });
   }
 
@@ -143,30 +131,38 @@ function buildChips(meta: ArtifactMeta | undefined, pins: PinRef[] | undefined, 
 
 function trustClassChip(meta: ArtifactMeta, t: TFn): Chip {
   if (meta.source_type === "user_chat") {
+    const label = t("trust.source.user_chat.label");
     return {
-      label: t("trust.source.user_chat.label"),
+      label,
       tone: "warning",
       title: t("trust.source.user_chat.tip"),
+      filter: { key: "source_type", value: "user_chat", label },
     };
   }
   if (meta.verification_state === "verified") {
+    const label = t("trust.verification.verified.label");
     return {
-      label: t("trust.verification.verified.label"),
+      label,
       tone: "neutral",
       title: t("trust.verification.verified.tip"),
+      filter: { key: "verification_state", value: "verified", label },
     };
   }
   if (meta.verification_state === "unverified") {
+    const label = t("trust.verification.unverified.label");
     return {
-      label: t("trust.verification.unverified.label"),
+      label,
       tone: "warning",
       title: t("trust.verification.unverified.tip"),
+      filter: { key: "verification_state", value: "unverified", label },
     };
   }
+  const label = t("trust.verification.partially_verified.label");
   return {
-    label: t("trust.verification.partially_verified.label"),
+    label,
     tone: "neutral",
     title: t("trust.verification.partially_verified.tip"),
+    filter: { key: "verification_state", value: "partially_verified", label },
   };
 }
 
@@ -174,38 +170,48 @@ function sourceSummaryChip(meta: ArtifactMeta, pins: PinRef[] | undefined, t: TF
   const count = pins?.length ?? 0;
   const pinsLabel = pinCountLabel(count, t);
   if (meta.source_type === "code") {
+    const label = t("trust.source.code.label");
     return {
-      label: count > 0 ? `${t("trust.source.code.label")} · ${pinsLabel}` : t("trust.source.code.label"),
+      label: count > 0 ? `${label} · ${pinsLabel}` : label,
       tone: "neutral",
       title: t("trust.source.code.tip"),
+      filter: { key: "source_type", value: "code", label },
     };
   }
   if (meta.source_type === "mixed") {
+    const label = t("trust.source.mixed.label");
     return {
-      label: count > 0 ? `${t("trust.source.mixed.label")} · ${pinsLabel}` : t("trust.source.mixed.label"),
+      label: count > 0 ? `${label} · ${pinsLabel}` : label,
       tone: "neutral",
       title: t("trust.source.mixed.tip"),
+      filter: { key: "source_type", value: "mixed", label },
     };
   }
   if (meta.source_type === "artifact") {
+    const label = t("trust.source.artifact.label");
     return {
-      label: t("trust.source.artifact.label"),
+      label,
       tone: "neutral",
       title: t("trust.source.artifact.tip"),
+      filter: { key: "source_type", value: "artifact", label },
     };
   }
   if (meta.source_type === "external") {
+    const label = t("trust.source.external.label");
     return {
-      label: t("trust.source.external.label"),
+      label,
       tone: "neutral",
       title: t("trust.source.external.tip"),
+      filter: { key: "source_type", value: "external", label },
     };
   }
   if (meta.source_type === "user_chat") {
+    const label = t("trust.source.user_chat.label");
     return {
       label: t("trust.source.user_chat.short_label"),
       tone: "warning",
       title: t("trust.source.user_chat.tip"),
+      filter: { key: "source_type", value: "user_chat", label },
     };
   }
   return {
@@ -222,29 +228,45 @@ function pinCountLabel(count: number, t: TFn): string {
 function taskStatusChip(status: TaskMeta["status"], t: TFn): Chip | null {
   switch (status) {
     case "claimed_done":
-      return {
-        label: t("trust.task.claimed_done.label"),
-        tone: "warning",
-        title: t("trust.task.claimed_done.tip"),
-      };
+      {
+        const label = t("trust.task.claimed_done.label");
+        return {
+          label,
+          tone: "warning",
+          title: t("trust.task.claimed_done.tip"),
+          filter: { key: "task_status", value: "claimed_done", label },
+        };
+      }
     case "verified":
-      return {
-        label: t("trust.task.verified.label"),
-        tone: "neutral",
-        title: t("trust.task.verified.tip"),
-      };
+      {
+        const label = t("trust.task.verified.label");
+        return {
+          label,
+          tone: "neutral",
+          title: t("trust.task.verified.tip"),
+          filter: { key: "task_status", value: "verified", label },
+        };
+      }
     case "blocked":
-      return {
-        label: t("trust.task.blocked.label"),
-        tone: "danger",
-        title: t("trust.task.blocked.tip"),
-      };
+      {
+        const label = t("trust.task.blocked.label");
+        return {
+          label,
+          tone: "danger",
+          title: t("trust.task.blocked.tip"),
+          filter: { key: "task_status", value: "blocked", label },
+        };
+      }
     case "cancelled":
-      return {
-        label: t("trust.task.cancelled.label"),
-        tone: "neutral",
-        title: t("trust.task.cancelled.tip"),
-      };
+      {
+        const label = t("trust.task.cancelled.label");
+        return {
+          label,
+          tone: "neutral",
+          title: t("trust.task.cancelled.tip"),
+          filter: { key: "task_status", value: "cancelled", label },
+        };
+      }
     case "open":
     case undefined:
     default:
@@ -277,31 +299,39 @@ function warningChips(recent: RecentWarning[] | undefined, t: TFn): Chip[] {
   }
   const chips: Chip[] = [];
   if (codes.has("CANONICAL_REWRITE_WITHOUT_EVIDENCE")) {
+    const label = t("trust.warning.canonical_rewrite.label");
     chips.push({
-      label: t("trust.warning.canonical_rewrite.label"),
+      label,
       tone: "warning",
       title: t("trust.warning.canonical_rewrite.tip"),
+      filter: { key: "warning", value: "CANONICAL_REWRITE_WITHOUT_EVIDENCE", label },
     });
   }
   if (codes.has("CONSENT_REQUIRED_FOR_USER_CHAT")) {
+    const label = t("trust.warning.consent_required.label");
     chips.push({
-      label: t("trust.warning.consent_required.label"),
+      label,
       tone: "warning",
       title: t("trust.warning.consent_required.tip"),
+      filter: { key: "warning", value: "CONSENT_REQUIRED_FOR_USER_CHAT", label },
     });
   }
   if (codes.has("SOURCE_TYPE_UNCLASSIFIED")) {
+    const label = t("trust.warning.source_unclassified.label");
     chips.push({
-      label: t("trust.warning.source_unclassified.label"),
+      label,
       tone: "neutral",
       title: t("trust.warning.source_unclassified.tip"),
+      filter: { key: "warning", value: "SOURCE_TYPE_UNCLASSIFIED", label },
     });
   }
   if (codes.has("RECOMMEND_READ_BEFORE_CREATE")) {
+    const label = t("trust.warning.near_duplicate.label");
     chips.push({
-      label: t("trust.warning.near_duplicate.label"),
+      label,
       tone: "neutral",
       title: t("trust.warning.near_duplicate.tip"),
+      filter: { key: "warning", value: "RECOMMEND_READ_BEFORE_CREATE", label },
     });
   }
   return chips;
@@ -310,28 +340,44 @@ function warningChips(recent: RecentWarning[] | undefined, t: TFn): Chip[] {
 function nextSessionChip(meta: ArtifactMeta, t: TFn): Chip {
   switch (meta.next_context_policy) {
     case "excluded":
-      return {
-        label: t("trust.next_context.excluded.label"),
-        tone: "danger",
-        title: t("trust.next_context.excluded.tip"),
-      };
+      {
+        const label = t("trust.next_context.excluded.label");
+        return {
+          label,
+          tone: "danger",
+          title: t("trust.next_context.excluded.tip"),
+          filter: { key: "next_context_policy", value: "excluded", label },
+        };
+      }
     case "opt_in":
-      return {
-        label: t("trust.next_context.opt_in.label"),
-        tone: "warning",
-        title: t("trust.next_context.opt_in.tip"),
-      };
+      {
+        const label = t("trust.next_context.opt_in.label");
+        return {
+          label,
+          tone: "warning",
+          title: t("trust.next_context.opt_in.tip"),
+          filter: { key: "next_context_policy", value: "opt_in", label },
+        };
+      }
     case "default":
-      return {
-        label: t("trust.next_context.default.label"),
-        tone: "neutral",
-        title: t("trust.next_context.default.tip"),
-      };
+      {
+        const label = t("trust.next_context.default.label");
+        return {
+          label,
+          tone: "neutral",
+          title: t("trust.next_context.default.tip"),
+          filter: { key: "next_context_policy", value: "default", label },
+        };
+      }
     default:
-      return {
-        label: t("trust.next_context.default.label"),
-        tone: "neutral",
-        title: t("trust.next_context.default_missing.tip"),
-      };
+      {
+        const label = t("trust.next_context.default.label");
+        return {
+          label,
+          tone: "neutral",
+          title: t("trust.next_context.default_missing.tip"),
+          filter: { key: "next_context_policy", value: "default", label },
+        };
+      }
   }
 }

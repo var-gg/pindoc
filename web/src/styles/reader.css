@@ -193,6 +193,96 @@
 .chip--stale     { background: var(--stale-bg);    color: var(--stale);    border-color: var(--stale-border); }
 .chip--archived  { background: var(--archived-bg); color: var(--fg-2);     border-color: var(--archived-border); }
 .chip--area      { color: var(--fg-2); background: transparent; }
+.trust-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 12px;
+}
+.chip--trust {
+  height: 22px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border-color: var(--fg-4);
+  color: var(--fg-2);
+  font-size: 10.5px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.chip--trust-neutral { background: var(--bg-2); }
+.chip--trust-warning { background: color-mix(in oklch, var(--warning, #c68a2a) 12%, var(--bg-2)); }
+.chip--trust-danger { background: color-mix(in oklch, var(--danger, #d86b6b) 14%, var(--bg-2)); }
+.badge-chip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.badge-popover-chip {
+  appearance: none;
+  cursor: pointer;
+}
+.badge-popover-chip:hover,
+.badge-popover-chip:focus-visible {
+  color: var(--fg-0);
+  border-color: var(--border-strong);
+  background: var(--bg-3);
+  outline: none;
+}
+.badge-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 70;
+  width: min(300px, 82vw);
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-2);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-float);
+  color: var(--fg-2);
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: normal;
+}
+.badge-popover__title {
+  margin-bottom: 4px;
+  color: var(--fg-0);
+  font-weight: 600;
+}
+.badge-popover p {
+  margin: 0 0 10px;
+}
+.badge-popover__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.badge-popover__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.badge-popover__action:hover,
+.badge-popover__action:focus-visible {
+  background: var(--bg-3);
+  border-color: var(--border-strong);
+  color: var(--fg-0);
+  outline: none;
+}
+.badge-popover__action .lucide {
+  width: 13px;
+  height: 13px;
+}
 
 .p-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; }
 .p-dot--live { background: var(--live); }
@@ -691,6 +781,10 @@
   gap: 6px;
   flex-wrap: wrap;
   min-width: 0;
+}
+.reader-filter-bar {
+  justify-content: flex-start;
+  margin: -4px 0 12px;
 }
 .task-filter-chip {
   display: inline-flex;
