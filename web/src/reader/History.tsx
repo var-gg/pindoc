@@ -4,6 +4,7 @@ import { ChevronRight } from "lucide-react";
 import { api, type RevisionsResp } from "../api/client";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
+import { RevisionTypeBadge } from "./RevisionTypeBadge";
 
 type Load =
   | { kind: "loading" }
@@ -80,6 +81,7 @@ export function History() {
                     {r.commit_msg || t("history.no_commit_msg")}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--fg-3)" }}>
+                    <RevisionTypeBadge revisionType={r.revision_type} compact />
                     <span className={av.className} style={{ width: 14, height: 14, fontSize: 8 }}>{av.initials}</span>
                     <span>{r.author_id}{r.author_version ? `@${r.author_version}` : ""}</span>
                     <span>·</span>

@@ -208,6 +208,8 @@ export type RevisionRow = {
   author_version?: string;
   commit_msg?: string;
   completeness: string;
+  revision_shape?: RevisionShape;
+  revision_type?: RevisionType;
   created_at: string;
 };
 
@@ -221,9 +223,12 @@ export type RevisionsResp = {
 export type DiffRevMeta = {
   revision_number: number;
   title: string;
+  body_hash?: string;
   author_id: string;
   author_version?: string;
   commit_msg?: string;
+  revision_shape?: RevisionShape;
+  revision_type?: RevisionType;
   created_at: string;
 };
 
@@ -243,12 +248,33 @@ export type SectionDelta = {
   lines_removed: number;
 };
 
+export type RevisionShape =
+  | "body_patch"
+  | "meta_patch"
+  | "acceptance_transition"
+  | "scope_defer";
+
+export type RevisionType =
+  | "text_edit"
+  | "acceptance_toggle"
+  | "meta_change"
+  | "system_auto"
+  | "mixed";
+
+export type MetaDeltaEntry = {
+  key: string;
+  before: unknown;
+  after: unknown;
+};
+
 export type DiffResp = {
   artifact_id: string;
   slug: string;
   from: DiffRevMeta;
   to: DiffRevMeta;
   stats: DiffStats;
+  meta_delta: MetaDeltaEntry[];
+  revision_type?: RevisionType;
   section_deltas: SectionDelta[];
   unified_diff: string;
 };

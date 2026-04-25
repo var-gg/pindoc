@@ -30,6 +30,7 @@ import { TaskControls } from "./TaskControls";
 import { Toc } from "./Toc";
 import { headingsFromBody } from "./slug";
 import { typeChipClass } from "./typeChip";
+import { RevisionTypeBadge } from "./RevisionTypeBadge";
 
 type Props = {
   projectSlug: string;
@@ -410,6 +411,7 @@ function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: strin
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-3)" }}>
                 rev {r.revision_number}
               </span>
+              <RevisionTypeBadge revisionType={r.revision_type} compact />
               <span className={av.className} style={{ width: 12, height: 12, fontSize: 7 }}>
                 {av.initials}
               </span>

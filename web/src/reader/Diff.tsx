@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { ChevronRight } from "lucide-react";
-import { api, type DiffResp } from "../api/client";
+import { api, type DiffResp, type MetaDeltaEntry } from "../api/client";
 import { useI18n } from "../i18n";
+import { RevisionTypeBadge } from "./RevisionTypeBadge";
 
 type Load =
   | { kind: "loading" }
@@ -42,6 +43,8 @@ export function Diff() {
     );
   }
   const { data } = state;
+  const metaDelta = data.meta_delta ?? [];
+  const revisionType = data.revision_type ?? data.to.revision_type;
 
   return (
     <main className="content">
@@ -60,6 +63,8 @@ export function Diff() {
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", color: "var(--fg-3)", fontFamily: "var(--font-mono)", fontSize: 12, marginBottom: 32, paddingBottom: 20, borderBottom: "1px solid var(--border)" }}>
           <span>{data.from.author_id} → {data.to.author_id}</span>
           <span>·</span>
+          <RevisionTypeBadge revisionType={revisionType} />
+          {revisionType && <span>·</span>}
           <span style={{ color: "var(--live)" }}>+{data.stats.lines_added}</span>
           <span style={{ color: "var(--stale)" }}>−{data.stats.lines_removed}</span>
           <span>lines</span>
@@ -72,6 +77,7 @@ export function Diff() {
         </div>
 
         <h2 style={{ fontSize: 18, margin: "0 0 12px", color: "var(--fg-0)" }}>{t("diff.section_summary")}</h2>
+        {metaDelta.length > 0 && <MetaDeltaCard rows={metaDelta} />}
         <ul style={{ listStyle: "none", margin: "0 0 32px", padding: 0 }}>
           {data.section_deltas.map((sd, idx) => (
             <li key={idx} style={{
@@ -100,6 +106,64 @@ export function Diff() {
       </article>
     </main>
   );
+}
+
+function MetaDeltaCard({ rows }: { rows: MetaDeltaEntry[] }) {
+  const { t } = useI18n();
+  return (
+    <section style={{
+      border: "1px solid var(--border)",
+      borderRadius: "var(--r-2)",
+      background: "var(--bg-1)",
+      marginBottom: 18,
+      overflow: "hidden",
+    }}>
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+        padding: "10px 12px",
+        borderBottom: "1px solid var(--border)",
+      }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--fg-0)" }}>{t("diff.meta")}</span>
+        <span className="chip chip--area">{t("diff.meta_count", rows.length)}</span>
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+          <thead>
+            <tr style={{ color: "var(--fg-3)", fontFamily: "var(--font-mono)", textAlign: "left" }}>
+              <th style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)", fontWeight: 500 }}>{t("diff.meta_key")}</th>
+              <th style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)", fontWeight: 500 }}>{t("diff.meta_before")}</th>
+              <th style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)", fontWeight: 500 }}>{t("diff.meta_after")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.key}>
+                <td style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)", fontFamily: "var(--font-mono)", color: "var(--fg-1)", whiteSpace: "nowrap" }}>{row.key}</td>
+                <td style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)", color: "var(--fg-2)" }}>{formatMetaValue(row.before)}</td>
+                <td style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)", color: "var(--fg-0)" }}>{formatMetaValue(row.after)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function formatMetaValue(value: unknown): string {
+  if (value == null || value === "") return "∅";
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "∅";
+    return value.map((v) => formatMetaValue(v)).join(", ");
+  }
+  if (typeof value === "object") {
+    const json = JSON.stringify(value);
+    return json === "{}" ? "∅" : json;
+  }
+  return String(value);
 }
 
 function changeChipClass(change: string): string {
