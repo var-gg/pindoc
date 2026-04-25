@@ -226,6 +226,8 @@ Sidecar 섹션 위계는 C1 이후 **Identity strip → Quick actions → Relati
 
 Trust Card 배지는 locale bundle을 통해 label과 tooltip을 모두 현지화한다. Tooltip은 단순 번역이 아니라 **의미 / 나타나는 조건 / 변경 경로** 3요소를 짧게 포함해야 한다. 예를 들어 `source_type=user_chat`은 "대화 기반" label과 함께 consent_state를 명시하라는 변경 경로를 제시하고, `RECOMMEND_READ_BEFORE_CREATE` warning은 "중복 후보" label과 함께 기존 artifact의 `update_of` 사용을 안내한다. Pin count도 영어식 plural 문구를 그대로 노출하지 않고 locale별 규칙(`핀 N`, `N pins`)을 따른다.
 
+Reader의 visual language는 Pindoc 안의 Glossary artifact `visual-language-reference`가 단일 출처다. `/help/design-legend`는 기본 프로젝트의 해당 artifact로 redirect하며, badge popover나 shortcut overlay의 "전체 legend" 링크도 같은 artifact를 가리킨다. Type badge, trust badge, area count, relation icon, status/priority pill의 의미가 바뀌는 변경은 코드와 함께 이 Glossary를 같은 PR/작업 단위에서 갱신한다.
+
 ### Cmd+K Palette
 
 ```

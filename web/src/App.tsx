@@ -31,6 +31,7 @@ export function App() {
       <Route path="/p/:project/:locale/tasks/:slug" element={<ReaderShell view="tasks" />} />
       <Route path="/p/:project/:locale/graph" element={<ReaderShell view="graph" />} />
       <Route path="/p/:project/:locale/inbox" element={<ReaderShell view="inbox" />} />
+      <Route path="/help/design-legend" element={<DesignLegendRedirect />} />
 
       {/* Legacy /p/:project/... routes redirect into the project's
           declared locale segment. Keeps pre-Phase-18 bookmarks and
@@ -180,6 +181,49 @@ function LegacyRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "inbox" }
       cancelled = true;
     };
   }, [base, location.pathname, location.search]);
+
+  if (err) {
+    return (
+      <div className="reader-state reader-state--error">
+        <strong>{t("wiki.error_title")}</strong>
+        <p>{err}</p>
+        <p>
+          {t("wiki.error_hint_prefix")} <code>{t("wiki.error_hint_cmd")}</code>{" "}
+          {t("wiki.error_hint_suffix")}
+        </p>
+      </div>
+    );
+  }
+  if (!target) {
+    return <div className="reader-state">{t("wiki.loading")}</div>;
+  }
+  return <Navigate to={target} replace />;
+}
+
+function DesignLegendRedirect() {
+  const location = useLocation();
+  const [target, setTarget] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const { t } = useI18n();
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const cfg = await api.config();
+        if (cancelled) return;
+        const locale = cfg.default_project_locale || "en";
+        setTarget(
+          `/p/${cfg.default_project_slug}/${locale}/wiki/visual-language-reference${location.search || ""}`,
+        );
+      } catch (e) {
+        if (!cancelled) setErr(String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [location.search]);
 
   if (err) {
     return (

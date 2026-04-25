@@ -57,7 +57,7 @@ export function ReaderSurface({
   const areaLabel = localizedAreaName(t, detail.area_slug, detail.area_slug);
   const legendHref =
     projectSlug && projectLocale
-      ? `/p/${projectSlug}/${projectLocale}/wiki/reader-design-legend-glossary-artifact`
+      ? `/p/${projectSlug}/${projectLocale}/wiki/visual-language-reference`
       : undefined;
   const hasLiveSidecarData =
     Boolean(detail.superseded_by) ||
