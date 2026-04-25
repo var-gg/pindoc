@@ -147,22 +147,23 @@ type artifactDiffInput struct {
 }
 
 type artifactDiffOutput struct {
-	ArtifactID    string                `json:"artifact_id"`
-	Slug          string                `json:"slug"`
-	From          RevisionMeta          `json:"from"`
-	To            RevisionMeta          `json:"to"`
-	Stats         diff.Stats            `json:"stats"`
-	MetaDelta     []diff.MetaDeltaEntry `json:"meta_delta"`
-	RevisionType  string                `json:"revision_type"`
-	SectionDeltas []diff.SectionDelta   `json:"section_deltas"`
-	UnifiedDiff   string                `json:"unified_diff"`
+	ArtifactID    string                   `json:"artifact_id"`
+	Slug          string                   `json:"slug"`
+	From          RevisionMeta             `json:"from"`
+	To            RevisionMeta             `json:"to"`
+	Stats         diff.Stats               `json:"stats"`
+	MetaDelta     []diff.MetaDeltaEntry    `json:"meta_delta"`
+	Acceptance    diff.AcceptanceChecklist `json:"acceptance_checklist"`
+	RevisionType  string                   `json:"revision_type"`
+	SectionDeltas []diff.SectionDelta      `json:"section_deltas"`
+	UnifiedDiff   string                   `json:"unified_diff"`
 }
 
 func RegisterArtifactDiff(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.diff",
-			Description: "Compute the diff between two revisions of an artifact. Returns revision_type, meta_delta, and per-section change summary (section_deltas) before unified_diff; prefer reading those summaries before consuming the full unified_diff. from_rev defaults to latest-1, to_rev to latest.",
+			Description: "Compute the diff between two revisions of an artifact. Returns revision_type, meta_delta, acceptance_checklist, and section_deltas before unified_diff; prefer reading those summaries before consuming the full unified_diff. from_rev defaults to latest-1, to_rev to latest.",
 		},
 		func(ctx context.Context, _ *sdk.CallToolRequest, in artifactDiffInput) (*sdk.CallToolResult, artifactDiffOutput, error) {
 			ref := normalizeRef(in.IDOrSlug)
@@ -189,6 +190,7 @@ func RegisterArtifactDiff(server *sdk.Server, deps Deps) {
 				len(metaDelta) > 0,
 			)
 			to.meta.RevisionType = revisionType
+			acceptanceChecklist := diff.AcceptanceChecklistSummary(from.body, to.body, to.snapshot.Shape, to.snapshot.ShapePayload)
 
 			return nil, artifactDiffOutput{
 				ArtifactID:    artifactID,
@@ -197,6 +199,7 @@ func RegisterArtifactDiff(server *sdk.Server, deps Deps) {
 				To:            to.meta,
 				Stats:         stats,
 				MetaDelta:     metaDelta,
+				Acceptance:    acceptanceChecklist,
 				RevisionType:  revisionType,
 				SectionDeltas: deltas,
 				UnifiedDiff:   unified,

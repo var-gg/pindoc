@@ -183,17 +183,19 @@ func (d Deps) handleArtifactDiff(w http.ResponseWriter, r *http.Request) {
 		len(metaDelta) > 0,
 	)
 	to.meta.RevisionType = revisionType
+	acceptanceChecklist := diff.AcceptanceChecklistSummary(from.body, to.body, to.snapshot.Shape, to.snapshot.ShapePayload)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"artifact_id":    artifactID,
-		"slug":           slug,
-		"from":           from.meta,
-		"to":             to.meta,
-		"stats":          stats,
-		"meta_delta":     metaDelta,
-		"revision_type":  revisionType,
-		"section_deltas": deltas,
-		"unified_diff":   unified,
+		"artifact_id":          artifactID,
+		"slug":                 slug,
+		"from":                 from.meta,
+		"to":                   to.meta,
+		"stats":                stats,
+		"meta_delta":           metaDelta,
+		"acceptance_checklist": acceptanceChecklist,
+		"revision_type":        revisionType,
+		"section_deltas":       deltas,
+		"unified_diff":         unified,
 	})
 }
 

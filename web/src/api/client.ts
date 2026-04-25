@@ -267,6 +267,23 @@ export type MetaDeltaEntry = {
   after: unknown;
 };
 
+export type AcceptanceItem = {
+  index: number;
+  state: "[ ]" | "[x]" | "[~]" | "[-]";
+  text: string;
+  changed?: boolean;
+  from_state?: "[ ]" | "[x]" | "[~]" | "[-]";
+  to_state?: "[ ]" | "[x]" | "[~]" | "[-]";
+  reason?: string;
+};
+
+export type AcceptanceChecklist = {
+  items: AcceptanceItem[];
+  has_change: boolean;
+  changed_index?: number;
+  reason?: string;
+};
+
 export type DiffResp = {
   artifact_id: string;
   slug: string;
@@ -274,6 +291,7 @@ export type DiffResp = {
   to: DiffRevMeta;
   stats: DiffStats;
   meta_delta: MetaDeltaEntry[];
+  acceptance_checklist?: AcceptanceChecklist;
   revision_type?: RevisionType;
   section_deltas: SectionDelta[];
   unified_diff: string;

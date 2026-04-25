@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { ChevronRight } from "lucide-react";
-import { api, type DiffResp, type MetaDeltaEntry } from "../api/client";
+import { api, type AcceptanceChecklist, type DiffResp, type MetaDeltaEntry } from "../api/client";
 import { useI18n } from "../i18n";
 import { RevisionTypeBadge } from "./RevisionTypeBadge";
 
@@ -45,6 +45,12 @@ export function Diff() {
   const { data } = state;
   const metaDelta = data.meta_delta ?? [];
   const revisionType = data.revision_type ?? data.to.revision_type;
+  const acceptanceChecklist = data.acceptance_checklist;
+  const showAcceptanceChecklist = Boolean(
+    acceptanceChecklist?.has_change &&
+    acceptanceChecklist.items.length > 0 &&
+    (revisionType === "acceptance_toggle" || revisionType === "mixed"),
+  );
 
   return (
     <main className="content">
@@ -78,6 +84,9 @@ export function Diff() {
 
         <h2 style={{ fontSize: 18, margin: "0 0 12px", color: "var(--fg-0)" }}>{t("diff.section_summary")}</h2>
         {metaDelta.length > 0 && <MetaDeltaCard rows={metaDelta} />}
+        {showAcceptanceChecklist && (
+          <AcceptanceChecklistCard checklist={acceptanceChecklist!} />
+        )}
         <ul style={{ listStyle: "none", margin: "0 0 32px", padding: 0 }}>
           {data.section_deltas.map((sd, idx) => (
             <li key={idx} style={{
@@ -105,6 +114,66 @@ export function Diff() {
         <UnifiedBlock src={data.unified_diff} />
       </article>
     </main>
+  );
+}
+
+function AcceptanceChecklistCard({ checklist }: { checklist: AcceptanceChecklist }) {
+  const { t } = useI18n();
+  const done = checklist.items.filter((item) => item.state === "[x]").length;
+  return (
+    <section style={{
+      border: "1px solid var(--border)",
+      borderRadius: "var(--r-2)",
+      background: "var(--bg-1)",
+      marginBottom: 18,
+      overflow: "hidden",
+    }}>
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+        padding: "10px 12px",
+        borderBottom: "1px solid var(--border)",
+      }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--fg-0)" }}>{t("diff.acceptance")}</span>
+        <span className="chip chip--area">{t("diff.acceptance_count", done, checklist.items.length)}</span>
+      </div>
+      <div style={{ display: "grid" }}>
+        {checklist.items.map((item) => (
+          <div
+            key={item.index}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "24px 86px 1fr",
+              gap: 10,
+              alignItems: "start",
+              padding: "9px 12px",
+              borderBottom: "1px solid var(--border)",
+              background: item.changed ? "color-mix(in oklch, var(--accent) 9%, transparent)" : undefined,
+            }}
+          >
+            <span style={{ fontFamily: "var(--font-mono)", color: item.changed ? "var(--accent)" : "var(--fg-4)" }}>
+              {item.changed ? "←" : item.index + 1}
+            </span>
+            <span className={`chip chip--${acceptanceChipClass(item.state)}`} style={{ justifySelf: "start" }}>
+              {t(`diff.acceptance.state.${acceptanceStateKey(item.state)}`)}
+            </span>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: "var(--fg-1)", wordBreak: "break-word" }}>{item.text}</div>
+              {item.changed && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-3)" }}>
+                  {item.from_state && item.to_state && (
+                    <span>{item.from_state} → {item.to_state}</span>
+                  )}
+                  {item.reason && <span>{item.reason}</span>}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -164,6 +233,32 @@ function formatMetaValue(value: unknown): string {
     return json === "{}" ? "∅" : json;
   }
   return String(value);
+}
+
+function acceptanceStateKey(state: AcceptanceChecklist["items"][number]["state"]): string {
+  switch (state) {
+    case "[x]":
+      return "done";
+    case "[~]":
+      return "partial";
+    case "[-]":
+      return "deferred";
+    default:
+      return "open";
+  }
+}
+
+function acceptanceChipClass(state: AcceptanceChecklist["items"][number]["state"]): string {
+  switch (state) {
+    case "[x]":
+      return "live";
+    case "[~]":
+      return "draft";
+    case "[-]":
+      return "stale";
+    default:
+      return "archived";
+  }
 }
 
 function changeChipClass(change: string): string {
