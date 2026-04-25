@@ -359,6 +359,9 @@
   "lang.en": "English",
   "lang.ko": "한국어",
 
+  "new_project.welcome.step": "Step 1 / 3",
+  "new_project.welcome.title": "Welcome to Pindoc",
+  "new_project.welcome.subtitle": "Create your first project to get started. Next steps: paste the `.mcp.json` snippet → open Claude Code in your workspace.",
   "new_project.title": "Create a new project",
   "new_project.subtitle": "One Pindoc instance hosts many projects. Use a separate project per workspace so writes stay scoped.",
   "new_project.field.slug": "Slug",

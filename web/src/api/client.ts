@@ -22,6 +22,12 @@ export type ServerConfig = {
   // Reader must fall back to read-only + chat-shortcut UX
   // (Decision agent-only-write-분할, Alternative C).
   auth_mode?: "trusted_local" | "project_token" | "oauth";
+  // onboarding_required tells the SPA to redirect a fresh install to
+  // the new-project wizard instead of the legacy "open default project"
+  // landing. True when the instance has no projects other than the
+  // seed `pindoc` row. Decision project-bootstrap-canonical-flow-
+  // reader-ui-first-class.
+  onboarding_required?: boolean;
 };
 
 export type Project = {

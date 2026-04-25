@@ -177,6 +177,19 @@ function LegacyRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "inbox" }
       try {
         const cfg = await api.config();
         if (cancelled) return;
+        // Onboarding intercept (Decision project-bootstrap-canonical-
+        // flow-reader-ui-first-class): when the instance has no
+        // projects other than the seed `pindoc` row, redirect a fresh
+        // user to the new-project wizard instead of the legacy
+        // /p/{default}/{locale}/{base} landing. The wizard re-uses
+        // /projects/new with `?welcome=1` so the page renders a
+        // friendlier header. Self-correcting — once they create a
+        // project, onboarding_required flips to false on the next
+        // /api/config call.
+        if (cfg.onboarding_required) {
+          setTarget(`/projects/new?welcome=1`);
+          return;
+        }
         const tail = trimLegacyPrefix(location.pathname, base);
         const suffix = tail ? `/${tail}` : "";
         const search = location.search || "";

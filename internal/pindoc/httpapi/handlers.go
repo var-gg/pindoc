@@ -72,7 +72,36 @@ func (d Deps) handleConfig(w http.ResponseWriter, r *http.Request) {
 		// (Decision agent-only-write-분할). Hardcoded constant in M1 since
 		// we don't ship project_token / oauth yet.
 		"auth_mode": AuthModeTrustedLocal,
+		// onboarding_required tells the React app to redirect / → wizard.
+		// True when only the seed `pindoc` project exists (Decision
+		// project-bootstrap-canonical-flow-reader-ui-first-class). The
+		// react app reads this on mount and, if true, sends the user
+		// to /projects/new?welcome=1 instead of the legacy redirect.
+		// Self-correcting — if the user later deletes their projects,
+		// the wizard returns. Acceptable for V1 single-user self-host.
+		"onboarding_required": d.checkOnboardingRequired(r.Context()),
 	})
+}
+
+// checkOnboardingRequired returns true when the instance has no projects
+// other than the seed `pindoc` row. Used by /api/config so the SPA can
+// decide whether to redirect a fresh user into the wizard. Errors are
+// logged and treated as "not required" — better to show the legacy
+// landing than to dead-end on an unrelated DB hiccup. Cheap query
+// (single COUNT) but skipped when DB pool is missing for tests that
+// stub Deps.
+func (d Deps) checkOnboardingRequired(ctx context.Context) bool {
+	if d.DB == nil {
+		return false
+	}
+	var count int
+	if err := d.DB.QueryRow(ctx,
+		`SELECT COUNT(*) FROM projects WHERE slug != 'pindoc'`,
+	).Scan(&count); err != nil {
+		d.Logger.Warn("onboarding check failed; defaulting to not required", "err", err)
+		return false
+	}
+	return count == 0
 }
 
 // AuthModeTrustedLocal is the M1 hosting model: one operator, local

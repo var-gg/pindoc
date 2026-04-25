@@ -1802,3 +1802,34 @@
   line-height: 1.55;
   margin: 8px 0 0;
 }
+
+/* CreateProjectPage welcome banner — only shown when LegacyRedirect
+ * sends a fresh install here with ?welcome=1. Decision project-
+ * bootstrap-canonical-flow-reader-ui-first-class T4. */
+.cp-welcome {
+  margin: -20px 0 28px;
+  padding: 18px 20px;
+  border-radius: var(--r-1);
+  background: color-mix(in oklch, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in oklch, var(--accent) 18%, transparent);
+}
+.cp-welcome__step {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 4px;
+}
+.cp-welcome__title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--fg-0);
+  margin: 0 0 6px;
+}
+.cp-welcome__sub {
+  font-size: 13px;
+  color: var(--fg-2);
+  line-height: 1.55;
+  margin: 0;
+}

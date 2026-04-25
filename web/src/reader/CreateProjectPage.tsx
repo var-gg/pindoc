@@ -11,7 +11,7 @@
 // without depending on the Reader's project-scoped chrome being usable
 // yet.
 import { useEffect, useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { Check, Copy, Loader2 } from "lucide-react";
 import { api, type CreateProjectResp } from "../api/client";
 import { useI18n } from "../i18n";
@@ -30,6 +30,12 @@ const DAEMON_BASE_FALLBACK = "http://127.0.0.1:5832";
 export function CreateProjectPage() {
   const { t, lang } = useI18n();
   const initialLang: Lang = lang === "ko" ? "ko" : "en";
+  const [searchParams] = useSearchParams();
+  // welcome=1 marks the onboarding wizard entry — LegacyRedirect sends
+  // fresh installs here, and the page renders a friendlier header so
+  // the user knows they're at "step 1 of 3 — pick a project name". A
+  // direct visitor without ?welcome=1 sees the bare form.
+  const isWelcome = searchParams.get("welcome") === "1";
 
   const [slug, setSlug] = useState("");
   const [name, setName] = useState("");
@@ -94,6 +100,13 @@ export function CreateProjectPage() {
 
   return (
     <div className="cp-page">
+      {isWelcome && (
+        <div className="cp-welcome">
+          <p className="cp-welcome__step">{t("new_project.welcome.step")}</p>
+          <h2 className="cp-welcome__title">{t("new_project.welcome.title")}</h2>
+          <p className="cp-welcome__sub">{t("new_project.welcome.subtitle")}</p>
+        </div>
+      )}
       <header className="cp-header">
         <h1>{t("new_project.title")}</h1>
         <p className="cp-subtitle">{t("new_project.subtitle")}</p>
