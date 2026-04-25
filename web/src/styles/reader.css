@@ -494,8 +494,163 @@
   padding: 4px 0;
 }
 .graph-wrap { padding: 16px; }
-.mini-graph { height: 200px; background: var(--bg-0); border: 1px solid var(--border); border-radius: var(--r-3); overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.mini-graph {
+  position: relative;
+  height: 200px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--r-3);
+  overflow: hidden;
+}
+.mini-graph--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .mini-graph__empty { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); padding: 16px; text-align: center; }
+.mini-graph__edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.mini-graph__edge {
+  stroke: var(--border-strong);
+  stroke-width: 1.15;
+  stroke-linecap: round;
+  opacity: 0.88;
+}
+.mini-graph__arrow {
+  fill: var(--border-strong);
+  opacity: 0.95;
+}
+.mini-graph__edge--implements {
+  stroke: var(--type-task);
+  stroke-width: 1.7;
+}
+.mini-graph__edge--references {
+  stroke: var(--accent);
+}
+.mini-graph__edge--blocks,
+.mini-graph__edge--blocked-by {
+  stroke: var(--prio-p0);
+  stroke-width: 1.55;
+}
+.mini-graph__edge--relates-to {
+  stroke-dasharray: 3 4;
+}
+.mini-graph__edge--translation-of {
+  stroke: var(--type-glossary);
+  stroke-dasharray: 5 3;
+}
+.mini-graph__edge--supersedes {
+  stroke: var(--type-decision);
+  stroke-width: 1.45;
+}
+.mini-graph__edge-label {
+  fill: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  paint-order: stroke;
+  stroke: var(--bg-0);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.mini-graph__node {
+  --mini-node-bg: var(--type-default-bg);
+  --mini-node-fg: var(--type-default);
+  --mini-node-border: var(--type-default-border);
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  width: 74px;
+  min-height: 34px;
+  padding: 5px 7px;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--mini-node-border);
+  border-radius: var(--r-1);
+  background: var(--mini-node-bg);
+  color: var(--mini-node-fg);
+  text-decoration: none;
+  box-shadow: 0 1px 2px color-mix(in oklch, var(--fg-0) 7%, transparent);
+}
+.mini-graph__node:hover,
+.mini-graph__node:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+  border-color: var(--accent);
+  z-index: 4;
+}
+.mini-graph__node--center {
+  z-index: 3;
+  width: 96px;
+  min-height: 42px;
+  border-width: 2px;
+  box-shadow:
+    0 0 0 2px var(--bg-0),
+    0 4px 14px color-mix(in oklch, var(--fg-0) 11%, transparent);
+}
+.mini-graph__node-type {
+  overflow: hidden;
+  color: currentColor;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  line-height: 1;
+  opacity: 0.78;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.mini-graph__node-label {
+  display: block;
+  overflow: hidden;
+  color: currentColor;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mini-graph__node--decision { --mini-node-bg: var(--type-decision-bg); --mini-node-fg: var(--type-decision); --mini-node-border: var(--type-decision-border); }
+.mini-graph__node--analysis { --mini-node-bg: var(--type-analysis-bg); --mini-node-fg: var(--type-analysis); --mini-node-border: var(--type-analysis-border); }
+.mini-graph__node--task { --mini-node-bg: var(--type-task-bg); --mini-node-fg: var(--type-task); --mini-node-border: var(--type-task-border); }
+.mini-graph__node--debug { --mini-node-bg: var(--type-debug-bg); --mini-node-fg: var(--type-debug); --mini-node-border: var(--type-debug-border); }
+.mini-graph__node--glossary { --mini-node-bg: var(--type-glossary-bg); --mini-node-fg: var(--type-glossary); --mini-node-border: var(--type-glossary-border); }
+.mini-graph__node--flow { --mini-node-bg: var(--type-flow-bg); --mini-node-fg: var(--type-flow); --mini-node-border: var(--type-flow-border); }
+.mini-graph__node--tc { --mini-node-bg: var(--type-tc-bg); --mini-node-fg: var(--type-tc); --mini-node-border: var(--type-tc-border); }
+.mini-graph__node--feature { --mini-node-bg: var(--type-feature-bg); --mini-node-fg: var(--type-feature); --mini-node-border: var(--type-feature-border); }
+.mini-graph__node--apiendpoint { --mini-node-bg: var(--type-apiendpoint-bg); --mini-node-fg: var(--type-apiendpoint); --mini-node-border: var(--type-apiendpoint-border); }
+.mini-graph__node--screen { --mini-node-bg: var(--type-screen-bg); --mini-node-fg: var(--type-screen); --mini-node-border: var(--type-screen-border); }
+.mini-graph__node--datamodel { --mini-node-bg: var(--type-datamodel-bg); --mini-node-fg: var(--type-datamodel); --mini-node-border: var(--type-datamodel-border); }
+.mini-graph__node--verificationreport { --mini-node-bg: var(--type-verificationreport-bg); --mini-node-fg: var(--type-verificationreport); --mini-node-border: var(--type-verificationreport-border); }
+.mini-graph__more {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-1);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-decoration: none;
+}
+.mini-graph__more:hover,
+.mini-graph__more:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
 .relations { padding: 0 16px 16px; }
 .sidecar-section .relations { padding: 0; }
 .relations--merged {

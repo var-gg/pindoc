@@ -137,36 +137,7 @@ export function Sidecar({ projectSlug, detail, authMode, agents, users, onArtifa
       )}
 
       <div className="graph-wrap">
-        <div className="mini-graph">
-          <svg viewBox="0 0 280 200" style={{ width: "100%", height: "100%" }}>
-            <g stroke="currentColor" strokeWidth="1" fill="none" opacity="0.35" style={{ color: "var(--fg-3)" }}>
-              <line x1="140" y1="100" x2="60" y2="60" />
-              <line x1="140" y1="100" x2="220" y2="50" />
-              <line x1="140" y1="100" x2="220" y2="150" />
-              <line x1="140" y1="100" x2="60" y2="150" />
-            </g>
-            <g fontFamily="JetBrains Mono, monospace" fontSize="9">
-              <g transform="translate(140,100)">
-                <circle r="14" fill="var(--live-bg)" stroke="var(--live)" strokeWidth="1.5" />
-                <text textAnchor="middle" dy="3" fill="var(--live)">
-                  {(detail.type.slice(0, 3) || "A").toUpperCase()}
-                </text>
-              </g>
-              <g transform="translate(60,60)">
-                <circle r="7" fill="var(--bg-2)" stroke="var(--fg-4)" strokeWidth="1" />
-              </g>
-              <g transform="translate(220,50)">
-                <circle r="7" fill="var(--bg-2)" stroke="var(--fg-4)" strokeWidth="1" />
-              </g>
-              <g transform="translate(220,150)">
-                <circle r="7" fill="var(--bg-2)" stroke="var(--fg-4)" strokeWidth="1" />
-              </g>
-              <g transform="translate(60,150)">
-                <circle r="7" fill="var(--bg-2)" stroke="var(--fg-4)" strokeWidth="1" />
-              </g>
-            </g>
-          </svg>
-        </div>
+        <MiniGraph detail={detail} projectSlug={projectSlug} locale={locale} />
       </div>
 
       <SidecarStaticSection title={t("sidecar.relations")}>
@@ -443,6 +414,130 @@ function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: strin
       )}
     </div>
   );
+}
+
+const MINI_GRAPH_MAX_NEIGHBORS = 8;
+const MINI_GRAPH_CENTER = { x: 140, y: 100 };
+
+type MiniGraphEdge = {
+  edge: EdgeRef;
+  direction: "out" | "in";
+};
+
+function MiniGraph({
+  detail,
+  projectSlug,
+  locale,
+}: {
+  detail: Artifact;
+  projectSlug: string;
+  locale: string;
+}) {
+  const { t } = useI18n();
+  const allEdges: MiniGraphEdge[] = [
+    ...(detail.relates_to ?? []).map((edge) => ({ edge, direction: "out" as const })),
+    ...(detail.related_by ?? []).map((edge) => ({ edge, direction: "in" as const })),
+  ];
+  const visible = allEdges.slice(0, MINI_GRAPH_MAX_NEIGHBORS);
+  const hidden = Math.max(0, allEdges.length - visible.length);
+  const positions = radialPositions(visible.length);
+
+  if (visible.length === 0) {
+    return (
+      <div className="mini-graph mini-graph--empty">
+        <span className="mini-graph__empty">{t("sidecar.no_relations")}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mini-graph mini-graph--live" aria-label={t("sidecar.relations")}>
+      <svg className="mini-graph__edges" viewBox="0 0 280 200" aria-hidden="true">
+        <defs>
+          <marker
+            id="mini-graph-arrow"
+            markerHeight="7"
+            markerWidth="7"
+            orient="auto"
+            refX="6"
+            refY="3.5"
+          >
+            <path d="M0,0 L7,3.5 L0,7 Z" className="mini-graph__arrow" />
+          </marker>
+        </defs>
+        {visible.map(({ edge, direction }, i) => {
+          const p = positions[i];
+          const start = direction === "out" ? MINI_GRAPH_CENTER : p;
+          const end = direction === "out" ? p : MINI_GRAPH_CENTER;
+          const labelX = (start.x + end.x) / 2;
+          const labelY = (start.y + end.y) / 2 - 4;
+          return (
+            <g key={`${direction}-${edge.artifact_id}-${edge.relation}-${i}`}>
+              <line
+                x1={start.x}
+                y1={start.y}
+                x2={end.x}
+                y2={end.y}
+                className={`mini-graph__edge mini-graph__edge--${relationClass(edge.relation)}`}
+                markerEnd="url(#mini-graph-arrow)"
+              />
+              <text x={labelX} y={labelY} className="mini-graph__edge-label">
+                {direction === "out" ? "→" : "←"} {edge.relation}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      <Link
+        to={`/p/${projectSlug}/${locale}/wiki/${detail.slug}`}
+        className={`mini-graph__node mini-graph__node--center mini-graph__node--${typeClassSuffix(detail.type)}`}
+        style={{ left: MINI_GRAPH_CENTER.x, top: MINI_GRAPH_CENTER.y }}
+        title={detail.title}
+      >
+        <span className="mini-graph__node-type">{detail.type}</span>
+        <span className="mini-graph__node-label">{detail.title}</span>
+      </Link>
+      {visible.map(({ edge }, i) => (
+        <Link
+          key={`${edge.artifact_id}-${edge.relation}-${i}`}
+          to={`/p/${projectSlug}/${locale}/wiki/${edge.slug}`}
+          className={`mini-graph__node mini-graph__node--${typeClassSuffix(edge.type)}`}
+          style={{ left: positions[i].x, top: positions[i].y }}
+          title={`${edge.title} (${edge.type})`}
+        >
+          <span className="mini-graph__node-type">{edge.type}</span>
+          <span className="mini-graph__node-label">{edge.title}</span>
+        </Link>
+      ))}
+      {hidden > 0 && (
+        <Link to={`/p/${projectSlug}/${locale}/graph`} className="mini-graph__more">
+          {t("sidecar.more_relations", hidden)}
+        </Link>
+      )}
+    </div>
+  );
+}
+
+function radialPositions(count: number): Array<{ x: number; y: number }> {
+  if (count <= 0) return [];
+  const radiusX = 96;
+  const radiusY = 66;
+  const start = -Math.PI / 2;
+  return Array.from({ length: count }, (_, i) => {
+    const angle = start + (i * 2 * Math.PI) / count;
+    return {
+      x: Math.round(MINI_GRAPH_CENTER.x + Math.cos(angle) * radiusX),
+      y: Math.round(MINI_GRAPH_CENTER.y + Math.sin(angle) * radiusY),
+    };
+  });
+}
+
+function typeClassSuffix(type: string): string {
+  return type.toLowerCase().replace(/[^a-z0-9]+/g, "") || "default";
+}
+
+function relationClass(relation: string): string {
+  return relation.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "default";
 }
 
 // ConnectedArtifacts renders typed edges (relates_to / related_by) as

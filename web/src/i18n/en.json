@@ -90,6 +90,7 @@
   "sidecar.quick_copy_agent_ref": "Copy agent ref",
   "sidecar.quick_history": "Open revision history",
   "sidecar.relations": "Relations",
+  "sidecar.more_relations": "+%d more →",
   "sidecar.provenance": "Provenance",
   "sidecar.policy": "Policy",
   "sidecar.timeline": "Timeline",

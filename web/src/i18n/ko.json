@@ -90,6 +90,7 @@
   "sidecar.quick_copy_agent_ref": "agent ref 복사",
   "sidecar.quick_history": "수정 이력 열기",
   "sidecar.relations": "관계",
+  "sidecar.more_relations": "+%d개 더 보기 →",
   "sidecar.provenance": "출처",
   "sidecar.policy": "정책",
   "sidecar.timeline": "타임라인",
