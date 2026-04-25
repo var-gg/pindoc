@@ -850,6 +850,245 @@
 .palette__foot { display: flex; gap: 16px; padding: 8px 16px; background: var(--bg-0); border-top: 1px solid var(--border); font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
 .palette__empty { padding: 18px 16px; color: var(--fg-3); font-size: 13px; }
 
+/* Shortcut + symbol overlay */
+.shortcuts-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 82px 20px 32px;
+  background: oklch(0% 0 0 / 0.38);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+:root.theme-dark .shortcuts-overlay { background: oklch(0% 0 0 / 0.62); }
+.shortcuts-panel {
+  width: min(920px, 100%);
+  max-height: calc(100vh - 120px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-4);
+  background: var(--bg-1);
+  color: var(--fg-1);
+  box-shadow: var(--shadow-palette);
+}
+.shortcuts-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.shortcuts-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.shortcuts-panel__title > .lucide {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.shortcuts-panel__title h2 {
+  margin: 0;
+  color: var(--fg-0);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.shortcuts-panel__title p {
+  margin: 2px 0 0;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.shortcuts-panel__close {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-1);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  cursor: pointer;
+}
+.shortcuts-panel__close:hover,
+.shortcuts-panel__close:focus-visible {
+  border-color: var(--border-strong);
+  background: var(--bg-3);
+  color: var(--fg-0);
+  outline: none;
+}
+.shortcuts-panel__close .lucide {
+  width: 15px;
+  height: 15px;
+}
+.shortcuts-panel__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+  min-height: 0;
+  overflow-y: auto;
+}
+.shortcuts-section {
+  min-width: 0;
+  padding: 16px 18px 18px;
+}
+.shortcuts-section + .shortcuts-section {
+  border-left: 1px solid var(--border);
+}
+.shortcuts-section__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 12px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+}
+.shortcuts-section__head .lucide {
+  width: 13px;
+  height: 13px;
+  color: var(--fg-4);
+}
+.shortcuts-group-list,
+.shortcut-row-list,
+.symbol-row-list {
+  display: flex;
+  flex-direction: column;
+}
+.shortcuts-group {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.shortcuts-group:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.shortcuts-group + .shortcuts-group {
+  margin-top: 14px;
+}
+.shortcuts-group h3 {
+  margin: 0 0 8px;
+  color: var(--fg-0);
+  font-size: 13px;
+  font-weight: 600;
+}
+.shortcut-row,
+.symbol-row {
+  display: grid;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 9px 0;
+  border-top: 1px solid color-mix(in oklch, var(--border) 62%, transparent);
+}
+.shortcut-row:first-child,
+.symbol-row:first-child {
+  border-top: 0;
+}
+.shortcut-row {
+  grid-template-columns: 82px 18px minmax(0, 1fr);
+}
+.symbol-row {
+  grid-template-columns: minmax(92px, auto) 18px minmax(0, 1fr);
+}
+.shortcut-row > .lucide,
+.symbol-row > .lucide {
+  width: 15px;
+  height: 15px;
+  color: var(--fg-4);
+}
+.shortcut-row__keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.shortcut-row__body,
+.symbol-row__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.shortcut-row__body strong,
+.symbol-row__body strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-0);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shortcut-row__body span,
+.symbol-row__body span {
+  color: var(--fg-3);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.symbol-row__sample {
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+}
+.symbol-row__sample .type-chip,
+.symbol-row__sample .chip-area,
+.symbol-row__sample .task-filter-chip {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.shortcut-symbol-icon {
+  width: 26px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--r-1);
+  color: var(--fg-3);
+  background: var(--bg-2);
+}
+.shortcut-symbol-icon .lucide {
+  width: 14px;
+  height: 14px;
+}
+.shortcuts-panel__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-0);
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.shortcuts-panel__foot a {
+  color: var(--fg-1);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--fg-4);
+}
+.shortcuts-panel__foot a:hover,
+.shortcuts-panel__foot a:focus-visible {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  outline: none;
+}
+
 /* Surface stubs */
 .surface-stub { max-width: 66ch; margin: 0 auto; padding: 48px 32px; line-height: var(--lh-reader); }
 .surface-stub h1 { font-size: var(--fs-2xl); margin: 0 0 var(--sp-4); }
@@ -926,6 +1165,14 @@
   .palette__input input { font-size: 16px; }
   .palette__foot { display: none; }
   .palette__section { overflow-y: auto; }
+  .shortcuts-overlay { padding: 0; align-items: flex-end; }
+  .shortcuts-panel { width: 100%; max-height: 88vh; border-radius: var(--r-4) var(--r-4) 0 0; border-bottom: 0; }
+  .shortcuts-panel__head { padding: 14px 16px; }
+  .shortcuts-panel__grid { grid-template-columns: minmax(0, 1fr); }
+  .shortcuts-section + .shortcuts-section { border-left: 0; border-top: 1px solid var(--border); }
+  .shortcut-row { grid-template-columns: 72px 16px minmax(0, 1fr); }
+  .symbol-row { grid-template-columns: minmax(76px, auto) 16px minmax(0, 1fr); }
+  .shortcuts-panel__foot { align-items: flex-start; flex-direction: column; }
 }
 
 /* Scrollbars match dev-tool aesthetic */

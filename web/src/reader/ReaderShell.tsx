@@ -8,6 +8,7 @@ import { CmdK } from "./CmdK";
 import { ReaderSurface, type DetailScope } from "./ReaderSurface";
 import { Sidebar } from "./Sidebar";
 import { Sidecar } from "./Sidecar";
+import { ShortcutsOverlay } from "./ShortcutsOverlay";
 import { TopNav } from "./TopNav";
 import { initTheme, setTheme, type Theme } from "./theme";
 import { useReaderData } from "./useReaderData";
@@ -70,6 +71,7 @@ export function ReaderShell({ view }: Props) {
   const [theme, setThemeState] = useState<Theme>(() => initTheme());
   const [readerWidth, setReaderWidthState] = useState<ReaderWidth>(() => initReaderWidth());
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [taskInspectorSlug, setTaskInspectorSlug] = useState<string | null>(null);
   const [taskInspectorDetail, setTaskInspectorDetail] = useState<Artifact | null>(null);
@@ -186,6 +188,7 @@ export function ReaderShell({ view }: Props) {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
+        setShortcutsOpen(false);
         setPaletteOpen(true);
       }
     }
@@ -193,10 +196,33 @@ export function ReaderShell({ view }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // `?` overlay listener — mirrors Arc/Linear help overlays. Skip editable
+  // controls so Shift+/ remains normal text input in search boxes/forms.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (paletteOpen) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      const questionKey = e.key === "?" || (e.key === "/" && e.shiftKey);
+      if (questionKey) {
+        e.preventDefault();
+        setShortcutsOpen((v) => !v);
+        return;
+      }
+      if (e.key === "Escape" && shortcutsOpen) {
+        e.preventDefault();
+        setShortcutsOpen(false);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [paletteOpen, shortcutsOpen]);
+
   useEffect(() => {
     if (view !== "tasks") return;
     function onKey(e: KeyboardEvent) {
-      if (paletteOpen || e.key !== "Escape") return;
+      if (paletteOpen || shortcutsOpen || e.key !== "Escape") return;
       const target = e.target as HTMLElement | null;
       if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
       if (!selectedArea && !selectedType && badgeFilters.length === 0) return;
@@ -205,7 +231,7 @@ export function ReaderShell({ view }: Props) {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [view, paletteOpen, selectedArea, selectedType, badgeFilters.length, slug, baseRoute, navigate]);
+  }, [view, paletteOpen, shortcutsOpen, selectedArea, selectedType, badgeFilters.length, slug, baseRoute, navigate]);
 
   const toggleTheme = () => {
     const next: Theme = theme === "dark" ? "light" : "dark";
@@ -344,6 +370,7 @@ export function ReaderShell({ view }: Props) {
         theme={theme}
         onToggleTheme={toggleTheme}
         onOpenPalette={() => setPaletteOpen(true)}
+        onOpenShortcuts={() => setShortcutsOpen(true)}
         onToggleMenu={() => setMenuOpen((v) => !v)}
         inboxCount={inboxStubCount()}
         readerWidth={readerWidth}
@@ -376,6 +403,7 @@ export function ReaderShell({ view }: Props) {
           badgeFilters={badgeFilters}
           areaNameBySlug={areaNameBySlug}
           areaPathBySlug={areaPathBySlug}
+          keyboardDisabled={paletteOpen || shortcutsOpen}
           selectedTaskSlug={taskInspectorSlug}
           onSelectTask={setTaskInspectorSlug}
           onClearAreaFilter={clearAreaFilter}
@@ -396,6 +424,18 @@ export function ReaderShell({ view }: Props) {
         />
       </div>
       <CmdK projectSlug={project} open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <ShortcutsOverlay
+        open={shortcutsOpen}
+        view={view}
+        projectSlug={project}
+        projectLocale={locale}
+        detail={sidecarDetail}
+        selectedArea={selectedArea}
+        selectedType={selectedType}
+        badgeFilters={badgeFilters}
+        areaNameBySlug={areaNameBySlug}
+        onClose={() => setShortcutsOpen(false)}
+      />
     </div>
   );
 }
@@ -494,6 +534,7 @@ function Body({
   badgeFilters,
   areaNameBySlug,
   areaPathBySlug,
+  keyboardDisabled,
   selectedTaskSlug,
   onSelectTask,
   onClearAreaFilter,
@@ -515,6 +556,7 @@ function Body({
   badgeFilters: BadgeFilter[];
   areaNameBySlug: ReadonlyMap<string, string>;
   areaPathBySlug: ReadonlyMap<string, string[]>;
+  keyboardDisabled: boolean;
   selectedTaskSlug: string | null;
   onSelectTask: (slug: string) => void;
   onClearAreaFilter: () => void;
@@ -541,7 +583,7 @@ function Body({
     : null;
 
   useEffect(() => {
-    if (view !== "reader" || !detailScope || detailScope.mismatch) return;
+    if (keyboardDisabled || view !== "reader" || !detailScope || detailScope.mismatch) return;
     const scope = detailScope;
     function onKey(e: KeyboardEvent) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -558,7 +600,7 @@ function Body({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [view, detailScope, navigate]);
+  }, [keyboardDisabled, view, detailScope, navigate]);
 
   if (view === "graph") {
     return (
@@ -622,6 +664,7 @@ function Body({
         selectedArea={selectedArea}
         badgeFilters={badgeFilters}
         areaNameBySlug={areaNameBySlug}
+        keyboardDisabled={keyboardDisabled}
         selectedTaskSlug={selectedTaskSlug}
         onSelectTask={onSelectTask}
         onClearAreaFilter={onClearAreaFilter}
@@ -726,6 +769,7 @@ function TasksKanban({
   selectedArea,
   badgeFilters,
   areaNameBySlug,
+  keyboardDisabled,
   selectedTaskSlug,
   onSelectTask,
   onClearAreaFilter,
@@ -741,6 +785,7 @@ function TasksKanban({
   selectedArea: string | null;
   badgeFilters: BadgeFilter[];
   areaNameBySlug: ReadonlyMap<string, string>;
+  keyboardDisabled: boolean;
   selectedTaskSlug: string | null;
   onSelectTask: (slug: string) => void;
   onClearAreaFilter: () => void;
@@ -760,7 +805,7 @@ function TasksKanban({
   const allPendingCount = countPendingTasks(allList);
 
   useEffect(() => {
-    if (orderedTasks.length === 0) return;
+    if (keyboardDisabled || orderedTasks.length === 0) return;
     function onKey(e: KeyboardEvent) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -780,7 +825,7 @@ function TasksKanban({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [orderedTasks, selectedTaskSlug, onSelectTask]);
+  }, [keyboardDisabled, orderedTasks, selectedTaskSlug, onSelectTask]);
 
   if (allList.length === 0) {
     return (

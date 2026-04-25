@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router";
-import { Activity, AlignCenter, AlignJustify, ChevronDown, FileText, Inbox, Maximize2, Menu, Moon, Search, Share2, Sun } from "lucide-react";
+import { Activity, AlignCenter, AlignJustify, ChevronDown, CircleHelp, FileText, Inbox, Maximize2, Menu, Moon, Search, Share2, Sun } from "lucide-react";
 import type { ComponentType } from "react";
 import { api, type ProjectListItem } from "../api/client";
 import { useI18n, type Lang } from "../i18n";
@@ -13,6 +13,7 @@ type Props = {
   theme: Theme;
   onToggleTheme: () => void;
   onOpenPalette: () => void;
+  onOpenShortcuts: () => void;
   onToggleMenu: () => void;
   inboxCount: number;
   readerWidth: ReaderWidth;
@@ -34,6 +35,7 @@ export function TopNav({
   theme,
   onToggleTheme,
   onOpenPalette,
+  onOpenShortcuts,
   onToggleMenu,
   inboxCount,
   readerWidth,
@@ -85,6 +87,15 @@ export function TopNav({
         <Search className="lucide" />
         <span>{t("nav.search_hint")}</span>
         <span className="kbd">⌘K</span>
+      </button>
+
+      <button
+        className="nav__theme"
+        onClick={onOpenShortcuts}
+        aria-label={t("shortcuts.open")}
+        title={t("shortcuts.open")}
+      >
+        <CircleHelp className="lucide" />
       </button>
 
       <div className="nav__width" role="group" aria-label={t("nav.width_toggle")}>
