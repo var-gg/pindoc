@@ -31,10 +31,10 @@ func sha256HexOf(s string) string {
 // "semantic content (agent-only)" and "operational metadata (UI direct
 // edit allowed under trusted_local)". This handler is the HTTP-side
 // bridge the Reader's TaskControls component hits — it mirrors the
-// server contract of pindoc.artifact.propose(shape=meta_patch) restricted
-// to task_meta.assignee / priority / due_at, which is exactly the slice
-// the Decision permits. Status is intentionally absent; the
-// pindoc.task.transition path still owns that axis.
+// server contract of pindoc.artifact.propose(shape=body_patch +
+// task_meta.status) for status and shape=meta_patch for assignee /
+// priority / due_at. `verified` still belongs to pindoc.artifact.verify,
+// and `claimed_done` keeps the acceptance-completion gate.
 //
 // Why not let TaskControls call MCP directly: the Reader is a browser
 // context that can't speak stdio JSON-RPC to a local MCP subprocess.
@@ -46,6 +46,7 @@ type taskMetaPatchRequest struct {
 	CommitMsg       string  `json:"commit_msg"`
 	AuthorID        string  `json:"author_id"`
 	AuthorVersion   string  `json:"author_version,omitempty"`
+	Status          *string `json:"status,omitempty"`
 	Assignee        *string `json:"assignee,omitempty"`
 	Priority        *string `json:"priority,omitempty"`
 	DueAt           *string `json:"due_at,omitempty"`
@@ -99,7 +100,12 @@ var validTaskPriorities = map[string]struct{}{
 	"p0": {}, "p1": {}, "p2": {}, "p3": {},
 }
 
+var validTaskStatuses = map[string]struct{}{
+	"open": {}, "claimed_done": {}, "blocked": {}, "cancelled": {},
+}
+
 var validTaskAssignee = regexp.MustCompile(`^(agent:[a-zA-Z0-9_\-:.]+|user:[a-zA-Z0-9_\-]+|@[a-zA-Z0-9_\-.]+)$`)
+var taskAcceptanceLine = regexp.MustCompile(`^\s*[-*+]\s+\[([ xX~-])\]\s+`)
 
 func normalizeTaskAssignee(assignee string) (string, bool) {
 	a := strings.TrimSpace(assignee)
@@ -112,8 +118,23 @@ func normalizeTaskAssignee(assignee string) (string, bool) {
 	return a, true
 }
 
+func countTaskAcceptanceResolution(body string) (resolved, total int) {
+	for _, line := range strings.Split(body, "\n") {
+		match := taskAcceptanceLine.FindStringSubmatch(strings.TrimRight(line, "\r"))
+		if match == nil {
+			continue
+		}
+		total++
+		switch match[1] {
+		case "x", "X", "~", "-":
+			resolved++
+		}
+	}
+	return resolved, total
+}
+
 // handleTaskMetaPatch writes a meta_patch revision for one Task's
-// task_meta (assignee / priority / due_at / parent_slug). Mirrors the
+// task_meta (status / assignee / priority / due_at / parent_slug). Mirrors the
 // MCP handleUpdateMetaPatch semantics:
 //   - shallow-merge task_meta JSONB so a single-field PATCH preserves the
 //     rest (CASE ... COALESCE(task_meta,'{}'::jsonb) || $::jsonb)
@@ -122,8 +143,9 @@ func normalizeTaskAssignee(assignee string) (string, bool) {
 //   - emits an artifact.meta_patched event so the same telemetry / recent
 //     changes rails render the revision
 //
-// Status is rejected up-front (TASK_STATUS_VIA_TRANSITION_TOOL) and never
-// reaches SQL.
+// Status is allowed for open / claimed_done / blocked / cancelled only.
+// verified remains verify-tool only, and claimed_done is rejected unless
+// the current body has no unresolved acceptance checkboxes.
 func (d Deps) handleTaskMetaPatch(w http.ResponseWriter, r *http.Request) {
 	// auth_mode gate lives here. M1 is always trusted_local so there is
 	// no runtime check; V1.5+ will introduce a Deps.AuthMode field and
@@ -253,6 +275,24 @@ func (d Deps) applyTaskMetaPatch(
 	// "cleared to empty string". Clear is encoded as JSON null and
 	// jsonb_strip_nulls removes that key after the shallow merge.
 	patch := map[string]any{}
+	statusNeedsAcceptanceGate := false
+	if in.Status != nil {
+		v := strings.TrimSpace(*in.Status)
+		if v != "" {
+			if v == "verified" {
+				return zero, newTaskMetaApplyError(http.StatusBadRequest, "VER_VIA_VERIFY_TOOL_ONLY", "status=verified must be set via pindoc.artifact.verify", "status")
+			}
+			if _, ok := validTaskStatuses[v]; !ok {
+				return zero, newTaskMetaApplyError(http.StatusBadRequest, "TASK_STATUS_INVALID", "status must be one of open | claimed_done | blocked | cancelled; verified is verify-tool only", "status")
+			}
+			if v == "claimed_done" {
+				statusNeedsAcceptanceGate = true
+			}
+			patch["status"] = v
+		} else {
+			patch["status"] = nil
+		}
+	}
 	if in.Assignee != nil {
 		v := strings.TrimSpace(*in.Assignee)
 		if v != "" {
@@ -292,21 +332,21 @@ func (d Deps) applyTaskMetaPatch(
 		}
 	}
 	if len(patch) == 0 {
-		return zero, newTaskMetaApplyError(http.StatusBadRequest, "META_PATCH_EMPTY", "at least one of assignee | priority | due_at | parent_slug is required", "assignee", "priority", "due_at", "parent_slug")
+		return zero, newTaskMetaApplyError(http.StatusBadRequest, "META_PATCH_EMPTY", "at least one of status | assignee | priority | due_at | parent_slug is required", "status", "assignee", "priority", "due_at", "parent_slug")
 	}
 
 	ref := strings.TrimPrefix(strings.TrimPrefix(idOrSlug, "pindoc://"), "/")
 
-	var artifactID, projectID, currentType, currentSlug string
+	var artifactID, projectID, currentType, currentSlug, currentBody string
 	var lastRev int
 	err := d.DB.QueryRow(ctx, `
-		SELECT a.id::text, a.project_id::text, a.type, a.slug,
+		SELECT a.id::text, a.project_id::text, a.type, a.slug, a.body_markdown,
 		       COALESCE((SELECT max(revision_number) FROM artifact_revisions WHERE artifact_id = a.id), 0)
 		FROM artifacts a
 		JOIN projects p ON p.id = a.project_id
 		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 		LIMIT 1
-	`, projectSlug, ref).Scan(&artifactID, &projectID, &currentType, &currentSlug, &lastRev)
+	`, projectSlug, ref).Scan(&artifactID, &projectID, &currentType, &currentSlug, &currentBody, &lastRev)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return zero, newTaskMetaApplyError(http.StatusNotFound, "UPDATE_TARGET_NOT_FOUND", "artifact not found in this project")
 	}
@@ -317,6 +357,12 @@ func (d Deps) applyTaskMetaPatch(
 
 	if currentType != "Task" {
 		return zero, newTaskMetaApplyError(http.StatusBadRequest, "TASK_META_WRONG_TYPE", "task_meta is only valid when type='Task'", "task_meta")
+	}
+	if statusNeedsAcceptanceGate {
+		resolved, total := countTaskAcceptanceResolution(currentBody)
+		if resolved < total {
+			return zero, newTaskMetaApplyError(http.StatusBadRequest, "CLAIMED_DONE_INCOMPLETE", "status=claimed_done requires every acceptance checkbox to be resolved", "status")
+		}
 	}
 
 	expectedVersion := in.ExpectedVersion

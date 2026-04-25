@@ -43,6 +43,7 @@ import { RevisionTypeBadge } from "./RevisionTypeBadge";
 type Props = {
   projectSlug: string;
   detail: Artifact | null;
+  emptyMessage?: string;
   // auth_mode lets TaskControls flip between inline-editable and
   // read-only without a second round-trip (Decision agent-only-write-
   // 분할). Undefined = config not yet loaded — treat as non-trusted and
@@ -76,7 +77,7 @@ const DEFAULT_COLLAPSED_STATE: CollapsedState = {
   meta: true,
 };
 
-export function Sidecar({ projectSlug, detail, authMode, agents, users, onArtifactUpdated }: Props) {
+export function Sidecar({ projectSlug, detail, emptyMessage, authMode, agents, users, onArtifactUpdated }: Props) {
   const { t } = useI18n();
   const { locale = "" } = useParams<{ locale?: string }>();
   const [collapsed, toggleSection] = useSidecarCollapseState();
@@ -96,8 +97,8 @@ export function Sidecar({ projectSlug, detail, authMode, agents, users, onArtifa
           <h3>{t("sidecar.this_artifact")}</h3>
         </div>
         <div className="graph-wrap">
-          <div className="mini-graph">
-            <span className="mini-graph__empty">{t("sidecar.no_selection")}</span>
+          <div className="mini-graph mini-graph--empty">
+            <span className="mini-graph__empty">{emptyMessage ?? t("sidecar.no_selection")}</span>
           </div>
         </div>
       </aside>
@@ -124,6 +125,8 @@ export function Sidecar({ projectSlug, detail, authMode, agents, users, onArtifa
       <QuickActions detail={detail} artifactHref={artifactHref} />
 
       {headings.length >= 2 && <Toc headings={headings} />}
+
+      {detail.type === "Task" && <TaskInspectorSummary detail={detail} areaLabel={areaLabel} />}
 
       {detail.type === "Task" && (
         <TaskControls
@@ -297,6 +300,53 @@ function QuickActions({ detail, artifactHref }: { detail: Artifact; artifactHref
       </Link>
     </div>
   );
+}
+
+function TaskInspectorSummary({ detail, areaLabel }: { detail: Artifact; areaLabel: string }) {
+  const { t } = useI18n();
+  const stats = acceptanceStats(detail.body_markdown);
+  const percent = stats.total > 0 ? Math.round((stats.resolved / stats.total) * 100) : 0;
+  const edges = (detail.relates_to?.length ?? 0) + (detail.related_by?.length ?? 0);
+  const updatedAt = detail.updated_at ? new Date(detail.updated_at).toLocaleString() : "—";
+  return (
+    <div className="task-inspector-summary">
+      <div className="task-inspector-summary__grid">
+        <span>{t("task_inspector.status")}</span>
+        <strong>{detail.task_meta?.status ?? t("tasks.col_no_status")}</strong>
+        <span>{t("task_inspector.area")}</span>
+        <strong>{areaLabel}</strong>
+        <span>{t("task_inspector.due_at")}</span>
+        <strong>{detail.task_meta?.due_at ? new Date(detail.task_meta.due_at).toLocaleString() : "—"}</strong>
+        <span>{t("task_inspector.tags")}</span>
+        <strong>{detail.tags.length > 0 ? detail.tags.join(", ") : "—"}</strong>
+        <span>{t("task_inspector.edges")}</span>
+        <strong>{edges}</strong>
+        <span>{t("task_inspector.last_revision")}</span>
+        <strong>{updatedAt} · {detail.author_id}</strong>
+      </div>
+      <div className="task-inspector-meter" aria-label={t("task_inspector.acceptance_ratio")}>
+        <div className="task-inspector-meter__head">
+          <span>{t("task_inspector.acceptance_ratio")}</span>
+          <strong>{stats.resolved}/{stats.total} · {percent}%</strong>
+        </div>
+        <div className="task-inspector-meter__track">
+          <span style={{ width: `${percent}%` }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function acceptanceStats(body: string): { resolved: number; total: number } {
+  let resolved = 0;
+  let total = 0;
+  for (const line of body.split("\n")) {
+    const match = /^\s*[-*+]\s+\[([ xX~-])\]\s+/.exec(line.trimEnd());
+    if (!match) continue;
+    total++;
+    if (match[1] !== " ") resolved++;
+  }
+  return { resolved, total };
 }
 
 function copyToClipboard(text: string) {

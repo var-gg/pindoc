@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { X } from "lucide-react";
 import type { Aggregate } from "./useReaderData";
-import type { Artifact, ArtifactRef, Area } from "../api/client";
+import { api, type Artifact, type ArtifactRef, type Area } from "../api/client";
 import { useI18n } from "../i18n";
 import { CmdK } from "./CmdK";
 import { ReaderSurface, type DetailScope } from "./ReaderSurface";
@@ -71,6 +71,10 @@ export function ReaderShell({ view }: Props) {
   const [readerWidth, setReaderWidthState] = useState<ReaderWidth>(() => initReaderWidth());
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [taskInspectorSlug, setTaskInspectorSlug] = useState<string | null>(null);
+  const [taskInspectorDetail, setTaskInspectorDetail] = useState<Artifact | null>(null);
+  const [taskInspectorLoading, setTaskInspectorLoading] = useState(false);
+  const [taskInspectorReloadNonce, setTaskInspectorReloadNonce] = useState(0);
   // Surface·Type·Area 3축: Surface is owned by the URL segment (wiki|tasks|
   // graph|inbox — already carried in `view` prop). Area and Type are the
   // secondary filters layered on top and survive round-trips through the
@@ -214,6 +218,29 @@ export function ReaderShell({ view }: Props) {
     setReaderWidthState(next);
   };
 
+  useEffect(() => {
+    if (view !== "tasks" || slug || !taskInspectorSlug) {
+      setTaskInspectorDetail(null);
+      setTaskInspectorLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setTaskInspectorLoading(true);
+    api.artifact(project, taskInspectorSlug)
+      .then((artifact) => {
+        if (!cancelled) setTaskInspectorDetail(artifact);
+      })
+      .catch(() => {
+        if (!cancelled) setTaskInspectorDetail(null);
+      })
+      .finally(() => {
+        if (!cancelled) setTaskInspectorLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, slug, project, taskInspectorSlug, taskInspectorReloadNonce]);
+
   // Hooks must stay at top level (rules-of-hooks). Filter against a
   // possibly-empty list when we haven't loaded yet so we never call
   // this hook conditionally.
@@ -279,6 +306,22 @@ export function ReaderShell({ view }: Props) {
 
   const { project: projectData, areas, detail, agents, users, authMode } = state.data;
   const reload = state.reload;
+  const sidecarDetail =
+    view === "reader"
+      ? detail
+      : view === "tasks"
+        ? detail ?? taskInspectorDetail
+        : null;
+  const sidecarEmptyMessage =
+    view === "tasks" && !detail
+      ? taskInspectorLoading
+        ? t("tasks.inspector_loading")
+        : t("tasks.inspector_empty")
+      : undefined;
+  function handleTaskInspectorUpdated() {
+    reload();
+    setTaskInspectorReloadNonce((n) => n + 1);
+  }
   // Override area.artifact_count with the Surface-aware recomputation so
   // the sidebar badge matches the list the user is actually looking at.
   // Acceptance #6/#7: counters respect current Surface + the *other* filter
@@ -333,6 +376,8 @@ export function ReaderShell({ view }: Props) {
           badgeFilters={badgeFilters}
           areaNameBySlug={areaNameBySlug}
           areaPathBySlug={areaPathBySlug}
+          selectedTaskSlug={taskInspectorSlug}
+          onSelectTask={setTaskInspectorSlug}
           onClearAreaFilter={clearAreaFilter}
           onClearTypeFilter={clearTypeFilter}
           onClearBadgeFilter={clearBadgeFilter}
@@ -342,11 +387,12 @@ export function ReaderShell({ view }: Props) {
         />
         <Sidecar
           projectSlug={project}
-          detail={view === "reader" || view === "tasks" ? detail : null}
+          detail={sidecarDetail}
+          emptyMessage={sidecarEmptyMessage}
           authMode={authMode}
           agents={agents}
           users={users}
-          onArtifactUpdated={reload}
+          onArtifactUpdated={view === "tasks" ? handleTaskInspectorUpdated : reload}
         />
       </div>
       <CmdK projectSlug={project} open={paletteOpen} onClose={() => setPaletteOpen(false)} />
@@ -448,6 +494,8 @@ function Body({
   badgeFilters,
   areaNameBySlug,
   areaPathBySlug,
+  selectedTaskSlug,
+  onSelectTask,
   onClearAreaFilter,
   onClearTypeFilter,
   onClearBadgeFilter,
@@ -467,6 +515,8 @@ function Body({
   badgeFilters: BadgeFilter[];
   areaNameBySlug: ReadonlyMap<string, string>;
   areaPathBySlug: ReadonlyMap<string, string[]>;
+  selectedTaskSlug: string | null;
+  onSelectTask: (slug: string) => void;
   onClearAreaFilter: () => void;
   onClearTypeFilter: () => void;
   onClearBadgeFilter: (key: BadgeFilterKey) => void;
@@ -572,6 +622,8 @@ function Body({
         selectedArea={selectedArea}
         badgeFilters={badgeFilters}
         areaNameBySlug={areaNameBySlug}
+        selectedTaskSlug={selectedTaskSlug}
+        onSelectTask={onSelectTask}
         onClearAreaFilter={onClearAreaFilter}
         onClearBadgeFilter={onClearBadgeFilter}
         onClearFilters={onClearFilters}
@@ -674,6 +726,8 @@ function TasksKanban({
   selectedArea,
   badgeFilters,
   areaNameBySlug,
+  selectedTaskSlug,
+  onSelectTask,
   onClearAreaFilter,
   onClearBadgeFilter,
   onClearFilters,
@@ -687,6 +741,8 @@ function TasksKanban({
   selectedArea: string | null;
   badgeFilters: BadgeFilter[];
   areaNameBySlug: ReadonlyMap<string, string>;
+  selectedTaskSlug: string | null;
+  onSelectTask: (slug: string) => void;
   onClearAreaFilter: () => void;
   onClearBadgeFilter: (key: BadgeFilterKey) => void;
   onClearFilters: () => void;
@@ -695,12 +751,36 @@ function TasksKanban({
 
   const groups = groupTasksByStatus(list);
   const allGroups = groupTasksByStatus(allList);
+  const orderedTasks = orderedTaskList(groups);
   const hasActiveFilters = Boolean(selectedArea || badgeFilters.length > 0);
   const scopeLabel = selectedArea
     ? areaNameBySlug.get(selectedArea) ?? selectedArea
     : t("wiki.area_all");
   const filteredPendingCount = countPendingTasks(list);
   const allPendingCount = countPendingTasks(allList);
+
+  useEffect(() => {
+    if (orderedTasks.length === 0) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, button, a, [contenteditable='true']")) return;
+      e.preventDefault();
+      const current = selectedTaskSlug
+        ? orderedTasks.findIndex((a) => a.slug === selectedTaskSlug)
+        : -1;
+      const delta = e.key === "ArrowDown" ? 1 : -1;
+      const nextIndex =
+        current < 0
+          ? (delta > 0 ? 0 : orderedTasks.length - 1)
+          : Math.max(0, Math.min(orderedTasks.length - 1, current + delta));
+      const next = orderedTasks[nextIndex];
+      if (next) onSelectTask(next.slug);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [orderedTasks, selectedTaskSlug, onSelectTask]);
 
   if (allList.length === 0) {
     return (
@@ -753,6 +833,8 @@ function TasksKanban({
             projectSlug={projectSlug}
             projectLocale={projectLocale}
             currentSlug={currentSlug}
+            selectedTaskSlug={selectedTaskSlug}
+            onSelectTask={onSelectTask}
             areaNameBySlug={areaNameBySlug}
           />
         ))}
@@ -769,6 +851,8 @@ function TasksKanban({
             projectSlug={projectSlug}
             projectLocale={projectLocale}
             currentSlug={currentSlug}
+            selectedTaskSlug={selectedTaskSlug}
+            onSelectTask={onSelectTask}
             subtle
             areaNameBySlug={areaNameBySlug}
           />
@@ -786,6 +870,8 @@ function TasksKanban({
             projectSlug={projectSlug}
             projectLocale={projectLocale}
             currentSlug={currentSlug}
+            selectedTaskSlug={selectedTaskSlug}
+            onSelectTask={onSelectTask}
             subtle
             areaNameBySlug={areaNameBySlug}
           />
@@ -818,6 +904,14 @@ function countPendingTasks(list: ArtifactRef[]): number {
     const status = a.task_meta?.status;
     return !status || status === "open";
   }).length;
+}
+
+function orderedTaskList(groups: Map<string, ArtifactRef[]>): ArtifactRef[] {
+  return [
+    ...TASK_COLUMNS.flatMap((col) => groups.get(col.id) ?? []),
+    ...(groups.get("no_status") ?? []),
+    ...(groups.get("cancelled") ?? []),
+  ];
 }
 
 function TaskBoardHeader({
@@ -988,6 +1082,8 @@ function TaskColumn({
   projectSlug,
   projectLocale,
   currentSlug,
+  selectedTaskSlug,
+  onSelectTask,
   subtle,
   areaNameBySlug,
 }: {
@@ -1000,6 +1096,8 @@ function TaskColumn({
   projectSlug: string;
   projectLocale: string;
   currentSlug: string | undefined;
+  selectedTaskSlug: string | null;
+  onSelectTask: (slug: string) => void;
   subtle?: boolean;
   areaNameBySlug: ReadonlyMap<string, string>;
 }) {
@@ -1021,6 +1119,8 @@ function TaskColumn({
             projectSlug={projectSlug}
             projectLocale={projectLocale}
             isActive={currentSlug === a.slug}
+            isSelected={selectedTaskSlug === a.slug}
+            onSelect={onSelectTask}
             areaNameBySlug={areaNameBySlug}
           />
         ))}
@@ -1053,23 +1153,44 @@ function TaskCard({
   projectSlug,
   projectLocale,
   isActive,
+  isSelected,
+  onSelect,
   areaNameBySlug,
 }: {
   artifact: ArtifactRef;
   projectSlug: string;
   projectLocale: string;
   isActive: boolean;
+  isSelected: boolean;
+  onSelect: (slug: string) => void;
   areaNameBySlug: ReadonlyMap<string, string>;
 }) {
   const { t } = useI18n();
+  const navigate = useNavigate();
   const priority = a.task_meta?.priority;
   const prioClass = priority ? PRIORITY_CLASS[priority] : undefined;
   const blocked = a.task_meta?.status === "blocked";
   const areaLabel = areaNameBySlug.get(a.area_slug) ?? localizedAreaName(t, a.area_slug, a.area_slug);
+  const detailHref = `/p/${projectSlug}/${projectLocale}/wiki/${a.slug}`;
+  const selected = isActive || isSelected;
   return (
-    <Link
-      to={`/p/${projectSlug}/${projectLocale}/tasks/${a.slug}`}
-      className={`task-card${isActive ? " is-active" : ""}`}
+    <article
+      tabIndex={0}
+      data-task-card-slug={a.slug}
+      aria-selected={selected}
+      className={`task-card${selected ? " is-active" : ""}`}
+      onClick={() => onSelect(a.slug)}
+      onDoubleClick={() => navigate(detailHref)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          navigate(detailHref);
+        }
+        if (e.key === " ") {
+          e.preventDefault();
+          onSelect(a.slug);
+        }
+      }}
     >
       {blocked && (
         <div className="blocked-banner">
@@ -1093,7 +1214,13 @@ function TaskCard({
         )}
         <span className="chip-area">{areaLabel}</span>
       </div>
-      <div className="task-card__title">{a.title}</div>
+      <Link
+        to={detailHref}
+        className="task-card__title task-card__title-link"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {a.title}
+      </Link>
       <div className="task-card__foot">
         {a.task_meta?.assignee && <span>{a.task_meta.assignee}</span>}
         {a.task_meta?.due_at && (
@@ -1101,6 +1228,6 @@ function TaskCard({
         )}
         <span>{new Date(a.updated_at).toLocaleDateString()}</span>
       </div>
-    </Link>
+    </article>
   );
 }

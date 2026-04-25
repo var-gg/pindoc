@@ -1,14 +1,15 @@
 // TaskControls renders the operational-metadata edit lane for Task
 // artifacts — the visible half of Decision agent-only-write-분할. Status
-// is intentionally absent; it stays on pindoc.task.transition /
-// pindoc.artifact.verify so the acceptance-checklist and
-// Implementer ≠ Verifier gates keep working.
+// is editable for open / claimed_done / blocked / cancelled; verified
+// stays read-only because only pindoc.artifact.verify can set it. The
+// server re-checks the claimed_done acceptance gate.
 //
 // Edit contract:
 //   - only renders when detail.type === "Task"
 //   - auth_mode="trusted_local" → inline-editable; anything else → read-only
 //   - assignee changes use POST .../task-assign, the browser bridge for
-//     pindoc.task.assign; priority / due_at stay on POST .../task-meta
+//     pindoc.task.assign; status / priority / due_at stay on
+//     POST .../task-meta
 //   - expected_version comes from detail.revision_number (added Phase M1.x)
 //
 // The UI is intentionally minimal: priority as four pills, assignee as a
@@ -18,7 +19,7 @@
 // questions).
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarClock, CircleUserRound, Flag, Loader2 } from "lucide-react";
+import { CalendarClock, CircleUserRound, Flag, Loader2, Workflow } from "lucide-react";
 import {
   api,
   type Artifact,
@@ -44,6 +45,8 @@ type Props = {
 
 const PRIORITIES = ["p0", "p1", "p2", "p3"] as const;
 type Priority = (typeof PRIORITIES)[number];
+const EDITABLE_STATUSES = ["open", "claimed_done", "blocked", "cancelled"] as const;
+type EditableStatus = (typeof EDITABLE_STATUSES)[number];
 
 // M1 has no /api/user/current endpoint, so edits are attributed to a
 // stable web-originated identity. When V1.5 ships the user-identity
@@ -99,6 +102,9 @@ export function TaskControls({ projectSlug, detail, authMode, agents, users, onU
 
   const [assignee, setAssignee] = useState<string>(taskMeta.assignee ?? "");
   const [priority, setPriority] = useState<Priority | "">((taskMeta.priority as Priority | undefined) ?? "");
+  const [status, setStatus] = useState<EditableStatus | "verified" | "">(
+    (taskMeta.status as EditableStatus | "verified" | undefined) ?? "",
+  );
   const [dueAt, setDueAt] = useState<string>(() => toDatetimeLocal(taskMeta.due_at));
   const [saving, setSaving] = useState(false);
   const [errorCode, setErrorCode] = useState<string | null>(null);
@@ -123,10 +129,11 @@ export function TaskControls({ projectSlug, detail, authMode, agents, users, onU
   useEffect(() => {
     setAssignee(taskMeta.assignee ?? "");
     setPriority((taskMeta.priority as Priority | undefined) ?? "");
+    setStatus((taskMeta.status as EditableStatus | "verified" | undefined) ?? "");
     setDueAt(toDatetimeLocal(taskMeta.due_at));
     setErrorCode(null);
     setErrorMsg(null);
-  }, [detail.revision_number, taskMeta.assignee, taskMeta.priority, taskMeta.due_at]);
+  }, [detail.revision_number, taskMeta.assignee, taskMeta.priority, taskMeta.status, taskMeta.due_at]);
 
   const dirty = useMemo(() => {
     const currentAssignee = taskMeta.assignee ?? "";
@@ -134,12 +141,13 @@ export function TaskControls({ projectSlug, detail, authMode, agents, users, onU
     const currentDue = toDatetimeLocal(taskMeta.due_at);
     return (
       assignee.trim() !== currentAssignee.trim() ||
+      status !== (taskMeta.status ?? "") ||
       priority !== currentPriority ||
       dueAt !== currentDue
     );
-  }, [assignee, priority, dueAt, taskMeta]);
+  }, [assignee, status, priority, dueAt, taskMeta]);
 
-  async function saveOne(field: "assignee" | "priority" | "due_at", value: string) {
+  async function saveOne(field: "assignee" | "status" | "priority" | "due_at", value: string) {
     if (field === "assignee") {
       setSaving(true);
       setErrorCode(null);
@@ -174,6 +182,7 @@ export function TaskControls({ projectSlug, detail, authMode, agents, users, onU
       commit_msg: commitMsgFor(field, value),
       author_id: WEB_AUTHOR_ID,
     };
+    if (field === "status") input.status = value as EditableStatus;
     if (field === "priority") input.priority = value as Priority;
     if (field === "due_at") input.due_at = value;
     try {
@@ -204,6 +213,9 @@ export function TaskControls({ projectSlug, detail, authMode, agents, users, onU
     };
     const trimmedAssignee = assignee.trim();
     const assigneeChanged = trimmedAssignee !== (taskMeta.assignee ?? "").trim();
+    if (status && status !== "verified" && status !== taskMeta.status) {
+      input.status = status;
+    }
     if (priority && priority !== taskMeta.priority) {
       input.priority = priority;
     }
@@ -211,7 +223,7 @@ export function TaskControls({ projectSlug, detail, authMode, agents, users, onU
     if (dueAt && dueAt !== currentDue) {
       input.due_at = fromDatetimeLocal(dueAt);
     }
-    const hasMetaPatch = Boolean(input.priority || input.due_at);
+    const hasMetaPatch = Boolean(input.status || input.priority || input.due_at);
     try {
       if (hasMetaPatch) {
         await api.taskMetaPatch(projectSlug, detail.slug, input);
@@ -253,6 +265,41 @@ export function TaskControls({ projectSlug, detail, authMode, agents, users, onU
             · {t("task_controls.read_only")}
           </span>
         )}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+        <Workflow className="lucide" style={{ width: 13, height: 13, color: "var(--fg-3)" }} />
+        <span style={{ fontSize: 11, color: "var(--fg-3)", minWidth: 58 }}>
+          {t("task_controls.status")}
+        </span>
+        <select
+          value={status}
+          disabled={readOnly || saving || status === "verified"}
+          onChange={(e) => {
+            const v = e.target.value as EditableStatus;
+            setStatus(v);
+            if (!readOnly) void saveOne("status", v);
+          }}
+          title={status === "verified" ? t("task_controls.status_verified_readonly") : undefined}
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            padding: "3px 6px",
+            borderRadius: "var(--r-1)",
+            border: "1px solid var(--border-1)",
+            background: "var(--bg-2)",
+            color: "var(--fg-1)",
+            minWidth: 160,
+          }}
+        >
+          {status === "" && <option value="">{t("tasks.col_no_status")}</option>}
+          {status === "verified" && <option value="verified">{t("tasks.col_verified")}</option>}
+          {EDITABLE_STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {taskStatusLabel(s, t)}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Priority — inline pill group, commits on click */}
@@ -442,7 +489,20 @@ function fromDatetimeLocal(local: string): string {
   return d.toISOString();
 }
 
-function commitMsgFor(field: "assignee" | "priority" | "due_at", value: string): string {
+function taskStatusLabel(status: EditableStatus, t: ReturnType<typeof useI18n>["t"]): string {
+  switch (status) {
+    case "open":
+      return t("tasks.col_open");
+    case "claimed_done":
+      return t("tasks.col_claimed_done");
+    case "blocked":
+      return t("tasks.col_blocked");
+    case "cancelled":
+      return t("tasks.col_cancelled");
+  }
+}
+
+function commitMsgFor(field: "assignee" | "status" | "priority" | "due_at", value: string): string {
   const display = value || "(unset)";
   return `UI TaskControls: set ${field}=${display}`;
 }

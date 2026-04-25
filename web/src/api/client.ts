@@ -316,16 +316,18 @@ function p(project: string): string {
 
 // TaskMetaPatchInput is the write surface the Reader's TaskControls
 // ships to POST /api/p/{project}/artifacts/{idOrSlug}/task-meta. Fields
-// map 1:1 onto the server taskMetaPatchRequest — assignee / priority /
-// due_at / parent_slug are the four operational-metadata axes the
-// Decision permits; status stays on the MCP-only lane. `null` is never
-// emitted by the current UI (clearing a field needs a separate design
-// pass); every `undefined` field is omitted from the wire payload.
+// map 1:1 onto the server taskMetaPatchRequest — status / assignee /
+// priority / due_at / parent_slug are the operational-metadata axes the
+// Decision permits. `verified` remains verify-tool only server-side.
+// `null` is never emitted by the current UI (clearing a field needs a
+// separate design pass); every `undefined` field is omitted from the wire
+// payload.
 export type TaskMetaPatchInput = {
   expected_version: number;
   commit_msg: string;
   author_id: string;
   author_version?: string;
+  status?: "open" | "claimed_done" | "blocked" | "cancelled";
   assignee?: string;
   priority?: "p0" | "p1" | "p2" | "p3";
   due_at?: string;
