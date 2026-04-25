@@ -112,7 +112,7 @@ func (d Deps) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 		Slug:             out.Slug,
 		Name:             out.Name,
 		PrimaryLanguage:  out.PrimaryLanguage,
-		URL:              "/p/" + out.Slug + "/" + out.PrimaryLanguage + "/wiki",
+		URL:              "/p/" + out.Slug + "/wiki",
 		DefaultArea:      out.DefaultArea,
 		AreasCreated:     out.AreasCreated,
 		TemplatesCreated: out.TemplatesCreated,

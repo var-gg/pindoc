@@ -9,10 +9,8 @@
 
 export type ServerConfig = {
   default_project_slug: string;
-  // Phase 18 — default project's locale segment. Reader's LegacyRedirect
-  // inserts it into /p/:slug/... URLs so bare /wiki/... shares still
-  // resolve to a canonical /p/:slug/:locale/wiki/... URL. Empty falls
-  // back to "en" in the UI helper.
+  // Compatibility alias for the default project's primary_language.
+  // Canonical Reader URLs no longer carry locale.
   default_project_locale?: string;
   multi_project: boolean;
   version: string;
@@ -37,8 +35,8 @@ export type Project = {
   description?: string;
   color?: string;
   primary_language: string;
-  // Phase 18 — canonical locale of this project row. Same slug may
-  // live in multiple locales; (slug, locale) is the unique key.
+  // Compatibility alias for primary_language. Locale is metadata, not a
+  // route or identity key.
   locale?: string;
   areas_count: number;
   artifacts_count: number;
@@ -156,6 +154,7 @@ export type ArtifactRef = {
   type: string;
   title: string;
   area_slug: string;
+  body_locale?: string;
   completeness: string;
   status: string;
   review_state: string;

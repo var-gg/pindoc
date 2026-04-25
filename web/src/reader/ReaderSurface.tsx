@@ -1,5 +1,5 @@
-import { Link } from "react-router";
-import { ChevronLeft, ChevronRight, ListFilter } from "lucide-react";
+import { Link, useLocation } from "react-router";
+import { ChevronLeft, ChevronRight, Languages, ListFilter } from "lucide-react";
 import type { Artifact, ArtifactRef } from "../api/client";
 import { useI18n } from "../i18n";
 import { ArtifactByline } from "./ArtifactByline";
@@ -15,7 +15,6 @@ type Props = {
   emptyMessage: string;
   scope?: DetailScope | null;
   projectSlug?: string;
-  projectLocale?: string;
   onApplyBadgeFilter?: (filter: BadgeFilter) => void;
   onApplyAreaFilter?: (areaSlug: string) => void;
 };
@@ -35,11 +34,11 @@ export function ReaderSurface({
   emptyMessage,
   scope,
   projectSlug,
-  projectLocale,
   onApplyBadgeFilter,
   onApplyAreaFilter,
 }: Props) {
   const { t } = useI18n();
+  const location = useLocation();
 
   if (!detail) {
     return (
@@ -56,14 +55,31 @@ export function ReaderSurface({
     : "—";
   const areaLabel = localizedAreaName(t, detail.area_slug, detail.area_slug);
   const legendHref =
-    projectSlug && projectLocale
-      ? `/p/${projectSlug}/${projectLocale}/wiki/visual-language-reference`
+    projectSlug
+      ? `/p/${projectSlug}/wiki/visual-language-reference`
       : undefined;
   const hasLiveSidecarData =
     Boolean(detail.superseded_by) ||
     (detail.relates_to?.length ?? 0) > 0 ||
     (detail.related_by?.length ?? 0) > 0 ||
     (detail.pins?.length ?? 0) > 0;
+  const translationEdges = [
+    ...(detail.relates_to ?? []),
+    ...(detail.related_by ?? []),
+  ].filter((edge) => edge.relation === "translation_of");
+  const translateLocales = ["en", "ko", "ja", "hi"];
+  const activeTranslateLocale = new URLSearchParams(location.search).get("translate") ?? "";
+  const highlightedLocale = activeTranslateLocale || detail.body_locale || "";
+  const translateHref = (locale: string) => {
+    const params = new URLSearchParams(location.search);
+    if (locale === detail.body_locale) {
+      params.delete("translate");
+    } else {
+      params.set("translate", locale);
+    }
+    const query = params.toString();
+    return `${location.pathname}${query ? `?${query}` : ""}`;
+  };
 
   return (
     <main className="content">
@@ -102,6 +118,35 @@ export function ReaderSurface({
             onApply={onApplyAreaFilter ? () => onApplyAreaFilter(detail.area_slug) : undefined}
             legendHref={legendHref}
           />
+          {detail.body_locale ? (
+            <span className="chip chip--area" title="Artifact body language">
+              lang: {detail.body_locale}
+            </span>
+          ) : null}
+          <span className="translate-toggle" aria-label="Translation target">
+            <Languages className="lucide" aria-hidden="true" />
+            {translateLocales.map((locale) => (
+              <Link
+                key={locale}
+                to={translateHref(locale)}
+                className={`translate-toggle__option${highlightedLocale === locale ? " is-active" : ""}`}
+                aria-current={highlightedLocale === locale ? "true" : undefined}
+                title={`translate=${locale}`}
+              >
+                {locale.toUpperCase()}
+              </Link>
+            ))}
+          </span>
+          {projectSlug && translationEdges.map((edge) => (
+            <Link
+              key={`translation-${edge.artifact_id}`}
+              to={`/p/${projectSlug}/wiki/${edge.slug}`}
+              className="chip chip--area"
+              title={edge.title}
+            >
+              translation
+            </Link>
+          ))}
           <span className="art-meta__sep">·</span>
           <ArtifactByline artifact={detail} />
           <span className="art-meta__sep">·</span>

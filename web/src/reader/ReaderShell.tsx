@@ -62,7 +62,7 @@ type Props = {
 };
 
 export function ReaderShell({ view }: Props) {
-  const { project = "", locale = "", slug } = useParams<{ project: string; locale?: string; slug?: string }>();
+  const { project = "", slug } = useParams<{ project: string; slug?: string }>();
   const { t } = useI18n();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -120,7 +120,7 @@ export function ReaderShell({ view }: Props) {
     }
   }, [selectedArea, selectedType, view, searchParams, setSearchParams]);
 
-  const baseRoute = `/p/${project}/${locale}/${view === "tasks" ? "tasks" : "wiki"}`;
+  const baseRoute = `/p/${project}/${view === "tasks" ? "tasks" : "wiki"}`;
 
   function writeSearchParams(next: URLSearchParams, opts?: { toList?: boolean }) {
     const qs = next.toString();
@@ -393,7 +393,6 @@ export function ReaderShell({ view }: Props) {
         <Body
           view={view}
           projectSlug={project}
-          projectLocale={locale}
           detail={detail}
           list={filteredArtifacts}
           allList={surfaceList}
@@ -428,7 +427,6 @@ export function ReaderShell({ view }: Props) {
         open={shortcutsOpen}
         view={view}
         projectSlug={project}
-        projectLocale={locale}
         detail={sidecarDetail}
         selectedArea={selectedArea}
         selectedType={selectedType}
@@ -524,7 +522,6 @@ function filteredReaderHref(
 function Body({
   view,
   projectSlug,
-  projectLocale,
   detail,
   list,
   allList,
@@ -546,7 +543,6 @@ function Body({
 }: {
   view: ReaderView;
   projectSlug: string;
-  projectLocale: string;
   detail: Artifact | null;
   list: ArtifactRef[];
   allList: ArtifactRef[];
@@ -568,7 +564,7 @@ function Body({
 }) {
   const { t } = useI18n();
   const navigate = useNavigate();
-  const baseRoute = `/p/${projectSlug}/${projectLocale}/${view === "tasks" ? "tasks" : "wiki"}`;
+  const baseRoute = `/p/${projectSlug}/${view === "tasks" ? "tasks" : "wiki"}`;
   const detailScope = detail && view === "reader"
     ? buildDetailScope({
         detail,
@@ -638,7 +634,6 @@ function Body({
         emptyMessage={view === "tasks" ? t("wiki.empty_tasks_detail") : t("wiki.empty_detail")}
         scope={detailScope}
         projectSlug={projectSlug}
-        projectLocale={projectLocale}
         onApplyBadgeFilter={onApplyBadgeFilter}
         onApplyAreaFilter={onApplyAreaFilter}
       />
@@ -656,7 +651,6 @@ function Body({
     return (
       <TasksKanban
         projectSlug={projectSlug}
-        projectLocale={projectLocale}
         list={list}
         allList={allList}
         currentSlug={currentSlug}
@@ -696,7 +690,7 @@ function Body({
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {list.map((a) => {
-              const linkBase = `/p/${projectSlug}/${projectLocale}/wiki`;
+              const linkBase = `/p/${projectSlug}/wiki`;
               const isActive = currentSlug === a.slug;
               return (
                 <Link
@@ -761,7 +755,6 @@ const PRIORITY_CLASS: Record<string, string> = {
 
 function TasksKanban({
   projectSlug,
-  projectLocale,
   list,
   allList,
   currentSlug,
@@ -777,7 +770,6 @@ function TasksKanban({
   onClearFilters,
 }: {
   projectSlug: string;
-  projectLocale: string;
   list: ArtifactRef[];
   allList: ArtifactRef[];
   currentSlug: string | undefined;
@@ -876,7 +868,6 @@ function TasksKanban({
             hasActiveFilters={hasActiveFilters}
             onClearFilters={onClearFilters}
             projectSlug={projectSlug}
-            projectLocale={projectLocale}
             currentSlug={currentSlug}
             selectedTaskSlug={selectedTaskSlug}
             onSelectTask={onSelectTask}
@@ -894,7 +885,6 @@ function TasksKanban({
             hasActiveFilters={hasActiveFilters}
             onClearFilters={onClearFilters}
             projectSlug={projectSlug}
-            projectLocale={projectLocale}
             currentSlug={currentSlug}
             selectedTaskSlug={selectedTaskSlug}
             onSelectTask={onSelectTask}
@@ -913,7 +903,6 @@ function TasksKanban({
             hasActiveFilters={hasActiveFilters}
             onClearFilters={onClearFilters}
             projectSlug={projectSlug}
-            projectLocale={projectLocale}
             currentSlug={currentSlug}
             selectedTaskSlug={selectedTaskSlug}
             onSelectTask={onSelectTask}
@@ -1125,7 +1114,6 @@ function TaskColumn({
   hasActiveFilters,
   onClearFilters,
   projectSlug,
-  projectLocale,
   currentSlug,
   selectedTaskSlug,
   onSelectTask,
@@ -1139,7 +1127,6 @@ function TaskColumn({
   hasActiveFilters: boolean;
   onClearFilters: () => void;
   projectSlug: string;
-  projectLocale: string;
   currentSlug: string | undefined;
   selectedTaskSlug: string | null;
   onSelectTask: (slug: string) => void;
@@ -1162,7 +1149,6 @@ function TaskColumn({
             key={a.id}
             artifact={a}
             projectSlug={projectSlug}
-            projectLocale={projectLocale}
             isActive={currentSlug === a.slug}
             isSelected={selectedTaskSlug === a.slug}
             onSelect={onSelectTask}
@@ -1196,7 +1182,6 @@ function TaskColumn({
 function TaskCard({
   artifact: a,
   projectSlug,
-  projectLocale,
   isActive,
   isSelected,
   onSelect,
@@ -1204,7 +1189,6 @@ function TaskCard({
 }: {
   artifact: ArtifactRef;
   projectSlug: string;
-  projectLocale: string;
   isActive: boolean;
   isSelected: boolean;
   onSelect: (slug: string) => void;
@@ -1216,7 +1200,7 @@ function TaskCard({
   const prioClass = priority ? PRIORITY_CLASS[priority] : undefined;
   const blocked = a.task_meta?.status === "blocked";
   const areaLabel = areaNameBySlug.get(a.area_slug) ?? localizedAreaName(t, a.area_slug, a.area_slug);
-  const detailHref = `/p/${projectSlug}/${projectLocale}/wiki/${a.slug}`;
+  const detailHref = `/p/${projectSlug}/wiki/${a.slug}`;
   const selected = isActive || isSelected;
   return (
     <article

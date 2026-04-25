@@ -6,7 +6,7 @@ import (
 )
 
 func TestRenderPindocMDAreaTaxonomySection(t *testing.T) {
-	body := renderPindocMD("Pindoc", "pindoc", "ko", "test")
+	body := renderPindocMD("Pindoc", "project-123", "pindoc", "ko", "ko", "test", true)
 
 	for _, want := range []string{
 		"## Area taxonomy",
@@ -33,7 +33,7 @@ func TestRenderPindocMDAreaTaxonomySection(t *testing.T) {
 }
 
 func TestRenderPindocMDSlugGuidance(t *testing.T) {
-	body := renderPindocMD("Pindoc", "pindoc", "ko", "test")
+	body := renderPindocMD("Pindoc", "project-123", "pindoc", "ko", "ko", "test", true)
 
 	for _, want := range []string{
 		"## Slug 규약",
@@ -52,7 +52,7 @@ func TestRenderPindocMDSlugGuidance(t *testing.T) {
 }
 
 func TestRenderPindocMDProjectLanguageGuidance(t *testing.T) {
-	body := renderPindocMD("Pindoc", "pindoc", "ko", "test")
+	body := renderPindocMD("Pindoc", "project-123", "pindoc", "ko", "ko", "test", true)
 
 	for _, want := range []string{
 		"primary_language=en|ko|ja",
@@ -68,7 +68,7 @@ func TestRenderPindocMDProjectLanguageGuidance(t *testing.T) {
 }
 
 func TestRenderPindocMDBodyVsGraphEdgesGuidance(t *testing.T) {
-	body := renderPindocMD("Pindoc", "pindoc", "ko", "test")
+	body := renderPindocMD("Pindoc", "project-123", "pindoc", "ko", "ko", "test", true)
 
 	for _, want := range []string{
 		"## Body vs graph edges",
@@ -80,5 +80,48 @@ func TestRenderPindocMDBodyVsGraphEdgesGuidance(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("rendered PINDOC.md missing edge guidance %q", want)
 		}
+	}
+}
+
+func TestRenderPindocMDFrontmatter(t *testing.T) {
+	body := renderPindocMD("Pindoc", "ddbbfa62-4511-41c2-af07-110f534fb6e4", "pindoc", "ko", "ko", "test", true)
+
+	for _, want := range []string{
+		"---\nproject_slug: pindoc",
+		"project_id: ddbbfa62-4511-41c2-af07-110f534fb6e4",
+		"locale: ko",
+		"schema_version: 1",
+		"---\n\n# PINDOC.md",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("rendered PINDOC.md missing frontmatter %q", want)
+		}
+	}
+}
+
+func TestRenderPindocMDTaskLifecycleSection(t *testing.T) {
+	body := renderPindocMD("Pindoc", "project-123", "pindoc", "ko", "ko", "test", true)
+
+	for _, want := range []string{
+		"## Section 12 — Task lifecycle (chip / parallel work)",
+		"### Before spawn",
+		"### During chip work",
+		"### After chip merge to main",
+		"### If interrupted / abandoned",
+		"### Retroactive policy",
+		"task_meta.status=\"open\"",
+		"status: \"claimed_done\"",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("rendered PINDOC.md missing Section 12 guidance %q", want)
+		}
+	}
+}
+
+func TestRenderPindocMDOmitsTaskLifecycleSection(t *testing.T) {
+	body := renderPindocMD("Pindoc", "project-123", "pindoc", "ko", "ko", "test", false)
+
+	if strings.Contains(body, "## Section 12 — Task lifecycle") {
+		t.Fatalf("rendered PINDOC.md should omit Section 12 when includeSection12=false")
 	}
 }

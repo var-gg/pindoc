@@ -50,6 +50,7 @@ type artifactProposeInput struct {
 	AreaSlug      string   `json:"area_slug" jsonschema:"slug from pindoc.area.list; use 'misc' or '_unsorted' if unsure"`
 	Title         string   `json:"title"`
 	BodyMarkdown  string   `json:"body_markdown" jsonschema:"main content in markdown"`
+	BodyLocale    string   `json:"body_locale,omitempty" jsonschema:"BCP 47 body language tag; default = project primary_language"`
 	Slug          string   `json:"slug,omitempty" jsonschema:"optional; auto-generated from title if absent"`
 	Tags          []string `json:"tags,omitempty"`
 	Completeness  string   `json:"completeness,omitempty" jsonschema:"draft|partial|settled; default partial"`
@@ -100,7 +101,8 @@ type artifactProposeInput struct {
 	Pins []ArtifactPinInput `json:"pins,omitempty" jsonschema:"code references tying this artifact to files/commits"`
 
 	// RelatesTo records typed edges to other artifacts in the same project.
-	// Valid relations: implements | references | blocks | relates_to.
+	// Valid relations: implements | references | blocks | relates_to |
+	// translation_of.
 	// Target may be id, slug, or pindoc:// URL — resolved server-side.
 	// Unknown targets fail the whole call with RELATES_TARGET_NOT_FOUND.
 	RelatesTo []ArtifactRelationInput `json:"relates_to,omitempty" jsonschema:"typed edges to other artifacts"`
@@ -148,7 +150,7 @@ type artifactProposeInput struct {
 	//
 	//   status      — todo | in_progress | blocked | done | cancelled
 	//   priority    — p0 | p1 | p2 | p3
-	//   assignee    — free-form string; e.g. "@alice", "agent:claude-code"
+	//   assignee    — agent:<id> | user:<id> | @<handle>
 	//   due_at      — RFC3339 timestamp
 	//   parent_slug — another Task artifact's slug (for epic→task→subtask)
 	//
@@ -683,6 +685,13 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			if in.Tags == nil {
 				in.Tags = []string{}
 			}
+			bodyLocale := normalizeBodyLocale(in.BodyLocale)
+			if bodyLocale == "" {
+				bodyLocale = normalizeBodyLocale(scope.ProjectLocale)
+			}
+			if bodyLocale == "" {
+				bodyLocale = "en"
+			}
 
 			// --- INSERT + event in one tx --------------------------------
 			tx, err := deps.DB.Begin(ctx)
@@ -700,13 +709,14 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				err = tx.QueryRow(ctx, `
 					INSERT INTO artifacts (
 						project_id, area_id, slug, type, title, body_markdown, tags,
+						body_locale,
 						completeness, status, review_state,
 						author_kind, author_id, author_version, author_user_id,
 						task_meta, artifact_meta, published_at
-					) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'published', 'auto_published', 'agent', $9, $10, NULLIF($11, '')::uuid, $12, $13::jsonb, now())
+					) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'published', 'auto_published', 'agent', $10, $11, NULLIF($12, '')::uuid, $13, $14::jsonb, now())
 					RETURNING id::text, published_at
 				`, projectID, areaID, finalSlug, in.Type, in.Title, in.BodyMarkdown, in.Tags,
-					completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), p.UserID, taskMetaJSON, artifactMetaJSON).Scan(&newID, &publishedAt)
+					bodyLocale, completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), p.UserID, taskMetaJSON, artifactMetaJSON).Scan(&newID, &publishedAt)
 				if err == nil {
 					break
 				}
@@ -1743,6 +1753,11 @@ func preflight(ctx context.Context, deps Deps, projectSlug string, in *artifactP
 				push(fmt.Sprintf(i18n.T(lang, "preflight.task_priority_invalid"), tm.Priority), "TASK_PRIORITY_INVALID")
 			}
 		}
+		if a := strings.TrimSpace(tm.Assignee); a != "" {
+			if _, ok := validateAssignee(a); !ok {
+				push(i18n.T(lang, "preflight.task_assignee_invalid"), "ASSIGNEE_INVALID")
+			}
+		}
 		if d := strings.TrimSpace(tm.DueAt); d != "" {
 			if _, err := time.Parse(time.RFC3339, d); err != nil {
 				push(fmt.Sprintf(i18n.T(lang, "preflight.task_due_at_invalid"), tm.DueAt), "TASK_DUE_AT_INVALID")
@@ -2037,7 +2052,7 @@ func patchFieldsFor(code string) []string {
 		return []string{"body_markdown", "body_patch", "shape"}
 	case "META_PATCH_EMPTY":
 		return []string{"tags", "completeness", "task_meta", "artifact_meta"}
-	case "TASK_STATUS_VIA_TRANSITION_TOOL":
+	case "TASK_STATUS_VIA_TRANSITION_TOOL", "VER_VIA_VERIFY_TOOL_ONLY":
 		return []string{"task_meta.status"}
 	case "ACCEPT_TRANSITION_REQUIRED",
 		"ACCEPT_TRANSITION_INDEX_REQUIRED",
@@ -2080,8 +2095,16 @@ func patchFieldsFor(code string) []string {
 		return []string{"type"}
 	case "PIN_PATH_EMPTY", "PIN_LINES_INVALID", "PIN_KIND_INVALID", "PIN_URL_INVALID":
 		return []string{"pins"}
-	case "TASK_META_WRONG_TYPE", "TASK_STATUS_INVALID", "TASK_PRIORITY_INVALID", "TASK_DUE_AT_INVALID":
+	case "TASK_META_WRONG_TYPE":
 		return []string{"task_meta"}
+	case "TASK_STATUS_INVALID":
+		return []string{"task_meta.status"}
+	case "TASK_PRIORITY_INVALID":
+		return []string{"task_meta.priority"}
+	case "ASSIGNEE_INVALID":
+		return []string{"task_meta.assignee"}
+	case "TASK_DUE_AT_INVALID":
+		return []string{"task_meta.due_at"}
 	case "REL_TARGET_EMPTY", "REL_INVALID":
 		return []string{"relates_to"}
 	default:

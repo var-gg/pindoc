@@ -403,7 +403,7 @@ func runProjectCreate(ctx context.Context, pool *db.Pool, args []string) error {
 	fmt.Printf("created project: %s (id=%s)\n", out.Slug, out.ID)
 	fmt.Printf("  name:      %s\n", out.Name)
 	fmt.Printf("  language:  %s\n", out.PrimaryLanguage)
-	fmt.Printf("  url:       /p/%s/%s/wiki\n", out.Slug, out.PrimaryLanguage)
+	fmt.Printf("  url:       /p/%s/wiki\n", out.Slug)
 	fmt.Printf("  areas:     %d\n", out.AreasCreated)
 	fmt.Printf("  templates: %d\n", out.TemplatesCreated)
 	return nil

@@ -43,10 +43,12 @@ type ProjectScope struct {
 	// to re-query the row they just resolved.
 	ProjectSlug string
 
-	// ProjectLocale is projects.locale (Task task-phase-18-project-
-	// locale-implementation, migration 0015). HumanURL / AbsHumanURL
-	// embed it in /p/{slug}/{locale}/wiki/ share paths. Empty falls
-	// back to "en" inside HumanURL.
+	// ProjectLocale is the project's canonical language metadata. It is
+	// loaded from projects.primary_language; the old projects.locale
+	// identity column was dropped by task-canonical-locale-migration.
+	// Kept as a compatibility field for handlers that still need to show
+	// the canonical language in responses. HumanURL ignores it because
+	// share paths are now /p/{slug}/wiki/...
 	ProjectLocale string
 
 	// Role is the caller's permission tier within this project. V1
@@ -118,13 +120,13 @@ func ResolveProject(ctx context.Context, pool *db.Pool, p *Principal, slug strin
 	}
 
 	var (
-		projectID string
-		locale    string
+		projectID       string
+		primaryLanguage string
 	)
 	err := pool.QueryRow(ctx,
-		`SELECT id::text, locale FROM projects WHERE slug = $1 LIMIT 1`,
+		`SELECT id::text, primary_language FROM projects WHERE slug = $1 LIMIT 1`,
 		slug,
-	).Scan(&projectID, &locale)
+	).Scan(&projectID, &primaryLanguage)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("%w: %q", ErrProjectNotFound, slug)
 	}
@@ -136,7 +138,7 @@ func ResolveProject(ctx context.Context, pool *db.Pool, p *Principal, slug strin
 	return &ProjectScope{
 		ProjectID:     projectID,
 		ProjectSlug:   slug,
-		ProjectLocale: locale,
+		ProjectLocale: primaryLanguage,
 		Role:          role,
 	}, nil
 }

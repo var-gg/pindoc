@@ -22,6 +22,7 @@ var RegisteredTools = []string{
 	"pindoc.area.list",
 	"pindoc.area.create",
 	"pindoc.artifact.read",
+	"pindoc.artifact.translate",
 	"pindoc.artifact.propose",
 	"pindoc.harness.install",
 	"pindoc.artifact.search",

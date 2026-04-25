@@ -11,7 +11,7 @@ type Load =
   | { kind: "ready"; data: DiffResp };
 
 export function Diff() {
-  const { project = "", locale = "", slug = "" } = useParams<{ project: string; locale: string; slug: string }>();
+  const { project = "", slug = "" } = useParams<{ project: string; slug: string }>();
   const [search] = useSearchParams();
   const fromRev = Number(search.get("from")) || undefined;
   const toRev = Number(search.get("to")) || undefined;
@@ -56,9 +56,9 @@ export function Diff() {
     <main className="content">
       <article className="reader-article" style={{ maxWidth: 980 }}>
         <div className="crumbs">
-          <Link to={`/p/${project}/${locale}/wiki/${slug}`}>{data.to.title}</Link>
+          <Link to={`/p/${project}/wiki/${slug}`}>{data.to.title}</Link>
           <ChevronRight className="lucide" />
-          <Link to={`/p/${project}/${locale}/wiki/${slug}/history`}>{t("history.title")}</Link>
+          <Link to={`/p/${project}/wiki/${slug}/history`}>{t("history.title")}</Link>
           <ChevronRight className="lucide" />
           <span className="current">
             rev {data.from.revision_number} → rev {data.to.revision_number}

@@ -16,8 +16,8 @@ import (
 
 // areaSlugRe enforces the same URL-safe shape used by project slugs
 // (lowercase letter + kebab tail, 2-40 chars). Areas live under
-// /p/{project}/{locale}/wiki/{slug} alongside artifacts so the same cap
-// keeps the URL bar readable.
+// /p/{project}/wiki/{slug} alongside artifacts so the same cap keeps the
+// URL bar readable.
 var areaSlugRe = regexp.MustCompile(`^[a-z][a-z0-9-]{1,39}$`)
 
 type areaCreateInput struct {

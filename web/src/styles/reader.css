@@ -193,6 +193,12 @@
 .chip--stale     { background: var(--stale-bg);    color: var(--stale);    border-color: var(--stale-border); }
 .chip--archived  { background: var(--archived-bg); color: var(--fg-2);     border-color: var(--archived-border); }
 .chip--area      { color: var(--fg-2); background: transparent; }
+.translate-toggle { display: inline-flex; align-items: center; height: 22px; border: 1px solid var(--border); border-radius: var(--r-1); background: var(--bg-2); overflow: hidden; color: var(--fg-2); }
+.translate-toggle .lucide { width: 12px; height: 12px; margin: 0 6px; color: var(--fg-3); flex-shrink: 0; }
+.translate-toggle__option { display: inline-flex; align-items: center; justify-content: center; height: 20px; min-width: 28px; padding: 0 6px; border-left: 1px solid var(--border); color: var(--fg-2); text-decoration: none; font-family: var(--font-mono); font-size: 10px; font-weight: 600; white-space: nowrap; }
+.translate-toggle__option:hover,
+.translate-toggle__option:focus-visible { background: var(--bg-3); color: var(--fg-0); outline: none; }
+.translate-toggle__option.is-active { background: var(--accent); color: var(--accent-ink); border-left-color: color-mix(in oklch, var(--accent) 70%, var(--border)); }
 .trust-card {
   display: flex;
   flex-wrap: wrap;

@@ -84,15 +84,15 @@ MCP = write (write-only), Wiki UI = read + (엣지) approve. REST API = 3차.
 
 Tier A core 강제 + Tier B Domain Pack + Tier C Custom(V2+).
 
-### 원칙 7. Multi-project by Design (transport에 따라 두 운영 모델)
+### 원칙 7. Multi-project by Design (account-level MCP scope)
 
 한 Pindoc 인스턴스는 복수 Project를 호스팅하도록 **설계**됐다 (schema, URL, Web UI 모두 `/p/:project/…` 스코프). Solo 사이드 프로젝트 / FE·BE 분리 / 영세 2~3명 복수 프로젝트가 1급 시민.
 
-`pindoc-server`는 두 transport를 지원하며 모델이 다르다:
+`pindoc-server`는 두 transport를 지원하지만 scope 모델은 동일하다:
 
-**stdio (기본, subprocess-per-session)** — `pindoc-server` 단독 실행. Claude Code가 `.mcp.json`의 `command` entry로 launch. `PINDOC_PROJECT` env가 그 subprocess의 active project로 고정되며 세션 중 switch 불가. 워크스페이스마다 별도 entry로 별도 subprocess가 떠야 멀티프로젝트가 된다. `capabilities`: `scope_mode="fixed_session"`, `new_project_requires_reconnect=true`, `transport="stdio"`.
+**stdio (기본, subprocess-per-session)** — `pindoc-server` 단독 실행. Claude Code가 `.mcp.json`의 `command` entry로 launch. `PINDOC_PROJECT` env는 `pindoc.project.current`의 fallback일 뿐이고, project-scoped tool은 `project_slug` input으로 scope를 고른다. `capabilities`: `scope_mode="per_call"`, `new_project_requires_reconnect=false`, `transport="stdio"`.
 
-**streamable_http (데몬, V1 멀티프로젝트 운영 모델)** — `pindoc-server -http 127.0.0.1:5830` 단일 데몬을 띄우면 다수 Claude Code 세션이 attach. `.mcp.json`의 `url` entry가 `http://127.0.0.1:5830/mcp/p/{project}` — URL 경로가 connection의 active project를 결정한다. 데몬 내부 `getServer(req)` 콜백이 매 연결마다 project slug를 path에서 추출 + DB 검증 후 project-scoped Server를 빌드해 SDK에 반환. 한 데몬에서 RAM·embedder·telemetry가 공유되고, 새 프로젝트 = 새 url(.mcp.json 추가)이지 데몬 재기동 아님. 같은 데몬이 같은 포트에서 Reader read-only HTTP API(`/api/...`)와 liveness probe(`/health`)도 함께 서빙하므로 V1 운영에서는 별도 `pindoc-api` 프로세스가 필요 없다. `capabilities`: `scope_mode="per_connection"`, `new_project_requires_reconnect=false`, `transport="streamable_http"`. Decision `pindoc-mcp-transport-streamable-http-per-connection-scope`.
+**streamable_http (데몬, V1 멀티프로젝트 운영 모델)** — `pindoc-server -http 127.0.0.1:5830` 단일 데몬을 띄우면 다수 Claude Code/Codex 세션이 같은 `.mcp.json` URL `http://127.0.0.1:5830/mcp`에 attach한다. 연결 URL은 account-level이고, 매 tool call의 `project_slug`가 project scope를 결정한다. 한 데몬에서 RAM·embedder·telemetry가 공유되고, 새 프로젝트는 다음 tool call부터 바로 addressable하다. 같은 데몬이 같은 포트에서 Reader read-only HTTP API(`/api/...`)와 liveness probe(`/health`)도 함께 서빙하므로 V1 운영에서는 별도 `pindoc-api` 프로세스가 필요 없다. `capabilities`: `scope_mode="per_call"`, `new_project_requires_reconnect=false`, `transport="streamable_http"`. Decision `mcp-scope-account-level-industry-standard`.
 
 두 모드 다 `auth_mode="trusted_local"` — V1은 단일 사용자/loopback 신뢰 모델. 자기-호스팅 공개(타 사용자가 데몬에 직접 attach) 시 `project_token` / OAuth 도입은 별 Decision으로 이어진다.
 

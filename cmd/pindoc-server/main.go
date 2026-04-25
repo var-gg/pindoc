@@ -8,9 +8,7 @@
 // `-http <addr>` (or PINDOC_HTTP_MCP_ADDR env) flips the binary into
 // long-running daemon mode. A single daemon serves multiple agent
 // sessions over streamable-HTTP at one account-level URL: /mcp.
-// Connections are no longer scoped to a project (Decision
-// mcp-scope-account-level-industry-standard supersedes the per-
-// connection /mcp/p/{project} pattern); each tool input carries
+// Connections are not scoped to a project; each tool input carries
 // project_slug and the handler resolves it per call. See
 // docs/03-architecture.md.
 package main
@@ -160,18 +158,14 @@ func main() {
 	defer tele.Close()
 
 	if httpAddr != "" {
-		// Resolve the default project's locale once so the Reader can
-		// rebuild legacy /wiki/... URLs into /p/<slug>/<locale>/...
-		// without an extra round-trip — kept on the Reader API side
-		// because share-link rendering remains "default project of the
-		// instance" even though MCP scope is now per-call (Decision
-		// mcp-scope-account-level-industry-standard). Task task-phase-
-		// 18-project-locale-implementation.
+		// Resolve the default project's canonical language once for the
+		// compatibility `default_project_locale` API field. Reader URLs no
+		// longer carry locale after task-canonical-locale-migration.
 		var defaultLocale string
 		if err := pool.QueryRow(ctx,
-			`SELECT locale FROM projects WHERE slug = $1 LIMIT 1`, cfg.ProjectSlug,
+			`SELECT primary_language FROM projects WHERE slug = $1 LIMIT 1`, cfg.ProjectSlug,
 		).Scan(&defaultLocale); err != nil {
-			logger.Info("default project locale lookup skipped",
+			logger.Info("default project language lookup skipped",
 				"project_slug", cfg.ProjectSlug, "err", err)
 		}
 

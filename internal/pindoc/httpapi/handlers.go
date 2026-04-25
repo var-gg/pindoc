@@ -24,10 +24,9 @@ type projectInfo struct {
 	Description     string `json:"description,omitempty"`
 	Color           string `json:"color,omitempty"`
 	PrimaryLanguage string `json:"primary_language"`
-	// Locale is the authoritative canonical-key column added by Phase 18
-	// (migration 0015, Task task-phase-18-project-locale-implementation).
-	// Reader URL embeds it between the project slug and the view verb so
-	// the same slug across locales stays uniquely addressable.
+	// Locale is a compatibility alias for PrimaryLanguage. Locale is no
+	// longer part of project identity or Reader URLs after task-canonical-
+	// locale-migration.
 	Locale         string        `json:"locale"`
 	AreasCount     int           `json:"areas_count"`
 	ArtifactsCount int           `json:"artifacts_count"`
@@ -241,7 +240,7 @@ func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
 	err := d.DB.QueryRow(r.Context(), `
 		SELECT
 			p.id::text, p.slug, p.name, p.owner_id, p.description, p.color,
-			p.primary_language, p.locale, p.created_at,
+			p.primary_language, p.primary_language, p.created_at,
 			(SELECT count(*) FROM areas     WHERE project_id = p.id),
 			(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
 		FROM projects p WHERE p.slug = $1
@@ -345,6 +344,7 @@ type artifactRow struct {
 	Type         string    `json:"type"`
 	Title        string    `json:"title"`
 	AreaSlug     string    `json:"area_slug"`
+	BodyLocale   string    `json:"body_locale,omitempty"`
 	Completeness string    `json:"completeness"`
 	Status       string    `json:"status"`
 	ReviewState  string    `json:"review_state"`
@@ -393,6 +393,7 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 	rows, err := d.DB.Query(r.Context(), `
 		SELECT
 			a.id::text, a.slug, a.type, a.title, ar.slug,
+			COALESCE(NULLIF(a.body_locale, ''), NULLIF(p.primary_language, ''), 'en'),
 			a.completeness, a.status, a.review_state,
 			a.author_id, a.published_at, a.updated_at, a.task_meta, a.artifact_meta,
 			wr.recent_warnings,
@@ -441,6 +442,7 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 		var userID, userDisplay, userGithub *string
 		if err := rows.Scan(
 			&a.ID, &a.Slug, &a.Type, &a.Title, &a.AreaSlug,
+			&a.BodyLocale,
 			&a.Completeness, &a.Status, &a.ReviewState,
 			&a.AuthorID, &publishedAt, &a.UpdatedAt, &taskMeta, &artifactMeta,
 			&recentWarnings,
@@ -564,6 +566,7 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	err := d.DB.QueryRow(r.Context(), `
 		SELECT
 			a.id::text, a.slug, a.type, a.title, ar.slug,
+			COALESCE(NULLIF(a.body_locale, ''), NULLIF(p.primary_language, ''), 'en'),
 			a.completeness, a.status, a.review_state,
 			a.author_id, a.published_at, a.updated_at,
 			a.body_markdown, a.tags, a.author_version, a.created_at,
@@ -578,6 +581,7 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		LIMIT 1
 	`, slug, ref).Scan(
 		&a.ID, &a.Slug, &a.Type, &a.Title, &a.AreaSlug,
+		&a.BodyLocale,
 		&a.Completeness, &a.Status, &a.ReviewState,
 		&a.AuthorID, &publishedAt, &a.UpdatedAt,
 		&a.BodyMarkdown, &a.Tags, &authorVer, &a.CreatedAt,

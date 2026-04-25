@@ -13,8 +13,8 @@ export default defineConfig({
     open: false,
     proxy: {
       // Forward /api/* to the merged pindoc-server daemon (the same
-      // process now serves /mcp/p/{project}, /api/..., and /health on a
-      // single port — see cmd/pindoc-server). Keeps the UI on a single
+      // process now serves /mcp, /api/..., and /health on a single
+      // port — see cmd/pindoc-server). Keeps the UI on a single
       // origin so no CORS dance during dev. Vite's strictPort=true means
       // dev frontend and the daemon can't co-bind 5830 — switch the
       // daemon off (Stop-Service pindoc-server) before running

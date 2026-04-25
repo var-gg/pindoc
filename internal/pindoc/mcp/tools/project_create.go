@@ -98,20 +98,20 @@ func RegisterProjectCreate(server *sdk.Server, deps Deps) {
 				ID:                out.ID,
 				Slug:              out.Slug,
 				Name:              out.Name,
-				URL:               fmt.Sprintf("/p/%s/%s/wiki", out.Slug, out.PrimaryLanguage),
+				URL:               fmt.Sprintf("/p/%s/wiki", out.Slug),
 				DefaultArea:       out.DefaultArea,
 				ReconnectRequired: false,
 				Activation:        "in_this_session",
 				NextSteps: []string{
 					fmt.Sprintf("Pass project_slug=%q on subsequent project-scoped tool calls (artifact.propose, area.list, ...) to write into the new project.", out.Slug),
-					fmt.Sprintf("Open the Reader at /p/%s/%s/wiki to verify.", out.Slug, out.PrimaryLanguage),
+					fmt.Sprintf("Open the Reader at /p/%s/wiki to verify.", out.Slug),
 				},
 				Message: strings.TrimSpace(fmt.Sprintf(`
-Project %q (%s locale) created. Share this URL with the user: /p/%s/%s/wiki
+Project %q (%s canonical language) created. Share this URL with the user: /p/%s/wiki
 The new slug is usable immediately — pass project_slug=%q in subsequent
 tool inputs to write into it; no MCP reconnect needed (account-level
 scope, Decision mcp-scope-account-level-industry-standard).
-`, out.Slug, out.PrimaryLanguage, out.Slug, out.PrimaryLanguage, out.Slug)),
+`, out.Slug, out.PrimaryLanguage, out.Slug, out.Slug)),
 			}, nil
 		},
 	)
@@ -119,7 +119,7 @@ scope, Decision mcp-scope-account-level-industry-standard).
 
 const projectCreateDescription = `
 Create a new Pindoc project. Returns the canonical
-/p/{slug}/{primary_language}/wiki URL the user should bookmark.
+/p/{slug}/wiki URL the user should bookmark.
 Auto-creates 9 top-level/project-root areas
 (Decision area-구조-top-level-고정-골격-depth-2-sub-area만-프로젝트별-자유):
 the fixed 8 concern skeleton plus _unsorted, then starter sub-areas so

@@ -1,7 +1,7 @@
 // Package auth holds Pindoc's caller-identity abstraction. A Principal is
 // who is calling — UserID + AgentID + auth-mode metadata, account-level.
 // ProjectScope is per-call: the project slug travels in each tool input
-// and ResolveProject turns it into id/locale/role after a project_members
+// and ResolveProject turns it into id/canonical-language/role after a project_members
 // lookup. Resolvers are the per-mode flow that produces a Principal from
 // the incoming request. The Resolver chain is the only place auth_mode
 // branches exist — every tool handler downstream is mode-blind.

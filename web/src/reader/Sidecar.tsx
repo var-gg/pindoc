@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router";
+import { Link } from "react-router";
 import {
   ArrowDownLeft,
   ArrowLeftRight,
@@ -79,7 +79,6 @@ const DEFAULT_COLLAPSED_STATE: CollapsedState = {
 
 export function Sidecar({ projectSlug, detail, emptyMessage, authMode, agents, users, onArtifactUpdated }: Props) {
   const { t } = useI18n();
-  const { locale = "" } = useParams<{ locale?: string }>();
   const [collapsed, toggleSection] = useSidecarCollapseState();
   // TOC feeds off body_markdown; Markdown.tsx independently derives the
   // same slugs via the same uniqueSlug ledger so `<h2 id>` matches
@@ -110,7 +109,7 @@ export function Sidecar({ projectSlug, detail, emptyMessage, authMode, agents, u
     ? new Date(detail.published_at).toLocaleString()
     : "—";
   const areaLabel = localizedAreaName(t, detail.area_slug, detail.area_slug);
-  const artifactHref = `/p/${projectSlug}/${locale}/wiki/${detail.slug}`;
+  const artifactHref = `/p/${projectSlug}/wiki/${detail.slug}`;
 
   // Graph edges aren't derived yet (Phase 3+ pipeline populates these via
   // artifact.superseded_by + future artifact_edges). Show placeholder
@@ -140,7 +139,7 @@ export function Sidecar({ projectSlug, detail, emptyMessage, authMode, agents, u
       )}
 
       <div className="graph-wrap">
-        <MiniGraph detail={detail} projectSlug={projectSlug} locale={locale} />
+        <MiniGraph detail={detail} projectSlug={projectSlug} />
       </div>
 
       <SidecarStaticSection title={t("sidecar.relations")}>
@@ -398,7 +397,6 @@ function SidecarCollapsibleSection({
 
 function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: string }) {
   const { t } = useI18n();
-  const { locale = "" } = useParams<{ locale?: string }>();
   const [revs, setRevs] = useState<RevisionRow[] | null>(null);
 
   useEffect(() => {
@@ -425,7 +423,7 @@ function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: strin
       <div className="sidecar-timeline-head">
         <span>{t("history.recent_changes")}</span>
         <Link
-          to={`/p/${projectSlug}/${locale}/wiki/${slug}/history`}
+          to={`/p/${projectSlug}/wiki/${slug}/history`}
           className="sidecar-timeline-head__link"
         >
           <HistoryIcon className="lucide" style={{ width: 11, height: 11 }} />
@@ -456,7 +454,7 @@ function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: strin
       })}
       {remainder > 0 && (
         <Link
-          to={`/p/${projectSlug}/${locale}/wiki/${slug}/history`}
+          to={`/p/${projectSlug}/wiki/${slug}/history`}
           style={{ fontSize: 11, color: "var(--fg-3)", fontFamily: "var(--font-mono)", textDecoration: "none" }}
         >
           {t("history.more_revisions", remainder)}
@@ -477,11 +475,9 @@ type MiniGraphEdge = {
 function MiniGraph({
   detail,
   projectSlug,
-  locale,
 }: {
   detail: Artifact;
   projectSlug: string;
-  locale: string;
 }) {
   const { t } = useI18n();
   const allEdges: MiniGraphEdge[] = [
@@ -539,7 +535,7 @@ function MiniGraph({
         })}
       </svg>
       <Link
-        to={`/p/${projectSlug}/${locale}/wiki/${detail.slug}`}
+        to={`/p/${projectSlug}/wiki/${detail.slug}`}
         className={`mini-graph__node mini-graph__node--center mini-graph__node--${typeClassSuffix(detail.type)}`}
         style={{ left: MINI_GRAPH_CENTER.x, top: MINI_GRAPH_CENTER.y }}
         title={detail.title}
@@ -550,7 +546,7 @@ function MiniGraph({
       {visible.map(({ edge }, i) => (
         <Link
           key={`${edge.artifact_id}-${edge.relation}-${i}`}
-          to={`/p/${projectSlug}/${locale}/wiki/${edge.slug}`}
+          to={`/p/${projectSlug}/wiki/${edge.slug}`}
           className={`mini-graph__node mini-graph__node--${typeClassSuffix(edge.type)}`}
           style={{ left: positions[i].x, top: positions[i].y }}
           title={`${edge.title} (${edge.type})`}
@@ -560,7 +556,7 @@ function MiniGraph({
         </Link>
       ))}
       {hidden > 0 && (
-        <Link to={`/p/${projectSlug}/${locale}/graph`} className="mini-graph__more">
+        <Link to={`/p/${projectSlug}/graph`} className="mini-graph__more">
           {t("sidecar.more_relations", hidden)}
         </Link>
       )}
@@ -610,7 +606,6 @@ function ConnectedArtifacts({
   supersededBy: string;
 }) {
   const { t } = useI18n();
-  const { locale = "" } = useParams<{ locale?: string }>();
   const nothing = !hasSupersedes && relates.length === 0 && relatedBy.length === 0;
 
   if (nothing) {
@@ -643,7 +638,7 @@ function ConnectedArtifacts({
         {rows.map(({ edge, direction }) => (
           <li key={`${direction}-${edge.relation}-${edge.artifact_id}`}>
             <Link
-              to={`/p/${projectSlug}/${locale}/wiki/${edge.slug}`}
+              to={`/p/${projectSlug}/wiki/${edge.slug}`}
               className="relation-card"
               title={edge.title}
             >

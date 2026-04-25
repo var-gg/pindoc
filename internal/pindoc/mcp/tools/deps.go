@@ -93,7 +93,8 @@ type Deps struct {
 // AbsHumanURL builds an absolute share URL from the current settings. Empty
 // when PublicBaseURL isn't configured — callers should treat absence as
 // "operator hasn't set a base URL yet; fall back to human_url relative
-// path".
+// path". projectLocale is kept for call-site compatibility and ignored
+// by the canonical-only URL builder.
 func AbsHumanURL(s *settings.Store, projectSlug, projectLocale, artifactSlug string) string {
 	if s == nil {
 		return ""
@@ -108,18 +109,10 @@ func AbsHumanURL(s *settings.Store, projectSlug, projectLocale, artifactSlug str
 	return base + HumanURL(projectSlug, projectLocale, artifactSlug)
 }
 
-// HumanURL returns the canonical /p/:project/:locale/wiki/:slug relative
-// URL used in all agent-to-human share links (Task task-phase-18-project-
-// locale-implementation adds the locale segment between slug and wiki).
-// Agents paste this into chat so the user can click through to the
-// reader. Relative on purpose — the hosting origin is the user's
-// deployment (self-host first), the agent does not know the external
-// base URL. Empty `projectLocale` falls back to "en" so pre-migration
-// call sites still emit a valid-looking URL.
-func HumanURL(projectSlug, projectLocale, artifactSlug string) string {
-	locale := projectLocale
-	if locale == "" {
-		locale = "en"
-	}
-	return "/p/" + projectSlug + "/" + locale + "/wiki/" + artifactSlug
+// HumanURL returns the canonical /p/:project/wiki/:slug relative URL used
+// in all agent-to-human share links. projectLocale is kept for call-site
+// compatibility after the canonical-locale migration; it is no longer part
+// of project identity or share paths.
+func HumanURL(projectSlug, _ string, artifactSlug string) string {
+	return "/p/" + projectSlug + "/wiki/" + artifactSlug
 }

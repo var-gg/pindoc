@@ -135,6 +135,7 @@ func NewServer(opts Options) *Server {
 	tools.RegisterAreaList(s, deps)
 	tools.RegisterAreaCreate(s, deps)
 	tools.RegisterArtifactRead(s, deps)
+	tools.RegisterArtifactTranslate(s, deps)
 
 	// Phase 2.3 write-side + Phase 3 retrieval.
 	tools.RegisterArtifactPropose(s, deps)

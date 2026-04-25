@@ -168,6 +168,76 @@ mark complete
 	})
 }
 
+func TestPreflightTaskMetaValidation(t *testing.T) {
+	baseBody := `## Purpose
+validate task meta
+## Acceptance criteria
+- [ ] validation runs before insert`
+
+	t.Run("invalid assignee is rejected", func(t *testing.T) {
+		in := artifactProposeInput{
+			Type:         "Task",
+			Title:        "t",
+			BodyMarkdown: baseBody,
+			AreaSlug:     "misc",
+			AuthorID:     "test-agent",
+			TaskMeta:     &TaskMetaInput{Assignee: "codex"},
+		}
+		_, failed, code := preflight(context.Background(), Deps{}, "", &in, "en")
+		if code != "ASSIGNEE_INVALID" {
+			t.Fatalf("code=%q want ASSIGNEE_INVALID; failed=%v", code, failed)
+		}
+		if !containsCode(failed, "ASSIGNEE_INVALID") {
+			t.Fatalf("expected ASSIGNEE_INVALID in failed=%v", failed)
+		}
+	})
+
+	t.Run("valid assignee passes", func(t *testing.T) {
+		in := artifactProposeInput{
+			Type:         "Task",
+			Title:        "t",
+			BodyMarkdown: baseBody,
+			AreaSlug:     "misc",
+			AuthorID:     "test-agent",
+			TaskMeta:     &TaskMetaInput{Assignee: "agent:codex"},
+		}
+		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
+		if containsCode(failed, "ASSIGNEE_INVALID") {
+			t.Fatalf("valid assignee should pass, got failed=%v", failed)
+		}
+	})
+
+	t.Run("empty assignee passes", func(t *testing.T) {
+		in := artifactProposeInput{
+			Type:         "Task",
+			Title:        "t",
+			BodyMarkdown: baseBody,
+			AreaSlug:     "misc",
+			AuthorID:     "test-agent",
+			TaskMeta:     &TaskMetaInput{Assignee: ""},
+		}
+		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
+		if containsCode(failed, "ASSIGNEE_INVALID") {
+			t.Fatalf("empty assignee should pass, got failed=%v", failed)
+		}
+	})
+
+	t.Run("invalid priority is rejected", func(t *testing.T) {
+		in := artifactProposeInput{
+			Type:         "Task",
+			Title:        "t",
+			BodyMarkdown: baseBody,
+			AreaSlug:     "misc",
+			AuthorID:     "test-agent",
+			TaskMeta:     &TaskMetaInput{Priority: "p99"},
+		}
+		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
+		if !containsCode(failed, "TASK_PRIORITY_INVALID") {
+			t.Fatalf("expected TASK_PRIORITY_INVALID in failed=%v", failed)
+		}
+	})
+}
+
 // TestApplyTaskCreateDefaults keeps new Task artifacts out of the
 // "no status" bucket by injecting the lifecycle baseline only on create /
 // supersede-create paths. Explicit caller choices still win.

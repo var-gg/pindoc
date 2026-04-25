@@ -172,8 +172,8 @@ func CreateProject(
 
 	var projectID string
 	err = tx.QueryRow(ctx, `
-		INSERT INTO projects (owner_id, slug, name, description, color, primary_language, locale)
-		VALUES ($1, $2, $3, $4, $5, $6, $6)
+		INSERT INTO projects (owner_id, slug, name, description, color, primary_language)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id::text
 	`, ownerID, slug, name, descPtr, colorPtr, lang).Scan(&projectID)
 	if err != nil {
@@ -189,7 +189,7 @@ func CreateProject(
 		return zero, fmt.Errorf("seed default areas: %w", err)
 	}
 
-	templatesCreated, err := seedTemplates(ctx, tx, projectID)
+	templatesCreated, err := seedTemplates(ctx, tx, projectID, lang)
 	if err != nil {
 		return zero, fmt.Errorf("seed templates: %w", err)
 	}
@@ -243,7 +243,7 @@ func seedAreas(ctx context.Context, tx pgx.Tx, projectID, lang string) (int, err
 // of truth for diff/history). Mirrors migration 0006_template_artifacts
 // for pre-existing projects so behavior stays identical whether a project
 // was created via raw migration seed or via this function.
-func seedTemplates(ctx context.Context, tx pgx.Tx, projectID string) (int, error) {
+func seedTemplates(ctx context.Context, tx pgx.Tx, projectID, bodyLocale string) (int, error) {
 	var miscID string
 	if err := tx.QueryRow(ctx, `
 		SELECT id::text FROM areas WHERE project_id = $1::uuid AND slug = 'misc'
@@ -255,15 +255,16 @@ func seedTemplates(ctx context.Context, tx pgx.Tx, projectID string) (int, error
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO artifacts (
 				project_id, area_id, slug, type, title, body_markdown, tags,
+				body_locale,
 				completeness, status, review_state,
 				author_kind, author_id, author_version, published_at
 			) VALUES (
 				$1::uuid, $2::uuid, $3, $4, $5, $6, ARRAY['_template'],
-				'partial', 'published', 'auto_published',
+				$7, 'partial', 'published', 'auto_published',
 				'system', 'pindoc-seed', '0.0.1', now()
 			)
 			RETURNING id::text
-		`, projectID, miscID, t.Slug, t.Type, t.Title, t.Body).Scan(&templateID); err != nil {
+		`, projectID, miscID, t.Slug, t.Type, t.Title, t.Body, bodyLocale).Scan(&templateID); err != nil {
 			return 0, fmt.Errorf("seed template %s: %w", t.Slug, err)
 		}
 		// Phase A revision-shapes refactor: every artifact must have

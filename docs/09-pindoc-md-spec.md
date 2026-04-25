@@ -1,6 +1,8 @@
 # 09. PINDOC.md — Harness 스펙
 
-`PINDOC.md`는 에이전트가 **매 세션 시작 시 로드하는 행동 규약**입니다. `pindoc init`이 프로젝트 루트에 자동 생성하고, `CLAUDE.md` / `AGENTS.md` / `.cursorrules`가 이를 참조합니다.
+`PINDOC.md`는 에이전트가 **매 세션 시작 시 로드하는 행동 규약**입니다. `pindoc init` 또는 `pindoc.harness.install`이 프로젝트 루트에 자동 생성하고, `CLAUDE.md` / `AGENTS.md` / `.cursorrules`가 이를 참조합니다.
+
+현재 harness 출력은 파일 상단 YAML frontmatter(`project_slug`, `project_id`, `locale`, `schema_version`)를 포함한다. 이 frontmatter는 workspace detection의 Priority 1 explicit override이고, `locale`은 canonical identity가 아니라 사용자의 보기 언어 선호다. Section 12는 chip/parallel work가 Pindoc Task의 open → claimed_done → verified 흐름과 acceptance checkbox 갱신을 놓치지 않도록 pre-spawn, during, after-merge, interrupted, retroactive policy를 명시한다.
 
 이 문서는 두 부분으로 구성:
 1. **템플릿 원문** — `pindoc init`이 생성하는 실제 파일 내용

@@ -48,7 +48,6 @@ type Props = {
   open: boolean;
   view: ReaderView;
   projectSlug: string;
-  projectLocale: string;
   detail: Artifact | null;
   selectedArea: string | null;
   selectedType: string | null;
@@ -61,7 +60,6 @@ export function ShortcutsOverlay({
   open,
   view,
   projectSlug,
-  projectLocale,
   detail,
   selectedArea,
   selectedType,
@@ -83,7 +81,7 @@ export function ShortcutsOverlay({
     areaNameBySlug,
     t,
   });
-  const legendHref = `/p/${projectSlug}/${projectLocale || "ko"}/wiki/visual-language-reference`;
+  const legendHref = `/p/${projectSlug}/wiki/visual-language-reference`;
 
   return (
     <div
