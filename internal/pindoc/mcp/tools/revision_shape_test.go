@@ -82,7 +82,7 @@ func TestPreflightShapeValidation(t *testing.T) {
 			ExpectedVersion: &one,
 			Shape:           "mystery_patch",
 		}
-		_, failed, _ := preflight(context.Background(), Deps{}, &in, "en")
+		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
 		if !containsCode(failed, "SHAPE_INVALID") {
 			t.Fatalf("expected SHAPE_INVALID in failed=%v", failed)
 		}
@@ -97,7 +97,7 @@ func TestPreflightShapeValidation(t *testing.T) {
 			AuthorID:     "test-agent",
 			Shape:        "meta_patch",
 		}
-		_, failed, _ := preflight(context.Background(), Deps{}, &in, "en")
+		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
 		if !containsCode(failed, "SHAPE_REQUIRES_UPDATE") {
 			t.Fatalf("expected SHAPE_REQUIRES_UPDATE in failed=%v", failed)
 		}
@@ -112,7 +112,7 @@ func TestPreflightShapeValidation(t *testing.T) {
 			AuthorID:     "test-agent",
 			Shape:        "body_patch",
 		}
-		_, failed, _ := preflight(context.Background(), Deps{}, &in, "en")
+		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
 		if containsCode(failed, "SHAPE_INVALID") || containsCode(failed, "SHAPE_REQUIRES_UPDATE") {
 			t.Fatalf("body_patch on create should pass shape gates, got %v", failed)
 		}
@@ -126,7 +126,7 @@ func TestPreflightShapeValidation(t *testing.T) {
 			AreaSlug:     "misc",
 			AuthorID:     "test-agent",
 		}
-		_, failed, _ := preflight(context.Background(), Deps{}, &in, "en")
+		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
 		if containsCode(failed, "SHAPE_INVALID") || containsCode(failed, "SHAPE_REQUIRES_UPDATE") {
 			t.Fatalf("omitted shape should default to body_patch silently, got %v", failed)
 		}

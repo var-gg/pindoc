@@ -9,6 +9,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/projects"
 )
 
@@ -64,7 +65,7 @@ func RegisterProjectCreate(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.project.create",
 			Description: strings.TrimSpace(projectCreateDescription),
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in projectCreateInput) (*sdk.CallToolResult, projectCreateOutput, error) {
+		func(ctx context.Context, _ *auth.Principal, in projectCreateInput) (*sdk.CallToolResult, projectCreateOutput, error) {
 			tx, err := deps.DB.BeginTx(ctx, pgx.TxOptions{})
 			if err != nil {
 				return nil, projectCreateOutput{}, fmt.Errorf("begin tx: %w", err)

@@ -17,7 +17,7 @@ func TestPreflightDecisionAreaDeprecated(t *testing.T) {
 		AuthorID:     "test-agent",
 	}
 
-	checklist, failed, code := preflight(context.Background(), Deps{}, &in, "en")
+	checklist, failed, code := preflight(context.Background(), Deps{}, "", &in, "en")
 	if code != "DECISION_AREA_DEPRECATED" {
 		t.Fatalf("code got=%q want DECISION_AREA_DEPRECATED; failed=%v checklist=%v", code, failed, checklist)
 	}

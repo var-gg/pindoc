@@ -9,6 +9,8 @@ import (
 	"unicode/utf8"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 )
 
 // taskBulkAssignInput is the agent-facing shape for pindoc.task.bulk_assign.
@@ -29,8 +31,8 @@ type taskBulkAssignInput struct {
 	// why 12 Tasks moved together.
 	Reason string `json:"reason" jsonschema:"required; 2-200 runes; why these Tasks move together"`
 
-	// AuthorID overrides deps.AgentID for the display label. Empty = use
-	// the server's agent_id.
+	// AuthorID overrides Principal.AgentID for the display label. Empty =
+	// use the server's agent_id.
 	AuthorID string `json:"author_id,omitempty"`
 
 	// AuthorVersion pairs with AuthorID for audit.
@@ -81,7 +83,7 @@ func RegisterTaskBulkAssign(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.task.bulk_assign",
 			Description: "Change the assignee of multiple Tasks in one batch. Reason is required (one-line rationale shared by every revision's commit_msg). Each accepted slug produces a revision prefixed with a shared bulk_op_id for audit. Partial success allowed: per-slug failures land in results[].error_code and do not abort the batch. For a single Task use pindoc.task.assign.",
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in taskBulkAssignInput) (*sdk.CallToolResult, taskBulkAssignOutput, error) {
+		func(ctx context.Context, p *auth.Principal, in taskBulkAssignInput) (*sdk.CallToolResult, taskBulkAssignOutput, error) {
 			// --- Batch-level validation (fail-fast, no bulk_op_id issued). ---
 			reason := strings.TrimSpace(in.Reason)
 			if reason == "" {
@@ -129,7 +131,7 @@ func RegisterTaskBulkAssign(server *sdk.Server, deps Deps) {
 			results := make([]taskBulkAssignResult, 0, len(in.Slugs))
 			successCount, failCount := 0, 0
 			for _, slug := range in.Slugs {
-				single, sErr := assignOneTask(ctx, deps, slug, assignee, reason, in.AuthorID, in.AuthorVersion, bulkOpID)
+				single, sErr := assignOneTask(ctx, deps, p, slug, assignee, reason, in.AuthorID, in.AuthorVersion, bulkOpID)
 				if sErr != nil {
 					// Server-side fault on this slug — record and move on.
 					// Not aborting the batch because other slugs may still be

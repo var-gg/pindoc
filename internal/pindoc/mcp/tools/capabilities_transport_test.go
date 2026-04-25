@@ -1,6 +1,10 @@
 package tools
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
+)
 
 // TestBuildCapabilities_TransportBranching locks the contract that
 // `pindoc.project.current` advertises capability values keyed off the
@@ -11,6 +15,10 @@ import "testing"
 // a different project per URL — switching projects is "open another url"
 // not "tear down the daemon". Decision
 // pindoc-mcp-transport-streamable-http-per-connection-scope.
+//
+// Transport now flows through *auth.Principal rather than tools.Deps —
+// the Principal carries every per-call caller-context value (Decision
+// principal-resolver-architecture). The capability shape is unchanged.
 func TestBuildCapabilities_TransportBranching(t *testing.T) {
 	cases := []struct {
 		name              string
@@ -44,7 +52,7 @@ func TestBuildCapabilities_TransportBranching(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			caps := buildCapabilities(Deps{Transport: c.transport}, false)
+			caps := buildCapabilities(Deps{}, &auth.Principal{Transport: c.transport, AuthMode: auth.AuthModeTrustedLocal}, false)
 			if caps.Transport != c.wantTransport {
 				t.Errorf("Transport = %q, want %q", caps.Transport, c.wantTransport)
 			}
@@ -86,7 +94,7 @@ func TestBuildCapabilities_MultiProjectPassThrough(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			caps := buildCapabilities(Deps{Transport: "stdio"}, c.multiProject)
+			caps := buildCapabilities(Deps{}, &auth.Principal{Transport: "stdio", AuthMode: auth.AuthModeTrustedLocal}, c.multiProject)
 			if caps.MultiProject != c.multiProject {
 				t.Errorf("MultiProject = %v, want %v", caps.MultiProject, c.multiProject)
 			}

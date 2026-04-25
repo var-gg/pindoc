@@ -11,6 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 )
 
 // Author identity dual (Decision `decision-author-identity-dual`,
@@ -20,9 +22,9 @@ import (
 // pindoc.user.update:  mutate display_name / email / github_handle with
 //                       events.user_rename audit row on change.
 //
-// The artifact.propose path reads deps.UserID (populated from the boot-
-// time upsert) and writes it into artifacts.author_user_id so every
-// revision lands with the dual identity.
+// The artifact.propose path reads Principal.UserID (populated from the
+// boot-time upsert via the trusted_local resolver) and writes it into
+// artifacts.author_user_id so every revision lands with the dual identity.
 
 // displayNameMin / displayNameMax are the validation range for
 // display_name. Phase 14's D-title-rule used 15-80 runes for artifact
@@ -64,8 +66,8 @@ func RegisterUserCurrent(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.user.current",
 			Description: "Return the user (display_name / email / github_handle / source) bound to this MCP session. Populated at server startup from PINDOC_USER_NAME / PINDOC_USER_EMAIL; returns USER_NOT_SET when the operator hasn't configured identity yet.",
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, _ struct{}) (*sdk.CallToolResult, userCurrentOutput, error) {
-			if deps.UserID == "" {
+		func(ctx context.Context, p *auth.Principal, _ struct{}) (*sdk.CallToolResult, userCurrentOutput, error) {
+			if p.UserID == "" {
 				return nil, userCurrentOutput{
 					Status:    "not_ready",
 					ErrorCode: "USER_NOT_SET",
@@ -75,7 +77,7 @@ func RegisterUserCurrent(server *sdk.Server, deps Deps) {
 					},
 				}, nil
 			}
-			row, err := loadUserByID(ctx, deps, deps.UserID)
+			row, err := loadUserByID(ctx, deps, p.UserID)
 			if err != nil {
 				return nil, userCurrentOutput{}, fmt.Errorf("load user: %w", err)
 			}
@@ -118,8 +120,8 @@ func RegisterUserUpdate(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.user.update",
 			Description: "Mutate the current session user's display_name / email / github_handle. At least one field required. Validates length and '@' substring on email; unique constraint on email and github_handle. On success returns the new row plus changed_fields[] and previous{} so the agent can echo the diff.",
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in userUpdateInput) (*sdk.CallToolResult, userUpdateOutput, error) {
-			if deps.UserID == "" {
+		func(ctx context.Context, p *auth.Principal, in userUpdateInput) (*sdk.CallToolResult, userUpdateOutput, error) {
+			if p.UserID == "" {
 				return nil, userUpdateOutput{
 					Status:    "not_ready",
 					ErrorCode: "USER_NOT_SET",
@@ -137,7 +139,7 @@ func RegisterUserUpdate(server *sdk.Server, deps Deps) {
 			fieldsChanged := []string{}
 			prev := map[string]string{}
 
-			existing, err := loadUserByID(ctx, deps, deps.UserID)
+			existing, err := loadUserByID(ctx, deps, p.UserID)
 			if err != nil {
 				return nil, userUpdateOutput{}, fmt.Errorf("load user: %w", err)
 			}
@@ -206,7 +208,7 @@ func RegisterUserUpdate(server *sdk.Server, deps Deps) {
 			// event under the active project scope so audit queries stay
 			// project-bounded.
 			var projectID string
-			err = deps.DB.QueryRow(ctx, `SELECT id::text FROM projects WHERE slug = $1`, deps.ProjectSlug).Scan(&projectID)
+			err = deps.DB.QueryRow(ctx, `SELECT id::text FROM projects WHERE slug = $1`, p.ProjectSlug).Scan(&projectID)
 			if err != nil {
 				return nil, userUpdateOutput{}, fmt.Errorf("resolve project_id: %w", err)
 			}
@@ -224,7 +226,7 @@ func RegisterUserUpdate(server *sdk.Server, deps Deps) {
 				       github_handle = NULLIF($3, ''),
 				       updated_at    = now()
 				 WHERE id = $4
-			`, newDisplay, newEmail, newGithub, deps.UserID)
+			`, newDisplay, newEmail, newGithub, p.UserID)
 			if err != nil {
 				// Uniqueness (email / github_handle) shows up as a Postgres
 				// error here. Surface as stable code instead of 500.
@@ -249,7 +251,7 @@ func RegisterUserUpdate(server *sdk.Server, deps Deps) {
 			}
 
 			payload := map[string]any{
-				"user_id":        deps.UserID,
+				"user_id":        p.UserID,
 				"changed_fields": fieldsChanged,
 				"previous":       prev,
 				"new": map[string]string{
@@ -262,7 +264,7 @@ func RegisterUserUpdate(server *sdk.Server, deps Deps) {
 			_, err = tx.Exec(ctx, `
 				INSERT INTO events (project_id, kind, subject_id, payload)
 				VALUES ($1, 'user_rename', $2::uuid, $3::jsonb)
-			`, projectID, deps.UserID, payloadJSON)
+			`, projectID, p.UserID, payloadJSON)
 			if err != nil {
 				return nil, userUpdateOutput{}, fmt.Errorf("event insert: %w", err)
 			}
@@ -271,7 +273,7 @@ func RegisterUserUpdate(server *sdk.Server, deps Deps) {
 				return nil, userUpdateOutput{}, fmt.Errorf("commit: %w", err)
 			}
 
-			updated, err := loadUserByID(ctx, deps, deps.UserID)
+			updated, err := loadUserByID(ctx, deps, p.UserID)
 			if err != nil {
 				return nil, userUpdateOutput{}, fmt.Errorf("reload: %w", err)
 			}
@@ -312,7 +314,8 @@ func loadUserByID(ctx context.Context, deps Deps, id string) (*UserRow, error) {
 // UpsertUserFromEnv is called by the MCP binary at startup when
 // PINDOC_USER_NAME is set. Idempotent: same (display_name, email) on
 // re-run returns the existing id. Returns empty id + nil when env isn't
-// set so the caller can leave deps.UserID empty.
+// set so the boot-time chain wiring can pass an empty UserID into
+// TrustedLocalResolver.
 func UpsertUserFromEnv(ctx context.Context, deps Deps, userName, userEmail string) (string, error) {
 	if strings.TrimSpace(userName) == "" {
 		return "", nil

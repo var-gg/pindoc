@@ -3,6 +3,8 @@ package tools
 import (
 	"strings"
 	"testing"
+
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 )
 
 func TestSuggestAreasForTaskDescriptionLiteratureReview(t *testing.T) {
@@ -38,7 +40,7 @@ func TestSuggestAreasForTaskDescriptionLowConfidenceEmpty(t *testing.T) {
 }
 
 func TestBuildSourceSessionRefIncludesSearchReceipt(t *testing.T) {
-	ref := buildSourceSessionRef(Deps{AgentID: "agent-1"}, artifactProposeInput{
+	ref := buildSourceSessionRef(&auth.Principal{AgentID: "agent-1"}, artifactProposeInput{
 		AuthorID: "codex",
 		Basis:    &artifactProposeBasis{SearchReceipt: "sr_123"},
 	})

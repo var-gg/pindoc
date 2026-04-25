@@ -8,6 +8,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 )
 
@@ -75,7 +76,7 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.artifact.search",
 			Description: "Semantic search over Pindoc artifacts. Returns the best matching chunk per artifact with distance (lower = closer). Use before writing a new artifact to avoid duplicates. Filters on type and area_slug.",
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in artifactSearchInput) (*sdk.CallToolResult, artifactSearchOutput, error) {
+		func(ctx context.Context, p *auth.Principal, in artifactSearchInput) (*sdk.CallToolResult, artifactSearchOutput, error) {
 			if strings.TrimSpace(in.Query) == "" {
 				return nil, artifactSearchOutput{}, fmt.Errorf("query is required")
 			}
@@ -152,7 +153,7 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 				areasArg = in.Areas
 			}
 
-			rows, err := deps.DB.Query(ctx, sql, qVec, deps.ProjectSlug, typesArg, areasArg, in.TopK, in.IncludeTemplates)
+			rows, err := deps.DB.Query(ctx, sql, qVec, p.ProjectSlug, typesArg, areasArg, in.TopK, in.IncludeTemplates)
 			if err != nil {
 				return nil, artifactSearchOutput{}, fmt.Errorf("search query: %w", err)
 			}
@@ -177,8 +178,8 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 				// fetch full body via artifact.read if needed.
 				h.Snippet = trimSnippet(h.Snippet, 400)
 				h.AgentRef = "pindoc://" + h.Slug
-				h.HumanURL = HumanURL(deps.ProjectSlug, deps.ProjectLocale, h.Slug)
-				h.HumanURLAbs = AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, h.Slug)
+				h.HumanURL = HumanURL(p.ProjectSlug, p.ProjectLocale, h.Slug)
+				h.HumanURLAbs = AbsHumanURL(deps.Settings, p.ProjectSlug, p.ProjectLocale, h.Slug)
 				if len(metaRaw) > 0 {
 					var meta ResolvedArtifactMeta
 					if err := json.Unmarshal(metaRaw, &meta); err == nil {
@@ -205,7 +206,7 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 				for _, h := range out.Hits {
 					ids = append(ids, h.ArtifactID)
 				}
-				out.SearchReceipt = deps.Receipts.Issue(deps.ProjectSlug, in.Query,
+				out.SearchReceipt = deps.Receipts.Issue(p.ProjectSlug, in.Query,
 					headSnapshotsForArtifacts(ctx, deps, ids),
 				)
 			}

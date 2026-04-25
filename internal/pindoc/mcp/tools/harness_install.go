@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 )
 
 type harnessInstallInput struct {
@@ -95,11 +97,11 @@ func RegisterHarnessInstall(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.harness.install",
 			Description: "Return the PINDOC.md body this project should adopt and the one-line CLAUDE.md include that loads it. Write the returned body to PINDOC.md at the repo root, and append the include line to CLAUDE.md (or AGENTS.md). Re-run to regenerate after upgrading the server — the spec evolves with the server version.",
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in harnessInstallInput) (*sdk.CallToolResult, harnessInstallOutput, error) {
+		func(ctx context.Context, p *auth.Principal, in harnessInstallInput) (*sdk.CallToolResult, harnessInstallOutput, error) {
 			var projName, projLang string
 			err := deps.DB.QueryRow(ctx, `
 				SELECT name, primary_language FROM projects WHERE slug = $1
-			`, deps.ProjectSlug).Scan(&projName, &projLang)
+			`, p.ProjectSlug).Scan(&projName, &projLang)
 			if err != nil {
 				return nil, harnessInstallOutput{}, fmt.Errorf("project lookup: %w", err)
 			}
@@ -109,7 +111,7 @@ func RegisterHarnessInstall(server *sdk.Server, deps Deps) {
 				lang = projLang
 			}
 
-			body := renderPindocMD(projName, deps.ProjectSlug, lang, deps.Version)
+			body := renderPindocMD(projName, p.ProjectSlug, lang, deps.Version)
 
 			var snippetBody string
 			if lang == "ko" {
@@ -140,7 +142,7 @@ rules (Pre-flight Check before writes, Referenced Confirmation when
 asking the user for approval, agent-only write surface).
 `, styleSnippetMarkerBegin)),
 				RenderedFor: RenderedFor{
-					ProjectSlug:     deps.ProjectSlug,
+					ProjectSlug:     p.ProjectSlug,
 					PrimaryLanguage: lang,
 					Version:         deps.Version,
 				},

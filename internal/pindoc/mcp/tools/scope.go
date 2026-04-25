@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 )
 
 type scopeInFlightInput struct {
@@ -73,7 +75,7 @@ task_meta.status; use pindoc.task.queue before saying pending Tasks are
 done.
 `),
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in scopeInFlightInput) (*sdk.CallToolResult, scopeInFlightOutput, error) {
+		func(ctx context.Context, p *auth.Principal, in scopeInFlightInput) (*sdk.CallToolResult, scopeInFlightOutput, error) {
 			limit := in.Limit
 			if limit <= 0 {
 				limit = 50
@@ -108,7 +110,7 @@ done.
 			if s := strings.TrimSpace(in.AreaSlug); s != "" {
 				areaArg = s
 			}
-			rows, err := deps.DB.Query(ctx, sql, deps.ProjectSlug, areaArg)
+			rows, err := deps.DB.Query(ctx, sql, p.ProjectSlug, areaArg)
 			if err != nil {
 				return nil, scopeInFlightOutput{}, fmt.Errorf("in_flight query: %w", err)
 			}
@@ -182,8 +184,8 @@ done.
 						State:         state,
 						LineText:      lineText,
 						AgentRef:      "pindoc://" + slug,
-						HumanURL:      HumanURL(deps.ProjectSlug, deps.ProjectLocale, slug),
-						HumanURLAbs:   AbsHumanURL(deps.Settings, deps.ProjectSlug, deps.ProjectLocale, slug),
+						HumanURL:      HumanURL(p.ProjectSlug, p.ProjectLocale, slug),
+						HumanURLAbs:   AbsHumanURL(deps.Settings, p.ProjectSlug, p.ProjectLocale, slug),
 					}
 					items = append(items, item)
 					if bucket == "deferred" {

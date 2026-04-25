@@ -7,6 +7,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/projects"
 )
 
@@ -123,7 +124,7 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.project.current",
 			Description: "Return the active Pindoc project (id, slug, name, primary language, area/artifact counts). Call this once per session before any write tool so the agent knows which project scope its propose calls will land in.",
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, _ projectCurrentInput) (*sdk.CallToolResult, projectCurrentOutput, error) {
+		func(ctx context.Context, princ *auth.Principal, _ projectCurrentInput) (*sdk.CallToolResult, projectCurrentOutput, error) {
 			var out projectCurrentOutput
 			var desc, color *string
 
@@ -142,14 +143,14 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 					(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
 				FROM projects p
 				WHERE p.slug = $1
-			`, deps.ProjectSlug).Scan(
+			`, princ.ProjectSlug).Scan(
 				&out.ID, &out.Slug, &out.Name, &out.OwnerID,
 				&desc, &color,
 				&out.PrimaryLanguage, &out.Locale, &out.CreatedAt,
 				&out.AreasCount, &out.ArtifactsCount,
 			)
 			if err != nil {
-				return nil, projectCurrentOutput{}, fmt.Errorf("project %q not found: %w", deps.ProjectSlug, err)
+				return nil, projectCurrentOutput{}, fmt.Errorf("project %q not found: %w", princ.ProjectSlug, err)
 			}
 			if desc != nil {
 				out.Description = *desc
@@ -158,7 +159,7 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 				out.Color = *color
 			}
 			out.Rendering = pindocRenderingCaps
-			out.Capabilities = buildCapabilities(deps, deriveMultiProject(ctx, deps))
+			out.Capabilities = buildCapabilities(deps, princ, deriveMultiProject(ctx, deps, princ))
 			return nil, out, nil
 		},
 	)
@@ -172,11 +173,11 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 // DB hiccup hides the switcher rather than crashing the tool call —
 // the UI falling back to single-project chrome is preferable to a
 // bootstrap failure.
-func deriveMultiProject(ctx context.Context, deps Deps) bool {
-	if deps.DB == nil {
+func deriveMultiProject(ctx context.Context, deps Deps, p *auth.Principal) bool {
+	if deps.DB == nil || p == nil {
 		return false
 	}
-	n, err := projects.CountVisible(ctx, deps.DB, deps.UserID)
+	n, err := projects.CountVisible(ctx, deps.DB, p.UserID)
 	if err != nil {
 		if deps.Logger != nil {
 			deps.Logger.Warn("multi_project derivation failed; defaulting to false",
@@ -188,7 +189,7 @@ func deriveMultiProject(ctx context.Context, deps Deps) bool {
 	return projects.IsMultiProject(n)
 }
 
-func buildCapabilities(deps Deps, multiProject bool) Capabilities {
+func buildCapabilities(deps Deps, p *auth.Principal, multiProject bool) Capabilities {
 	quality := "stub"
 	if deps.Embedder != nil {
 		if name := deps.Embedder.Info().Name; name != "" && name != "stub" {
@@ -199,7 +200,14 @@ func buildCapabilities(deps Deps, multiProject bool) Capabilities {
 	if deps.Settings != nil {
 		publicBase = deps.Settings.Get().PublicBaseURL
 	}
-	transport := deps.Transport
+	transport := ""
+	authMode := auth.AuthModeTrustedLocal
+	if p != nil {
+		transport = p.Transport
+		if p.AuthMode != "" {
+			authMode = p.AuthMode
+		}
+	}
 	if transport == "" {
 		transport = "stdio"
 	}
@@ -220,7 +228,7 @@ func buildCapabilities(deps Deps, multiProject bool) Capabilities {
 		ScopeMode:                   scopeMode,
 		NewProjectRequiresReconnect: requiresReconnect,
 		RetrievalQuality:            quality,
-		AuthMode:                    "trusted_local",
+		AuthMode:                    authMode,
 		Transport:                   transport,
 		UpdateVia:                   "update_of",
 		RequiresExpectedVersion:     true,

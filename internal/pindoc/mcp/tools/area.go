@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 )
 
 type areaListInput struct {
@@ -45,7 +47,7 @@ func RegisterAreaList(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.area.list",
 			Description: "List every Area in the current project. Use this to pick the right area_slug before pindoc.artifact.propose. Every artifact must live in exactly one Area (use 'misc' if nothing else fits, 'cross-cutting' for concerns that span all areas).",
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in areaListInput) (*sdk.CallToolResult, areaListOutput, error) {
+		func(ctx context.Context, p *auth.Principal, in areaListInput) (*sdk.CallToolResult, areaListOutput, error) {
 			rows, err := deps.DB.Query(ctx, `
 				WITH p AS (SELECT id FROM projects WHERE slug = $1)
 				SELECT
@@ -68,13 +70,13 @@ func RegisterAreaList(server *sdk.Server, deps Deps) {
 				JOIN p ON a.project_id = p.id
 				LEFT JOIN areas parent ON parent.id = a.parent_id
 				ORDER BY a.is_cross_cutting, a.slug
-			`, deps.ProjectSlug, in.IncludeTemplates)
+			`, p.ProjectSlug, in.IncludeTemplates)
 			if err != nil {
 				return nil, areaListOutput{}, fmt.Errorf("query areas: %w", err)
 			}
 			defer rows.Close()
 
-			out := areaListOutput{ProjectSlug: deps.ProjectSlug, Areas: []AreaRef{}}
+			out := areaListOutput{ProjectSlug: p.ProjectSlug, Areas: []AreaRef{}}
 			for rows.Next() {
 				var a AreaRef
 				var desc, parentSlug *string

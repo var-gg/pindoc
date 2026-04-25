@@ -3,80 +3,128 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"time"
 	"unicode/utf8"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
 )
 
+// Handler is Pindoc's tool handler signature — Principal-aware,
+// req-blind. AddInstrumentedTool wraps a Handler in the SDK's
+// req-aware ToolHandlerFor by running the AuthChain to produce the
+// Principal and threading it as an explicit argument. Handlers
+// therefore never reach into deps for caller identity / scope and
+// never inspect raw HTTP headers — both responsibilities belong to
+// the resolver chain (Decision principal-resolver-architecture).
+type Handler[I, O any] func(ctx context.Context, p *auth.Principal, in I) (*sdk.CallToolResult, O, error)
+
 // AddInstrumentedTool is the drop-in replacement for sdk.AddTool that
-// every Pindoc tool uses. Wraps handler with Instrument() before
-// registering so telemetry lands on every call without the registration
-// site duplicating the boilerplate. Nil deps.Telemetry no-ops the
-// wrap, so tests that leave it unset still compile and run.
+// every Pindoc tool uses. Resolves the calling Principal via
+// deps.AuthChain, then wraps the resulting handler with telemetry
+// before registering. Telemetry no-ops cleanly when deps.Telemetry is
+// nil (test fixtures); chain failures (no resolver matched, malformed
+// token) propagate to the caller as plain errors rather than producing
+// a degraded Principal.
 func AddInstrumentedTool[I, O any](
 	server *sdk.Server,
 	deps Deps,
 	tool *sdk.Tool,
-	handler sdk.ToolHandlerFor[I, O],
+	handler Handler[I, O],
 ) {
-	sdk.AddTool(server, tool, Instrument(tool.Name, deps.Telemetry, deps, handler))
+	name := tool.Name
+	chain := deps.AuthChain
+	store := deps.Telemetry
+	sdkHandler := func(ctx context.Context, req *sdk.CallToolRequest, input I) (*sdk.CallToolResult, O, error) {
+		p, err := chain.Resolve(ctx, req)
+		if err != nil {
+			var zero O
+			return nil, zero, fmt.Errorf("auth: resolve principal for %q: %w", name, err)
+		}
+		if store == nil {
+			return handler(ctx, p, input)
+		}
+		return instrumentCall(name, store, p, input, func() (*sdk.CallToolResult, O, error) {
+			return handler(ctx, p, input)
+		})
+	}
+	sdk.AddTool(server, tool, sdkHandler)
 }
 
-// Instrument wraps a tool handler with async telemetry. The returned
-// handler is a drop-in replacement — same signature, same semantics,
-// plus a fire-and-forget Record() on the way out. Latency cost is
-// dominated by two json.Marshal calls + one tiktoken encode; the
-// channel send itself is non-blocking and never waits on IO.
+// instrumentCall records one tool-call entry around the supplied
+// handler invocation. Latency cost is dominated by two json.Marshal
+// calls plus one tiktoken encode; the channel send is non-blocking
+// and never waits on IO.
 //
 // Error code is lifted by reflection from an `ErrorCode string` field
 // on the output struct when present (Pindoc's not_ready convention).
 // Falls back to "handler_error" when the handler returned a non-nil
 // error; empty string for successful calls.
-func Instrument[I, O any](
+func instrumentCall[I, O any](
 	name string,
 	store *telemetry.Store,
-	deps Deps,
-	handler sdk.ToolHandlerFor[I, O],
-) sdk.ToolHandlerFor[I, O] {
-	if store == nil {
-		return handler
+	p *auth.Principal,
+	input I,
+	invoke func() (*sdk.CallToolResult, O, error),
+) (*sdk.CallToolResult, O, error) {
+	start := time.Now()
+
+	inputJSON, _ := json.Marshal(input)
+	result, output, err := invoke()
+	outputJSON, _ := json.Marshal(output)
+
+	errorCode := ""
+	if err != nil {
+		errorCode = "handler_error"
+	} else if code := extractErrorCode(output); code != "" {
+		errorCode = code
 	}
-	return func(ctx context.Context, req *sdk.CallToolRequest, input I) (*sdk.CallToolResult, O, error) {
-		start := time.Now()
 
-		inputJSON, _ := json.Marshal(input)
-		result, output, err := handler(ctx, req, input)
-		outputJSON, _ := json.Marshal(output)
+	store.Record(telemetryEntry(start, name, p, inputJSON, outputJSON, errorCode, store))
 
-		errorCode := ""
-		if err != nil {
-			errorCode = "handler_error"
-		} else if code := extractErrorCode(output); code != "" {
-			errorCode = code
-		}
+	return result, output, err
+}
 
-		store.Record(telemetry.Entry{
-			StartedAt:       start,
-			DurationMs:      time.Since(start).Milliseconds(),
-			ToolName:        name,
-			AgentID:         deps.AgentID,
-			UserID:          deps.UserID,
-			ProjectSlug:     deps.ProjectSlug,
-			InputBytes:      len(inputJSON),
-			OutputBytes:     len(outputJSON),
-			InputChars:      utf8.RuneCountInString(string(inputJSON)),
-			OutputChars:     utf8.RuneCountInString(string(outputJSON)),
-			InputTokensEst:  store.EstimateTokens(string(inputJSON)),
-			OutputTokensEst: store.EstimateTokens(string(outputJSON)),
-			ErrorCode:       errorCode,
-			ToolsetVersion:  ToolsetVersion(),
-		})
-
-		return result, output, err
+// telemetryEntry packages the per-call fields into a telemetry.Entry,
+// pulling user / agent / project from the resolved Principal so the
+// downstream mcp_tool_calls schema stays identical to the V1 (deps-
+// fed) shape — the regression check on row format is "fields look the
+// same as before this Task". Nil principals fall back to empty strings
+// so capability probes that ran before chain resolution still record
+// cleanly.
+func telemetryEntry(
+	start time.Time,
+	name string,
+	p *auth.Principal,
+	inputJSON, outputJSON []byte,
+	errorCode string,
+	store *telemetry.Store,
+) telemetry.Entry {
+	var agentID, userID, projectSlug string
+	if p != nil {
+		agentID = p.AgentID
+		userID = p.UserID
+		projectSlug = p.ProjectSlug
+	}
+	return telemetry.Entry{
+		StartedAt:       start,
+		DurationMs:      time.Since(start).Milliseconds(),
+		ToolName:        name,
+		AgentID:         agentID,
+		UserID:          userID,
+		ProjectSlug:     projectSlug,
+		InputBytes:      len(inputJSON),
+		OutputBytes:     len(outputJSON),
+		InputChars:      utf8.RuneCountInString(string(inputJSON)),
+		OutputChars:     utf8.RuneCountInString(string(outputJSON)),
+		InputTokensEst:  store.EstimateTokens(string(inputJSON)),
+		OutputTokensEst: store.EstimateTokens(string(outputJSON)),
+		ErrorCode:       errorCode,
+		ToolsetVersion:  ToolsetVersion(),
 	}
 }
 

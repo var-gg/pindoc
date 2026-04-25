@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 )
 
 // taskAssignInput is the agent-facing shape for pindoc.task.assign.
@@ -29,7 +31,7 @@ type taskAssignInput struct {
 	Reason string `json:"reason,omitempty" jsonschema:"optional one-line rationale (stored as commit_msg)"`
 
 	// AuthorID overrides the server-issued agent_id for the revision's
-	// display label. Empty = use deps.AgentID.
+	// display label. Empty = use Principal.AgentID.
 	AuthorID string `json:"author_id,omitempty" jsonschema:"override author display label; defaults to server agent_id"`
 
 	// AuthorVersion is the model/client version tag stored alongside the
@@ -102,7 +104,7 @@ func RegisterTaskAssign(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.task.assign",
 			Description: "Change the assignee of a single Task. Semantic shortcut over artifact.propose(shape='meta_patch', task_meta={assignee}) — bypasses search_receipt gating (operational metadata lane). Assignee format: agent:<id> | user:<id> | @<handle>, or empty to clear. Reason is optional (stored as commit_msg). For batch rebalance use pindoc.task.bulk_assign instead.",
 		},
-		func(ctx context.Context, _ *sdk.CallToolRequest, in taskAssignInput) (*sdk.CallToolResult, taskAssignOutput, error) {
+		func(ctx context.Context, p *auth.Principal, in taskAssignInput) (*sdk.CallToolResult, taskAssignOutput, error) {
 			assignee, ok := validateAssignee(in.Assignee)
 			if !ok {
 				return nil, taskAssignOutput{
@@ -112,7 +114,7 @@ func RegisterTaskAssign(server *sdk.Server, deps Deps) {
 					Checklist: []string{"assignee must match agent:<id> | user:<id> | @<handle>, or be empty string to clear"},
 				}, nil
 			}
-			res, err := assignOneTask(ctx, deps, in.SlugOrID, assignee, in.Reason, in.AuthorID, in.AuthorVersion, "")
+			res, err := assignOneTask(ctx, deps, p, in.SlugOrID, assignee, in.Reason, in.AuthorID, in.AuthorVersion, "")
 			if err != nil {
 				return nil, taskAssignOutput{}, err
 			}
@@ -130,6 +132,7 @@ func RegisterTaskAssign(server *sdk.Server, deps Deps) {
 func assignOneTask(
 	ctx context.Context,
 	deps Deps,
+	p *auth.Principal,
 	slugOrID, assignee, reason, authorID, authorVersion, bulkOpID string,
 ) (taskAssignOutput, error) {
 	ref := normalizeRef(slugOrID)
@@ -155,13 +158,13 @@ func assignOneTask(
 		JOIN projects p ON p.id = a.project_id
 		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 		LIMIT 1
-	`, deps.ProjectSlug, ref).Scan(&artifactID, &resolvedSlug, &artifactType, &lastRev)
+	`, p.ProjectSlug, ref).Scan(&artifactID, &resolvedSlug, &artifactType, &lastRev)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return taskAssignOutput{
 			Status:    "not_ready",
 			ErrorCode: "ASSIGN_TARGET_NOT_FOUND",
 			Failed:    []string{"ASSIGN_TARGET_NOT_FOUND"},
-			Checklist: []string{fmt.Sprintf("Task %q not found in project %q", slugOrID, deps.ProjectSlug)},
+			Checklist: []string{fmt.Sprintf("Task %q not found in project %q", slugOrID, p.ProjectSlug)},
 		}, nil
 	}
 	if err != nil {
@@ -189,7 +192,7 @@ func assignOneTask(
 
 	effAuthorID := strings.TrimSpace(authorID)
 	if effAuthorID == "" {
-		effAuthorID = deps.AgentID
+		effAuthorID = p.AgentID
 	}
 	if effAuthorID == "" {
 		effAuthorID = "unknown"
@@ -218,7 +221,7 @@ func assignOneTask(
 		}
 	}
 
-	_, out, err := handleUpdateMetaPatch(ctx, deps, propIn, deps.UserLanguage)
+	_, out, err := handleUpdateMetaPatch(ctx, deps, p, propIn, deps.UserLanguage)
 	if err != nil {
 		return taskAssignOutput{}, err
 	}
