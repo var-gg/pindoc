@@ -846,3 +846,27 @@ func (d Deps) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, info)
 }
+
+// handleSimpleHealth is the minimal liveness probe NSSM (and any external
+// monitor) hits — process-up + DB reachable, no embedder spinup, no
+// project lookup. Always returns 200 so a transient DB blip surfaces as
+// `db: degraded` in the body rather than tripping monitor alerts;
+// process-down is what those monitors should treat as failure.
+func (d Deps) handleSimpleHealth(w http.ResponseWriter, r *http.Request) {
+	dbStatus := "ok"
+	if d.DB == nil {
+		dbStatus = "degraded"
+	} else if err := d.DB.Ping(r.Context()); err != nil {
+		dbStatus = "degraded"
+	}
+	uptime := int64(0)
+	if !d.StartTime.IsZero() {
+		uptime = int64(time.Since(d.StartTime).Seconds())
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":     "ok",
+		"version":    d.Version,
+		"uptime_sec": uptime,
+		"db":         dbStatus,
+	})
+}

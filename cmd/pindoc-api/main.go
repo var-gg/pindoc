@@ -31,6 +31,7 @@ var (
 )
 
 func main() {
+	startTime := time.Now()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
@@ -110,6 +111,7 @@ func main() {
 		Telemetry:            telemetryStore,
 		Version:              version,
 		BuildCommit:          commit,
+		StartTime:            startTime,
 	})
 
 	srv := &http.Server{

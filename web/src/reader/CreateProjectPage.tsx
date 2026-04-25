@@ -25,7 +25,7 @@ type Lang = "en" | "ko" | "ja";
 // edit the host:port portion of the snippet manually for now — V1.5
 // adds a server_settings.mcp_daemon_base_url override so the UI fills
 // it in automatically.
-const DAEMON_BASE_FALLBACK = "http://127.0.0.1:5832";
+const DAEMON_BASE_FALLBACK = "http://127.0.0.1:5830";
 
 export function CreateProjectPage() {
   const { t, lang } = useI18n();

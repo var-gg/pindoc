@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
@@ -53,12 +54,22 @@ type Deps struct {
 	Telemetry   *telemetry.Store
 	Version     string
 	BuildCommit string
+
+	// StartTime stamps when the daemon process began running. Surfaced
+	// via GET /health as uptime_sec so operators can spot-check that
+	// the NSSM-managed service hasn't been silently restart-looped.
+	// Zero value is OK — the health handler reports uptime_sec=0.
+	StartTime time.Time
 }
 
 func New(cfg *config.Config, d Deps) http.Handler {
 	mux := http.NewServeMux()
 
 	// Unscoped reads — apply to the whole instance.
+	// /health is the lightweight liveness probe (NSSM / external
+	// monitor); /api/health is the verbose embedder-aware variant the
+	// Reader uses internally.
+	mux.HandleFunc("GET /health", d.handleSimpleHealth)
 	mux.HandleFunc("GET /api/health", d.handleHealth)
 	mux.HandleFunc("GET /api/config", d.handleConfig)
 	mux.HandleFunc("GET /api/projects", d.handleProjectList)

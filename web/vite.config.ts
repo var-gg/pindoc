@@ -12,10 +12,15 @@ export default defineConfig({
     strictPort: true, // fail loudly if 5830 is taken rather than silently drifting
     open: false,
     proxy: {
-      // Forward /api/* to the pindoc-api daemon (see cmd/pindoc-api).
-      // Keeps the UI on a single origin so no CORS dance during dev.
+      // Forward /api/* to the merged pindoc-server daemon (the same
+      // process now serves /mcp/p/{project}, /api/..., and /health on a
+      // single port — see cmd/pindoc-server). Keeps the UI on a single
+      // origin so no CORS dance during dev. Vite's strictPort=true means
+      // dev frontend and the daemon can't co-bind 5830 — switch the
+      // daemon off (Stop-Service pindoc-server) before running
+      // `pnpm dev` for hot-reload UI work.
       "/api": {
-        target: "http://127.0.0.1:5831",
+        target: "http://127.0.0.1:5830",
         changeOrigin: false,
       },
     },

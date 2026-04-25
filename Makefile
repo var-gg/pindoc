@@ -4,7 +4,7 @@
 # GnuWin32.Make` or similar). Users without make can run the commands
 # verbatim — this file is short on purpose.
 
-.PHONY: help db-up db-down db-logs embed-up embed-down embed-logs server-build api-build reembed-build server-run server-dev server-run-http api-run-http web-dev fmt tidy
+.PHONY: help db-up db-down db-logs embed-up embed-down embed-logs server-build api-build reembed-build server-run server-dev server-run-http server-run-daemon api-run-http web-dev fmt tidy
 
 # Embedding env used by the http provider (Phase 10). Keep the model hint,
 # dimension, and E5-style prefixes together so a single `make server-run-http`
@@ -29,10 +29,11 @@ help:
 	@echo "  server-build     — compile the MCP server binary"
 	@echo "  api-build        — compile the HTTP API binary"
 	@echo "  reembed-build    — compile the pindoc-reembed CLI"
-	@echo "  server-run       — run the MCP server with stub embedder"
-	@echo "  server-run-http  — run the MCP server with TEI http embedder"
-	@echo "  api-run-http     — run the HTTP API with TEI http embedder"
-	@echo "  web-dev          — run the Vite dev server (port 5830)"
+	@echo "  server-run       — run the MCP server with stub embedder (stdio)"
+	@echo "  server-run-http  — run the MCP server with TEI http embedder (stdio)"
+	@echo "  server-run-daemon — run the merged HTTP daemon on 127.0.0.1:5830 (MCP + Reader API + /health)"
+	@echo "  api-run-http     — run the standalone HTTP API daemon (deprecated; use server-run-daemon)"
+	@echo "  web-dev          — run the Vite dev server (port 5830 — stop the daemon first)"
 	@echo "  fmt              — gofmt + go vet the whole module"
 	@echo "  tidy             — go mod tidy"
 
@@ -71,6 +72,9 @@ server-dev:
 
 server-run-http:
 	$(EMBED_ENV) go run ./cmd/pindoc-server
+
+server-run-daemon:
+	$(EMBED_ENV) go run ./cmd/pindoc-server -http 127.0.0.1:5830
 
 api-run-http:
 	$(EMBED_ENV) go run ./cmd/pindoc-api
