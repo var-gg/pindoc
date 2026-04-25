@@ -2,14 +2,22 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
 import {
   ArrowDownLeft,
+  ArrowLeftRight,
   ArrowUpRight,
+  Ban,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Clipboard,
   History as HistoryIcon,
+  Languages,
+  Layers,
+  Link2,
+  Lock,
   Pencil,
+  Puzzle,
   Share2,
+  type LucideIcon,
 } from "lucide-react";
 import {
   api,
@@ -492,7 +500,7 @@ function ConnectedArtifacts({
             <Link
               to={`/p/${projectSlug}/${locale}/wiki/${edge.slug}`}
               className="relation-card"
-              title={direction === "out" ? t("sidecar.rel_outgoing") : t("sidecar.rel_incoming")}
+              title={edge.title}
             >
               <span className="relation-card__dir" aria-hidden="true">
                 {direction === "out" ? (
@@ -501,15 +509,47 @@ function ConnectedArtifacts({
                   <ArrowDownLeft className="lucide" />
                 )}
               </span>
-              <span className="chip relation-card__relation">{edge.relation}</span>
-              <span className="relation-card__type">{edge.type}</span>
-              <span className="relation-card__title">{edge.title}</span>
+              <RelationIcon relation={edge.relation} />
+              <span className="relation-card__body">
+                <span className="relation-card__title">{edge.title}</span>
+                <span className="relation-card__type">{edge.type}</span>
+              </span>
             </Link>
           </li>
         ))}
       </ul>
     </div>
   );
+}
+
+function RelationIcon({ relation }: { relation: string }) {
+  const Icon = relationIconFor(relation);
+  return (
+    <span className="relation-card__relation" title={relation} aria-label={relation}>
+      <Icon className="lucide" />
+    </span>
+  );
+}
+
+function relationIconFor(relation: string): LucideIcon {
+  switch (relation) {
+    case "implements":
+      return Puzzle;
+    case "references":
+      return Link2;
+    case "blocks":
+      return Ban;
+    case "blocked_by":
+      return Lock;
+    case "supersedes":
+      return Layers;
+    case "translation_of":
+      return Languages;
+    case "relates_to":
+      return ArrowLeftRight;
+    default:
+      return Link2;
+  }
 }
 
 // ProvenanceBlock renders the epistemic + evidence data the Trust Card

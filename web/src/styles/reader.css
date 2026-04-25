@@ -429,14 +429,15 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 .relation-card {
   display: grid;
-  grid-template-columns: 16px auto auto minmax(0, 1fr);
-  gap: 6px;
+  grid-template-columns: 16px 22px minmax(0, 1fr);
+  gap: 7px;
   align-items: center;
-  padding: 5px 6px;
+  min-height: 40px;
+  padding: 4px 6px;
   border-radius: var(--r-1);
   color: var(--fg-1);
   text-decoration: none;
@@ -455,22 +456,40 @@
   height: 12px;
 }
 .relation-card__relation {
-  height: 18px;
-  padding: 0 6px;
-  font-size: 9px;
-  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-1);
+  color: var(--fg-3);
+  background: transparent;
+}
+.relation-card__relation .lucide {
+  width: 12px;
+  height: 12px;
+}
+.relation-card__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .relation-card__type {
   color: var(--fg-3);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9.5px;
+  line-height: 1.1;
 }
 .relation-card__title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 12.8px;
+  font-weight: 600;
+  line-height: 1.2;
 }
 
 .provenance { padding: 14px 16px; border-top: 1px solid var(--border); }
