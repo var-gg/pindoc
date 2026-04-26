@@ -2567,6 +2567,19 @@
   border-radius: var(--r-2);
   background: var(--bg-1);
 }
+.change-card--interactive {
+  cursor: pointer;
+}
+.change-card--interactive:hover,
+.change-card--interactive:focus-visible {
+  border-color: color-mix(in oklch, var(--accent) 42%, var(--border-1));
+  background: color-mix(in oklch, var(--accent) 5%, var(--bg-1));
+  outline: none;
+}
+.change-card.is-active {
+  border-color: color-mix(in oklch, var(--accent) 58%, var(--border-1));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
 .change-card--compact {
   padding: 12px 14px;
 }
@@ -2589,6 +2602,28 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 4px;
+}
+.change-card__inspect {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-1);
+  color: var(--fg-3);
+  background: var(--bg-2);
+}
+.change-card__inspect .lucide {
+  width: 13px;
+  height: 13px;
+}
+.change-card--interactive:hover .change-card__inspect,
+.change-card--interactive:focus-visible .change-card__inspect,
+.change-card.is-active .change-card__inspect {
+  color: var(--accent);
+  border-color: color-mix(in oklch, var(--accent) 42%, var(--border-1));
 }
 .change-card h2 {
   margin: 8px 0 8px;

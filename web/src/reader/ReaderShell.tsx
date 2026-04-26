@@ -81,6 +81,9 @@ export function ReaderShell({ view }: Props) {
   const [wikiInspectorSlug, setWikiInspectorSlug] = useState<string | null>(null);
   const [wikiInspectorDetail, setWikiInspectorDetail] = useState<Artifact | null>(null);
   const [wikiInspectorLoading, setWikiInspectorLoading] = useState(false);
+  const [todayInspectorSlug, setTodayInspectorSlug] = useState<string | null>(null);
+  const [todayInspectorDetail, setTodayInspectorDetail] = useState<Artifact | null>(null);
+  const [todayInspectorLoading, setTodayInspectorLoading] = useState(false);
   const [taskInspectorSlug, setTaskInspectorSlug] = useState<string | null>(null);
   const [taskInspectorDetail, setTaskInspectorDetail] = useState<Artifact | null>(null);
   const [taskInspectorLoading, setTaskInspectorLoading] = useState(false);
@@ -276,6 +279,29 @@ export function ReaderShell({ view }: Props) {
   }, [view, slug, project, wikiInspectorSlug]);
 
   useEffect(() => {
+    if (view !== "today" || slug || !todayInspectorSlug) {
+      setTodayInspectorDetail(null);
+      setTodayInspectorLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setTodayInspectorLoading(true);
+    api.artifact(project, todayInspectorSlug)
+      .then((artifact) => {
+        if (!cancelled) setTodayInspectorDetail(artifact);
+      })
+      .catch(() => {
+        if (!cancelled) setTodayInspectorDetail(null);
+      })
+      .finally(() => {
+        if (!cancelled) setTodayInspectorLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, slug, project, todayInspectorSlug]);
+
+  useEffect(() => {
     if (view !== "tasks" || slug || !taskInspectorSlug) {
       setTaskInspectorDetail(null);
       setTaskInspectorLoading(false);
@@ -382,6 +408,8 @@ export function ReaderShell({ view }: Props) {
   const sidecarDetail =
     view === "reader"
       ? detail ?? wikiInspectorDetail
+      : view === "today"
+        ? todayInspectorDetail
       : view === "tasks"
         ? detail ?? taskInspectorDetail
         : null;
@@ -390,6 +418,10 @@ export function ReaderShell({ view }: Props) {
       ? wikiInspectorLoading
         ? t("reader.inspector_loading")
         : t("reader.inspector_empty")
+      : view === "today"
+      ? todayInspectorLoading
+        ? t("today.inspector_loading")
+        : t("today.inspector_empty")
       : view === "tasks" && !detail
       ? taskInspectorLoading
         ? t("tasks.inspector_loading")
@@ -451,8 +483,8 @@ export function ReaderShell({ view }: Props) {
           selectedArea={selectedArea}
           selectedType={selectedType}
           badgeFilters={badgeFilters}
-          selectedWikiSlug={wikiInspectorSlug}
-          onSelectWikiArtifact={setWikiInspectorSlug}
+          selectedInspectorSlug={view === "today" ? todayInspectorSlug : wikiInspectorSlug}
+          onSelectInspectorArtifact={view === "today" ? setTodayInspectorSlug : setWikiInspectorSlug}
           areaNameBySlug={areaNameBySlug}
           areaPathBySlug={areaPathBySlug}
           keyboardDisabled={paletteOpen || shortcutsOpen}
@@ -473,7 +505,7 @@ export function ReaderShell({ view }: Props) {
           authMode={authMode}
           agents={agents}
           users={users}
-          showOpenDetailAction={view === "reader" && !detail && Boolean(wikiInspectorDetail)}
+          showOpenDetailAction={(view === "reader" && !detail && Boolean(wikiInspectorDetail)) || (view === "today" && Boolean(todayInspectorDetail))}
           onArtifactUpdated={view === "tasks" ? handleTaskInspectorUpdated : reload}
         />
       </div>
@@ -584,8 +616,8 @@ function Body({
   selectedArea,
   selectedType,
   badgeFilters,
-  selectedWikiSlug,
-  onSelectWikiArtifact,
+  selectedInspectorSlug,
+  onSelectInspectorArtifact,
   areaNameBySlug,
   areaPathBySlug,
   keyboardDisabled,
@@ -608,8 +640,8 @@ function Body({
   selectedArea: string | null;
   selectedType: string | null;
   badgeFilters: BadgeFilter[];
-  selectedWikiSlug: string | null;
-  onSelectWikiArtifact: (slug: string) => void;
+  selectedInspectorSlug: string | null;
+  onSelectInspectorArtifact: (slug: string) => void;
   areaNameBySlug: ReadonlyMap<string, string>;
   areaPathBySlug: ReadonlyMap<string, string[]>;
   keyboardDisabled: boolean;
@@ -690,6 +722,8 @@ function Body({
         selectedArea={selectedArea}
         areaNameBySlug={areaNameBySlug}
         onSelectArea={onSelectArea}
+        selectedArtifactSlug={selectedInspectorSlug}
+        onSelectArtifact={onSelectInspectorArtifact}
       />
     );
   }
@@ -766,7 +800,7 @@ function Body({
             {list.map((a) => {
               const linkBase = `/p/${projectSlug}/wiki`;
               const href = filteredReaderHref(linkBase, a.slug, selectedArea, selectedType, badgeFilters);
-              const isActive = currentSlug === a.slug || selectedWikiSlug === a.slug;
+              const isActive = currentSlug === a.slug || selectedInspectorSlug === a.slug;
               return (
                 <article
                   key={a.id}
@@ -775,7 +809,7 @@ function Body({
                   role="button"
                   aria-selected={isActive}
                   title={t("reader.card_select_hint")}
-                  onClick={() => onSelectWikiArtifact(a.slug)}
+                  onClick={() => onSelectInspectorArtifact(a.slug)}
                   onDoubleClick={() => navigate(href)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && e.shiftKey) {
@@ -785,7 +819,7 @@ function Body({
                     }
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      onSelectWikiArtifact(a.slug);
+                      onSelectInspectorArtifact(a.slug);
                       return;
                     }
                     if (e.key.toLowerCase() === "o") {

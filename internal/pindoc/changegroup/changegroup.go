@@ -59,20 +59,29 @@ type TypeCount struct {
 	Count int    `json:"count"`
 }
 
+type ArtifactRef struct {
+	ID       string `json:"id"`
+	Slug     string `json:"slug"`
+	Title    string `json:"title"`
+	Type     string `json:"type"`
+	AreaSlug string `json:"area_slug"`
+}
+
 type Group struct {
-	GroupID           string      `json:"group_id"`
-	GroupKind         string      `json:"group_kind"`
-	GroupingKey       GroupingKey `json:"grouping_key"`
-	CommitSummary     string      `json:"commit_summary"`
-	RevisionCount     int         `json:"revision_count"`
-	ArtifactCount     int         `json:"artifact_count"`
-	TypeCounts        []TypeCount `json:"type_counts,omitempty"`
-	Areas             []string    `json:"areas"`
-	Authors           []string    `json:"authors"`
-	TimeStart         time.Time   `json:"time_start"`
-	TimeEnd           time.Time   `json:"time_end"`
-	Importance        Importance  `json:"importance"`
-	VerificationState string      `json:"verification_state"`
+	GroupID           string       `json:"group_id"`
+	GroupKind         string       `json:"group_kind"`
+	GroupingKey       GroupingKey  `json:"grouping_key"`
+	CommitSummary     string       `json:"commit_summary"`
+	RevisionCount     int          `json:"revision_count"`
+	ArtifactCount     int          `json:"artifact_count"`
+	TypeCounts        []TypeCount  `json:"type_counts,omitempty"`
+	FirstArtifact     *ArtifactRef `json:"first_artifact,omitempty"`
+	Areas             []string     `json:"areas"`
+	Authors           []string     `json:"authors"`
+	TimeStart         time.Time    `json:"time_start"`
+	TimeEnd           time.Time    `json:"time_end"`
+	Importance        Importance   `json:"importance"`
+	VerificationState string       `json:"verification_state"`
 }
 
 type CompactGroup struct {
@@ -396,6 +405,7 @@ type groupAcc struct {
 	Group
 	artifactSet       map[string]struct{}
 	artifactTypeByKey map[string]string
+	firstArtifact     *ArtifactRef
 	areaSet           map[string]struct{}
 	authorSet         map[string]struct{}
 	commitMsgs        []string
@@ -439,6 +449,15 @@ func (a *groupAcc) add(row RevisionRow) {
 		if _, exists := a.artifactTypeByKey[artifactKey]; !exists {
 			a.artifactTypeByKey[artifactKey] = firstNonEmpty(row.ArtifactType, "Artifact")
 		}
+		if a.firstArtifact == nil {
+			a.firstArtifact = &ArtifactRef{
+				ID:       row.ArtifactID,
+				Slug:     row.ArtifactSlug,
+				Title:    row.ArtifactTitle,
+				Type:     firstNonEmpty(row.ArtifactType, "Artifact"),
+				AreaSlug: row.AreaSlug,
+			}
+		}
 	}
 	if row.AreaSlug != "" {
 		a.areaSet[row.AreaSlug] = struct{}{}
@@ -464,6 +483,10 @@ func (a *groupAcc) finish() Group {
 	a.Authors = sortedKeys(a.authorSet)
 	a.ArtifactCount = len(a.artifactSet)
 	a.TypeCounts = typeCounts(a.artifactTypeByKey)
+	if a.firstArtifact != nil {
+		first := *a.firstArtifact
+		a.FirstArtifact = &first
+	}
 	a.GroupKind = dominantKind(a.kindCounts)
 	a.VerificationState = aggregateVerification(a.verifySet)
 	a.CommitSummary = summarizeCommits(a.commitMsgs, a.RevisionCount, a.ArtifactCount)

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ChevronDown, ChevronRight, Download, Filter, Loader2, Sparkles } from "lucide-react";
-import { Link } from "react-router";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { CheckCircle2, ChevronDown, ChevronRight, Download, Filter, Loader2, PanelRightOpen, Sparkles } from "lucide-react";
+import { Link, useNavigate } from "react-router";
 import { api, type ChangeGroup, type TodayResp } from "../api/client";
 import { useI18n } from "../i18n";
 import { EmptyState } from "./SurfacePrimitives";
@@ -11,6 +11,8 @@ type Props = {
   selectedArea: string | null;
   areaNameBySlug: ReadonlyMap<string, string>;
   onSelectArea: (areaSlug: string) => void;
+  selectedArtifactSlug: string | null;
+  onSelectArtifact: (slug: string) => void;
 };
 
 type KindFilter =
@@ -28,7 +30,14 @@ const KIND_LABEL: Record<Exclude<KindFilter, "all" | "verification">, string> = 
   system: "System",
 };
 
-export function Today({ projectSlug, selectedArea, areaNameBySlug, onSelectArea }: Props) {
+export function Today({
+  projectSlug,
+  selectedArea,
+  areaNameBySlug,
+  onSelectArea,
+  selectedArtifactSlug,
+  onSelectArtifact,
+}: Props) {
   const { t, lang } = useI18n();
   const [data, setData] = useState<TodayResp | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -159,6 +168,8 @@ export function Today({ projectSlug, selectedArea, areaNameBySlug, onSelectArea 
               projectSlug={projectSlug}
               areaNameBySlug={areaNameBySlug}
               onSelectArea={onSelectArea}
+              selectedArtifactSlug={selectedArtifactSlug}
+              onSelectArtifact={onSelectArtifact}
             />
           ))}
           {autoGroups.length > 0 && (
@@ -174,6 +185,8 @@ export function Today({ projectSlug, selectedArea, areaNameBySlug, onSelectArea 
                   projectSlug={projectSlug}
                   areaNameBySlug={areaNameBySlug}
                   onSelectArea={onSelectArea}
+                  selectedArtifactSlug={selectedArtifactSlug}
+                  onSelectArtifact={onSelectArtifact}
                   compact
                 />
               ))}
@@ -193,18 +206,57 @@ function ChangeGroupCard({
   projectSlug,
   areaNameBySlug,
   onSelectArea,
+  selectedArtifactSlug,
+  onSelectArtifact,
   compact,
 }: {
   group: ChangeGroup;
   projectSlug: string;
   areaNameBySlug: ReadonlyMap<string, string>;
   onSelectArea: (areaSlug: string) => void;
+  selectedArtifactSlug: string | null;
+  onSelectArtifact: (slug: string) => void;
   compact?: boolean;
 }) {
   const { t } = useI18n();
+  const navigate = useNavigate();
   const firstArea = group.areas[0];
+  const firstArtifact = group.first_artifact;
+  const detailHref = firstArtifact ? `/p/${projectSlug}/wiki/${firstArtifact.slug}` : null;
+  const isActive = Boolean(firstArtifact && selectedArtifactSlug === firstArtifact.slug);
+  const isInteractive = Boolean(firstArtifact);
+  function openDetail() {
+    if (detailHref) navigate(detailHref);
+  }
+  function selectArtifact() {
+    if (firstArtifact) onSelectArtifact(firstArtifact.slug);
+  }
+  function onKeyDown(e: KeyboardEvent<HTMLElement>) {
+    if (!isInteractive) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest("a, button, input, textarea, select, [contenteditable='true']")) return;
+    const openKey = e.key.toLowerCase() === "o" || (e.key === "Enter" && e.shiftKey);
+    if (openKey) {
+      e.preventDefault();
+      openDetail();
+      return;
+    }
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      selectArtifact();
+    }
+  }
   return (
-    <article className={`change-card${compact ? " change-card--compact" : ""}`}>
+    <article
+      className={`change-card${compact ? " change-card--compact" : ""}${isInteractive ? " change-card--interactive" : ""}${isActive ? " is-active" : ""}`}
+      tabIndex={isInteractive ? 0 : undefined}
+      role={isInteractive ? "button" : undefined}
+      aria-selected={isInteractive ? isActive : undefined}
+      title={isInteractive ? t("today.card_select_hint") : undefined}
+      onClick={selectArtifact}
+      onDoubleClick={openDetail}
+      onKeyDown={onKeyDown}
+    >
       <div className="change-card__top">
         <span className={`change-kind change-kind--${group.group_kind}`}>{KIND_LABEL[group.group_kind] ?? group.group_kind}</span>
         <span className={`change-importance change-importance--${group.importance.level}`}>{group.importance.level}</span>
@@ -217,6 +269,11 @@ function ChangeGroupCard({
             ))}
           </span>
         )}
+        {firstArtifact && (
+          <span className="change-card__inspect" aria-label={t("today.card_select_hint")}>
+            <PanelRightOpen className="lucide" aria-hidden="true" />
+          </span>
+        )}
       </div>
       <h2>{group.commit_summary}</h2>
       <div className="change-card__meta">
@@ -224,7 +281,7 @@ function ChangeGroupCard({
         <span>{group.grouping_key.kind} · {group.grouping_key.confidence}</span>
         <span>{group.verification_state}</span>
       </div>
-      <div className="change-card__areas">
+      <div className="change-card__areas" onClick={(e) => e.stopPropagation()}>
         {group.areas.map((area) => (
           <VisualAreaChip
             key={area}
@@ -234,7 +291,7 @@ function ChangeGroupCard({
           />
         ))}
       </div>
-      <div className="change-card__actions">
+      <div className="change-card__actions" onClick={(e) => e.stopPropagation()}>
         {firstArea && <Link to={`/p/${projectSlug}/wiki?area=${encodeURIComponent(firstArea)}`}>{t("today.open_area")}</Link>}
         {firstArea && <ExportButton url={api.exportProjectUrl(projectSlug, { area: firstArea })} label={t("today.export_area")} />}
       </div>

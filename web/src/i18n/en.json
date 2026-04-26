@@ -444,6 +444,9 @@
   "today.export_area": "Export area",
   "today.revision_count": "%d rev",
   "today.artifact_count": "%d artifact",
+  "today.card_select_hint": "Show first artifact in Inspector. Shift+Enter or O opens full detail.",
+  "today.inspector_empty": "Click a change card to populate the Inspector.",
+  "today.inspector_loading": "Loading Inspector...",
   "today.type_distribution": "Type distribution",
 
   "lang.switch": "Language",

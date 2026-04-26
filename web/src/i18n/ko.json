@@ -444,6 +444,9 @@
   "today.export_area": "Area export",
   "today.revision_count": "rev %d개",
   "today.artifact_count": "artifact %d개",
+  "today.card_select_hint": "첫 artifact를 Inspector에서 보기. Shift+Enter 또는 O로 전체 상세를 엽니다.",
+  "today.inspector_empty": "change 카드를 클릭하면 Inspector가 채워집니다.",
+  "today.inspector_loading": "Inspector를 불러오는 중...",
   "today.type_distribution": "Type 분포",
 
   "lang.switch": "언어",

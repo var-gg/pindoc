@@ -319,6 +319,14 @@ export type ChangeGroupTypeCount = {
   count: number;
 };
 
+export type ChangeGroupArtifactRef = {
+  id: string;
+  slug: string;
+  title: string;
+  type: string;
+  area_slug: string;
+};
+
 export type ChangeGroup = {
   group_id: string;
   group_kind: "human_trigger" | "auto_sync" | "maintenance" | "system";
@@ -327,6 +335,7 @@ export type ChangeGroup = {
   revision_count: number;
   artifact_count: number;
   type_counts?: ChangeGroupTypeCount[];
+  first_artifact?: ChangeGroupArtifactRef;
   areas: string[];
   authors: string[];
   time_start: string;
