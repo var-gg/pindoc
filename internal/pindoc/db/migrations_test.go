@@ -137,3 +137,36 @@ func TestProjectsSensitiveOpsMigrationContract(t *testing.T) {
 		}
 	}
 }
+
+func TestAuditUserFKsSetNullMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0036_audit_user_fks_set_null.sql")
+	if err != nil {
+		t.Fatalf("read audit user fks migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"artifacts_author_user_id_fkey",
+		"artifact_scope_edges_created_by_user_id_fkey",
+		"mcp_tool_calls_user_id_fkey",
+		"project_members_invited_by_fkey",
+		"read_events_user_id_fkey",
+		"ON DELETE SET NULL",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("audit user fks migration Up missing %q:\n%s", want, up)
+		}
+	}
+	for _, want := range []string{
+		"-- +goose Down",
+		"DROP CONSTRAINT IF EXISTS read_events_user_id_fkey",
+		"DROP CONSTRAINT IF EXISTS project_members_invited_by_fkey",
+		"DROP CONSTRAINT IF EXISTS mcp_tool_calls_user_id_fkey",
+		"DROP CONSTRAINT IF EXISTS artifact_scope_edges_created_by_user_id_fkey",
+		"DROP CONSTRAINT IF EXISTS artifacts_author_user_id_fkey",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("audit user fks migration Down missing %q", want)
+		}
+	}
+}
