@@ -46,9 +46,11 @@ func AddInstrumentedTool[I, O any](
 			return nil, zero, fmt.Errorf("auth: resolve principal for %q: %w", name, err)
 		}
 		if store == nil {
-			return handler(ctx, p, input)
+			result, output, err := handler(ctx, p, input)
+			output = applyMCPErrorContract(output, deps.UserLanguage)
+			return result, output, err
 		}
-		return instrumentCall(name, store, p, input, func() (*sdk.CallToolResult, O, error) {
+		return instrumentCall(name, store, deps.UserLanguage, p, input, func() (*sdk.CallToolResult, O, error) {
 			return handler(ctx, p, input)
 		})
 	}
@@ -67,6 +69,7 @@ func AddInstrumentedTool[I, O any](
 func instrumentCall[I, O any](
 	name string,
 	store *telemetry.Store,
+	lang string,
 	p *auth.Principal,
 	input I,
 	invoke func() (*sdk.CallToolResult, O, error),
@@ -75,6 +78,7 @@ func instrumentCall[I, O any](
 
 	inputJSON, _ := json.Marshal(input)
 	result, output, err := invoke()
+	output = applyMCPErrorContract(output, lang)
 	outputJSON, _ := json.Marshal(output)
 
 	errorCode := ""

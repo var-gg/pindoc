@@ -27,11 +27,14 @@ type projectCurrentInput struct {
 type projectCurrentOutput struct {
 	// not_ready surface — populated when the server can't pick a project
 	// (no input slug, no PINDOC_PROJECT env, no projects table row).
-	Status           string   `json:"status,omitempty"`
-	ErrorCode        string   `json:"error_code,omitempty"`
-	Failed           []string `json:"failed,omitempty"`
-	Checklist        []string `json:"checklist,omitempty"`
-	SuggestedActions []string `json:"suggested_actions,omitempty"`
+	Status           string               `json:"status,omitempty"`
+	ErrorCode        string               `json:"error_code,omitempty"`
+	Failed           []string             `json:"failed,omitempty"`
+	Checklist        []string             `json:"checklist,omitempty"`
+	ErrorCodes       []string             `json:"error_codes,omitempty" jsonschema:"canonical stable SCREAMING_SNAKE_CASE identifiers; branch on these"`
+	ChecklistItems   []ErrorChecklistItem `json:"checklist_items,omitempty" jsonschema:"localized checklist entries paired with stable codes"`
+	MessageLocale    string               `json:"message_locale,omitempty" jsonschema:"locale used for checklist/checklist_items.message after fallback"`
+	SuggestedActions []string             `json:"suggested_actions,omitempty"`
 
 	ID              string `json:"id,omitempty"`
 	Slug            string `json:"slug,omitempty"`

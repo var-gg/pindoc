@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -33,11 +34,19 @@ type projectCreateInput struct {
 }
 
 type projectCreateOutput struct {
-	ID          string `json:"id"`
-	Slug        string `json:"slug"`
-	Name        string `json:"name"`
-	URL         string `json:"url" jsonschema:"canonical UI path to the project's wiki — share this, not /wiki/..."`
-	DefaultArea string `json:"default_area" jsonschema:"slug of the 'misc' area seeded so artifacts can be filed immediately"`
+	Status         string               `json:"status,omitempty"`
+	ErrorCode      string               `json:"error_code,omitempty"`
+	Failed         []string             `json:"failed,omitempty"`
+	ErrorCodes     []string             `json:"error_codes,omitempty" jsonschema:"canonical stable SCREAMING_SNAKE_CASE identifiers; branch on these"`
+	Checklist      []string             `json:"checklist,omitempty"`
+	ChecklistItems []ErrorChecklistItem `json:"checklist_items,omitempty" jsonschema:"localized checklist entries paired with stable codes"`
+	MessageLocale  string               `json:"message_locale,omitempty" jsonschema:"locale used for checklist/checklist_items.message after fallback"`
+
+	ID          string `json:"id,omitempty"`
+	Slug        string `json:"slug,omitempty"`
+	Name        string `json:"name,omitempty"`
+	URL         string `json:"url,omitempty" jsonschema:"canonical UI path to the project's wiki — share this, not /wiki/..."`
+	DefaultArea string `json:"default_area,omitempty" jsonschema:"slug of the 'misc' area seeded so artifacts can be filed immediately"`
 	// BootstrapReceipt is a one-use search_receipt the agent can pass to
 	// the first artifact.propose call in the newly-created project without
 	// paying a separate artifact.search/context.for_task round-trip.
@@ -45,7 +54,7 @@ type projectCreateOutput struct {
 	// SearchReceipt is an alias for BootstrapReceipt for clients that
 	// already expect the generic receipt field name.
 	SearchReceipt string `json:"search_receipt,omitempty"`
-	Message       string `json:"message"`
+	Message       string `json:"message,omitempty"`
 	// ReconnectRequired + Activation + NextSteps describe how the new
 	// project becomes addressable. Account-level scope (Decision
 	// mcp-scope-account-level-industry-standard) means the new slug is
@@ -54,8 +63,8 @@ type projectCreateOutput struct {
 	// here for backward compat with agents that still branch on the
 	// flag.
 	ReconnectRequired bool           `json:"reconnect_required"`
-	Activation        string         `json:"activation" jsonschema:"one of: in_this_session"`
-	NextSteps         []NextToolHint `json:"next_steps"`
+	Activation        string         `json:"activation,omitempty" jsonschema:"one of: in_this_session"`
+	NextSteps         []NextToolHint `json:"next_steps,omitempty"`
 }
 
 // RegisterProjectCreate wires pindoc.project.create. The handler is a
@@ -91,6 +100,9 @@ func RegisterProjectCreate(server *sdk.Server, deps Deps) {
 				OwnerID:         in.OwnerID,
 			})
 			if err != nil {
+				if notReady, ok := projectCreateNotReady(deps.UserLanguage, err); ok {
+					return nil, notReady, nil
+				}
 				return nil, projectCreateOutput{}, err
 			}
 
@@ -107,6 +119,7 @@ func RegisterProjectCreate(server *sdk.Server, deps Deps) {
 			}
 
 			return nil, projectCreateOutput{
+				Status:            "accepted",
 				ID:                out.ID,
 				Slug:              out.Slug,
 				Name:              out.Name,
@@ -126,6 +139,61 @@ scope, Decision mcp-scope-account-level-industry-standard).
 			}, nil
 		},
 	)
+}
+
+func projectCreateNotReady(lang string, err error) (projectCreateOutput, bool) {
+	code := projectCreateErrorCode(err)
+	if code == "" {
+		return projectCreateOutput{}, false
+	}
+	out := projectCreateOutput{
+		Status:    "not_ready",
+		ErrorCode: code,
+		Failed:    []string{code},
+		Checklist: []string{projectCreateChecklistMessage(lang, code, err)},
+	}
+	return applyMCPErrorContract(out, lang), true
+}
+
+func projectCreateErrorCode(err error) string {
+	switch {
+	case errors.Is(err, projects.ErrSlugInvalid):
+		return "SLUG_INVALID"
+	case errors.Is(err, projects.ErrSlugReserved):
+		return "SLUG_RESERVED"
+	case errors.Is(err, projects.ErrSlugTaken):
+		return "SLUG_TAKEN"
+	case errors.Is(err, projects.ErrNameRequired):
+		return "NAME_REQUIRED"
+	case errors.Is(err, projects.ErrLangRequired):
+		return "LANG_REQUIRED"
+	case errors.Is(err, projects.ErrLangInvalid):
+		return "LANG_INVALID"
+	default:
+		return ""
+	}
+}
+
+func projectCreateChecklistMessage(lang, code string, err error) string {
+	if normalizeMessageLocale(lang) != "ko" {
+		return err.Error()
+	}
+	switch code {
+	case "SLUG_INVALID":
+		return "slug는 소문자로 시작하는 2-40자 kebab-case여야 합니다."
+	case "SLUG_RESERVED":
+		return "이 slug는 라우팅/예약어와 충돌합니다. 프로젝트에 더 구체적인 slug를 선택하세요."
+	case "SLUG_TAKEN":
+		return "같은 owner 아래에 이미 같은 project slug가 있습니다. 다른 slug를 선택하세요."
+	case "NAME_REQUIRED":
+		return "name은 필수입니다."
+	case "LANG_REQUIRED":
+		return "primary_language는 필수입니다. 사용자에게 en, ko, ja 중 하나를 명시적으로 확인하세요."
+	case "LANG_INVALID":
+		return "primary_language는 en, ko, ja 중 하나여야 합니다."
+	default:
+		return err.Error()
+	}
 }
 
 const projectCreateDescription = `

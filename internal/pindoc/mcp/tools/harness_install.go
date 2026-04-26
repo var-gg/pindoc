@@ -51,10 +51,19 @@ type harnessInstallInput struct {
 }
 
 type harnessInstallOutput struct {
+	// not_ready surface — populated for tool-level validation failures.
+	Status         string               `json:"status,omitempty"`
+	ErrorCode      string               `json:"error_code,omitempty"`
+	Failed         []string             `json:"failed,omitempty"`
+	ErrorCodes     []string             `json:"error_codes,omitempty" jsonschema:"canonical stable SCREAMING_SNAKE_CASE identifiers; branch on these"`
+	Checklist      []string             `json:"checklist,omitempty"`
+	ChecklistItems []ErrorChecklistItem `json:"checklist_items,omitempty" jsonschema:"localized checklist entries paired with stable codes"`
+	MessageLocale  string               `json:"message_locale,omitempty" jsonschema:"locale used for checklist/checklist_items.message after fallback"`
+
 	// SuggestedPath is relative to the repo root. The agent writes Body
 	// here using its own filesystem tool (Pindoc MCP does not touch the
 	// filesystem — separation of concerns).
-	SuggestedPath string `json:"suggested_path"`
+	SuggestedPath string `json:"suggested_path,omitempty"`
 
 	// Body is the full PINDOC.md content the agent should write.
 	Body string `json:"body,omitempty"`
@@ -68,7 +77,7 @@ type harnessInstallOutput struct {
 
 	// ClaudeMdIncludeLine is a one-line directive the agent appends to
 	// CLAUDE.md (or AGENTS.md) so every future session auto-loads PINDOC.md.
-	ClaudeMdIncludeLine string `json:"claude_md_include_line"`
+	ClaudeMdIncludeLine string `json:"claude_md_include_line,omitempty"`
 
 	// StyleSnippet is the register-separation block the agent drops into
 	// CLAUDE.md / AGENTS.md / .cursorrules (Task task-harness-claudemd-
@@ -83,21 +92,21 @@ type harnessInstallOutput struct {
 	// own environment to pick the right one (Claude Code → CLAUDE.md,
 	// Codex/OpenAI → AGENTS.md, Cursor → .cursorrules). If none exist
 	// the agent creates the first entry.
-	StyleSnippetTargets []string `json:"style_snippet_targets"`
+	StyleSnippetTargets []string `json:"style_snippet_targets,omitempty"`
 
 	// StyleSnippetMarker is the opening marker substring the agent looks
 	// for when deciding whether to append (none found), replace (same
 	// version found), or warn (different version / user-edited body).
 	// The matching close marker is the same string with " BEGIN " → " END ".
-	StyleSnippetMarker string `json:"style_snippet_marker"`
+	StyleSnippetMarker string `json:"style_snippet_marker,omitempty"`
 
 	// Message gives the agent a plain-English summary of what to do next.
-	Message string `json:"message"`
+	Message string `json:"message,omitempty"`
 
 	// ResponseFormat reports the resolved output mode. ContentETag is
 	// always returned so clients can avoid receiving the same body again.
-	ResponseFormat string `json:"response_format"`
-	ContentETag    string `json:"content_etag"`
+	ResponseFormat string `json:"response_format,omitempty"`
+	ContentETag    string `json:"content_etag,omitempty"`
 
 	// ContentURL is reserved for future retrievable harness payload URLs.
 	// Local MCP mode has no durable payload URL, so it is omitted today.
@@ -105,12 +114,12 @@ type harnessInstallOutput struct {
 	ContentOmitted bool   `json:"content_omitted,omitempty"`
 
 	// StyleSnippetETag mirrors ContentETag for the agent-settings snippet.
-	StyleSnippetETag    string `json:"style_snippet_etag"`
+	StyleSnippetETag    string `json:"style_snippet_etag,omitempty"`
 	StyleSnippetOmitted bool   `json:"style_snippet_omitted,omitempty"`
 
 	// Metadata the template was rendered from, so the agent can explain
 	// choices to the user.
-	RenderedFor RenderedFor `json:"rendered_for"`
+	RenderedFor RenderedFor `json:"rendered_for,omitzero"`
 }
 
 const (
@@ -163,7 +172,7 @@ func RegisterHarnessInstall(server *sdk.Server, deps Deps) {
 		func(ctx context.Context, p *auth.Principal, in harnessInstallInput) (*sdk.CallToolResult, harnessInstallOutput, error) {
 			responseFormat, err := normalizeHarnessResponseFormat(in.ResponseFormat)
 			if err != nil {
-				return nil, harnessInstallOutput{}, err
+				return nil, harnessInstallResponseFormatNotReady(deps.UserLanguage), nil
 			}
 
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -240,6 +249,24 @@ func normalizeHarnessResponseFormat(raw string) (string, error) {
 	default:
 		return "", fmt.Errorf("response_format must be %q or %q", harnessResponseFormatFull, harnessResponseFormatFileOnly)
 	}
+}
+
+func harnessInstallResponseFormatNotReady(lang string) harnessInstallOutput {
+	const code = "HARNESS_RESPONSE_FORMAT_INVALID"
+	out := harnessInstallOutput{
+		Status:    "not_ready",
+		ErrorCode: code,
+		Failed:    []string{code},
+		Checklist: []string{harnessInstallResponseFormatMessage(lang)},
+	}
+	return applyMCPErrorContract(out, lang)
+}
+
+func harnessInstallResponseFormatMessage(lang string) string {
+	if normalizeMessageLocale(lang) == "ko" {
+		return `response_format은 "full" 또는 "file_only"만 허용됩니다.`
+	}
+	return fmt.Sprintf("response_format must be %q or %q", harnessResponseFormatFull, harnessResponseFormatFileOnly)
 }
 
 func harnessETag(content string) string {

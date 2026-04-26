@@ -49,13 +49,16 @@ type UserRow struct {
 }
 
 type userCurrentOutput struct {
-	Status    string   `json:"status"`
-	Code      string   `json:"code,omitempty"`
-	ErrorCode string   `json:"error_code,omitempty"`
-	Failed    []string `json:"failed,omitempty"`
-	Checklist []string `json:"checklist,omitempty"`
-	Hints     []string `json:"hints,omitempty"`
-	User      *UserRow `json:"user,omitempty"`
+	Status         string               `json:"status"`
+	Code           string               `json:"code,omitempty"`
+	ErrorCode      string               `json:"error_code,omitempty"`
+	Failed         []string             `json:"failed,omitempty"`
+	ErrorCodes     []string             `json:"error_codes,omitempty" jsonschema:"canonical stable SCREAMING_SNAKE_CASE identifiers; branch on these"`
+	Checklist      []string             `json:"checklist,omitempty"`
+	ChecklistItems []ErrorChecklistItem `json:"checklist_items,omitempty" jsonschema:"localized checklist entries paired with stable codes"`
+	MessageLocale  string               `json:"message_locale,omitempty" jsonschema:"locale used for checklist/checklist_items.message after fallback"`
+	Hints          []string             `json:"hints,omitempty"`
+	User           *UserRow             `json:"user,omitempty"`
 }
 
 // RegisterUserCurrent wires pindoc.user.current. Missing user identity is
@@ -133,13 +136,16 @@ type userUpdateInput struct {
 }
 
 type userUpdateOutput struct {
-	Status        string            `json:"status"`
-	ErrorCode     string            `json:"error_code,omitempty"`
-	Failed        []string          `json:"failed,omitempty"`
-	Checklist     []string          `json:"checklist,omitempty"`
-	User          *UserRow          `json:"user,omitempty"`
-	ChangedFields []string          `json:"changed_fields,omitempty"`
-	Previous      map[string]string `json:"previous,omitempty"`
+	Status         string               `json:"status"`
+	ErrorCode      string               `json:"error_code,omitempty"`
+	Failed         []string             `json:"failed,omitempty"`
+	ErrorCodes     []string             `json:"error_codes,omitempty" jsonschema:"canonical stable SCREAMING_SNAKE_CASE identifiers; branch on these"`
+	Checklist      []string             `json:"checklist,omitempty"`
+	ChecklistItems []ErrorChecklistItem `json:"checklist_items,omitempty" jsonschema:"localized checklist entries paired with stable codes"`
+	MessageLocale  string               `json:"message_locale,omitempty" jsonschema:"locale used for checklist/checklist_items.message after fallback"`
+	User           *UserRow             `json:"user,omitempty"`
+	ChangedFields  []string             `json:"changed_fields,omitempty"`
+	Previous       map[string]string    `json:"previous,omitempty"`
 }
 
 // RegisterUserUpdate wires pindoc.user.update. Validates inputs, mutates

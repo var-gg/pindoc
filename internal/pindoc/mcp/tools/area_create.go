@@ -30,11 +30,14 @@ type areaCreateInput struct {
 }
 
 type areaCreateOutput struct {
-	Status          string   `json:"status"` // accepted | not_ready
-	ErrorCode       string   `json:"error_code,omitempty"`
-	Failed          []string `json:"failed,omitempty"`
-	Checklist       []string `json:"checklist,omitempty"`
-	PatchableFields []string `json:"patchable_fields,omitempty"`
+	Status          string               `json:"status"` // accepted | not_ready
+	ErrorCode       string               `json:"error_code,omitempty"`
+	Failed          []string             `json:"failed,omitempty"`
+	Checklist       []string             `json:"checklist,omitempty"`
+	ErrorCodes      []string             `json:"error_codes,omitempty" jsonschema:"canonical stable SCREAMING_SNAKE_CASE identifiers; branch on these"`
+	ChecklistItems  []ErrorChecklistItem `json:"checklist_items,omitempty" jsonschema:"localized checklist entries paired with stable codes"`
+	MessageLocale   string               `json:"message_locale,omitempty" jsonschema:"locale used for checklist/checklist_items.message after fallback"`
+	PatchableFields []string             `json:"patchable_fields,omitempty"`
 
 	ID             string    `json:"id,omitempty"`
 	ProjectSlug    string    `json:"project_slug,omitempty"`
