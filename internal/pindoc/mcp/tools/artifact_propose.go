@@ -20,6 +20,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/i18n"
+	"github.com/var-gg/pindoc/internal/pindoc/policy"
 	"github.com/var-gg/pindoc/internal/pindoc/receipts"
 )
 
@@ -524,13 +525,13 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			// the supersede bookkeeping just before commit.
 
 			// --- Resolve area + project ----------------------------------
-			var projectID, areaID string
+			var projectID, areaID, sensitiveOps string
 			err = deps.DB.QueryRow(ctx, `
-				SELECT proj.id::text, area.id::text
+				SELECT proj.id::text, area.id::text, COALESCE(NULLIF(proj.sensitive_ops, ''), 'auto')
 				FROM projects proj
 				JOIN areas area ON area.project_id = proj.id
 				WHERE proj.slug = $1 AND area.slug = $2
-			`, scope.ProjectSlug, in.AreaSlug).Scan(&projectID, &areaID)
+			`, scope.ProjectSlug, in.AreaSlug).Scan(&projectID, &areaID, &sensitiveOps)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, artifactProposeOutput{
 					Status:    "not_ready",
@@ -845,6 +846,13 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			var publishedAt time.Time
 			taskMetaJSON := taskMetaToJSON(in.Type, in.TaskMeta)
 			artifactMetaJSON := artifactMetaToJSON(resolvedMeta)
+			reviewOp := policy.OpCompletenessWrite
+			if supersedeTargetID != "" {
+				reviewOp = policy.OpSupersede
+			}
+			reviewState := policy.ReviewStateFor(sensitiveOps, reviewOp, policy.SensitiveContext{
+				ToCompleteness: completeness,
+			})
 			for attempt := 0; attempt < 10; attempt++ {
 				err = tx.QueryRow(ctx, `
 					INSERT INTO artifacts (
@@ -853,10 +861,10 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						completeness, status, review_state,
 						author_kind, author_id, author_version, author_user_id,
 						task_meta, artifact_meta, published_at
-					) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'published', 'auto_published', 'agent', $10, $11, NULLIF($12, '')::uuid, $13, $14::jsonb, now())
+					) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'published', $15, 'agent', $10, $11, NULLIF($12, '')::uuid, $13, $14::jsonb, now())
 					RETURNING id::text, published_at
 				`, projectID, areaID, finalSlug, in.Type, in.Title, in.BodyMarkdown, in.Tags,
-					bodyLocale, completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), p.UserID, taskMetaJSON, artifactMetaJSON).Scan(&newID, &publishedAt)
+					bodyLocale, completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), p.UserID, taskMetaJSON, artifactMetaJSON, reviewState).Scan(&newID, &publishedAt)
 				if err == nil {
 					break
 				}
@@ -870,16 +878,22 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				return nil, artifactProposeOutput{}, errors.New("could not allocate a unique slug after 10 attempts")
 			}
 
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO events (project_id, kind, subject_id, payload)
-				VALUES ($1, 'artifact.published', $2, jsonb_build_object(
-					'area_slug', $3::text,
-					'type', $4::text,
-					'slug', $5::text,
-					'author_id', $6::text
-				))
-			`, projectID, newID, in.AreaSlug, in.Type, finalSlug, in.AuthorID); err != nil {
-				return nil, artifactProposeOutput{}, fmt.Errorf("event insert: %w", err)
+			if reviewState == policy.ReviewStatePending {
+				if err := recordReviewRequiredEvent(ctx, tx, projectID, newID, string(reviewOp), in.AuthorID); err != nil {
+					return nil, artifactProposeOutput{}, fmt.Errorf("review required event: %w", err)
+				}
+			} else {
+				if _, err := tx.Exec(ctx, `
+					INSERT INTO events (project_id, kind, subject_id, payload)
+					VALUES ($1, 'artifact.published', $2, jsonb_build_object(
+						'area_slug', $3::text,
+						'type', $4::text,
+						'slug', $5::text,
+						'author_id', $6::text
+					))
+				`, projectID, newID, in.AreaSlug, in.Type, finalSlug, in.AuthorID); err != nil {
+					return nil, artifactProposeOutput{}, fmt.Errorf("event insert: %w", err)
+				}
 			}
 			if err := recordAreaSuggestionResolvedEvent(ctx, tx, projectID, newID, areaSuggestionCorrelation(in), in.AreaSlug, finalSlug, in.AuthorID); err != nil {
 				return nil, artifactProposeOutput{}, fmt.Errorf("area suggestion resolve event: %w", err)
@@ -1062,7 +1076,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 
 	ref := normalizeRef(in.UpdateOf)
 
-	var artifactID, projectID, currentBody, currentTitle, currentType, currentSlug string
+	var artifactID, projectID, currentBody, currentTitle, currentType, currentSlug, sensitiveOps string
 	var currentTags []string
 	var currentCompleteness string
 	var currentMetaRaw, currentTaskMetaRaw []byte
@@ -1070,6 +1084,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	err := deps.DB.QueryRow(ctx, `
 		SELECT a.id::text, a.project_id::text, a.body_markdown, a.title, a.type, a.slug,
 		       a.tags, a.completeness, a.artifact_meta, a.task_meta,
+		       COALESCE(NULLIF(p.sensitive_ops, ''), 'auto'),
 		       COALESCE((SELECT max(revision_number) FROM artifact_revisions WHERE artifact_id = a.id), 0)
 		FROM artifacts a
 		JOIN projects p ON p.id = a.project_id
@@ -1077,7 +1092,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		LIMIT 1
 	`, scope.ProjectSlug, ref).Scan(
 		&artifactID, &projectID, &currentBody, &currentTitle, &currentType, &currentSlug,
-		&currentTags, &currentCompleteness, &currentMetaRaw, &currentTaskMetaRaw, &lastRev,
+		&currentTags, &currentCompleteness, &currentMetaRaw, &currentTaskMetaRaw, &sensitiveOps, &lastRev,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, artifactProposeOutput{
@@ -1323,6 +1338,10 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 			completeness = "partial"
 		}
 	}
+	reviewState := policy.ReviewStateFor(sensitiveOps, policy.OpCompletenessWrite, policy.SensitiveContext{
+		FromCompleteness: currentCompleteness,
+		ToCompleteness:   completeness,
+	})
 
 	tx, err := deps.DB.Begin(ctx)
 	if err != nil {
@@ -1381,11 +1400,16 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		           ELSE COALESCE($8, task_meta)
 		       END,
 		       artifact_meta  = COALESCE($9::jsonb, artifact_meta),
+		       review_state   = CASE
+		           WHEN $11::text = 'pending_review' THEN 'pending_review'
+		           ELSE review_state
+		       END,
 		       updated_at     = now()
 		 WHERE id = $1
 		RETURNING slug, COALESCE(published_at, now())
 	`, artifactID, in.Title, in.BodyMarkdown, in.Tags, completeness,
 		in.AuthorID, nullIfEmpty(in.AuthorVersion), taskMetaPatch, artifactMetaPatch, autoClaimedDone,
+		reviewState,
 	).Scan(&slug, &publishedAt)
 	if err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("update head: %w", err)
@@ -1415,6 +1439,11 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	}
 	if err := recordAreaSuggestionResolvedEvent(ctx, tx, projectID, artifactID, areaSuggestionCorrelation(in), in.AreaSlug, slug, in.AuthorID); err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("area suggestion resolve event: %w", err)
+	}
+	if reviewState == policy.ReviewStatePending {
+		if err := recordReviewRequiredEvent(ctx, tx, projectID, artifactID, string(policy.OpCompletenessWrite), in.AuthorID); err != nil {
+			return nil, artifactProposeOutput{}, fmt.Errorf("review required event: %w", err)
+		}
 	}
 
 	// Phase F scope-defer edge write. Runs inside the same tx so the
@@ -1625,6 +1654,17 @@ func recordAreaSuggestionResolvedEvent(ctx context.Context, tx pgx.Tx, projectID
 			'author_id',       $6::text
 		))
 	`, projectID, artifactID, correlationID, finalAreaSlug, slug, authorID)
+	return err
+}
+
+func recordReviewRequiredEvent(ctx context.Context, tx pgx.Tx, projectID, artifactID, op, authorID string) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO events (project_id, kind, subject_id, payload)
+		VALUES ($1, 'review.required', $2, jsonb_build_object(
+			'op',        $3::text,
+			'author_id', $4::text
+		))
+	`, projectID, artifactID, op, authorID)
 	return err
 }
 

@@ -296,7 +296,7 @@ func buildCapabilities(deps Deps, p *auth.Principal, multiProject bool) Capabili
 		Transport:                   transport,
 		UpdateVia:                   "update_of",
 		RequiresExpectedVersion:     true,
-		ReviewQueueSupported:        false,
+		ReviewQueueSupported:        true,
 		ReceiptTTLSec:               int(receiptTTLSeconds),
 		ReceiptExemptionLimit:       receiptExemptionLimit(deps),
 		PublicBaseURL:               publicBase,

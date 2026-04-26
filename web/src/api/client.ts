@@ -35,12 +35,16 @@ export type Project = {
   description?: string;
   color?: string;
   primary_language: string;
+  sensitive_ops?: "auto" | "confirm";
   // Compatibility alias for primary_language. Locale is metadata, not a
   // route or identity key.
   locale?: string;
   areas_count: number;
   artifacts_count: number;
   created_at: string;
+  capabilities?: {
+    review_queue_supported?: boolean;
+  };
 };
 
 export type ProjectListItem = {
@@ -364,6 +368,20 @@ export type TodayResp = {
   max_revision_id: number;
 };
 
+export type InboxResp = {
+  project_slug: string;
+  count: number;
+  items: ArtifactRef[];
+};
+
+export type InboxReviewResp = {
+  status: "accepted";
+  artifact_id: string;
+  slug: string;
+  review_state: "approved" | "rejected";
+  row_status: "published" | "archived";
+};
+
 export type ReadEventInput = {
   artifact_id: string;
   artifact_slug?: string;
@@ -611,6 +629,30 @@ export const api = {
   },
   artifact: (project: string, idOrSlug: string) =>
     j<Artifact>(`${p(project)}/artifacts/${encodeURIComponent(idOrSlug)}`),
+  inbox: (project: string) => j<InboxResp>(`${p(project)}/inbox`),
+  inboxReview: async (
+    project: string,
+    idOrSlug: string,
+    decision: "approve" | "reject",
+  ): Promise<InboxReviewResp> => {
+    const res = await fetch(
+      `${p(project)}/inbox/${encodeURIComponent(idOrSlug)}/review`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          decision,
+          reviewer_id: "reader",
+          commit_msg: `Reader Inbox ${decision}`,
+        }),
+      },
+    );
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`${res.status} ${res.statusText}: ${body.slice(0, 200)}`);
+    }
+    return (await res.json()) as InboxReviewResp;
+  },
   changeGroups: (project: string, params?: { limit?: number; area?: string; kind?: string; locale?: string }) => {
     const qs = new URLSearchParams();
     if (params?.limit) qs.set("limit", String(params.limit));

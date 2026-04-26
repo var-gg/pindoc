@@ -6,6 +6,7 @@ import { api, type Artifact, type ArtifactRef, type Area } from "../api/client";
 import { useI18n } from "../i18n";
 import { CmdK } from "./CmdK";
 import { GraphSurface } from "./Graph";
+import { Inbox } from "./Inbox";
 import { ArtifactByline } from "./ArtifactByline";
 import { ReaderSurface, type DetailScope } from "./ReaderSurface";
 import { Sidebar } from "./Sidebar";
@@ -37,30 +38,13 @@ export type ReaderView = "reader" | "inbox" | "graph" | "tasks" | "today";
 
 // surfaceAllows decides which artifacts a Surface's natural set contains
 // (Decision `decision-reader-ia-hierarchy`). Wiki = everything except Task;
-// Tasks = only Task; Inbox/Graph are stubs and currently pass through the
-// full list (real Inbox queue lands with the Review/Risk split; Graph's
-// sub-graph filtering ships with the React-ification in M1.5).
+// Tasks = only Task; Inbox owns its review queue data; Graph currently
+// passes through the full list until sub-graph filtering lands.
 function surfaceAllows(view: ReaderView, a: ArtifactRef): boolean {
   if (view === "tasks") return a.type === "Task";
   if (view === "today") return true;
   if (view === "reader") return a.type !== "Task";
   return true;
-}
-
-// inboxStubCount returns 0 (the Inbox surface is a stub) and logs once so
-// engineers diffing the nav badge realise the zero is structural, not a
-// load bug. Replace with a real count when the Review/Risk surfaces ship
-// (Task `reader-trust-card-...` Open issue — split from this component).
-let inboxStubWarned = false;
-function inboxStubCount(): number {
-  if (!inboxStubWarned) {
-    inboxStubWarned = true;
-    // eslint-disable-next-line no-console
-    console.warn(
-      "[pindoc] ReaderShell inboxCount is hard-coded to 0 — Inbox surface is a stub. See Task reader-trust-card-*.",
-    );
-  }
-  return 0;
 }
 
 type Props = {
@@ -89,6 +73,7 @@ export function ReaderShell({ view }: Props) {
   const [taskInspectorDetail, setTaskInspectorDetail] = useState<Artifact | null>(null);
   const [taskInspectorLoading, setTaskInspectorLoading] = useState(false);
   const [taskInspectorReloadNonce, setTaskInspectorReloadNonce] = useState(0);
+  const [inboxCount, setInboxCount] = useState(0);
   // Surface·Type·Area 3축: Surface is owned by the URL segment (wiki|tasks|
   // graph|inbox — already carried in `view` prop). Area and Type are the
   // secondary filters layered on top and survive round-trips through the
@@ -116,6 +101,24 @@ export function ReaderShell({ view }: Props) {
     // would fight the sync effect below on every param write.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
+
+  useEffect(() => {
+    if (!project) {
+      setInboxCount(0);
+      return;
+    }
+    let cancelled = false;
+    api.inbox(project)
+      .then((resp) => {
+        if (!cancelled) setInboxCount(resp.count);
+      })
+      .catch(() => {
+        if (!cancelled) setInboxCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project]);
 
   // URL search param sync (acceptance #10). Keep `?area=` / `?type=` in
   // lockstep with state so bookmarking or sharing a URL restores the exact
@@ -456,7 +459,7 @@ export function ReaderShell({ view }: Props) {
         onToggleTheme={toggleTheme}
         onOpenPalette={() => setPaletteOpen(true)}
         onToggleMenu={() => setMenuOpen((v) => !v)}
-        inboxCount={inboxStubCount()}
+        inboxCount={inboxCount}
         readerWidth={readerWidth}
         onChangeReaderWidth={changeReaderWidth}
       />
@@ -498,6 +501,7 @@ export function ReaderShell({ view }: Props) {
           onApplyBadgeFilter={applyBadgeFilter}
           onApplyAreaFilter={applyAreaFilterFromBadge}
           onSelectArea={handleSelectArea}
+          onInboxCountChange={setInboxCount}
         />
         <Sidecar
           projectSlug={project}
@@ -631,6 +635,7 @@ function Body({
   onApplyBadgeFilter,
   onApplyAreaFilter,
   onSelectArea,
+  onInboxCountChange,
 }: {
   view: ReaderView;
   projectSlug: string;
@@ -655,6 +660,7 @@ function Body({
   onApplyBadgeFilter: (filter: BadgeFilter) => void;
   onApplyAreaFilter: (areaSlug: string) => void;
   onSelectArea: (areaSlug: string) => void;
+  onInboxCountChange: (count: number) => void;
 }) {
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -706,16 +712,7 @@ function Body({
       />
     );
   }
-  if (view === "inbox") {
-    return (
-      <main className="content">
-        <div className="surface-panel">
-          <SurfaceHeader name="inbox" count={0} />
-          <EmptyState message={t("wiki.stub_inbox")} />
-        </div>
-      </main>
-    );
-  }
+  if (view === "inbox") return <Inbox projectSlug={projectSlug} onCountChange={onInboxCountChange} />;
   if (view === "today") {
     return (
       <Today

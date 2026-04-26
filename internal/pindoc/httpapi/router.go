@@ -123,6 +123,8 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/p/{project}/artifacts/{idOrSlug}/diff", d.handleArtifactDiff)
 	mux.HandleFunc("GET /api/p/{project}/search", d.handleSearch)
 	mux.HandleFunc("GET /api/p/{project}/change-groups", d.handleChangeGroups)
+	mux.HandleFunc("GET /api/p/{project}/inbox", d.handleInbox)
+	mux.HandleFunc("POST /api/p/{project}/inbox/{idOrSlug}/review", d.handleInboxReview)
 	mux.HandleFunc("POST /api/p/{project}/read-mark", d.handleReadMark)
 	mux.HandleFunc("POST /api/p/{project}/read-events", d.handleReadEvent)
 	mux.HandleFunc("GET /api/p/{project}/export", d.handleProjectExport)

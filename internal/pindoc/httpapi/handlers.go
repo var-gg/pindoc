@@ -25,6 +25,7 @@ type projectInfo struct {
 	Description     string `json:"description,omitempty"`
 	Color           string `json:"color,omitempty"`
 	PrimaryLanguage string `json:"primary_language"`
+	SensitiveOps    string `json:"sensitive_ops"`
 	// Locale is a compatibility alias for PrimaryLanguage. Locale is no
 	// longer part of project identity or Reader URLs after task-canonical-
 	// locale-migration.
@@ -33,6 +34,7 @@ type projectInfo struct {
 	ArtifactsCount int           `json:"artifacts_count"`
 	CreatedAt      time.Time     `json:"created_at"`
 	Rendering      RenderingCaps `json:"rendering"`
+	Capabilities   ProjectCaps   `json:"capabilities"`
 }
 
 // RenderingCaps tells an agent which markdown features actually render in
@@ -44,6 +46,10 @@ type RenderingCaps struct {
 	Extensions     []string `json:"extensions"`
 	CodeLanguages  []string `json:"code_languages"`
 	Notes          string   `json:"notes,omitempty"`
+}
+
+type ProjectCaps struct {
+	ReviewQueueSupported bool `json:"review_queue_supported"`
 }
 
 var pindocRenderingCaps = RenderingCaps{
@@ -245,13 +251,13 @@ func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
 	err := d.DB.QueryRow(r.Context(), `
 		SELECT
 			p.id::text, p.slug, p.name, p.owner_id, p.description, p.color,
-			p.primary_language, p.primary_language, p.created_at,
+			p.primary_language, p.primary_language, COALESCE(NULLIF(p.sensitive_ops, ''), 'auto'), p.created_at,
 			(SELECT count(*) FROM areas     WHERE project_id = p.id),
 			(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
 		FROM projects p WHERE p.slug = $1
 	`, slug).Scan(
 		&out.ID, &out.Slug, &out.Name, &out.OwnerID, &desc, &color,
-		&out.PrimaryLanguage, &out.Locale, &out.CreatedAt,
+		&out.PrimaryLanguage, &out.Locale, &out.SensitiveOps, &out.CreatedAt,
 		&out.AreasCount, &out.ArtifactsCount,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -270,6 +276,7 @@ func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
 		out.Color = *color
 	}
 	out.Rendering = pindocRenderingCaps
+	out.Capabilities = ProjectCaps{ReviewQueueSupported: true}
 	writeJSON(w, http.StatusOK, out)
 }
 

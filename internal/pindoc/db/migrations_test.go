@@ -106,3 +106,34 @@ func TestReadEventsMigrationContract(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectsSensitiveOpsMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0035_projects_sensitive_ops.sql")
+	if err != nil {
+		t.Fatalf("read projects sensitive ops migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"ADD COLUMN IF NOT EXISTS sensitive_ops TEXT NOT NULL DEFAULT 'auto'",
+		"DROP CONSTRAINT IF EXISTS projects_sensitive_ops_check",
+		"ADD CONSTRAINT projects_sensitive_ops_check",
+		"CHECK (sensitive_ops IN ('auto', 'confirm'))",
+		"SET sensitive_ops = 'auto'",
+		"ALTER COLUMN sensitive_ops SET DEFAULT 'auto'",
+		"ALTER COLUMN sensitive_ops SET NOT NULL",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("projects sensitive_ops migration Up missing %q:\n%s", want, up)
+		}
+	}
+	for _, want := range []string{
+		"-- +goose Down",
+		"DROP CONSTRAINT IF EXISTS projects_sensitive_ops_check",
+		"DROP COLUMN IF EXISTS sensitive_ops",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("projects sensitive_ops migration Down missing %q", want)
+		}
+	}
+}
