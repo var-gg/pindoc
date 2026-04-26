@@ -67,6 +67,10 @@ type Props = {
   // the Reader refetches the detail and the revision rail / TaskControls
   // reflect the new head.
   onArtifactUpdated?: () => void;
+  // Wiki list inspector mode reuses Sidecar as a brief. In that mode the
+  // full article is one explicit action away instead of implicit card
+  // navigation.
+  showOpenDetailAction?: boolean;
 };
 
 type CollapsibleKey = "provenance" | "policy" | "timeline" | "meta";
@@ -83,7 +87,16 @@ const DEFAULT_COLLAPSED_STATE: CollapsedState = {
   meta: true,
 };
 
-export function Sidecar({ projectSlug, detail, emptyMessage, authMode, agents, users, onArtifactUpdated }: Props) {
+export function Sidecar({
+  projectSlug,
+  detail,
+  emptyMessage,
+  authMode,
+  agents,
+  users,
+  onArtifactUpdated,
+  showOpenDetailAction,
+}: Props) {
   const { t } = useI18n();
   const [collapsed, toggleSection] = useSidecarCollapseState();
   // TOC feeds off body_markdown; Markdown.tsx independently derives the
@@ -128,6 +141,12 @@ export function Sidecar({ projectSlug, detail, emptyMessage, authMode, agents, u
       <IdentityStrip detail={detail} />
 
       <QuickActions detail={detail} artifactHref={artifactHref} />
+      {showOpenDetailAction && (
+        <Link to={artifactHref} className="sidecar-open-detail">
+          <span>{t("reader.inspector_open_detail")}</span>
+          <ArrowUpRight className="lucide" aria-hidden="true" />
+        </Link>
+      )}
 
       {headings.length >= 2 && <Toc headings={headings} />}
 

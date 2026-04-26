@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
-import { ArrowUpRight, PanelRightOpen, X } from "lucide-react";
+import { PanelRightOpen, X } from "lucide-react";
 import type { Aggregate } from "./useReaderData";
 import { api, type Artifact, type ArtifactRef, type Area } from "../api/client";
 import { useI18n } from "../i18n";
@@ -78,6 +78,9 @@ export function ReaderShell({ view }: Props) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [wikiInspectorSlug, setWikiInspectorSlug] = useState<string | null>(null);
+  const [wikiInspectorDetail, setWikiInspectorDetail] = useState<Artifact | null>(null);
+  const [wikiInspectorLoading, setWikiInspectorLoading] = useState(false);
   const [taskInspectorSlug, setTaskInspectorSlug] = useState<string | null>(null);
   const [taskInspectorDetail, setTaskInspectorDetail] = useState<Artifact | null>(null);
   const [taskInspectorLoading, setTaskInspectorLoading] = useState(false);
@@ -250,6 +253,29 @@ export function ReaderShell({ view }: Props) {
   };
 
   useEffect(() => {
+    if (view !== "reader" || slug || !wikiInspectorSlug) {
+      setWikiInspectorDetail(null);
+      setWikiInspectorLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setWikiInspectorLoading(true);
+    api.artifact(project, wikiInspectorSlug)
+      .then((artifact) => {
+        if (!cancelled) setWikiInspectorDetail(artifact);
+      })
+      .catch(() => {
+        if (!cancelled) setWikiInspectorDetail(null);
+      })
+      .finally(() => {
+        if (!cancelled) setWikiInspectorLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, slug, project, wikiInspectorSlug]);
+
+  useEffect(() => {
     if (view !== "tasks" || slug || !taskInspectorSlug) {
       setTaskInspectorDetail(null);
       setTaskInspectorLoading(false);
@@ -319,6 +345,22 @@ export function ReaderShell({ view }: Props) {
     );
   }, [surfaceList, selectedArea, badgeFilters]);
 
+  useEffect(() => {
+    if (paletteOpen || shortcutsOpen || view !== "reader" || slug || !wikiInspectorSlug) return;
+    const inspectedSlug = wikiInspectorSlug;
+    function onKey(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const openKey = e.key.toLowerCase() === "o" || (e.key === "Enter" && e.shiftKey);
+      if (!openKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, button, a, [contenteditable='true']")) return;
+      e.preventDefault();
+      navigate(filteredReaderHref(baseRoute, inspectedSlug, selectedArea, selectedType, badgeFilters));
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [paletteOpen, shortcutsOpen, view, slug, wikiInspectorSlug, navigate, baseRoute, selectedArea, selectedType, badgeFilters]);
+
   if (state.kind === "loading") {
     return <div className="reader-state">{t("wiki.loading")}</div>;
   }
@@ -339,12 +381,16 @@ export function ReaderShell({ view }: Props) {
   const reload = state.reload;
   const sidecarDetail =
     view === "reader"
-      ? detail
+      ? detail ?? wikiInspectorDetail
       : view === "tasks"
         ? detail ?? taskInspectorDetail
         : null;
   const sidecarEmptyMessage =
-    view === "tasks" && !detail
+    view === "reader" && !detail
+      ? wikiInspectorLoading
+        ? t("reader.inspector_loading")
+        : t("reader.inspector_empty")
+      : view === "tasks" && !detail
       ? taskInspectorLoading
         ? t("tasks.inspector_loading")
         : t("tasks.inspector_empty")
@@ -405,6 +451,8 @@ export function ReaderShell({ view }: Props) {
           selectedArea={selectedArea}
           selectedType={selectedType}
           badgeFilters={badgeFilters}
+          selectedWikiSlug={wikiInspectorSlug}
+          onSelectWikiArtifact={setWikiInspectorSlug}
           areaNameBySlug={areaNameBySlug}
           areaPathBySlug={areaPathBySlug}
           keyboardDisabled={paletteOpen || shortcutsOpen}
@@ -425,6 +473,7 @@ export function ReaderShell({ view }: Props) {
           authMode={authMode}
           agents={agents}
           users={users}
+          showOpenDetailAction={view === "reader" && !detail && Boolean(wikiInspectorDetail)}
           onArtifactUpdated={view === "tasks" ? handleTaskInspectorUpdated : reload}
         />
       </div>
@@ -535,6 +584,8 @@ function Body({
   selectedArea,
   selectedType,
   badgeFilters,
+  selectedWikiSlug,
+  onSelectWikiArtifact,
   areaNameBySlug,
   areaPathBySlug,
   keyboardDisabled,
@@ -557,6 +608,8 @@ function Body({
   selectedArea: string | null;
   selectedType: string | null;
   badgeFilters: BadgeFilter[];
+  selectedWikiSlug: string | null;
+  onSelectWikiArtifact: (slug: string) => void;
   areaNameBySlug: ReadonlyMap<string, string>;
   areaPathBySlug: ReadonlyMap<string, string[]>;
   keyboardDisabled: boolean;
@@ -712,24 +765,40 @@ function Body({
           <div className="artifact-list">
             {list.map((a) => {
               const linkBase = `/p/${projectSlug}/wiki`;
-              const isActive = currentSlug === a.slug;
+              const href = filteredReaderHref(linkBase, a.slug, selectedArea, selectedType, badgeFilters);
+              const isActive = currentSlug === a.slug || selectedWikiSlug === a.slug;
               return (
-                <Link
+                <article
                   key={a.id}
-                  to={filteredReaderHref(linkBase, a.slug, selectedArea, selectedType, badgeFilters)}
                   className={`backlink${isActive ? " is-active" : ""}`}
-                  title={t("reader.card_open_detail_hint")}
-                  style={isActive ? {
-                    borderColor: "var(--accent)",
-                    background: "color-mix(in oklch, var(--accent) 10%, transparent)",
-                  } : undefined}
+                  tabIndex={0}
+                  role="button"
+                  aria-selected={isActive}
+                  title={t("reader.card_select_hint")}
+                  onClick={() => onSelectWikiArtifact(a.slug)}
+                  onDoubleClick={() => navigate(href)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && e.shiftKey) {
+                      e.preventDefault();
+                      navigate(href);
+                      return;
+                    }
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onSelectWikiArtifact(a.slug);
+                      return;
+                    }
+                    if (e.key.toLowerCase() === "o") {
+                      e.preventDefault();
+                      navigate(href);
+                    }
+                  }}
                 >
                   <div className="backlink__head">
                     <span className="backlink__title">{a.title}</span>
-                    <ArrowUpRight
-                      className="lucide backlink__open-icon"
-                      aria-hidden="true"
-                    />
+                    <span className="backlink__inspect" aria-label={t("reader.card_select_hint")}>
+                      <PanelRightOpen className="lucide" aria-hidden="true" />
+                    </span>
                   </div>
                   <div className="backlink__excerpt">
                     <span className="backlink__badges">
@@ -742,7 +811,7 @@ function Body({
                     <ArtifactByline artifact={a} variant="list" />
                     <time dateTime={a.updated_at}>{new Date(a.updated_at).toLocaleDateString()}</time>
                   </div>
-                </Link>
+                </article>
               );
             })}
           </div>
