@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestGroupRowsPriorityKeysAndImportance(t *testing.T) {
@@ -96,6 +97,56 @@ func TestCompactNoGroupsOneGroupAndCap(t *testing.T) {
 	capped := Compact(groups, 1)
 	if len(capped) != 1 || capped[0].GroupID != "g1" {
 		t.Fatalf("capped compact = %#v", capped)
+	}
+}
+
+func TestTrimTextRuneSafeBoundaries(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		max  int
+		want string
+	}{
+		{
+			name: "english",
+			in:   "abcdefghijklmnopqrstuvwxyz",
+			max:  10,
+			want: "abcdefghij...",
+		},
+		{
+			name: "korean-byte-boundary",
+			in:   "한글ABC",
+			max:  4,
+			want: "한글AB...",
+		},
+		{
+			name: "mixed",
+			in:   "abc한글def",
+			max:  5,
+			want: "abc한글...",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := trimText(tc.in, tc.max)
+			if got != tc.want {
+				t.Fatalf("trimText() = %q, want %q", got, tc.want)
+			}
+			if !utf8.ValidString(got) {
+				t.Fatalf("trimText() returned invalid UTF-8: %q", got)
+			}
+		})
+	}
+}
+
+func TestSummarizeCommitsKeepsUTF8Valid(t *testing.T) {
+	msg := strings.Repeat("가", 120)
+	got := summarizeCommits([]string{msg}, 1, 1)
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("summary should preserve ellipsis on truncation: %q", got)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("summary returned invalid UTF-8: %q", got)
 	}
 }
 

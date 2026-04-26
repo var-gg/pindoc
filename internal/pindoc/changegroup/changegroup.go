@@ -653,8 +653,15 @@ func firstNonEmpty(values ...string) string {
 
 func trimText(s string, max int) string {
 	s = strings.TrimSpace(s)
-	if len(s) <= max {
+	if max <= 0 {
+		if s == "" {
+			return ""
+		}
+		return "..."
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
 		return s
 	}
-	return strings.TrimSpace(s[:max]) + "..."
+	return strings.TrimSpace(string(runes[:max])) + "..."
 }
