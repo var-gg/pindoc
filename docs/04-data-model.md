@@ -47,16 +47,23 @@ DomainPack {
 
 ```
 ProjectMembership {
-  id, project_id, principal: AgentRef | UserRef,
-  role: "admin" | "writer" | "approver" | "reader",
-  granted_at, granted_by, revoked_at?
+  project_id: ProjectRef
+  user_id: UserRef
+  role: "owner" | "editor" | "viewer"
+  invited_by?: UserRef
+  joined_at: timestamp
 }
 ```
 
-- `admin`: 설정, 멤버, Domain Pack, agent token 발급
-- `writer` (주로 Agent): Artifact write
-- `approver` (사람): Review Queue 처리
-- `reader`: 읽기
+- `owner`: 프로젝트 admin. 멤버 초대/제거, role 변경, 프로젝트 삭제
+- `editor`: artifact/task write 권한. V1.5 invite flow의 기본 역할
+- `viewer`: 읽기 전용
+
+V1 `trusted_local`에서는 권한 체크가 아직 project_members를 사용하지 않고
+기존처럼 모든 project를 owner로 해석한다. 다만 schema는 미리 생성되어
+server boot 시 env-derived default user가 `pindoc` project owner row를
+idempotent하게 받고, `pindoc.project.create`는 caller `Principal.UserID`가
+있으면 같은 transaction 안에서 owner row를 생성한다.
 
 ---
 

@@ -84,7 +84,7 @@ func RegisterProjectCreate(server *sdk.Server, deps Deps) {
 			Name:        "pindoc.project.create",
 			Description: strings.TrimSpace(projectCreateDescription),
 		},
-		func(ctx context.Context, _ *auth.Principal, in projectCreateInput) (*sdk.CallToolResult, projectCreateOutput, error) {
+		func(ctx context.Context, p *auth.Principal, in projectCreateInput) (*sdk.CallToolResult, projectCreateOutput, error) {
 			tx, err := deps.DB.BeginTx(ctx, pgx.TxOptions{})
 			if err != nil {
 				return nil, projectCreateOutput{}, fmt.Errorf("begin tx: %w", err)
@@ -98,6 +98,7 @@ func RegisterProjectCreate(server *sdk.Server, deps Deps) {
 				Color:           in.Color,
 				PrimaryLanguage: in.PrimaryLanguage,
 				OwnerID:         in.OwnerID,
+				OwnerUserID:     principalUserID(p),
 			})
 			if err != nil {
 				if notReady, ok := projectCreateNotReady(deps.UserLanguage, err); ok {
@@ -194,6 +195,13 @@ func projectCreateChecklistMessage(lang, code string, err error) string {
 	default:
 		return err.Error()
 	}
+}
+
+func principalUserID(p *auth.Principal) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(p.UserID)
 }
 
 const projectCreateDescription = `

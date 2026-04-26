@@ -64,6 +64,7 @@ type CreateProjectInput struct {
 	Color           string // optional CSS color
 	PrimaryLanguage string // required, one of SupportedLanguages
 	OwnerID         string // optional, defaults to "default"
+	OwnerUserID     string // optional users.id; creates project_members owner row when present
 }
 
 // CreateProjectOutput carries the post-create facts every entrypoint
@@ -192,6 +193,9 @@ func CreateProject(
 	templatesCreated, err := seedTemplates(ctx, tx, projectID, lang)
 	if err != nil {
 		return zero, fmt.Errorf("seed templates: %w", err)
+	}
+	if err := EnsureProjectOwnerMembership(ctx, tx, projectID, in.OwnerUserID); err != nil {
+		return zero, fmt.Errorf("seed owner membership: %w", err)
 	}
 
 	return CreateProjectOutput{

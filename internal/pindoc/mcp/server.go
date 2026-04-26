@@ -8,6 +8,7 @@ package mcp
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/mcp/tools"
+	"github.com/var-gg/pindoc/internal/pindoc/projects"
 	"github.com/var-gg/pindoc/internal/pindoc/receipts"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
 	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
@@ -116,6 +118,18 @@ func NewServer(opts Options) *Server {
 		Transport:             transport,
 	}
 	userID := upsertStartupUserID(context.Background(), opts.Logger, deps, opts.Config)
+	if err := projects.EnsureDefaultProjectOwnerMembership(context.Background(), opts.DB, opts.Config.ProjectSlug, userID); err != nil {
+		opts.Logger.Warn("default project owner membership bootstrap failed",
+			"project_slug", opts.Config.ProjectSlug,
+			"user_id", userID,
+			"error", err,
+		)
+	} else if strings.TrimSpace(userID) != "" {
+		opts.Logger.Info("default project owner membership bootstrap complete",
+			"project_slug", opts.Config.ProjectSlug,
+			"user_id", userID,
+		)
+	}
 
 	// V1 chain holds a single TrustedLocalResolver built from the
 	// env-derived account user. V1.5 adds BearerTokenResolver /
