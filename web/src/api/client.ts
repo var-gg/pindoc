@@ -314,6 +314,11 @@ export type ChangeGroupImportance = {
   reasons?: string[];
 };
 
+export type ChangeGroupTypeCount = {
+  type: string;
+  count: number;
+};
+
 export type ChangeGroup = {
   group_id: string;
   group_kind: "human_trigger" | "auto_sync" | "maintenance" | "system";
@@ -321,6 +326,7 @@ export type ChangeGroup = {
   commit_summary: string;
   revision_count: number;
   artifact_count: number;
+  type_counts?: ChangeGroupTypeCount[];
   areas: string[];
   authors: string[];
   time_start: string;

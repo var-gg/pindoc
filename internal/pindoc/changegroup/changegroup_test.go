@@ -30,6 +30,32 @@ func TestGroupRowsPriorityKeysAndImportance(t *testing.T) {
 	}
 }
 
+func TestGroupRowsTypeCountsUniqueArtifacts(t *testing.T) {
+	now := time.Date(2026, 4, 26, 10, 0, 0, 0, time.UTC)
+	firstTaskRev := row("pindoc", "task-1", "ui", "codex", "edit task", now, `{"bulk_op_id":"bulk-types"}`, `{}`)
+	secondTaskRev := firstTaskRev
+	secondTaskRev.RevisionID = "task-1-r2"
+	secondTaskRev.RevisionNumber = 2
+	secondTaskRev.CommitMsg = "edit task again"
+	secondTaskRev.CreatedAt = now.Add(time.Minute)
+	decisionRev := row("pindoc", "decision-1", "ui", "codex", "edit decision", now.Add(2*time.Minute), `{"bulk_op_id":"bulk-types"}`, `{}`)
+	decisionRev.ArtifactType = "Decision"
+	groups := GroupRows([]RevisionRow{firstTaskRev, secondTaskRev, decisionRev}, Options{Limit: 10})
+	if len(groups) != 1 {
+		t.Fatalf("groups=%d want 1", len(groups))
+	}
+	got := groups[0].TypeCounts
+	want := []TypeCount{{Type: "Decision", Count: 1}, {Type: "Task", Count: 1}}
+	if len(got) != len(want) {
+		t.Fatalf("type counts = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("type counts = %#v, want %#v", got, want)
+		}
+	}
+}
+
 func TestGroupRowsFallbackLowConfidence(t *testing.T) {
 	now := time.Date(2026, 4, 26, 10, 0, 0, 0, time.UTC)
 	groups := GroupRows([]RevisionRow{

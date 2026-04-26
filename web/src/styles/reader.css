@@ -507,7 +507,22 @@
 .backlink__open-icon { width: 14px; height: 14px; color: var(--fg-3); flex: 0 0 auto; }
 .backlink:hover .backlink__open-icon,
 .backlink:focus-visible .backlink__open-icon { color: var(--accent); }
-.backlink__excerpt { margin-top: 4px; font-size: 12.5px; color: var(--fg-2); line-height: 1.5; }
+.backlink__excerpt {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--fg-2);
+  line-height: 1.5;
+}
+.backlink__badges {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
 
 /* Sidecar — sticky right rail. Own scroll so long provenance / revisions
  * / TOC can scroll independently of the article. */
@@ -1973,6 +1988,12 @@
   background: color-mix(in oklch, var(--area-color) 9%, var(--bg-2));
   color: var(--area-color);
 }
+.chip-area--custom {
+  --area-color: var(--fg-2);
+  border-color: var(--border);
+  background: var(--bg-2);
+  color: var(--fg-2);
+}
 .chip-area--visual .lucide {
   width: 11px;
   height: 11px;
@@ -2021,6 +2042,7 @@
 .type-chip {
   display: inline-flex;
   align-items: center;
+  gap: 5px;
   height: 20px;
   padding: 0 7px;
   font-family: var(--font-mono);
@@ -2032,6 +2054,23 @@
   color: var(--type-default);
   letter-spacing: 0.02em;
   white-space: nowrap;
+}
+.type-chip--compact {
+  padding-inline: 6px;
+}
+.type-chip--visual .lucide {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+}
+.type-chip--count {
+  height: 22px;
+  padding-inline: 6px;
+  gap: 4px;
+}
+.type-chip__count {
+  color: currentColor;
+  opacity: 0.72;
 }
 .type-chip--decision           { background: var(--type-decision-bg);           color: var(--type-decision);           border-color: var(--type-decision-border); }
 .type-chip--analysis           { background: var(--type-analysis-bg);           color: var(--type-analysis);           border-color: var(--type-analysis-border); }
@@ -2499,6 +2538,12 @@
 .change-card__meta {
   font-size: 12px;
   color: var(--fg-3);
+}
+.change-card__types {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 .change-card h2 {
   margin: 8px 0 8px;

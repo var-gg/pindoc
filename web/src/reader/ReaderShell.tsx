@@ -6,6 +6,7 @@ import { api, type Artifact, type ArtifactRef, type Area } from "../api/client";
 import { useI18n } from "../i18n";
 import { CmdK } from "./CmdK";
 import { GraphSurface } from "./Graph";
+import { ArtifactByline } from "./ArtifactByline";
 import { ReaderSurface, type DetailScope } from "./ReaderSurface";
 import { Sidebar } from "./Sidebar";
 import { Sidecar } from "./Sidecar";
@@ -13,6 +14,7 @@ import { ShortcutsOverlay } from "./ShortcutsOverlay";
 import { EmptyState, SurfaceHeader } from "./SurfacePrimitives";
 import { Today } from "./Today";
 import { TopNav } from "./TopNav";
+import { ArtifactTypeChip, VisualAreaChip } from "./VisualChips";
 import { initTheme, setTheme, type Theme } from "./theme";
 import { useReaderData } from "./useReaderData";
 import { initReaderWidth, setReaderWidth as applyReaderWidth, type ReaderWidth } from "./readerWidth";
@@ -730,7 +732,15 @@ function Body({
                     />
                   </div>
                   <div className="backlink__excerpt">
-                    {(areaNameBySlug.get(a.area_slug) ?? a.area_slug)} · {a.author_id} · {new Date(a.updated_at).toLocaleDateString()}
+                    <span className="backlink__badges">
+                      <ArtifactTypeChip type={a.type} />
+                      <VisualAreaChip
+                        areaSlug={a.area_slug}
+                        label={areaNameBySlug.get(a.area_slug) ?? a.area_slug}
+                      />
+                    </span>
+                    <ArtifactByline artifact={a} variant="list" />
+                    <time dateTime={a.updated_at}>{new Date(a.updated_at).toLocaleDateString()}</time>
                   </div>
                 </Link>
               );

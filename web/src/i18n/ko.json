@@ -438,6 +438,9 @@
   "today.open_area": "Area 열기",
   "today.export_project": "프로젝트 export",
   "today.export_area": "Area export",
+  "today.revision_count": "rev %d개",
+  "today.artifact_count": "artifact %d개",
+  "today.type_distribution": "Type 분포",
 
   "lang.switch": "언어",
   "lang.en": "English",

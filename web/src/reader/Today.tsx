@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { api, type ChangeGroup, type TodayResp } from "../api/client";
 import { useI18n } from "../i18n";
 import { EmptyState } from "./SurfacePrimitives";
+import { TypeCountChip, VisualAreaChip } from "./VisualChips";
 
 type Props = {
   projectSlug: string;
@@ -207,8 +208,15 @@ function ChangeGroupCard({
       <div className="change-card__top">
         <span className={`change-kind change-kind--${group.group_kind}`}>{KIND_LABEL[group.group_kind] ?? group.group_kind}</span>
         <span className={`change-importance change-importance--${group.importance.level}`}>{group.importance.level}</span>
-        <span>{group.revision_count} rev</span>
-        <span>{group.artifact_count} artifact</span>
+        <span>{t("today.revision_count", group.revision_count)}</span>
+        <span>{t("today.artifact_count", group.artifact_count)}</span>
+        {group.type_counts && group.type_counts.length > 0 && (
+          <span className="change-card__types" aria-label={t("today.type_distribution")}>
+            {group.type_counts.slice(0, 5).map((row) => (
+              <TypeCountChip key={row.type} type={row.type} count={row.count} />
+            ))}
+          </span>
+        )}
       </div>
       <h2>{group.commit_summary}</h2>
       <div className="change-card__meta">
@@ -218,9 +226,12 @@ function ChangeGroupCard({
       </div>
       <div className="change-card__areas">
         {group.areas.map((area) => (
-          <button key={area} type="button" className="chip-area" onClick={() => onSelectArea(area)}>
-            {areaNameBySlug.get(area) ?? area}
-          </button>
+          <VisualAreaChip
+            key={area}
+            areaSlug={area}
+            label={areaNameBySlug.get(area) ?? area}
+            onClick={() => onSelectArea(area)}
+          />
         ))}
       </div>
       <div className="change-card__actions">

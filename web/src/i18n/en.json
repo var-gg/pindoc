@@ -438,6 +438,9 @@
   "today.open_area": "Open area",
   "today.export_project": "Export project",
   "today.export_area": "Export area",
+  "today.revision_count": "%d rev",
+  "today.artifact_count": "%d artifact",
+  "today.type_distribution": "Type distribution",
 
   "lang.switch": "Language",
   "lang.en": "English",

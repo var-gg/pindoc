@@ -54,6 +54,11 @@ type Importance struct {
 	Reasons []string `json:"reasons,omitempty"`
 }
 
+type TypeCount struct {
+	Type  string `json:"type"`
+	Count int    `json:"count"`
+}
+
 type Group struct {
 	GroupID           string      `json:"group_id"`
 	GroupKind         string      `json:"group_kind"`
@@ -61,6 +66,7 @@ type Group struct {
 	CommitSummary     string      `json:"commit_summary"`
 	RevisionCount     int         `json:"revision_count"`
 	ArtifactCount     int         `json:"artifact_count"`
+	TypeCounts        []TypeCount `json:"type_counts,omitempty"`
 	Areas             []string    `json:"areas"`
 	Authors           []string    `json:"authors"`
 	TimeStart         time.Time   `json:"time_start"`
@@ -388,13 +394,14 @@ func syntheticGroupID(scope, keyKind, keyValue string, windowStart time.Time) st
 
 type groupAcc struct {
 	Group
-	artifactSet map[string]struct{}
-	areaSet     map[string]struct{}
-	authorSet   map[string]struct{}
-	commitMsgs  []string
-	commitSet   map[string]struct{}
-	kindCounts  map[string]int
-	verifySet   map[string]int
+	artifactSet       map[string]struct{}
+	artifactTypeByKey map[string]string
+	areaSet           map[string]struct{}
+	authorSet         map[string]struct{}
+	commitMsgs        []string
+	commitSet         map[string]struct{}
+	kindCounts        map[string]int
+	verifySet         map[string]int
 }
 
 func newGroupAcc(groupID string, key GroupingKey, createdAt time.Time) *groupAcc {
@@ -405,12 +412,13 @@ func newGroupAcc(groupID string, key GroupingKey, createdAt time.Time) *groupAcc
 			TimeStart:   createdAt,
 			TimeEnd:     createdAt,
 		},
-		artifactSet: map[string]struct{}{},
-		areaSet:     map[string]struct{}{},
-		authorSet:   map[string]struct{}{},
-		commitSet:   map[string]struct{}{},
-		kindCounts:  map[string]int{},
-		verifySet:   map[string]int{},
+		artifactSet:       map[string]struct{}{},
+		artifactTypeByKey: map[string]string{},
+		areaSet:           map[string]struct{}{},
+		authorSet:         map[string]struct{}{},
+		commitSet:         map[string]struct{}{},
+		kindCounts:        map[string]int{},
+		verifySet:         map[string]int{},
 	}
 }
 
@@ -422,10 +430,15 @@ func (a *groupAcc) add(row RevisionRow) {
 	if row.CreatedAt.After(a.TimeEnd) {
 		a.TimeEnd = row.CreatedAt
 	}
-	if row.ArtifactID != "" {
-		a.artifactSet[row.ArtifactID] = struct{}{}
-	} else if row.ArtifactSlug != "" {
-		a.artifactSet[row.ArtifactSlug] = struct{}{}
+	artifactKey := row.ArtifactID
+	if artifactKey == "" {
+		artifactKey = row.ArtifactSlug
+	}
+	if artifactKey != "" {
+		a.artifactSet[artifactKey] = struct{}{}
+		if _, exists := a.artifactTypeByKey[artifactKey]; !exists {
+			a.artifactTypeByKey[artifactKey] = firstNonEmpty(row.ArtifactType, "Artifact")
+		}
 	}
 	if row.AreaSlug != "" {
 		a.areaSet[row.AreaSlug] = struct{}{}
@@ -450,6 +463,7 @@ func (a *groupAcc) finish() Group {
 	a.Areas = sortedKeys(a.areaSet)
 	a.Authors = sortedKeys(a.authorSet)
 	a.ArtifactCount = len(a.artifactSet)
+	a.TypeCounts = typeCounts(a.artifactTypeByKey)
 	a.GroupKind = dominantKind(a.kindCounts)
 	a.VerificationState = aggregateVerification(a.verifySet)
 	a.CommitSummary = summarizeCommits(a.commitMsgs, a.RevisionCount, a.ArtifactCount)
@@ -604,6 +618,27 @@ func dominantKind(counts map[string]int) string {
 		}
 	}
 	return best
+}
+
+func typeCounts(artifactTypeByKey map[string]string) []TypeCount {
+	if len(artifactTypeByKey) == 0 {
+		return nil
+	}
+	counts := map[string]int{}
+	for _, typ := range artifactTypeByKey {
+		counts[firstNonEmpty(typ, "Artifact")]++
+	}
+	out := make([]TypeCount, 0, len(counts))
+	for typ, count := range counts {
+		out = append(out, TypeCount{Type: typ, Count: count})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Type < out[j].Type
+	})
+	return out
 }
 
 func summarizeCommits(msgs []string, revisionCount, artifactCount int) string {
