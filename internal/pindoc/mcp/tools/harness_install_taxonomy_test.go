@@ -125,3 +125,12 @@ func TestRenderPindocMDOmitsTaskLifecycleSection(t *testing.T) {
 		t.Fatalf("rendered PINDOC.md should omit Section 12 when includeSection12=false")
 	}
 }
+
+func TestHarnessInstallRegisterSeparationAnchorGuide(t *testing.T) {
+	message := harnessInstallMessage(styleSnippetMarkerBegin)
+	for _, want := range []string{"immediately after the main", "agent-guidance H2", "# AGENTS.md instructions"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("harness install instructions missing anchor guide %q", want)
+		}
+	}
+}

@@ -39,3 +39,21 @@ func TestProjectCreateDescriptionRequiresExplicitImmutableLanguage(t *testing.T)
 		}
 	}
 }
+
+func TestProjectCreateNextStepsStartWithHarnessInstall(t *testing.T) {
+	steps := projectCreateNextSteps("ko", "new-project")
+	if len(steps) == 0 {
+		t.Fatalf("expected next_steps")
+	}
+	if steps[0].Tool != "pindoc.harness.install" {
+		t.Fatalf("next_steps[0].tool = %q, want pindoc.harness.install", steps[0].Tool)
+	}
+	if got := steps[0].Args["project_slug"]; got != "new-project" {
+		t.Fatalf("next_steps[0].args.project_slug = %v, want new-project", got)
+	}
+	for _, want := range []string{"PINDOC.md", "artifact.propose", "거부"} {
+		if !strings.Contains(steps[0].Reason, want) {
+			t.Fatalf("next_steps[0].reason missing %q: %q", want, steps[0].Reason)
+		}
+	}
+}

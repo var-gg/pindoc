@@ -46,9 +46,9 @@ type projectCreateOutput struct {
 	// project_slug in its input, so no MCP reconnect is needed. Kept
 	// here for backward compat with agents that still branch on the
 	// flag.
-	ReconnectRequired bool     `json:"reconnect_required"`
-	Activation        string   `json:"activation" jsonschema:"one of: in_this_session"`
-	NextSteps         []string `json:"next_steps"`
+	ReconnectRequired bool           `json:"reconnect_required"`
+	Activation        string         `json:"activation" jsonschema:"one of: in_this_session"`
+	NextSteps         []NextToolHint `json:"next_steps"`
 }
 
 // RegisterProjectCreate wires pindoc.project.create. The handler is a
@@ -102,10 +102,7 @@ func RegisterProjectCreate(server *sdk.Server, deps Deps) {
 				DefaultArea:       out.DefaultArea,
 				ReconnectRequired: false,
 				Activation:        "in_this_session",
-				NextSteps: []string{
-					fmt.Sprintf("Pass project_slug=%q on subsequent project-scoped tool calls (artifact.propose, area.list, ...) to write into the new project.", out.Slug),
-					fmt.Sprintf("Open the Reader at /p/%s/wiki to verify.", out.Slug),
-				},
+				NextSteps:         projectCreateNextSteps(deps.UserLanguage, out.Slug),
 				Message: strings.TrimSpace(fmt.Sprintf(`
 Project %q (%s canonical language) created. Share this URL with the user: /p/%s/wiki
 The new slug is usable immediately — pass project_slug=%q in subsequent
@@ -140,3 +137,29 @@ account-level scope (Decision mcp-scope-account-level-industry-
 standard) means every project-scoped tool takes a project_slug input
 and the new slug works on the very next call without reconnect.
 `
+
+func projectCreateNextSteps(lang, projectSlug string) []NextToolHint {
+	return []NextToolHint{
+		{
+			Tool: "pindoc.harness.install",
+			Args: map[string]any{
+				"project_slug": projectSlug,
+			},
+			Reason: projectCreateHarnessReason(lang),
+		},
+		{
+			Tool: "pindoc.ping",
+			Args: map[string]any{
+				"project_slug": projectSlug,
+			},
+			Reason: fmt.Sprintf("Verify project_slug=%q is addressable in this MCP session.", projectSlug),
+		},
+	}
+}
+
+func projectCreateHarnessReason(lang string) string {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(lang)), "ko") {
+		return "먼저 PINDOC.md를 설치하세요. 설치하지 않으면 이후 artifact.propose가 harness/context 부족으로 거부될 수 있습니다."
+	}
+	return "Install PINDOC.md first; later artifact.propose calls can be rejected when the harness context is missing."
+}

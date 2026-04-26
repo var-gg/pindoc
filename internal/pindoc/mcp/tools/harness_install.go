@@ -160,23 +160,7 @@ func RegisterHarnessInstall(server *sdk.Server, deps Deps) {
 			}
 			styleSnippet := styleSnippetMarkerBegin + "\n" + snippetBody + "\n" + styleSnippetMarkerEnd
 
-			message := strings.TrimSpace(fmt.Sprintf(`
-Write the returned body to PINDOC.md at the repo root. Then append this
-exact line to the end of CLAUDE.md (or AGENTS.md if you use that):
-    @PINDOC.md
-If PINDOC.md already exists, compare its YAML frontmatter before replacing:
-project_slug and project_id should match this response, and Section 12
-should be present unless include_section_12=false was explicitly requested.
-Ask the user before overwriting local edits outside generated content.
-In the same CLAUDE.md / AGENTS.md file, also ensure the register-separation
-block is present (see style_snippet). If a block with the marker
-"%s" already exists, replace the whole BEGIN…END region with the
-new body. If none exists, append it near the top of the agent-guidance
-section. Keep anything outside the markers untouched.
-Future sessions will auto-load PINDOC.md and follow the Pindoc Harness
-rules (Pre-flight Check before writes, Referenced Confirmation when
-asking the user for approval, agent-only write surface).
-`, styleSnippetMarkerBegin))
+			message := harnessInstallMessage(styleSnippetMarkerBegin)
 
 			return nil, harnessInstallOutput{
 				SuggestedPath:       "PINDOC.md",
@@ -200,6 +184,27 @@ asking the user for approval, agent-only write surface).
 			}, nil
 		},
 	)
+}
+
+func harnessInstallMessage(marker string) string {
+	return strings.TrimSpace(fmt.Sprintf(`
+Write the returned body to PINDOC.md at the repo root. Then append this
+exact line to the end of CLAUDE.md (or AGENTS.md if you use that):
+    @PINDOC.md
+If PINDOC.md already exists, compare its YAML frontmatter before replacing:
+project_slug and project_id should match this response, and Section 12
+should be present unless include_section_12=false was explicitly requested.
+Ask the user before overwriting local edits outside generated content.
+In the same CLAUDE.md / AGENTS.md file, also ensure the register-separation
+block is present (see style_snippet). If a block with the marker
+"%s" already exists, replace the whole BEGIN…END region with the
+new body. If none exists, insert it immediately after the main
+agent-guidance H2 (for example "# AGENTS.md instructions" or
+"# CLAUDE.md instructions"); keep anything outside the markers untouched.
+Future sessions will auto-load PINDOC.md and follow the Pindoc Harness
+rules (Pre-flight Check before writes, Referenced Confirmation when
+asking the user for approval, agent-only write surface).
+`, marker))
 }
 
 // renderPindocMD is intentionally one string template for M1. When PINDOC.md

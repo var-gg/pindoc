@@ -10,6 +10,8 @@ package tools
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +27,7 @@ type pingInput struct {
 	Message           string `json:"message,omitempty" jsonschema:"optional probe text echoed back in the response"`
 	ProjectSlug       string `json:"project_slug,omitempty" jsonschema:"optional project slug for current_project_summary; defaults to server PINDOC_PROJECT when configured"`
 	ClientToolsetHash string `json:"client_toolset_hash,omitempty" jsonschema:"optional client-known toolset_version for drift detection"`
+	WorkingDirectory  string `json:"working_directory,omitempty" jsonschema:"optional local workspace root; when provided, ping checks PINDOC.md frontmatter drift"`
 }
 
 type pingOutput struct {
@@ -43,6 +46,17 @@ type pingOutput struct {
 	CurrentProjectSummary *PingProjectSummary  `json:"current_project_summary,omitempty"`
 	ReconcileCandidates   []ReconcileCandidate `json:"reconcile_candidates,omitempty"`
 	ReconcileSummary      *ReconcileSummary    `json:"reconcile_summary,omitempty"`
+	HarnessDriftHint      *HarnessDriftHint    `json:"harness_drift_hint,omitempty"`
+}
+
+type HarnessDriftHint struct {
+	Detected            bool   `json:"detected"`
+	SuggestedCall       string `json:"suggested_call"`
+	Reason              string `json:"reason,omitempty"`
+	Path                string `json:"path,omitempty"`
+	ExpectedProjectSlug string `json:"expected_project_slug,omitempty"`
+	FoundProjectSlug    string `json:"found_project_slug,omitempty"`
+	SchemaVersion       string `json:"schema_version,omitempty"`
 }
 
 type PingProjectSummary struct {
@@ -86,6 +100,9 @@ func RegisterPing(server *sdk.Server, deps Deps) {
 			projectSlug := strings.TrimSpace(in.ProjectSlug)
 			if projectSlug == "" {
 				projectSlug = strings.TrimSpace(deps.DefaultProjectSlug)
+			}
+			if strings.TrimSpace(in.WorkingDirectory) != "" {
+				out.HarnessDriftHint = detectHarnessDrift(in.WorkingDirectory, projectSlug)
 			}
 			if projectSlug != "" && deps.DB != nil {
 				scope, err := auth.ResolveProject(ctx, deps.DB, p, projectSlug)
@@ -157,4 +174,62 @@ func pingProjectSummary(ctx context.Context, deps Deps, projectSlug string) (Pin
 		&out.CancelledTaskCount,
 	)
 	return out, err
+}
+
+func detectHarnessDrift(workingDirectory, expectedProjectSlug string) *HarnessDriftHint {
+	path := filepath.Join(strings.TrimSpace(workingDirectory), "PINDOC.md")
+	hint := &HarnessDriftHint{
+		Detected:            false,
+		SuggestedCall:       "pindoc.harness.install",
+		Path:                path,
+		ExpectedProjectSlug: strings.TrimSpace(expectedProjectSlug),
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		hint.Detected = true
+		if os.IsNotExist(err) {
+			hint.Reason = "PINDOC.md is missing in the workspace root."
+		} else {
+			hint.Reason = fmt.Sprintf("PINDOC.md could not be read: %v", err)
+		}
+		return hint
+	}
+	meta := parsePindocFrontmatter(string(body))
+	hint.FoundProjectSlug = meta["project_slug"]
+	hint.SchemaVersion = meta["schema_version"]
+	switch {
+	case strings.TrimSpace(hint.FoundProjectSlug) == "":
+		hint.Detected = true
+		hint.Reason = "PINDOC.md frontmatter is missing project_slug."
+	case hint.ExpectedProjectSlug != "" && hint.FoundProjectSlug != hint.ExpectedProjectSlug:
+		hint.Detected = true
+		hint.Reason = fmt.Sprintf("PINDOC.md project_slug=%q does not match expected project_slug=%q.", hint.FoundProjectSlug, hint.ExpectedProjectSlug)
+	case strings.TrimSpace(hint.SchemaVersion) == "":
+		hint.Detected = true
+		hint.Reason = "PINDOC.md frontmatter is missing schema_version."
+	}
+	return hint
+}
+
+func parsePindocFrontmatter(body string) map[string]string {
+	out := map[string]string{}
+	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return out
+	}
+	for _, line := range lines[1:] {
+		if strings.TrimSpace(line) == "---" {
+			return out
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.Trim(strings.TrimSpace(value), `"'`)
+		if key != "" {
+			out[key] = value
+		}
+	}
+	return out
 }
