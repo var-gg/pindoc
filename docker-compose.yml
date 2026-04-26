@@ -58,6 +58,7 @@ services:
       PINDOC_DATABASE_URL: postgres://pindoc:pindoc_dev@db:5432/pindoc?sslmode=disable
       PINDOC_HTTP_MCP_ADDR: 0.0.0.0:5830
       PINDOC_PROJECT: ${PINDOC_PROJECT:-pindoc}
+      PINDOC_AUTH_MODE: ${PINDOC_AUTH_MODE:-trusted_local}
       PINDOC_LOG_LEVEL: ${PINDOC_LOG_LEVEL:-info}
       PINDOC_USER_LANGUAGE: ${PINDOC_USER_LANGUAGE:-ko}
       PINDOC_USER_NAME: ${PINDOC_USER_NAME:-}

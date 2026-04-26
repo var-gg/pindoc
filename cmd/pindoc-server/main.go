@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -76,11 +77,16 @@ func main() {
 		logger.Error("config load failed", "err", err)
 		os.Exit(1)
 	}
+	if err := validateServerAuthMode(cfg.AuthMode); err != nil {
+		logger.Error("auth mode unsupported", "err", err)
+		os.Exit(1)
+	}
 
 	logger.Info("pindoc-server starting",
 		"version", version,
 		"commit", commit,
 		"transport", transportName,
+		"auth_mode", cfg.AuthMode,
 		"db_configured", cfg.DatabaseURL != "",
 	)
 
@@ -218,7 +224,7 @@ func main() {
 		return
 	}
 
-	server := pmcp.NewServer(pmcp.Options{
+	server, err := pmcp.NewServer(pmcp.Options{
 		Name:      "pindoc",
 		Version:   version,
 		Logger:    logger,
@@ -230,6 +236,10 @@ func main() {
 		Telemetry: tele,
 		Transport: "stdio",
 	})
+	if err != nil {
+		logger.Error("mcp server init failed", "err", err)
+		os.Exit(1)
+	}
 
 	err = server.Run(ctx, &sdk.StdioTransport{})
 	switch {
@@ -261,7 +271,12 @@ func main() {
 // Go 1.22's ServeMux picks /mcp over the catch-all `/` so the routing
 // is unambiguous.
 func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOpts pmcp.Options, apiHandler http.Handler) {
-	mcpServer := pmcp.NewServer(baseOpts).SDK()
+	mcp, err := pmcp.NewServer(baseOpts)
+	if err != nil {
+		logger.Error("mcp server init failed", "err", err)
+		os.Exit(1)
+	}
+	mcpServer := mcp.SDK()
 	getServer := func(_ *http.Request) *sdk.Server {
 		return mcpServer
 	}
@@ -315,6 +330,20 @@ func agentIDSource() string {
 		return "env"
 	}
 	return "generated"
+}
+
+func validateServerAuthMode(mode config.AuthMode) error {
+	if mode == "" || mode == config.AuthModeTrustedLocal {
+		return nil
+	}
+	switch mode {
+	case config.AuthModeOAuthGitHub:
+		return fmt.Errorf("PINDOC_AUTH_MODE=%s is not supported yet: bearer token resolver is not implemented; use trusted_local until task-fosite-as-integration lands", mode)
+	case config.AuthModePublicReadonly, config.AuthModeSingleUser:
+		return fmt.Errorf("PINDOC_AUTH_MODE=%s is not supported yet in V1; use trusted_local", mode)
+	default:
+		return fmt.Errorf("invalid PINDOC_AUTH_MODE: '%s'. valid: %s", mode, config.ValidAuthModesString())
+	}
 }
 
 func stubEmbedderWarning() string {

@@ -95,9 +95,9 @@ Tier A core 강제 + Tier B Domain Pack + Tier C Custom(V2+).
 
 **stdio (기본, subprocess-per-session)** — `pindoc-server` 단독 실행. Claude Code가 `.mcp.json`의 `command` entry로 launch. `PINDOC_PROJECT` env는 `pindoc.project.current`의 fallback일 뿐이고, project-scoped tool은 `project_slug` input으로 scope를 고른다. `capabilities`: `scope_mode="per_call"`, `new_project_requires_reconnect=false`, `transport="stdio"`.
 
-**streamable_http (데몬, V1 멀티프로젝트 운영 모델)** — `pindoc-server -http 127.0.0.1:5830` 단일 데몬을 띄우면 다수 Claude Code/Codex 세션이 같은 `.mcp.json` URL `http://127.0.0.1:5830/mcp`에 attach한다. 연결 URL은 account-level이고, 매 tool call의 `project_slug`가 project scope를 결정한다. 한 데몬에서 RAM·embedder·telemetry가 공유되고, 새 프로젝트는 다음 tool call부터 바로 addressable하다. 같은 데몬이 같은 포트에서 Reader read-only HTTP API(`/api/...`)와 liveness probe(`/health`)도 함께 서빙하므로 V1 운영에서는 별도 `pindoc-api` 프로세스가 필요 없다. `capabilities`: `scope_mode="per_call"`, `new_project_requires_reconnect=false`, `transport="streamable_http"`. Decision `mcp-scope-account-level-industry-standard`.
+**streamable_http (데몬, V1 멀티프로젝트 운영 모델)** — `pindoc-server -http 127.0.0.1:5830` 단일 데몬을 띄우면 다수 Claude Code/Codex 세션이 같은 `.mcp.json` URL `http://127.0.0.1:5830/mcp`에 attach한다. 연결 URL은 account-level이고, 매 tool call의 `project_slug`가 project scope를 결정한다. 한 데몬에서 RAM·embedder·telemetry가 공유되고, 새 프로젝트는 다음 tool call부터 바로 addressable하다. 같은 데몬이 같은 포트에서 Reader read-only HTTP API(`/api/...`)와 liveness probe(`/health`)도 함께 서빙하므로 V1 운영에서는 별도 `pindoc-api` 프로세스가 필요 없다. `capabilities`: `scope_mode="per_call"`, `new_project_requires_reconnect=false`, `transport="streamable_http"`, `auth_mode=$PINDOC_AUTH_MODE`. Decision `mcp-scope-account-level-industry-standard`.
 
-두 모드 다 `auth_mode="trusted_local"` — V1은 단일 사용자/loopback 신뢰 모델. 자기-호스팅 공개(타 사용자가 데몬에 직접 attach) 시 `project_token` / OAuth 도입은 별 Decision으로 이어진다.
+기본값은 `auth_mode="trusted_local"` — V1은 단일 사용자/loopback 신뢰 모델. `PINDOC_AUTH_MODE` enum은 `trusted_local|public_readonly|single_user|oauth_github`를 받지만, 현재 런타임은 `trusted_local` 외 값을 startup error로 거절한다. 자기-호스팅 공개(타 사용자가 데몬에 직접 attach) 시 OAuth / agent token 도입은 별 Task로 이어진다.
 
 Web UI(`pindoc-api`)는 두 transport와 무관하게 멀티프로젝트 switcher를 지원 (`/p/:project/…` canonical URL).
 
@@ -339,7 +339,7 @@ localhost:5830 — Pindoc HTTP daemon + PostgreSQL
 - 현재 M1 dev: `docker compose up -d --build`
 - legacy Windows NSSM 서비스가 5830을 점유하면 `PINDOC_DAEMON_PORT=5832`
   같은 host port override로 side-by-side 기동 후 NSSM을 관리자 권한으로 제거
-- 인증: `trusted_local` loopback 신뢰 모델
+- 인증: `PINDOC_AUTH_MODE=trusted_local` loopback 신뢰 모델 (default)
 - OAuth: 불필요
 - MCP 설정: account-level URL `http://127.0.0.1:5830/mcp`, project scope는
   tool input의 `project_slug`
@@ -410,6 +410,11 @@ $ pindoc init
 | Local | 없음 (`trusted_local`) | 없음 |
 | Self-host 도메인 | **GitHub OAuth** | User가 Settings에서 발급, per-agent |
 | Hosted (V2+) | GitHub + Google | auto-provision |
+
+`PINDOC_AUTH_MODE`는 config enum으로 `trusted_local`, `public_readonly`,
+`single_user`, `oauth_github`를 허용한다. V1 서버는 `trusted_local`만
+resolver chain을 구성하고, 나머지 값은 해당 resolver 구현이 들어오기 전까지
+startup error로 실패한다.
 
 ### Agent Token
 

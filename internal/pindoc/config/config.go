@@ -8,6 +8,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -22,6 +23,12 @@ type Config struct {
 
 	// LogLevel is "debug" | "info" | "warn" | "error".
 	LogLevel string
+
+	// AuthMode selects the resolver family the server boots with.
+	// V1 supports trusted_local only; the other enum values are accepted
+	// at config-parse time so operators get a stable error when they try
+	// to enable a future mode before its implementation lands.
+	AuthMode AuthMode
 
 	// UserLanguage hints NOT_READY template selection until Phase 5 loads
 	// the real value from PINDOC.md. Default "en".
@@ -76,13 +83,60 @@ type SummaryConfig struct {
 	Timeout       time.Duration
 }
 
-// Load builds a Config from process env vars. It never fails for Phase 1
-// usage (there are no required fields); the error return is reserved for
-// when real validation lands.
+type AuthMode string
+
+const (
+	AuthModeTrustedLocal   AuthMode = "trusted_local"
+	AuthModePublicReadonly AuthMode = "public_readonly"
+	AuthModeSingleUser     AuthMode = "single_user"
+	AuthModeOAuthGitHub    AuthMode = "oauth_github"
+)
+
+func (m AuthMode) Valid() bool {
+	switch m {
+	case AuthModeTrustedLocal, AuthModePublicReadonly, AuthModeSingleUser, AuthModeOAuthGitHub:
+		return true
+	default:
+		return false
+	}
+}
+
+func ValidAuthModesString() string {
+	return strings.Join(validAuthModeStrings(), "|")
+}
+
+func parseAuthMode(raw string) (AuthMode, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return AuthModeTrustedLocal, nil
+	}
+	mode := AuthMode(strings.ToLower(trimmed))
+	if !mode.Valid() {
+		return "", fmt.Errorf("invalid PINDOC_AUTH_MODE: '%s'. valid: %s", trimmed, ValidAuthModesString())
+	}
+	return mode, nil
+}
+
+func validAuthModeStrings() []string {
+	return []string{
+		string(AuthModeTrustedLocal),
+		string(AuthModePublicReadonly),
+		string(AuthModeSingleUser),
+		string(AuthModeOAuthGitHub),
+	}
+}
+
+// Load builds a Config from process env vars and fails fast on invalid enum
+// values so a misspelled security mode never silently boots the wrong model.
 func Load() (*Config, error) {
+	authMode, err := parseAuthMode(env("PINDOC_AUTH_MODE", string(AuthModeTrustedLocal)))
+	if err != nil {
+		return nil, err
+	}
 	cfg := &Config{
 		DatabaseURL:           env("PINDOC_DATABASE_URL", "postgres://pindoc:pindoc_dev@localhost:5432/pindoc?sslmode=disable"),
 		LogLevel:              env("PINDOC_LOG_LEVEL", "info"),
+		AuthMode:              authMode,
 		UserLanguage:          strings.ToLower(env("PINDOC_USER_LANGUAGE", "en")),
 		ReceiptExemptionLimit: envInt("PINDOC_RECEIPT_EXEMPTION_LIMIT", 5),
 		ProjectSlug:           env("PINDOC_PROJECT", "pindoc"),

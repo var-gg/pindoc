@@ -11,6 +11,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
+	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/projects"
 )
 
@@ -80,11 +81,9 @@ type Capabilities struct {
 	// RetrievalQuality: "stub" → hash-based (dev only), "http" → real
 	// embedder backing pindoc.artifact.search / context.for_task.
 	RetrievalQuality string `json:"retrieval_quality"`
-	// AuthMode: "trusted_local" (M1 self-host local subprocess, no token),
-	// "project_token" (V1.5+ per-project agent tokens),
-	// "oauth" (V2+ hosted). Renamed from "none" — "none" implied "no
-	// security at all" but the actual model is "trust the local
-	// subprocess".
+	// AuthMode mirrors PINDOC_AUTH_MODE. V1 supports "trusted_local" at
+	// runtime and advertises the configured enum so future modes can fail
+	// loudly before a server accidentally reports the wrong security model.
 	AuthMode string `json:"auth_mode"`
 	// Transport identifies how the agent reached this server. "stdio" =
 	// classic subprocess-per-session model where Claude Code launches
@@ -277,9 +276,12 @@ func buildCapabilities(deps Deps, p *auth.Principal, multiProject bool) Capabili
 	if deps.Settings != nil {
 		publicBase = deps.Settings.Get().PublicBaseURL
 	}
-	authMode := auth.AuthModeTrustedLocal
-	if p != nil && p.AuthMode != "" {
-		authMode = p.AuthMode
+	authMode := deps.AuthMode
+	if authMode == "" && p != nil && p.AuthMode != "" {
+		authMode = config.AuthMode(p.AuthMode)
+	}
+	if authMode == "" {
+		authMode = config.AuthModeTrustedLocal
 	}
 	transport := strings.TrimSpace(deps.Transport)
 	if transport == "" {
@@ -290,7 +292,7 @@ func buildCapabilities(deps Deps, p *auth.Principal, multiProject bool) Capabili
 		ScopeMode:                   "per_call",
 		NewProjectRequiresReconnect: false,
 		RetrievalQuality:            quality,
-		AuthMode:                    authMode,
+		AuthMode:                    string(authMode),
 		Transport:                   transport,
 		UpdateVia:                   "update_of",
 		RequiresExpectedVersion:     true,

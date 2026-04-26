@@ -47,6 +47,7 @@ type Deps struct {
 	Embedder    embed.Provider
 	Settings    *settings.Store
 	Telemetry   *telemetry.Store
+	AuthMode    config.AuthMode
 	Version     string
 	BuildCommit string
 	Summary     changegroup.SummaryConfig
@@ -77,6 +78,12 @@ func New(cfg *config.Config, d Deps) http.Handler {
 			DailyTokenCap: cfg.Summary.DailyTokenCap,
 			GroupCap:      cfg.Summary.GroupCap,
 		}
+	}
+	if cfg != nil && d.AuthMode == "" {
+		d.AuthMode = cfg.AuthMode
+	}
+	if d.AuthMode == "" {
+		d.AuthMode = config.AuthModeTrustedLocal
 	}
 
 	// Unscoped reads — apply to the whole instance.

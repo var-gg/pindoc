@@ -111,6 +111,14 @@ docker compose up -d --build
 # docker compose --profile tei up -d embed
 ```
 
+주요 환경변수:
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `PINDOC_AUTH_MODE` | `trusted_local` | 인증 모드 enum. 허용값은 `trusted_local`, `public_readonly`, `single_user`, `oauth_github`. 현재 V1 런타임은 `trusted_local`만 지원하고 나머지는 명확한 startup error로 거절한다. |
+| `PINDOC_PROJECT` | `pindoc` | `project_slug`를 생략한 일부 read/config 호출의 fallback 프로젝트. |
+| `PINDOC_DAEMON_PORT` | `5830` | Docker Compose daemon의 host port override. |
+
 Windows에서 기존 NSSM 서비스가 아직 5830 포트를 점유 중이면, 관리자
 PowerShell에서 제거하기 전까지 Docker daemon을 임시 포트로 띄운다.
 
@@ -179,7 +187,7 @@ go build -o bin/pindoc-server ./cmd/pindoc-server
 # 또는 PINDOC_HTTP_MCP_ADDR=127.0.0.1:5830 ./bin/pindoc-server
 ```
 
-각 세션에서 `pindoc.project.current(project_slug="...")`를 호출하면 프로젝트 메타데이터와 capabilities가 반환된다. 현재 HTTP 데몬은 `transport=streamable_http`, `scope_mode=per_call`을 advertise한다. 데몬은 loopback(`127.0.0.1`)에 bind되어 외부에서 접근 불가 — 자기-호스팅 공개 시 인증 도입은 별 작업.
+각 세션에서 `pindoc.project.current(project_slug="...")`를 호출하면 프로젝트 메타데이터와 capabilities가 반환된다. 현재 HTTP 데몬은 `transport=streamable_http`, `scope_mode=per_call`, `auth_mode=$PINDOC_AUTH_MODE`를 advertise한다. V1에서 실제 기동 가능한 값은 `trusted_local`뿐이며, 데몬은 loopback(`127.0.0.1`)에 bind되어 외부에서 접근 불가 — 자기-호스팅 공개 시 인증 도입은 별 작업.
 
 `pindoc.harness.install`이 생성하는 `PINDOC.md`는 YAML frontmatter(`project_slug`, `project_id`, `locale`, `schema_version`)를 포함한다. Frontmatter는 이후 workspace detection의 명시적 source다. Section X는 정책 wiki를 `context.for_task`의 `applicable_rules[]`로 자동 적용하는 규약을 설명하고, Section 12는 chip/parallel work가 시작·진행·merge·중단될 때 Pindoc Task status와 acceptance checkbox를 어떻게 갱신할지 규정한다. 기본 응답은 호환성을 위해 `response_format=full`이지만, 반복 호출은 `file_only` 또는 이전 etag(`if_content_etag`, `if_style_snippet_etag`)로 대형 body 재전송을 피한다.
 

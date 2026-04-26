@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/projects"
 )
@@ -71,10 +72,8 @@ func (d Deps) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"version":                d.Version,
 		// auth_mode mirrors the Capabilities.AuthMode surfaced by
 		// pindoc.project.current. Reader's TaskControls branches off this:
-		// "trusted_local" → inline editable, anything else → read-only
-		// (Decision agent-only-write-분할). Hardcoded constant in M1 since
-		// we don't ship project_token / oauth yet.
-		"auth_mode": AuthModeTrustedLocal,
+		// "trusted_local" → inline editable, anything else → read-only.
+		"auth_mode": string(d.authMode()),
 		// onboarding_required tells the React app to redirect / → wizard.
 		// True when only the seed `pindoc` project exists (Decision
 		// project-bootstrap-canonical-flow-reader-ui-first-class). The
@@ -129,11 +128,16 @@ func (d Deps) checkOnboardingRequired(ctx context.Context) bool {
 	return count == 0
 }
 
-// AuthModeTrustedLocal is the M1 hosting model: one operator, local
-// subprocess, no token. Keeping this as a named constant so the
-// TaskControls gate and the task-meta POST handler agree on the literal.
-// When V1.5+ introduces "project_token" this becomes a field on Deps.
-const AuthModeTrustedLocal = "trusted_local"
+// AuthModeTrustedLocal is kept as a compatibility alias for older HTTP-side
+// tests and comments. Runtime auth mode now comes from Deps.AuthMode.
+const AuthModeTrustedLocal = string(config.AuthModeTrustedLocal)
+
+func (d Deps) authMode() config.AuthMode {
+	if d.AuthMode.Valid() {
+		return d.AuthMode
+	}
+	return config.AuthModeTrustedLocal
+}
 
 type projectListRow struct {
 	ID              string    `json:"id"`

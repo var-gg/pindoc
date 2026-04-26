@@ -7,6 +7,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -83,7 +84,7 @@ type Server struct {
 	telemetry *telemetry.Store
 }
 
-func NewServer(opts Options) *Server {
+func NewServer(opts Options) (*Server, error) {
 	impl := &sdk.Implementation{
 		Name:    opts.Name,
 		Version: opts.Version,
@@ -116,6 +117,7 @@ func NewServer(opts Options) *Server {
 		Telemetry:             opts.Telemetry,
 		DefaultProjectSlug:    opts.Config.ProjectSlug,
 		Transport:             transport,
+		AuthMode:              opts.Config.AuthMode,
 	}
 	userID := upsertStartupUserID(context.Background(), opts.Logger, deps, opts.Config)
 	if err := projects.EnsureDefaultProjectOwnerMembership(context.Background(), opts.DB, opts.Config.ProjectSlug, userID); err != nil {
@@ -131,15 +133,11 @@ func NewServer(opts Options) *Server {
 		)
 	}
 
-	// V1 chain holds a single TrustedLocalResolver built from the
-	// env-derived account user. V1.5 adds BearerTokenResolver /
-	// OAuthSessionResolver in front of trusted_local — the prepended
-	// resolvers either match (and we short-circuit) or pass through to
-	// trusted_local for OSS self-host fallback. Handlers downstream are
-	// mode-blind.
-	deps.AuthChain = auth.NewChain(
-		auth.NewTrustedLocalResolver(userID, opts.AgentID),
-	)
+	authChain, err := authChainForMode(opts.Config.AuthMode, userID, opts.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	deps.AuthChain = authChain
 
 	// Phase 1 handshake — same registration path as every other tool so
 	// the auth chain runs and telemetry records the call.
@@ -189,6 +187,22 @@ func NewServer(opts Options) *Server {
 		sdk:       s,
 		logger:    opts.Logger,
 		telemetry: opts.Telemetry,
+	}, nil
+}
+
+func authChainForMode(mode config.AuthMode, userID, agentID string) (*auth.Chain, error) {
+	if mode == "" {
+		mode = config.AuthModeTrustedLocal
+	}
+	switch mode {
+	case config.AuthModeTrustedLocal:
+		return auth.NewChain(auth.NewTrustedLocalResolver(userID, agentID)), nil
+	case config.AuthModeOAuthGitHub:
+		return nil, fmt.Errorf("PINDOC_AUTH_MODE=%s is not supported yet: bearer token resolver is not implemented; use trusted_local until task-fosite-as-integration lands", mode)
+	case config.AuthModePublicReadonly, config.AuthModeSingleUser:
+		return nil, fmt.Errorf("PINDOC_AUTH_MODE=%s is not supported yet in V1; use trusted_local", mode)
+	default:
+		return nil, fmt.Errorf("invalid PINDOC_AUTH_MODE: '%s'. valid: %s", mode, config.ValidAuthModesString())
 	}
 }
 
