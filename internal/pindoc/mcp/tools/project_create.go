@@ -38,7 +38,14 @@ type projectCreateOutput struct {
 	Name        string `json:"name"`
 	URL         string `json:"url" jsonschema:"canonical UI path to the project's wiki — share this, not /wiki/..."`
 	DefaultArea string `json:"default_area" jsonschema:"slug of the 'misc' area seeded so artifacts can be filed immediately"`
-	Message     string `json:"message"`
+	// BootstrapReceipt is a one-use search_receipt the agent can pass to
+	// the first artifact.propose call in the newly-created project without
+	// paying a separate artifact.search/context.for_task round-trip.
+	BootstrapReceipt string `json:"bootstrap_receipt,omitempty"`
+	// SearchReceipt is an alias for BootstrapReceipt for clients that
+	// already expect the generic receipt field name.
+	SearchReceipt string `json:"search_receipt,omitempty"`
+	Message       string `json:"message"`
 	// ReconnectRequired + Activation + NextSteps describe how the new
 	// project becomes addressable. Account-level scope (Decision
 	// mcp-scope-account-level-industry-standard) means the new slug is
@@ -94,12 +101,19 @@ func RegisterProjectCreate(server *sdk.Server, deps Deps) {
 			deps.Logger.Info("project created",
 				"slug", out.Slug, "name", out.Name, "lang", out.PrimaryLanguage)
 
+			bootstrapReceipt := ""
+			if deps.Receipts != nil {
+				bootstrapReceipt = deps.Receipts.IssueOneUse(out.Slug, "project.create bootstrap", nil)
+			}
+
 			return nil, projectCreateOutput{
 				ID:                out.ID,
 				Slug:              out.Slug,
 				Name:              out.Name,
 				URL:               fmt.Sprintf("/p/%s/wiki", out.Slug),
 				DefaultArea:       out.DefaultArea,
+				BootstrapReceipt:  bootstrapReceipt,
+				SearchReceipt:     bootstrapReceipt,
 				ReconnectRequired: false,
 				Activation:        "in_this_session",
 				NextSteps:         projectCreateNextSteps(deps.UserLanguage, out.Slug),
@@ -136,6 +150,9 @@ The new slug is addressable immediately on this MCP connection —
 account-level scope (Decision mcp-scope-account-level-industry-
 standard) means every project-scoped tool takes a project_slug input
 and the new slug works on the very next call without reconnect.
+The response includes a one-use bootstrap_receipt/search_receipt for the
+first artifact.propose call in the new project, so agents do not need an
+extra search round-trip before writing the initial artifact.
 `
 
 func projectCreateNextSteps(lang, projectSlug string) []NextToolHint {

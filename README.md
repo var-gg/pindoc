@@ -76,7 +76,7 @@ Agent Session ── checkpoint ──▶ Promote ──▶ Artifact ──▶ G
 - ✅ Phase 8 — URL 멀티프로젝트 재구조화 (`/p/:project/…` canonical + `pindoc.project.create` MCP tool)
 - ✅ Phase 9 — `human_url`/`agent_ref` 분리 + `capabilities` 블록 + spec↔runtime drift 가시화
 - ✅ Phase 10 — real embedder dogfood (Docker TEI + `multilingual-e5-base` + pindoc-reembed CLI)
-- ✅ Phase 11 — write contract 강화 (`search_receipt` hard enforce + `pins[]` + `expected_version` + `supersede_of` + `relates_to[]` + semantic conflict block + `_unsorted` area)
+- ✅ Phase 11 — write contract 강화 (`search_receipt` hard enforce + bootstrap receipt/empty-area first-N exemption + `pins[]` + `expected_version` + `supersede_of` + `relates_to[]` + semantic conflict block + `_unsorted` area)
 - ✅ Phase 12 — agent ergonomics (`not_ready`에 `Failed[]`/`NextTools[]`/`Related[]` + `artifact.read(view=brief|full|continuation)` + server-issued `agent_id` + revision `source_session_ref`)
 - ✅ Phase 13 — template artifact seed (`_template_{debug,decision,analysis,task}` — 포맷도 evolving artifact, Reader UI "Show templates" 토글)
 - ✅ Phase 14 — operator settings + contract hardening (server_settings 테이블 + `pindoc-admin` CLI + `human_url_abs` + `expected_version` hard + `patchable_fields[]` + candidate warning + receipt TTL 30m + auth_mode rename)

@@ -71,6 +71,12 @@ type Deps struct {
 	// before dereferencing, and nil disables the gate (useful for tests).
 	Receipts *receipts.Store
 
+	// ReceiptExemptionLimit controls the create-path bootstrap allowance:
+	// receipt-less creates in an otherwise empty same-author area are
+	// accepted until this count is reached. Default comes from
+	// PINDOC_RECEIPT_EXEMPTION_LIMIT (5); zero disables the exemption.
+	ReceiptExemptionLimit int
+
 	// Settings is the operator-editable config store (Phase 14a). Nil-
 	// safe: capability reporting falls back to defaults, and human_url_abs
 	// is simply omitted when PublicBaseURL is empty.

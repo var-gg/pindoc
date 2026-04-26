@@ -27,6 +27,12 @@ type Config struct {
 	// the real value from PINDOC.md. Default "en".
 	UserLanguage string
 
+	// ReceiptExemptionLimit is the create-path search_receipt bootstrap
+	// allowance per area/author before artifact.propose requires an
+	// explicit search/context receipt again. Default 5. Set to 0 to
+	// disable the exemption while keeping normal search_receipt gating.
+	ReceiptExemptionLimit int
+
 	// ProjectSlug is the MCP server's active scope and the HTTP API's default
 	// project. URL shares without /p/{project}/ prefix redirect here; MCP
 	// write tools operate on this project unless a future session overrides
@@ -75,13 +81,14 @@ type SummaryConfig struct {
 // when real validation lands.
 func Load() (*Config, error) {
 	cfg := &Config{
-		DatabaseURL:  env("PINDOC_DATABASE_URL", "postgres://pindoc:pindoc_dev@localhost:5432/pindoc?sslmode=disable"),
-		LogLevel:     env("PINDOC_LOG_LEVEL", "info"),
-		UserLanguage: strings.ToLower(env("PINDOC_USER_LANGUAGE", "en")),
-		ProjectSlug:  env("PINDOC_PROJECT", "pindoc"),
-		RepoRoot:     env("PINDOC_REPO_ROOT", ""),
-		UserName:     strings.TrimSpace(env("PINDOC_USER_NAME", "")),
-		UserEmail:    strings.TrimSpace(env("PINDOC_USER_EMAIL", "")),
+		DatabaseURL:           env("PINDOC_DATABASE_URL", "postgres://pindoc:pindoc_dev@localhost:5432/pindoc?sslmode=disable"),
+		LogLevel:              env("PINDOC_LOG_LEVEL", "info"),
+		UserLanguage:          strings.ToLower(env("PINDOC_USER_LANGUAGE", "en")),
+		ReceiptExemptionLimit: envInt("PINDOC_RECEIPT_EXEMPTION_LIMIT", 5),
+		ProjectSlug:           env("PINDOC_PROJECT", "pindoc"),
+		RepoRoot:              env("PINDOC_REPO_ROOT", ""),
+		UserName:              strings.TrimSpace(env("PINDOC_USER_NAME", "")),
+		UserEmail:             strings.TrimSpace(env("PINDOC_USER_EMAIL", "")),
 		Embed: embed.Config{
 			// Empty default → gemma (bundled on-device embeddinggemma-300m).
 			// Set explicitly to "stub" for offline unit tests, "http" for

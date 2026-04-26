@@ -105,6 +105,10 @@ type Capabilities struct {
 	// ReceiptTTLSec is the search_receipt TTL (seconds). Agents can use
 	// this to decide whether to renew mid-loop.
 	ReceiptTTLSec int `json:"receipt_ttl_sec"`
+	// ReceiptExemptionLimit is the configured first-N create allowance for
+	// receipt-less bootstrap writes in empty/same-author areas. Zero means
+	// disabled.
+	ReceiptExemptionLimit int `json:"receipt_exemption_limit"`
 	// PublicBaseURL comes from server_settings.public_base_url. Empty
 	// when the operator hasn't configured one — agents should fall back
 	// to the relative human_url in that case. When present, tool
@@ -289,6 +293,7 @@ func buildCapabilities(deps Deps, p *auth.Principal, multiProject bool) Capabili
 		RequiresExpectedVersion:     true,
 		ReviewQueueSupported:        false,
 		ReceiptTTLSec:               int(receiptTTLSeconds),
+		ReceiptExemptionLimit:       receiptExemptionLimit(deps),
 		PublicBaseURL:               publicBase,
 	}
 }

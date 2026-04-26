@@ -18,6 +18,9 @@ func TestProjectCreateDescriptionAdvertisesAreaSeed(t *testing.T) {
 	if !strings.Contains(projectCreateDescription, "area-구조-top-level-고정-골격-depth-2-sub-area") {
 		t.Fatalf("project_create description should reference the governing Decision slug")
 	}
+	if !strings.Contains(projectCreateDescription, "bootstrap_receipt") {
+		t.Fatalf("project_create description should advertise bootstrap receipt")
+	}
 }
 
 // TestProjectCreateDescriptionRequiresExplicitImmutableLanguage locks the

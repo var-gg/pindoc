@@ -309,7 +309,7 @@ Propose 시 Pindoc이 NOT_READY 응답으로 되돌릴 수 있는 체크. 통과
 
 ### Section 2 (Write 프로토콜) 구현 주의
 
-- `pindoc.artifact.search` 없이 propose하면 Pre-flight Check가 "선행 search 없음" 으로 NOT_READY 반환. 에이전트는 이 루프를 학습해야 함.
+- `pindoc.artifact.search` 없이 propose하면 보통 Pre-flight Check가 "선행 search 없음" 으로 NOT_READY 반환한다. 예외는 `project.create`가 동봉한 one-use `bootstrap_receipt`를 쓰는 첫 propose, 또는 서버가 empty/same-author area의 첫 N건으로 `receipt_exempted`를 반환하는 bootstrap create다.
 - NOT_READY 응답 포맷은 [10-mcp-tools-spec](10-mcp-tools-spec.md)의 `pindoc.artifact.propose` 섹션 참조.
 - `SECTION_DUPLICATES_EDGES`는 warn-only입니다. Artifact는 publish되지만,
   에이전트는 다음 update에서 관계를 `relates_to` 필드로 옮기도록 유도받습니다.

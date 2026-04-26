@@ -437,11 +437,14 @@ Before calling pindoc.artifact.propose:
 2. Call pindoc.area.list and pick an existing area_slug; use 'misc' if
    nothing fits. Never invent an area_slug.
 3. **Call pindoc.context.for_task (or pindoc.artifact.search) BEFORE
-   create.** The server rejects create-path propose with NO_SRCH when the
-   request has no valid basis.search_receipt. Receipts are the opaque
-   token returned by either of those tools in the SAME MCP session and
-   expire after 30 minutes. Pass it back in propose input as
-   basis.search_receipt.
+   create, unless you are using a bootstrap exemption.** The server rejects
+   create-path propose with NO_SRCH when the request has no valid
+   basis.search_receipt and no exemption applies. Receipts are the opaque
+   token returned by either of those tools in the SAME MCP session. A
+   freshly-created project also returns a one-use bootstrap_receipt /
+   search_receipt for its first propose. Empty/same-author areas may accept
+   the first few receipt-less proposes and return receipt_exempted.
+   Pass any receipt back in propose input as basis.search_receipt.
 4. **If the context/search response carries candidate_updates[], read
    the top candidate with pindoc.artifact.read before deciding
    create-vs-update.** Skipping this earns a RECOMMEND_READ_BEFORE_CREATE

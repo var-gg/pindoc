@@ -102,17 +102,18 @@ func NewServer(opts Options) *Server {
 	// use it for the env-anchored user upsert, then layer the chain on
 	// top once we know UserID.
 	deps := tools.Deps{
-		DB:                 opts.DB,
-		Logger:             opts.Logger,
-		Version:            opts.Version,
-		UserLanguage:       opts.Config.UserLanguage,
-		Embedder:           opts.Embedder,
-		Receipts:           receipts.New(0), // DefaultTTL applies
-		Settings:           opts.Settings,
-		RepoRoot:           opts.Config.RepoRoot,
-		Telemetry:          opts.Telemetry,
-		DefaultProjectSlug: opts.Config.ProjectSlug,
-		Transport:          transport,
+		DB:                    opts.DB,
+		Logger:                opts.Logger,
+		Version:               opts.Version,
+		UserLanguage:          opts.Config.UserLanguage,
+		ReceiptExemptionLimit: opts.Config.ReceiptExemptionLimit,
+		Embedder:              opts.Embedder,
+		Receipts:              receipts.New(0), // DefaultTTL applies
+		Settings:              opts.Settings,
+		RepoRoot:              opts.Config.RepoRoot,
+		Telemetry:             opts.Telemetry,
+		DefaultProjectSlug:    opts.Config.ProjectSlug,
+		Transport:             transport,
 	}
 	userID := upsertStartupUserID(context.Background(), opts.Logger, deps, opts.Config)
 

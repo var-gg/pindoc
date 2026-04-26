@@ -393,6 +393,9 @@ type artifactProposeOutput struct {
 	// agent-supplied values when a stronger signal was present (e.g. code
 	// pins upgrading source_type). Absent on not_ready responses.
 	ArtifactMeta *ResolvedArtifactMeta `json:"artifact_meta,omitempty"`
+	// ReceiptExempted is populated when create-path search_receipt gating
+	// was intentionally skipped by the empty/same-author bootstrap policy.
+	ReceiptExempted *ReceiptExemptionSignal `json:"receipt_exempted,omitempty"`
 	// CanonicalRewriteWithoutEvidence is true when the update path rewrote
 	// a type-specific canonical claim section (Debug.Root cause,
 	// Decision.Decision, Analysis.Conclusion) without fresh evidence (new
@@ -400,6 +403,12 @@ type artifactProposeOutput struct {
 	// evidence keyword). Reader revision badges consume this flag for an
 	// "uncertain rewrite" marker. Always false on create paths.
 	CanonicalRewriteWithoutEvidence bool `json:"canonical_rewrite_without_evidence,omitempty"`
+}
+
+type ReceiptExemptionSignal struct {
+	Reason     string `json:"reason"`
+	NRemaining int    `json:"n_remaining"`
+	Limit      int    `json:"limit,omitempty"`
 }
 
 // NextToolHint is a structured continuation hint. It keeps the tool name
@@ -543,75 +552,86 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			// (read/target proves context). Unset receipts store disables
 			// the gate entirely (test fixtures).
 			isCreatePath := strings.TrimSpace(in.UpdateOf) == "" && strings.TrimSpace(in.SupersedeOf) == ""
+			var receiptExempted *ReceiptExemptionSignal
 			if isCreatePath && deps.Receipts != nil {
 				receipt := ""
 				if in.Basis != nil {
 					receipt = strings.TrimSpace(in.Basis.SearchReceipt)
 				}
+				var receiptSnapshots []receipts.ArtifactRef
 				if receipt == "" {
-					return nil, artifactProposeOutput{
-						Status:           "not_ready",
-						ErrorCode:        "NO_SRCH",
-						Failed:           []string{"NO_SRCH"},
-						Checklist:        []string{i18n.T(lang, "preflight.no_search_receipt")},
-						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
-						NextTools:        defaultNextTools("NO_SRCH"),
-						PatchableFields:  patchFieldsFor("NO_SRCH"),
-					}, nil
-				}
-				res := deps.Receipts.Verify(receipt, scope.ProjectSlug)
-				switch {
-				case res.Unknown:
-					return nil, artifactProposeOutput{
-						Status:           "not_ready",
-						ErrorCode:        "RECEIPT_UNKNOWN",
-						Failed:           []string{"RECEIPT_UNKNOWN"},
-						Checklist:        []string{i18n.T(lang, "preflight.receipt_unknown")},
-						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
-						NextTools:        defaultNextTools("RECEIPT_UNKNOWN"),
-						PatchableFields:  patchFieldsFor("RECEIPT_UNKNOWN"),
-					}, nil
-				case res.Expired:
-					return nil, artifactProposeOutput{
-						Status:           "not_ready",
-						ErrorCode:        "RECEIPT_EXPIRED",
-						Failed:           []string{"RECEIPT_EXPIRED"},
-						Checklist:        []string{i18n.T(lang, "preflight.receipt_expired")},
-						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
-						NextTools:        defaultNextTools("RECEIPT_EXPIRED"),
-						PatchableFields:  patchFieldsFor("RECEIPT_EXPIRED"),
-					}, nil
-				case res.WrongProject:
-					return nil, artifactProposeOutput{
-						Status:           "not_ready",
-						ErrorCode:        "RECEIPT_WRONG_PROJECT",
-						Failed:           []string{"RECEIPT_WRONG_PROJECT"},
-						Checklist:        []string{i18n.T(lang, "preflight.receipt_wrong_project")},
-						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
-						NextTools:        defaultNextTools("RECEIPT_WRONG_PROJECT"),
-						PatchableFields:  patchFieldsFor("RECEIPT_WRONG_PROJECT"),
-					}, nil
-				}
-				// Phase E — corpus-drift staleness. If the receipt was issued
-				// with snapshots (artifact_id, revision_number at search time)
-				// and ALL of those artifacts have since moved past their
-				// snapshotted revision, the receipt is stale in the one sense
-				// that matters: the agent searched a corpus that no longer
-				// exists. Partial drift is just a warning (see checkReceiptSupersedes).
-				if len(res.Snapshots) > 0 {
-					superseded, err := checkReceiptSupersedes(ctx, deps, res.Snapshots)
+					exemption, ok, err := maybeExemptMissingReceipt(ctx, deps, projectID, areaID, in.AuthorID)
 					if err != nil {
-						deps.Logger.Warn("receipt supersede check failed — allowing write", "err", err)
-					} else if len(superseded) == len(res.Snapshots) {
+						return nil, artifactProposeOutput{}, fmt.Errorf("receipt exemption check: %w", err)
+					}
+					if !ok {
 						return nil, artifactProposeOutput{
 							Status:           "not_ready",
-							ErrorCode:        "RECEIPT_SUPERSEDED",
-							Failed:           []string{"RECEIPT_SUPERSEDED"},
-							Checklist:        []string{i18n.T(lang, "preflight.receipt_superseded")},
+							ErrorCode:        "NO_SRCH",
+							Failed:           []string{"NO_SRCH"},
+							Checklist:        []string{i18n.T(lang, "preflight.no_search_receipt")},
 							SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
-							NextTools:        defaultNextTools("RECEIPT_SUPERSEDED"),
-							PatchableFields:  patchFieldsFor("RECEIPT_SUPERSEDED"),
+							NextTools:        defaultNextTools("NO_SRCH"),
+							PatchableFields:  patchFieldsFor("NO_SRCH"),
 						}, nil
+					}
+					receiptExempted = exemption
+				} else {
+					res := deps.Receipts.Verify(receipt, scope.ProjectSlug)
+					switch {
+					case res.Unknown:
+						return nil, artifactProposeOutput{
+							Status:           "not_ready",
+							ErrorCode:        "RECEIPT_UNKNOWN",
+							Failed:           []string{"RECEIPT_UNKNOWN"},
+							Checklist:        []string{i18n.T(lang, "preflight.receipt_unknown")},
+							SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
+							NextTools:        defaultNextTools("RECEIPT_UNKNOWN"),
+							PatchableFields:  patchFieldsFor("RECEIPT_UNKNOWN"),
+						}, nil
+					case res.Expired:
+						return nil, artifactProposeOutput{
+							Status:           "not_ready",
+							ErrorCode:        "RECEIPT_EXPIRED",
+							Failed:           []string{"RECEIPT_EXPIRED"},
+							Checklist:        []string{i18n.T(lang, "preflight.receipt_expired")},
+							SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
+							NextTools:        defaultNextTools("RECEIPT_EXPIRED"),
+							PatchableFields:  patchFieldsFor("RECEIPT_EXPIRED"),
+						}, nil
+					case res.WrongProject:
+						return nil, artifactProposeOutput{
+							Status:           "not_ready",
+							ErrorCode:        "RECEIPT_WRONG_PROJECT",
+							Failed:           []string{"RECEIPT_WRONG_PROJECT"},
+							Checklist:        []string{i18n.T(lang, "preflight.receipt_wrong_project")},
+							SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
+							NextTools:        defaultNextTools("RECEIPT_WRONG_PROJECT"),
+							PatchableFields:  patchFieldsFor("RECEIPT_WRONG_PROJECT"),
+						}, nil
+					}
+					receiptSnapshots = res.Snapshots
+					// Phase E — corpus-drift staleness. If the receipt was issued
+					// with snapshots (artifact_id, revision_number at search time)
+					// and ALL of those artifacts have since moved past their
+					// snapshotted revision, the receipt is stale in the one sense
+					// that matters: the agent searched a corpus that no longer
+					// exists. Partial drift is just a warning (see checkReceiptSupersedes).
+					if len(receiptSnapshots) > 0 {
+						superseded, err := checkReceiptSupersedes(ctx, deps, receiptSnapshots)
+						if err != nil {
+							deps.Logger.Warn("receipt supersede check failed — allowing write", "err", err)
+						} else if len(superseded) == len(receiptSnapshots) {
+							return nil, artifactProposeOutput{
+								Status:           "not_ready",
+								ErrorCode:        "RECEIPT_SUPERSEDED",
+								Failed:           []string{"RECEIPT_SUPERSEDED"},
+								Checklist:        []string{i18n.T(lang, "preflight.receipt_superseded")},
+								SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
+								NextTools:        defaultNextTools("RECEIPT_SUPERSEDED"),
+								PatchableFields:  patchFieldsFor("RECEIPT_SUPERSEDED"),
+							}, nil
+						}
 					}
 				}
 				if in.Type == "Task" {
@@ -619,7 +639,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 					if err != nil {
 						return nil, artifactProposeOutput{}, fmt.Errorf("active task exposure check: %w", err)
 					}
-					if len(activeTasks) > 0 && !receiptSnapshotsContainAny(res.Snapshots, activeTasks) {
+					if len(activeTasks) > 0 && !receiptSnapshotsContainAny(receiptSnapshots, activeTasks) {
 						related := make([]RelatedRef, 0, len(activeTasks))
 						for _, c := range activeTasks {
 							related = append(related, makeRelated(
@@ -990,6 +1010,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				WarningSeverities: severities,
 				EmbedderUsed:      embedderInfo(deps),
 				ArtifactMeta:      &metaOut,
+				ReceiptExempted:   receiptExempted,
 				ToolsetVersion:    ToolsetVersion(),
 			}, nil
 		},
@@ -2918,6 +2939,53 @@ func receiptSnapshotsContainAny(snapshots []receipts.ArtifactRef, candidates []s
 		}
 	}
 	return false
+}
+
+func receiptExemptionLimit(deps Deps) int {
+	if deps.ReceiptExemptionLimit < 0 {
+		return 0
+	}
+	return deps.ReceiptExemptionLimit
+}
+
+func maybeExemptMissingReceipt(ctx context.Context, deps Deps, projectID, areaID, authorID string) (*ReceiptExemptionSignal, bool, error) {
+	limit := receiptExemptionLimit(deps)
+	if limit <= 0 {
+		return nil, false, nil
+	}
+	var total, otherAuthors int
+	if err := deps.DB.QueryRow(ctx, `
+		SELECT
+			count(*)::int,
+			count(*) FILTER (WHERE author_id IS DISTINCT FROM $3)::int
+		FROM artifacts
+		WHERE project_id = $1::uuid
+		  AND area_id = $2::uuid
+		  AND status <> 'archived'
+		  AND NOT starts_with(slug, '_template_')
+	`, projectID, areaID, authorID).Scan(&total, &otherAuthors); err != nil {
+		return nil, false, err
+	}
+	signal, ok := receiptExemptionFromStats(total, otherAuthors, limit)
+	return signal, ok, nil
+}
+
+func receiptExemptionFromStats(totalArtifacts, otherAuthorArtifacts, limit int) (*ReceiptExemptionSignal, bool) {
+	if limit <= 0 || totalArtifacts < 0 || otherAuthorArtifacts < 0 {
+		return nil, false
+	}
+	if otherAuthorArtifacts > 0 || totalArtifacts >= limit {
+		return nil, false
+	}
+	remaining := limit - totalArtifacts - 1
+	if remaining < 0 {
+		remaining = 0
+	}
+	return &ReceiptExemptionSignal{
+		Reason:     "empty_area_first_proposes",
+		NRemaining: remaining,
+		Limit:      limit,
+	}, true
 }
 
 func activeTasksInArea(ctx context.Context, deps Deps, projectID, areaID, excludeArtifactID string) ([]semanticCandidate, error) {

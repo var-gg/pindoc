@@ -84,3 +84,14 @@ func TestBuildCapabilities_MultiProjectPassThrough(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildCapabilities_ReceiptExemptionLimit(t *testing.T) {
+	caps := buildCapabilities(
+		Deps{ReceiptExemptionLimit: 5},
+		&auth.Principal{AuthMode: auth.AuthModeTrustedLocal},
+		false,
+	)
+	if caps.ReceiptExemptionLimit != 5 {
+		t.Fatalf("ReceiptExemptionLimit = %d, want 5", caps.ReceiptExemptionLimit)
+	}
+}

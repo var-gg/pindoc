@@ -47,11 +47,12 @@ type ArtifactRef struct {
 }
 
 type entry struct {
-	project   string
-	query     string
-	issuedAt  time.Time
-	expiresAt time.Time
-	snapshots []ArtifactRef
+	project       string
+	query         string
+	issuedAt      time.Time
+	expiresAt     time.Time
+	snapshots     []ArtifactRef
+	remainingUses int // 0 means reusable until expiry; positive is consumed by Verify.
 }
 
 // Store is safe for concurrent Issue/Verify.
@@ -81,6 +82,18 @@ func New(ttl time.Duration) *Store {
 // nil snapshots to fall back to project-scope-only validity (backward
 // compat for legacy callers).
 func (s *Store) Issue(project, query string, snapshots []ArtifactRef) string {
+	return s.issue(project, query, snapshots, 0)
+}
+
+// IssueOneUse returns a receipt that is consumed by the first successful
+// Verify call for the matching project. It is used for bootstrap handoffs
+// such as pindoc.project.create, where a caller needs exactly one create
+// without doing a separate search round-trip.
+func (s *Store) IssueOneUse(project, query string, snapshots []ArtifactRef) string {
+	return s.issue(project, query, snapshots, 1)
+}
+
+func (s *Store) issue(project, query string, snapshots []ArtifactRef, remainingUses int) string {
 	if s == nil {
 		return ""
 	}
@@ -94,11 +107,12 @@ func (s *Store) Issue(project, query string, snapshots []ArtifactRef) string {
 
 	s.mu.Lock()
 	s.buf[id] = entry{
-		project:   project,
-		query:     query,
-		issuedAt:  now,
-		expiresAt: now.Add(s.ttl),
-		snapshots: snapCopy,
+		project:       project,
+		query:         query,
+		issuedAt:      now,
+		expiresAt:     now.Add(s.ttl),
+		snapshots:     snapCopy,
+		remainingUses: remainingUses,
 	}
 	s.mu.Unlock()
 	return id
@@ -118,29 +132,41 @@ type VerifyResult struct {
 	Snapshots    []ArtifactRef
 }
 
-// Verify looks up a receipt. After a successful verify the receipt stays
-// usable until expiry — multiple propose calls in one session can reuse
-// the same receipt (common: search once, then several connected writes).
-// Corpus-drift staleness is NOT checked here — that requires DB access
-// and lives at the call site so receipts stays dependency-free.
+// Verify looks up a receipt. Reusable receipts stay usable until expiry —
+// multiple propose calls in one session can reuse the same receipt (common:
+// search once, then several connected writes). One-use receipts are consumed
+// by the first successful same-project Verify. Corpus-drift staleness is NOT
+// checked here — that requires DB access and lives at the call site so
+// receipts stays dependency-free.
 func (s *Store) Verify(receipt, project string) VerifyResult {
 	if s == nil || receipt == "" {
 		return VerifyResult{Unknown: true}
 	}
 	s.mu.Lock()
 	e, ok := s.buf[receipt]
-	s.mu.Unlock()
 	if !ok {
+		s.mu.Unlock()
 		return VerifyResult{Unknown: true}
 	}
 	if time.Now().After(e.expiresAt) {
+		s.mu.Unlock()
 		return VerifyResult{Expired: true, IssuedQuery: e.query}
 	}
 	if e.project != project {
+		s.mu.Unlock()
 		return VerifyResult{WrongProject: true, IssuedQuery: e.query}
 	}
 	snapCopy := make([]ArtifactRef, len(e.snapshots))
 	copy(snapCopy, e.snapshots)
+	if e.remainingUses > 0 {
+		e.remainingUses--
+		if e.remainingUses == 0 {
+			delete(s.buf, receipt)
+		} else {
+			s.buf[receipt] = e
+		}
+	}
+	s.mu.Unlock()
 	return VerifyResult{Valid: true, IssuedQuery: e.query, Snapshots: snapCopy}
 }
 
