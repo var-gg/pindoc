@@ -170,7 +170,7 @@ go build -o bin/pindoc-server ./cmd/pindoc-server
 
 각 세션에서 `pindoc.project.current(project_slug="...")`를 호출하면 프로젝트 메타데이터와 capabilities가 반환된다. 현재 HTTP 데몬은 `transport=streamable_http`, `scope_mode=per_call`을 advertise한다. 데몬은 loopback(`127.0.0.1`)에 bind되어 외부에서 접근 불가 — 자기-호스팅 공개 시 인증 도입은 별 작업.
 
-`pindoc.harness.install`이 생성하는 `PINDOC.md`는 YAML frontmatter(`project_slug`, `project_id`, `locale`, `schema_version`)를 포함한다. Frontmatter는 이후 workspace detection의 명시적 source다. Section X는 정책 wiki를 `context.for_task`의 `applicable_rules[]`로 자동 적용하는 규약을 설명하고, Section 12는 chip/parallel work가 시작·진행·merge·중단될 때 Pindoc Task status와 acceptance checkbox를 어떻게 갱신할지 규정한다.
+`pindoc.harness.install`이 생성하는 `PINDOC.md`는 YAML frontmatter(`project_slug`, `project_id`, `locale`, `schema_version`)를 포함한다. Frontmatter는 이후 workspace detection의 명시적 source다. Section X는 정책 wiki를 `context.for_task`의 `applicable_rules[]`로 자동 적용하는 규약을 설명하고, Section 12는 chip/parallel work가 시작·진행·merge·중단될 때 Pindoc Task status와 acceptance checkbox를 어떻게 갱신할지 규정한다. 기본 응답은 호환성을 위해 `response_format=full`이지만, 반복 호출은 `file_only` 또는 이전 etag(`if_content_etag`, `if_style_snippet_etag`)로 대형 body 재전송을 피한다.
 
 Windows 기본 운영은 `scripts\install-user-mode.ps1` 이다. 기존
 `scripts\install-service.ps1` NSSM 경로는 deprecated legacy 옵션으로만 남긴다.

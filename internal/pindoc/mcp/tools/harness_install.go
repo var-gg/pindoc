@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -31,6 +33,21 @@ type harnessInstallInput struct {
 	// installs pick it up automatically; explicit false supports legacy
 	// migrations that need a smaller harness.
 	IncludeSection12 *bool `json:"include_section_12,omitempty" jsonschema:"include Task lifecycle Section 12; default true"`
+
+	// ResponseFormat controls whether this call returns the generated
+	// PINDOC.md / style snippet bodies. Empty defaults to "full" for
+	// backward compatibility. "file_only" returns metadata/etag fields
+	// without large bodies.
+	ResponseFormat string `json:"response_format,omitempty" jsonschema:"full|file_only; default full"`
+
+	// IfContentETag lets clients present a previously returned content_etag.
+	// When it matches the freshly rendered PINDOC.md content, the body is
+	// omitted even in full mode.
+	IfContentETag string `json:"if_content_etag,omitempty" jsonschema:"previous content_etag; omit body when it still matches"`
+
+	// IfStyleSnippetETag applies the same conditional omission rule to the
+	// register-separation style snippet.
+	IfStyleSnippetETag string `json:"if_style_snippet_etag,omitempty" jsonschema:"previous style_snippet_etag; omit style_snippet when it still matches"`
 }
 
 type harnessInstallOutput struct {
@@ -40,7 +57,7 @@ type harnessInstallOutput struct {
 	SuggestedPath string `json:"suggested_path"`
 
 	// Body is the full PINDOC.md content the agent should write.
-	Body string `json:"body"`
+	Body string `json:"body,omitempty"`
 
 	// PindocMdContent/PindocMdPath/Instructions are aliases for clients
 	// expecting the newer frontmatter task schema. The older Body /
@@ -59,7 +76,7 @@ type harnessInstallOutput struct {
 	// block can be located and replaced on version upgrades.
 	// Implements Decision `decision-artifact-format-leak-mitigation`
 	// first defence layer (agent conversation register).
-	StyleSnippet string `json:"style_snippet"`
+	StyleSnippet string `json:"style_snippet,omitempty"`
 
 	// StyleSnippetTargets lists the agent-settings files the snippet
 	// typically belongs in, ordered by preference. The agent reads its
@@ -77,10 +94,29 @@ type harnessInstallOutput struct {
 	// Message gives the agent a plain-English summary of what to do next.
 	Message string `json:"message"`
 
+	// ResponseFormat reports the resolved output mode. ContentETag is
+	// always returned so clients can avoid receiving the same body again.
+	ResponseFormat string `json:"response_format"`
+	ContentETag    string `json:"content_etag"`
+
+	// ContentURL is reserved for future retrievable harness payload URLs.
+	// Local MCP mode has no durable payload URL, so it is omitted today.
+	ContentURL     string `json:"content_url,omitempty"`
+	ContentOmitted bool   `json:"content_omitted,omitempty"`
+
+	// StyleSnippetETag mirrors ContentETag for the agent-settings snippet.
+	StyleSnippetETag    string `json:"style_snippet_etag"`
+	StyleSnippetOmitted bool   `json:"style_snippet_omitted,omitempty"`
+
 	// Metadata the template was rendered from, so the agent can explain
 	// choices to the user.
 	RenderedFor RenderedFor `json:"rendered_for"`
 }
+
+const (
+	harnessResponseFormatFull     = "full"
+	harnessResponseFormatFileOnly = "file_only"
+)
 
 // styleSnippetVersion is bumped whenever the snippet body changes in a
 // way worth re-propagating to existing installs. Agents compare the
@@ -125,6 +161,11 @@ func RegisterHarnessInstall(server *sdk.Server, deps Deps) {
 			Description: "Return the PINDOC.md body this project should adopt and the one-line CLAUDE.md include that loads it. Write the returned body to PINDOC.md at the repo root, and append the include line to CLAUDE.md (or AGENTS.md). Re-run to regenerate after upgrading the server — the spec evolves with the server version.",
 		},
 		func(ctx context.Context, p *auth.Principal, in harnessInstallInput) (*sdk.CallToolResult, harnessInstallOutput, error) {
+			responseFormat, err := normalizeHarnessResponseFormat(in.ResponseFormat)
+			if err != nil {
+				return nil, harnessInstallOutput{}, err
+			}
+
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
 			if err != nil {
 				return nil, harnessInstallOutput{}, fmt.Errorf("harness.install: %w", err)
@@ -162,7 +203,7 @@ func RegisterHarnessInstall(server *sdk.Server, deps Deps) {
 
 			message := harnessInstallMessage(styleSnippetMarkerBegin)
 
-			return nil, harnessInstallOutput{
+			out := harnessInstallOutput{
 				SuggestedPath:       "PINDOC.md",
 				Body:                body,
 				PindocMdContent:     body,
@@ -181,9 +222,53 @@ func RegisterHarnessInstall(server *sdk.Server, deps Deps) {
 					IncludeSection12: includeSection12,
 					Version:          deps.Version,
 				},
-			}, nil
+			}
+			applyHarnessResponseFormat(&out, in, responseFormat, body, styleSnippet)
+			return nil, out, nil
 		},
 	)
+}
+
+func normalizeHarnessResponseFormat(raw string) (string, error) {
+	format := strings.ToLower(strings.TrimSpace(raw))
+	if format == "" {
+		return harnessResponseFormatFull, nil
+	}
+	switch format {
+	case harnessResponseFormatFull, harnessResponseFormatFileOnly:
+		return format, nil
+	default:
+		return "", fmt.Errorf("response_format must be %q or %q", harnessResponseFormatFull, harnessResponseFormatFileOnly)
+	}
+}
+
+func harnessETag(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func applyHarnessResponseFormat(out *harnessInstallOutput, in harnessInstallInput, responseFormat, body, styleSnippet string) {
+	contentETag := harnessETag(body)
+	styleSnippetETag := harnessETag(styleSnippet)
+
+	out.ResponseFormat = responseFormat
+	out.ContentETag = contentETag
+	out.StyleSnippetETag = styleSnippetETag
+
+	omitContent := responseFormat == harnessResponseFormatFileOnly ||
+		strings.TrimSpace(in.IfContentETag) == contentETag
+	if omitContent {
+		out.Body = ""
+		out.PindocMdContent = ""
+		out.ContentOmitted = true
+	}
+
+	omitStyleSnippet := responseFormat == harnessResponseFormatFileOnly ||
+		strings.TrimSpace(in.IfStyleSnippetETag) == styleSnippetETag
+	if omitStyleSnippet {
+		out.StyleSnippet = ""
+		out.StyleSnippetOmitted = true
+	}
 }
 
 func harnessInstallMessage(marker string) string {
@@ -201,6 +286,9 @@ block is present (see style_snippet). If a block with the marker
 new body. If none exists, insert it immediately after the main
 agent-guidance H2 (for example "# AGENTS.md instructions" or
 "# CLAUDE.md instructions"); keep anything outside the markers untouched.
+If body / pindoc_md_content or style_snippet is omitted because
+response_format=file_only or an etag matched, no write is needed for that omitted
+payload; re-run with response_format=full and no matching etag to receive it.
 Future sessions will auto-load PINDOC.md and follow the Pindoc Harness
 rules (Pre-flight Check before writes, Referenced Confirmation when
 asking the user for approval, agent-only write surface).
