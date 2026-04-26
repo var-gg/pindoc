@@ -198,7 +198,7 @@ func authChainForMode(mode config.AuthMode, userID, agentID string) (*auth.Chain
 	case config.AuthModeTrustedLocal:
 		return auth.NewChain(auth.NewTrustedLocalResolver(userID, agentID)), nil
 	case config.AuthModeOAuthGitHub:
-		return nil, fmt.Errorf("PINDOC_AUTH_MODE=%s is not supported yet: bearer token resolver is not implemented; use trusted_local until task-fosite-as-integration lands", mode)
+		return auth.NewChain(auth.NewBearerTokenResolver(agentID)), nil
 	case config.AuthModePublicReadonly, config.AuthModeSingleUser:
 		return nil, fmt.Errorf("PINDOC_AUTH_MODE=%s is not supported yet in V1; use trusted_local", mode)
 	default:

@@ -11,11 +11,13 @@ func TestValidateServerAuthMode(t *testing.T) {
 	if err := validateServerAuthMode(config.AuthModeTrustedLocal); err != nil {
 		t.Fatalf("trusted_local error = %v", err)
 	}
+	if err := validateServerAuthMode(config.AuthModeOAuthGitHub); err != nil {
+		t.Fatalf("oauth_github error = %v", err)
+	}
 
 	for _, mode := range []config.AuthMode{
 		config.AuthModePublicReadonly,
 		config.AuthModeSingleUser,
-		config.AuthModeOAuthGitHub,
 	} {
 		t.Run(string(mode), func(t *testing.T) {
 			err := validateServerAuthMode(mode)

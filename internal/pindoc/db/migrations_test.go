@@ -170,3 +170,43 @@ func TestAuditUserFKsSetNullMigrationContract(t *testing.T) {
 		}
 	}
 }
+
+func TestOAuthStorageMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0037_oauth_storage.sql")
+	if err != nil {
+		t.Fatalf("read oauth storage migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"CREATE TABLE oauth_clients",
+		"client_id      TEXT PRIMARY KEY",
+		"secret_hash    BYTEA NULL",
+		"redirect_uris  TEXT[] NOT NULL",
+		"CREATE TABLE oauth_authorize_codes",
+		"code_hash        TEXT PRIMARY KEY",
+		"form_data        JSONB NOT NULL DEFAULT '{}'::jsonb",
+		"session          JSONB NOT NULL DEFAULT '{}'::jsonb",
+		"CREATE TABLE oauth_access_tokens",
+		"CREATE TABLE oauth_refresh_tokens",
+		"rotated_from      TEXT NULL REFERENCES oauth_refresh_tokens(token_hash) ON DELETE SET NULL",
+		"CREATE TABLE oauth_pkce_requests",
+		"code_challenge_method TEXT NOT NULL",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("oauth storage migration Up missing %q:\n%s", want, up)
+		}
+	}
+	for _, want := range []string{
+		"-- +goose Down",
+		"DROP TABLE IF EXISTS oauth_pkce_requests",
+		"DROP TABLE IF EXISTS oauth_refresh_tokens",
+		"DROP TABLE IF EXISTS oauth_access_tokens",
+		"DROP TABLE IF EXISTS oauth_authorize_codes",
+		"DROP TABLE IF EXISTS oauth_clients",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("oauth storage migration Down missing %q", want)
+		}
+	}
+}

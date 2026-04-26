@@ -64,6 +64,10 @@ services:
       PINDOC_USER_NAME: ${PINDOC_USER_NAME:-}
       PINDOC_USER_EMAIL: ${PINDOC_USER_EMAIL:-}
       PINDOC_PUBLIC_BASE_URL: ${PINDOC_PUBLIC_BASE_URL:-http://127.0.0.1:${PINDOC_DAEMON_PORT:-5830}}
+      PINDOC_OAUTH_SIGNING_KEY_PATH: ${PINDOC_OAUTH_SIGNING_KEY_PATH:-/var/lib/pindoc/cache/oauth-signing.pem}
+      PINDOC_OAUTH_CLIENT_ID: ${PINDOC_OAUTH_CLIENT_ID:-claude-desktop}
+      PINDOC_OAUTH_CLIENT_SECRET: ${PINDOC_OAUTH_CLIENT_SECRET:-}
+      PINDOC_OAUTH_REDIRECT_URIS: ${PINDOC_OAUTH_REDIRECT_URIS:-http://127.0.0.1:3846/callback,http://localhost:3846/callback}
       # Do not pass host PINDOC_EMBED_PROVIDER through here. A one-off
       # `PINDOC_EMBED_PROVIDER=stub docker compose up` previously made the
       # daemon silently index with hash embeddings. Compose users must opt

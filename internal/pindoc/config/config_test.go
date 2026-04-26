@@ -1,6 +1,7 @@
 package config
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -63,5 +64,30 @@ func TestLoadInvalidAuthMode(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("error %q does not contain %q", msg, want)
 		}
+	}
+}
+
+func TestLoadOAuthDefaultsAndRedirectList(t *testing.T) {
+	t.Setenv("PINDOC_OAUTH_REDIRECT_URIS", " http://127.0.0.1:1111/cb, http://localhost:2222/cb ;http://127.0.0.1:1111/cb ")
+	t.Setenv("PINDOC_OAUTH_CLIENT_ID", " test-client ")
+	t.Setenv("PINDOC_OAUTH_CLIENT_SECRET", " secret ")
+	t.Setenv("PINDOC_OAUTH_SIGNING_KEY_PATH", "C:/tmp/pindoc-oauth.pem")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.OAuthClientID != "test-client" {
+		t.Fatalf("OAuthClientID = %q, want test-client", cfg.OAuthClientID)
+	}
+	if cfg.OAuthClientSecret != "secret" {
+		t.Fatalf("OAuthClientSecret = %q, want secret", cfg.OAuthClientSecret)
+	}
+	if cfg.OAuthSigningKeyPath != "C:/tmp/pindoc-oauth.pem" {
+		t.Fatalf("OAuthSigningKeyPath = %q", cfg.OAuthSigningKeyPath)
+	}
+	want := []string{"http://127.0.0.1:1111/cb", "http://localhost:2222/cb"}
+	if !reflect.DeepEqual(cfg.OAuthRedirectURIs, want) {
+		t.Fatalf("OAuthRedirectURIs = %#v, want %#v", cfg.OAuthRedirectURIs, want)
 	}
 }

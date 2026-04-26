@@ -72,6 +72,15 @@ type Config struct {
 	// OAuth replaces these env vars with session-resolved principals.
 	UserName  string
 	UserEmail string
+
+	// OAuth 2.1 authorization-server settings for auth_mode=oauth_github.
+	// The first iteration keeps one operator-provisioned client and a
+	// locally persisted RSA signing key; GitHub identity exchange lands in
+	// the follow-up IdP task, while fosite owns code/token/PKCE semantics.
+	OAuthSigningKeyPath string
+	OAuthClientID       string
+	OAuthClientSecret   string
+	OAuthRedirectURIs   []string
 }
 
 type SummaryConfig struct {
@@ -143,6 +152,13 @@ func Load() (*Config, error) {
 		RepoRoot:              env("PINDOC_REPO_ROOT", ""),
 		UserName:              strings.TrimSpace(env("PINDOC_USER_NAME", "")),
 		UserEmail:             strings.TrimSpace(env("PINDOC_USER_EMAIL", "")),
+		OAuthSigningKeyPath:   env("PINDOC_OAUTH_SIGNING_KEY_PATH", "./data/oauth-signing.pem"),
+		OAuthClientID:         strings.TrimSpace(env("PINDOC_OAUTH_CLIENT_ID", "claude-desktop")),
+		OAuthClientSecret:     strings.TrimSpace(env("PINDOC_OAUTH_CLIENT_SECRET", "")),
+		OAuthRedirectURIs: envList("PINDOC_OAUTH_REDIRECT_URIS", []string{
+			"http://127.0.0.1:3846/callback",
+			"http://localhost:3846/callback",
+		}),
 		Embed: embed.Config{
 			// Empty default → gemma (bundled on-device embeddinggemma-300m).
 			// Set explicitly to "stub" for offline unit tests, "http" for
@@ -199,6 +215,30 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 		}
 	}
 	return fallback
+}
+
+func envList(key string, fallback []string) []string {
+	raw, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return append([]string(nil), fallback...)
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n'
+	})
+	out := make([]string, 0, len(parts))
+	seen := map[string]bool{}
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return append([]string(nil), fallback...)
+	}
+	return out
 }
 
 func env(key, fallback string) string {

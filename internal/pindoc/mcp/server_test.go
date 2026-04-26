@@ -17,11 +17,20 @@ func TestAuthChainForModeTrustedLocal(t *testing.T) {
 	}
 }
 
+func TestAuthChainForModeOAuthGitHub(t *testing.T) {
+	chain, err := authChainForMode(config.AuthModeOAuthGitHub, "user-id", "agent-id")
+	if err != nil {
+		t.Fatalf("authChainForMode() error = %v", err)
+	}
+	if chain == nil {
+		t.Fatalf("authChainForMode() chain = nil")
+	}
+}
+
 func TestAuthChainForModeUnsupported(t *testing.T) {
 	cases := []config.AuthMode{
 		config.AuthModePublicReadonly,
 		config.AuthModeSingleUser,
-		config.AuthModeOAuthGitHub,
 	}
 	for _, mode := range cases {
 		t.Run(string(mode), func(t *testing.T) {

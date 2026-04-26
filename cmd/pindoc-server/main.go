@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -30,13 +31,16 @@ import (
 	"syscall"
 	"time"
 
+	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	pauth "github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/httpapi"
 	pmcp "github.com/var-gg/pindoc/internal/pindoc/mcp"
+	"github.com/var-gg/pindoc/internal/pindoc/projects"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
 	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
 )
@@ -195,6 +199,38 @@ func main() {
 			logger.Info("Reader SPA disabled — set PINDOC_SPA_DIST or `pnpm --dir web build` to enable")
 		}
 
+		var oauthSvc *pauth.OAuthService
+		if cfg.AuthMode == config.AuthModeOAuthGitHub {
+			oauthUserID, err := pauth.EnsureBootstrapUser(ctx, pool, cfg.UserName, cfg.UserEmail)
+			if err != nil {
+				logger.Error("oauth bootstrap user failed", "err", err)
+				os.Exit(1)
+			}
+			if err := projects.EnsureDefaultProjectOwnerMembership(ctx, pool, cfg.ProjectSlug, oauthUserID); err != nil {
+				logger.Error("oauth default project membership bootstrap failed", "err", err)
+				os.Exit(1)
+			}
+			publicBaseURL := daemonPublicBaseURL(ssStore.Get().PublicBaseURL, httpAddr)
+			oauthSvc, err = pauth.NewOAuthService(ctx, pool, pauth.OAuthConfig{
+				Issuer:          publicBaseURL,
+				PublicBaseURL:   publicBaseURL,
+				SigningKeyPath:  cfg.OAuthSigningKeyPath,
+				ClientID:        cfg.OAuthClientID,
+				ClientSecret:    cfg.OAuthClientSecret,
+				RedirectURIs:    cfg.OAuthRedirectURIs,
+				BootstrapUserID: oauthUserID,
+			})
+			if err != nil {
+				logger.Error("oauth service init failed", "err", err)
+				os.Exit(1)
+			}
+			logger.Info("oauth service ready",
+				"issuer", publicBaseURL,
+				"client_id", cfg.OAuthClientID,
+				"bootstrap_user_id", oauthUserID,
+			)
+		}
+
 		apiHandler := httpapi.New(cfg, httpapi.Deps{
 			DB:                   pool,
 			Logger:               logger,
@@ -203,6 +239,7 @@ func main() {
 			Embedder:             embedder,
 			Settings:             ssStore,
 			Telemetry:            tele,
+			OAuth:                oauthSvc,
 			Version:              version,
 			BuildCommit:          commit,
 			StartTime:            startTime,
@@ -220,7 +257,7 @@ func main() {
 			Settings:  ssStore,
 			Telemetry: tele,
 			Transport: "streamable_http",
-		}, apiHandler)
+		}, apiHandler, oauthSvc)
 		return
 	}
 
@@ -270,7 +307,7 @@ func main() {
 // dependencies; apiHandler carries the Reader API mux (httpapi.New) —
 // Go 1.22's ServeMux picks /mcp over the catch-all `/` so the routing
 // is unambiguous.
-func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOpts pmcp.Options, apiHandler http.Handler) {
+func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOpts pmcp.Options, apiHandler http.Handler, oauthSvc *pauth.OAuthService) {
 	mcp, err := pmcp.NewServer(baseOpts)
 	if err != nil {
 		logger.Error("mcp server init failed", "err", err)
@@ -281,9 +318,20 @@ func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOp
 		return mcpServer
 	}
 	streamHandler := sdk.NewStreamableHTTPHandler(getServer, nil)
+	var mcpHandler http.Handler = streamHandler
+	if baseOpts.Config != nil && baseOpts.Config.AuthMode == config.AuthModeOAuthGitHub {
+		if oauthSvc == nil {
+			logger.Error("oauth_github mode requires oauth service")
+			os.Exit(1)
+		}
+		mcpHandler = mcpauth.RequireBearerToken(oauthSvc.TokenVerifier, &mcpauth.RequireBearerTokenOptions{
+			ResourceMetadataURL: oauthSvc.ResourceMetadataURL(),
+			Scopes:              []string{pauth.ScopePindoc},
+		})(mcpHandler)
+	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", streamHandler)
+	mux.Handle("/mcp", mcpHandler)
 	// Catch-all delegates everything else (/, /health, /api/...) to the
 	// Reader API mux. ServeMux picks /mcp over `/` because it is the
 	// more specific pattern.
@@ -338,12 +386,32 @@ func validateServerAuthMode(mode config.AuthMode) error {
 	}
 	switch mode {
 	case config.AuthModeOAuthGitHub:
-		return fmt.Errorf("PINDOC_AUTH_MODE=%s is not supported yet: bearer token resolver is not implemented; use trusted_local until task-fosite-as-integration lands", mode)
+		return nil
 	case config.AuthModePublicReadonly, config.AuthModeSingleUser:
 		return fmt.Errorf("PINDOC_AUTH_MODE=%s is not supported yet in V1; use trusted_local", mode)
 	default:
 		return fmt.Errorf("invalid PINDOC_AUTH_MODE: '%s'. valid: %s", mode, config.ValidAuthModesString())
 	}
+}
+
+func daemonPublicBaseURL(publicBaseURL, addr string) string {
+	publicBaseURL = strings.TrimRight(strings.TrimSpace(publicBaseURL), "/")
+	if publicBaseURL != "" {
+		if strings.HasPrefix(publicBaseURL, "http://") || strings.HasPrefix(publicBaseURL, "https://") {
+			return publicBaseURL
+		}
+		return "http://" + publicBaseURL
+	}
+	host := strings.TrimSpace(addr)
+	if h, p, err := net.SplitHostPort(addr); err == nil {
+		h = strings.Trim(h, "[]")
+		switch h {
+		case "", "0.0.0.0", "::":
+			h = "127.0.0.1"
+		}
+		host = net.JoinHostPort(h, p)
+	}
+	return "http://" + host
 }
 
 func stubEmbedderWarning() string {

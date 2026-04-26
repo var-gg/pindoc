@@ -106,6 +106,9 @@ func TestResolveRole_TrustedLocalAlwaysOwner(t *testing.T) {
 			t.Fatalf("resolveRole(mode=%q) = %q; want %q", mode, got, RoleOwner)
 		}
 	}
+	if got := resolveRole(&Principal{AuthMode: AuthModeOAuthGitHub}); got != "" {
+		t.Fatalf("resolveRole(oauth_github) = %q; want empty so project_members is consulted", got)
+	}
 	if got := resolveRole(nil); got != "" {
 		t.Fatalf("resolveRole(nil) = %q; want empty string", got)
 	}

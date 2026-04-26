@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	pauth "github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/changegroup"
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
@@ -47,6 +48,7 @@ type Deps struct {
 	Embedder    embed.Provider
 	Settings    *settings.Store
 	Telemetry   *telemetry.Store
+	OAuth       *pauth.OAuthService
 	AuthMode    config.AuthMode
 	Version     string
 	BuildCommit string
@@ -84,6 +86,9 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	}
 	if d.AuthMode == "" {
 		d.AuthMode = config.AuthModeTrustedLocal
+	}
+	if d.OAuth != nil {
+		d.OAuth.RegisterRoutes(mux)
 	}
 
 	// Unscoped reads — apply to the whole instance.
