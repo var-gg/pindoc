@@ -89,7 +89,7 @@ func TestPatchFieldsForFieldValueReserved(t *testing.T) {
 	}
 	hasRev := false
 	for _, tl := range tools {
-		if tl == "pindoc.artifact.revisions" {
+		if tl.Tool == "pindoc.artifact.revisions" {
 			hasRev = true
 			break
 		}

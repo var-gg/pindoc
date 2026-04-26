@@ -327,8 +327,9 @@ type artifactProposeOutput struct {
 	// why the gate fired. Populated alongside the legacy Checklist/
 	// SuggestedActions pair so agents can branch on codes without parsing
 	// natural language.
-	NextTools []string     `json:"next_tools,omitempty"`
-	Related   []RelatedRef `json:"related,omitempty"`
+	NextTools []NextToolHint `json:"next_tools,omitempty"`
+	Related   []RelatedRef   `json:"related,omitempty"`
+	Expected  *ExpectedShape `json:"expected,omitempty"`
 	// PatchableFields (Phase 14b) tells the agent which input fields to
 	// change for the retry. Empty = full input needs rework. Maps stable
 	// fail codes to the minimum patch surface so agents don't resend
@@ -369,6 +370,29 @@ type artifactProposeOutput struct {
 	// evidence keyword). Reader revision badges consume this flag for an
 	// "uncertain rewrite" marker. Always false on create paths.
 	CanonicalRewriteWithoutEvidence bool `json:"canonical_rewrite_without_evidence,omitempty"`
+}
+
+// NextToolHint is a structured continuation hint. It keeps the tool name
+// machine-readable and, when useful, carries the exact arguments for the
+// next MCP call.
+type NextToolHint struct {
+	Tool   string         `json:"tool"`
+	Args   map[string]any `json:"args,omitempty"`
+	Reason string         `json:"reason,omitempty"`
+}
+
+// ExpectedShape describes the shape the failed propose attempt should
+// converge to. For template-backed structure gates this includes the
+// exact template slug and H2 slots the agent can copy into its retry.
+type ExpectedShape struct {
+	ArtifactType string           `json:"artifact_type,omitempty"`
+	TemplateSlug string           `json:"template_slug,omitempty"`
+	RequiredH2   []ExpectedH2Slot `json:"required_h2,omitempty"`
+}
+
+type ExpectedH2Slot struct {
+	Label   string   `json:"label"`
+	Aliases []string `json:"aliases,omitempty"`
 }
 
 // RelatedRef is a compact pointer to another artifact the caller should
@@ -415,18 +439,20 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			lang := deps.UserLanguage
 			checklist, failed, code := preflight(ctx, deps, scope.ProjectSlug, &in, lang)
 			if len(checklist) > 0 {
+				expected := expectedForNotReady(ctx, deps, scope.ProjectSlug, in.Type, failed)
 				return nil, artifactProposeOutput{
 					Status:    "not_ready",
 					ErrorCode: code,
 					Failed:    failed,
 					Checklist: checklist,
-					SuggestedActions: []string{
+					SuggestedActions: suggestedActionsForNotReady(lang, in.Type, failed, []string{
 						i18n.T(lang, "suggested.fix_all"),
 						i18n.T(lang, "suggested.confirm_types"),
 						i18n.T(lang, "suggested.use_misc"),
-					},
-					NextTools:       defaultNextTools(code),
+					}),
+					NextTools:       nextToolsForNotReady(code, in.Type, failed),
 					PatchableFields: patchFieldsFor(code),
+					Expected:        expected,
 				}, nil
 			}
 
@@ -584,7 +610,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 							SuggestedActions: []string{
 								"Call pindoc.artifact.search with type=Task and the same area, or read the related Task(s), then retry with a fresh receipt.",
 							},
-							NextTools:       []string{"pindoc.artifact.search", "pindoc.artifact.read"},
+							NextTools:       toolHints("pindoc.artifact.search", "pindoc.artifact.read"),
 							PatchableFields: []string{"basis.search_receipt"},
 							Related:         related,
 						}, nil
@@ -712,7 +738,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 										[]string{"Read the candidate Task acceptance, then retry with supersede_of=<old-task-slug> or unrelated_reason=<why it does not overlap>."},
 										rel...,
 									),
-									NextTools:       []string{"pindoc.artifact.read", "pindoc.artifact.propose"},
+									NextTools:       toolHints("pindoc.artifact.read", "pindoc.artifact.propose"),
 									PatchableFields: []string{"supersede_of", "unrelated_reason"},
 									Related:         related,
 								}, nil
@@ -885,7 +911,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			warnings = append(warnings, pinPathWarnings(deps, in.Pins)...)
 			warnings = append(warnings, titleLengthWarnings(in.Title)...)
 			warnings = append(warnings, bodyH1Warnings(in.BodyMarkdown)...)
-			warnings = append(warnings, requiredH2Warnings(in.BodyMarkdown, in.Type)...)
+			warnings = append(warnings, requiredH2WarningsFor(ctx, deps, scope.ProjectSlug, in.BodyMarkdown, in.Type)...)
 			warnings = append(warnings, sectionDuplicatesEdgesWarnings(in.BodyMarkdown)...)
 			warnings = append(warnings, decisionSubjectAreaWarnings(in)...)
 			slugWarnings, slugSuggestedActions := slugBrevityAdvisory(in, finalSlug)
@@ -1391,7 +1417,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	// Canonical-claim rewrite guard — compare prev/new H2 sections for
 	// types that carry a canonical truth claim (Debug, Decision, Analysis)
 	// and require fresh evidence when that section's content shifts.
-	warnings := updatePathWarnings(deps, in)
+	warnings := updatePathWarnings(ctx, deps, scope.ProjectSlug, in)
 	warnings = append(warnings, decisionSubjectAreaWarnings(in)...)
 	// Body-patch warnings bubble up here so PATCH_NOOP etc. sit alongside
 	// canonical-rewrite / source-type advisories instead of a separate
@@ -1458,12 +1484,12 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 // place can't produce a duplicate — but runs the structural/pin gates so
 // the agent learns about title length / heading / pin-path issues on
 // revised artifacts too.
-func updatePathWarnings(deps Deps, in artifactProposeInput) []string {
+func updatePathWarnings(ctx context.Context, deps Deps, projectSlug string, in artifactProposeInput) []string {
 	var out []string
 	out = append(out, pinPathWarnings(deps, in.Pins)...)
 	out = append(out, titleLengthWarnings(in.Title)...)
 	out = append(out, bodyH1Warnings(in.BodyMarkdown)...)
-	out = append(out, requiredH2Warnings(in.BodyMarkdown, in.Type)...)
+	out = append(out, requiredH2WarningsFor(ctx, deps, projectSlug, in.BodyMarkdown, in.Type)...)
 	out = append(out, sectionDuplicatesEdgesWarnings(in.BodyMarkdown)...)
 	return out
 }
@@ -1653,6 +1679,9 @@ func preflight(ctx context.Context, deps Deps, projectSlug string, in *artifactP
 	// validator meta comment. A nil hint set (no template, no comment,
 	// DB unreachable) falls back to the hard-coded defaults below.
 	hints := getValidatorHints(ctx, deps, projectSlug, in.Type)
+	for _, slot := range missingRequiredH2Slots(in.BodyMarkdown, requiredH2SlotsFromHints(in.Type, hints)) {
+		push(fmt.Sprintf(i18n.T(lang, "preflight.h2_missing"), in.Type, slot.Label), "MISSING_H2:"+slot.Label)
+	}
 	switch in.Type {
 	case "Task":
 		needed := []string{"acceptance"}
@@ -2065,24 +2094,159 @@ func areaUnknownChecklist(ctx context.Context, deps Deps, scope *auth.ProjectSco
 // should call next to unblock itself. Returning nil means "no suggestion;
 // agent should re-read the checklist" — schema-level failures mostly fall
 // into that bucket because the fix is "fill in the missing field".
-func defaultNextTools(code string) []string {
+func defaultNextTools(code string) []NextToolHint {
+	if isMissingH2Code(code) {
+		return toolHints("pindoc.artifact.read", "pindoc.artifact.propose")
+	}
 	switch code {
 	case "NO_SRCH", "RECEIPT_UNKNOWN", "RECEIPT_EXPIRED", "RECEIPT_WRONG_PROJECT", "RECEIPT_SUPERSEDED":
-		return []string{"pindoc.artifact.search", "pindoc.context.for_task"}
+		return toolHints("pindoc.artifact.search", "pindoc.context.for_task")
 	case "CONFLICT_EXACT_TITLE", "POSSIBLE_DUP", "TASK_SUPERSEDE_REQUIRED", "TASK_ACTIVE_CONTEXT_REQUIRED":
-		return []string{"pindoc.artifact.read", "pindoc.artifact.propose"}
+		return toolHints("pindoc.artifact.read", "pindoc.artifact.propose")
 	case "VER_CONFLICT", "FIELD_VALUE_RESERVED":
-		return []string{"pindoc.artifact.revisions", "pindoc.artifact.diff"}
+		return toolHints("pindoc.artifact.revisions", "pindoc.artifact.diff")
 	case "UPDATE_TARGET_NOT_FOUND", "SUPERSEDE_TARGET_NOT_FOUND", "REL_TARGET_NOT_FOUND", "SCOPE_DEFER_TARGET_NOT_FOUND":
-		return []string{"pindoc.artifact.search", "pindoc.area.list"}
+		return toolHints("pindoc.artifact.search", "pindoc.area.list")
 	case "AREA_UNKNOWN", "AREA_NOT_FOUND", "AREA_EMPTY", "DECISION_AREA_DEPRECATED":
-		return []string{"pindoc.area.list"}
+		return toolHints("pindoc.area.list")
 	case "TASK_NO_ACCEPTANCE", "DEC_NO_SECTIONS", "DBG_NO_REPRO", "DBG_NO_RESOLUTION":
-		return []string{"pindoc.harness.install"}
+		return toolHints("pindoc.harness.install")
 	case "UPDATE_SUPERSEDE_EXCLUSIVE":
-		return []string{"pindoc.artifact.read"}
+		return toolHints("pindoc.artifact.read")
 	default:
 		return nil
+	}
+}
+
+func toolHints(names ...string) []NextToolHint {
+	out := make([]NextToolHint, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		out = append(out, NextToolHint{Tool: name})
+	}
+	return out
+}
+
+func nextToolsForNotReady(code, artifactType string, failed []string) []NextToolHint {
+	tools := defaultNextTools(code)
+	if !needsTemplateSelfHealHint(failed) {
+		return tools
+	}
+	slug := templateSlugForType(artifactType)
+	if slug == "" {
+		return tools
+	}
+	read := NextToolHint{
+		Tool: "pindoc.artifact.read",
+		Args: map[string]any{
+			"id_or_slug": slug,
+		},
+		Reason: "Read the matching template before retrying artifact.propose.",
+	}
+	return prependToolHint(read, tools)
+}
+
+func prependToolHint(first NextToolHint, rest []NextToolHint) []NextToolHint {
+	out := make([]NextToolHint, 0, len(rest)+1)
+	out = append(out, first)
+	for _, hint := range rest {
+		if hint.Tool == first.Tool {
+			if sameIDOrSlug(hint.Args, first.Args) || len(hint.Args) == 0 {
+				continue
+			}
+		}
+		out = append(out, hint)
+	}
+	return out
+}
+
+func sameIDOrSlug(a, b map[string]any) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	return fmt.Sprint(a["id_or_slug"]) == fmt.Sprint(b["id_or_slug"])
+}
+
+func suggestedActionsForNotReady(lang, artifactType string, failed []string, base []string) []string {
+	out := append([]string{}, base...)
+	if !needsTemplateSelfHealHint(failed) {
+		return out
+	}
+	if slug := templateSlugForType(artifactType); slug != "" {
+		out = append(out, fmt.Sprintf(i18n.T(lang, "suggested.read_template_self_heal"), slug))
+	}
+	return out
+}
+
+func expectedForNotReady(ctx context.Context, deps Deps, projectSlug, artifactType string, failed []string) *ExpectedShape {
+	if !needsTemplateSelfHealHint(failed) {
+		return nil
+	}
+	slots := requiredH2SlotsFor(ctx, deps, projectSlug, artifactType)
+	if len(slots) == 0 {
+		return nil
+	}
+	out := &ExpectedShape{
+		ArtifactType: artifactType,
+		TemplateSlug: templateSlugForType(artifactType),
+		RequiredH2:   make([]ExpectedH2Slot, 0, len(slots)),
+	}
+	for _, slot := range slots {
+		out.RequiredH2 = append(out.RequiredH2, ExpectedH2Slot{
+			Label:   slot.Label,
+			Aliases: aliasesWithoutLabel(slot.Label, slot.Aliases),
+		})
+	}
+	return out
+}
+
+func aliasesWithoutLabel(label string, aliases []string) []string {
+	var out []string
+	seen := map[string]struct{}{strings.ToLower(strings.TrimSpace(label)): {}}
+	for _, alias := range aliases {
+		key := strings.ToLower(strings.TrimSpace(alias))
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, alias)
+	}
+	return out
+}
+
+func needsTemplateSelfHealHint(failed []string) bool {
+	for _, code := range failed {
+		if isMissingH2Code(code) {
+			return true
+		}
+		switch code {
+		case "TASK_NO_ACCEPTANCE", "DEC_NO_SECTIONS", "DBG_NO_REPRO", "DBG_NO_RESOLUTION":
+			return true
+		}
+	}
+	return false
+}
+
+func isMissingH2Code(code string) bool {
+	return strings.HasPrefix(code, "MISSING_H2:")
+}
+
+func templateSlugForType(artifactType string) string {
+	t := strings.ToLower(strings.TrimSpace(artifactType))
+	if t == "" {
+		return ""
+	}
+	switch artifactType {
+	case "Decision", "Task", "Analysis", "Debug":
+		return "_template_" + t
+	default:
+		return ""
 	}
 }
 
@@ -3037,12 +3201,52 @@ func hasEvidenceDelta(prevMeta ResolvedArtifactMeta, in *artifactProposeInput) b
 	return false
 }
 
+type requiredH2Slot struct {
+	Label   string
+	Aliases []string
+}
+
 // requiredH2Warnings flags missing mandatory H2 sections per Type. Fuzzy
-// match: a slot is satisfied if any of its synonyms appear as an H2
-// (case-insensitive). en/ko synonyms tolerate the current bilingual
+// match: a slot is satisfied if any of its aliases appear as an H2
+// (case-insensitive). en/ko aliases tolerate the current bilingual
 // template corpus; Phase 18 template locale-split will normalise them.
 func requiredH2Warnings(body, artifactType string) []string {
-	slots := requiredH2ByType(artifactType)
+	return requiredH2WarningsForSlots(body, defaultRequiredH2Slots(artifactType))
+}
+
+func requiredH2WarningsFor(ctx context.Context, deps Deps, projectSlug, body, artifactType string) []string {
+	return requiredH2WarningsForSlots(body, requiredH2SlotsFor(ctx, deps, projectSlug, artifactType))
+}
+
+func requiredH2WarningsForSlots(body string, slots []requiredH2Slot) []string {
+	missing := missingRequiredH2Slots(body, slots)
+	out := make([]string, 0, len(missing))
+	for _, slot := range missing {
+		out = append(out, "MISSING_H2:"+slot.Label)
+	}
+	return out
+}
+
+func requiredH2SlotsFor(ctx context.Context, deps Deps, projectSlug, artifactType string) []requiredH2Slot {
+	return requiredH2SlotsFromHints(artifactType, getValidatorHints(ctx, deps, projectSlug, artifactType))
+}
+
+func requiredH2SlotsFromHints(artifactType string, hints *validatorHints) []requiredH2Slot {
+	if hints != nil && len(hints.RequiredH2) > 0 {
+		out := make([]requiredH2Slot, 0, len(hints.RequiredH2))
+		for _, label := range hints.RequiredH2 {
+			label = strings.TrimSpace(label)
+			if label == "" {
+				continue
+			}
+			out = append(out, requiredH2SlotForLabel(artifactType, label))
+		}
+		return out
+	}
+	return defaultRequiredH2Slots(artifactType)
+}
+
+func missingRequiredH2Slots(body string, slots []requiredH2Slot) []requiredH2Slot {
 	if len(slots) == 0 {
 		return nil
 	}
@@ -3052,69 +3256,124 @@ func requiredH2Warnings(body, artifactType string) []string {
 		if !ok {
 			continue
 		}
-		heading := strings.ToLower(strings.TrimSpace(strings.TrimRight(after, "#")))
-		seen[heading] = true
-		// Slash-mixed bilingual headings like "## 목적 / Purpose" used to
-		// miss synonym slots because only the full joined string landed
-		// in `seen`. Index each slash- / middle-dot- / em-dash-separated
-		// token so a Purpose slot matches either side of a mixed heading
-		// and a "## TODO — Acceptance criteria" subtitle still satisfies
-		// an Acceptance criteria slot (Task preflight-template-drift-통합
-		// §requiredH2Warnings).
-		for _, sep := range []string{"/", "·", "—", "–", "-"} {
-			if strings.Contains(heading, sep) {
-				for _, part := range strings.Split(heading, sep) {
-					trimmed := strings.TrimSpace(part)
-					if trimmed != "" {
-						seen[trimmed] = true
-					}
-				}
-			}
+		for _, key := range h2HeadingKeys(after) {
+			seen[key] = true
 		}
 	}
-	var out []string
-	for _, syn := range slots {
+	var out []requiredH2Slot
+	for _, slot := range slots {
 		matched := false
-		for _, alt := range syn {
-			if seen[strings.ToLower(alt)] {
+		for _, alt := range slot.Aliases {
+			if seen[normalizeH2Label(alt)] {
 				matched = true
 				break
 			}
 		}
 		if !matched {
-			out = append(out, "MISSING_H2:"+syn[0])
+			out = append(out, slot)
 		}
 	}
 	return out
 }
 
-// requiredH2ByType returns canonical H2 slots per Type plus accepted
-// synonyms (first entry = canonical English used for the warning label).
-// Debug keeps its existing keyword-based pre-flight check (debug_no_repro /
-// debug_no_resolution) — unification deferred to Phase 18.
-func requiredH2ByType(t string) [][]string {
+func h2HeadingKeys(heading string) []string {
+	heading = strings.TrimSpace(strings.TrimRight(heading, "#"))
+	parts := []string{heading}
+	for _, sep := range []string{"/", "·", "—", "–", "-"} {
+		if strings.Contains(heading, sep) {
+			parts = append(parts, strings.Split(heading, sep)...)
+		}
+	}
+	if before, rest, ok := strings.Cut(heading, "("); ok {
+		parts = append(parts, before)
+		if inside, _, ok := strings.Cut(rest, ")"); ok {
+			parts = append(parts, inside)
+		}
+	}
+	out := make([]string, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, part := range parts {
+		key := normalizeH2Label(part)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	return out
+}
+
+func normalizeH2Label(s string) string {
+	return strings.ToLower(strings.TrimSpace(strings.TrimRight(s, "#")))
+}
+
+func requiredH2SlotForLabel(artifactType, label string) requiredH2Slot {
+	slot := requiredH2Slot{Label: label, Aliases: []string{label}}
+	for _, candidate := range defaultRequiredH2Slots(artifactType) {
+		for _, alias := range candidate.Aliases {
+			if normalizeH2Label(alias) == normalizeH2Label(label) {
+				slot.Aliases = uniqueStrings(append(slot.Aliases, candidate.Aliases...))
+				return slot
+			}
+		}
+	}
+	return slot
+}
+
+// defaultRequiredH2Slots returns canonical H2 slots per Type plus accepted
+// aliases. The first label is what legacy warning codes surface when no
+// project template supplies a more specific label.
+func defaultRequiredH2Slots(t string) []requiredH2Slot {
 	switch t {
 	case "Decision":
-		return [][]string{
-			{"Context", "맥락", "컨텍스트"},
-			{"Decision", "결정"},
-			{"Rationale", "근거"},
-			{"Alternatives considered", "Alternatives", "대안"},
-			{"Consequences", "영향", "결과"},
+		return []requiredH2Slot{
+			{Label: "Context", Aliases: []string{"Context", "맥락", "컨텍스트"}},
+			{Label: "Decision", Aliases: []string{"Decision", "결정"}},
+			{Label: "Rationale", Aliases: []string{"Rationale", "근거"}},
+			{Label: "Alternatives considered", Aliases: []string{"Alternatives considered", "Alternatives", "대안"}},
+			{Label: "Consequences", Aliases: []string{"Consequences", "영향", "결과"}},
 		}
 	case "Analysis":
-		return [][]string{
-			{"TL;DR", "요약"},
+		return []requiredH2Slot{
+			{Label: "TL;DR", Aliases: []string{"TL;DR", "TL", "요약"}},
 		}
 	case "Task":
-		return [][]string{
-			{"Purpose", "목적"},
-			{"Scope", "범위"},
-			{"Acceptance criteria", "Acceptance", "완료 기준", "완료기준"},
+		return []requiredH2Slot{
+			{Label: "Purpose", Aliases: []string{"Purpose", "목적"}},
+			{Label: "Scope", Aliases: []string{"Scope", "범위"}},
+			{Label: "TODO", Aliases: []string{"TODO", "Acceptance criteria", "Acceptance", "완료 기준", "완료기준"}},
+		}
+	case "Debug":
+		return []requiredH2Slot{
+			{Label: "Symptom", Aliases: []string{"Symptom", "Symptoms", "증상"}},
+			{Label: "Reproduction", Aliases: []string{"Reproduction", "Repro", "재현"}},
+			{Label: "Root cause", Aliases: []string{"Root cause", "Cause", "원인"}},
+			{Label: "Resolution", Aliases: []string{"Resolution", "해결"}},
 		}
 	default:
 		return nil
 	}
+}
+
+func uniqueStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 // findSemanticAdvisories is findSemanticConflicts' soft cousin: returns

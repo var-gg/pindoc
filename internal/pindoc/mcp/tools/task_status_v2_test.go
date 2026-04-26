@@ -171,6 +171,8 @@ mark complete
 func TestPreflightTaskMetaValidation(t *testing.T) {
 	baseBody := `## Purpose
 validate task meta
+## Scope
+metadata validation only
 ## Acceptance criteria
 - [ ] validation runs before insert`
 
