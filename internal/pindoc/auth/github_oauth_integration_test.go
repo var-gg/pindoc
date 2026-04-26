@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/var-gg/pindoc/internal/pindoc/db"
+	"github.com/var-gg/pindoc/internal/pindoc/invites"
 )
 
 func TestGitHubOAuthCallbackIntegration(t *testing.T) {
@@ -21,11 +22,23 @@ func TestGitHubOAuthCallbackIntegration(t *testing.T) {
 	providerUID := fmt.Sprintf("%d", time.Now().UnixNano())
 	email := fmt.Sprintf("github-%s@example.invalid", suffix)
 	existingID := insertGitHubTrustedLocalUser(t, ctx, pool, "Existing GitHub "+suffix, strings.ToUpper(email))
+	ownerID := insertOAuthTestUser(t, ctx, pool, "invite-owner-"+suffix)
+	projectSlug, projectID := insertGitHubInviteProject(t, ctx, pool, suffix, ownerID)
+	rawInvite, _, err := invites.Issue(ctx, pool, invites.IssueInput{
+		ProjectID: projectID,
+		Role:      invites.RoleEditor,
+		IssuedBy:  ownerID,
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("issue invite: %v", err)
+	}
 	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE slug = $1`, projectSlug)
 		_, _ = pool.Exec(context.Background(), `
 			DELETE FROM users
-			 WHERE lower(email) = $1 OR provider_uid = $2
-		`, strings.ToLower(email), providerUID)
+			 WHERE lower(email) IN ($1, $2) OR provider_uid = $3
+		`, strings.ToLower(email), "oauth-invite-owner-"+suffix+"@example.invalid", providerUID)
 	})
 
 	fakeGitHub := fakeGitHubServer(t, fakeGitHubIdentity{
@@ -101,7 +114,7 @@ func TestGitHubOAuthCallbackIntegration(t *testing.T) {
 		"code_challenge_method": {"S256"},
 	}.Encode()
 	loginURL := ts.URL + "/auth/github/login?" + url.Values{
-		"invite":    {"invite-" + suffix},
+		"invite":    {rawInvite},
 		"return_to": {authURL},
 	}.Encode()
 
@@ -156,6 +169,16 @@ func TestGitHubOAuthCallbackIntegration(t *testing.T) {
 	}
 	if storedEmail != strings.ToLower(email) {
 		t.Fatalf("stored email = %q, want lowercase", storedEmail)
+	}
+	var role string
+	if err := pool.QueryRow(ctx, `
+		SELECT role FROM project_members
+		 WHERE project_id = $1::uuid AND user_id = $2::uuid
+	`, projectID, existingID).Scan(&role); err != nil {
+		t.Fatalf("select joined membership: %v", err)
+	}
+	if role != invites.RoleEditor {
+		t.Fatalf("joined role = %q, want editor", role)
 	}
 }
 
@@ -237,6 +260,26 @@ func insertGitHubTrustedLocalUser(t *testing.T, ctx context.Context, pool *db.Po
 		t.Fatalf("insert trusted local user: %v", err)
 	}
 	return id
+}
+
+func insertGitHubInviteProject(t *testing.T, ctx context.Context, pool *db.Pool, suffix, ownerID string) (string, string) {
+	t.Helper()
+	slug := "github-invite-" + suffix
+	var projectID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO projects (slug, name, owner_id, primary_language)
+		VALUES ($1, $2, $3, 'en')
+		RETURNING id::text
+	`, slug, "GitHub Invite "+suffix, "owner-"+suffix).Scan(&projectID); err != nil {
+		t.Fatalf("insert invite project: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO project_members (project_id, user_id, role)
+		VALUES ($1::uuid, $2::uuid, 'owner')
+	`, projectID, ownerID); err != nil {
+		t.Fatalf("insert invite owner membership: %v", err)
+	}
+	return slug, projectID
 }
 
 func redirectLocation(t *testing.T, client *http.Client, target string) *url.URL {

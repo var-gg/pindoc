@@ -36,6 +36,39 @@ func TestProjectMembersMigrationContract(t *testing.T) {
 	}
 }
 
+func TestInviteTokensMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0028_invite_tokens.sql")
+	if err != nil {
+		t.Fatalf("read invite_tokens migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"CREATE TABLE invite_tokens",
+		"token_hash  TEXT PRIMARY KEY",
+		"project_id  UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE",
+		"role        TEXT NOT NULL CHECK (role IN ('editor', 'viewer'))",
+		"issued_by   UUID REFERENCES users(id) ON DELETE SET NULL",
+		"consumed_by UUID REFERENCES users(id) ON DELETE SET NULL",
+		"CREATE INDEX idx_invite_tokens_project_consumed",
+		"ON invite_tokens(project_id, consumed_at)",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("invite_tokens migration Up missing %q:\n%s", want, up)
+		}
+	}
+	for _, want := range []string{
+		"-- +goose Down",
+		"DROP INDEX IF EXISTS idx_invite_tokens_expires_at",
+		"DROP INDEX IF EXISTS idx_invite_tokens_project_consumed",
+		"DROP TABLE IF EXISTS invite_tokens",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("invite_tokens migration Down missing %q", want)
+		}
+	}
+}
+
 func TestUsersEmailCanonicalMigrationContract(t *testing.T) {
 	raw, err := migrationsFS.ReadFile("migrations/0033_users_email_canonical.sql")
 	if err != nil {

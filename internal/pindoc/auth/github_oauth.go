@@ -21,6 +21,7 @@ import (
 	"golang.org/x/oauth2"
 	oauth2github "golang.org/x/oauth2/github"
 
+	"github.com/var-gg/pindoc/internal/pindoc/invites"
 	"github.com/var-gg/pindoc/internal/pindoc/users"
 )
 
@@ -194,11 +195,24 @@ func (s *OAuthService) handleGitHubCallback(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "user upsert failed", http.StatusInternalServerError)
 		return
 	}
+	joined, err := invites.Consume(r.Context(), s.store.pool, state.InviteToken, user.ID, time.Now().UTC())
+	if err != nil {
+		status := http.StatusGone
+		if !errors.Is(err, invites.ErrTokenInactive) && !errors.Is(err, invites.ErrTokenNotFound) {
+			status = http.StatusInternalServerError
+		}
+		http.Error(w, "invite consume failed", status)
+		return
+	}
 	if err := s.setBrowserSession(w, user.ID); err != nil {
 		http.Error(w, "session signing failed", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, s.github.safeReturnTo(state.ReturnTo), http.StatusFound)
+	returnTo := s.github.safeReturnTo(state.ReturnTo)
+	if (returnTo == "/" || strings.HasPrefix(returnTo, "/signup")) && joined.ProjectSlug != "" {
+		returnTo = "/p/" + url.PathEscape(joined.ProjectSlug) + "/today"
+	}
+	http.Redirect(w, r, returnTo, http.StatusFound)
 }
 
 type githubIdentity struct {
@@ -364,6 +378,10 @@ func (s *OAuthService) setBrowserSession(w http.ResponseWriter, userID string) e
 	return nil
 }
 
+func (s *OAuthService) SetBrowserSessionCookie(w http.ResponseWriter, userID string) error {
+	return s.setBrowserSession(w, userID)
+}
+
 func (s *OAuthService) browserSessionUserID(r *http.Request) string {
 	if s == nil || r == nil || len(s.cookieSecret) == 0 {
 		return ""
@@ -380,6 +398,10 @@ func (s *OAuthService) browserSessionUserID(r *http.Request) string {
 		return ""
 	}
 	return strings.TrimSpace(state.UserID)
+}
+
+func (s *OAuthService) BrowserSessionUserID(r *http.Request) string {
+	return s.browserSessionUserID(r)
 }
 
 func signJSON(secret []byte, payload any) (string, error) {

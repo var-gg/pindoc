@@ -99,6 +99,8 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/health", d.handleHealth)
 	mux.HandleFunc("GET /api/config", d.handleConfig)
 	mux.HandleFunc("GET /api/projects", d.handleProjectList)
+	mux.HandleFunc("GET /join", d.handleInviteJoinInfo)
+	mux.HandleFunc("POST /join", d.handleInviteJoin)
 	// POST /api/projects creates a new project (Decision
 	// project-bootstrap-canonical-flow-reader-ui-first-class). Behind the
 	// wire it calls projects.CreateProject — same source of truth as the
@@ -130,6 +132,7 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/p/{project}/change-groups", d.handleChangeGroups)
 	mux.HandleFunc("GET /api/p/{project}/inbox", d.handleInbox)
 	mux.HandleFunc("POST /api/p/{project}/inbox/{idOrSlug}/review", d.handleInboxReview)
+	mux.HandleFunc("POST /api/p/{project}/invite", d.handleInviteIssue)
 	mux.HandleFunc("POST /api/p/{project}/read-mark", d.handleReadMark)
 	mux.HandleFunc("POST /api/p/{project}/read-events", d.handleReadEvent)
 	mux.HandleFunc("GET /api/p/{project}/export", d.handleProjectExport)
