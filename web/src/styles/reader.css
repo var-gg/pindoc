@@ -391,7 +391,11 @@
 .backlinks h4 { font-size: 13px; font-family: var(--font-mono); letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-3); margin: 0 0 12px; font-weight: 500; }
 .backlink { display: block; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-2); margin-bottom: 8px; text-decoration: none; color: var(--fg-1); }
 .backlink:hover { background: var(--bg-2); border-color: var(--border-strong); }
-.backlink__head { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg-0); flex-wrap: wrap; }
+.backlink__head { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg-0); min-width: 0; }
+.backlink__title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.backlink__open-icon { width: 14px; height: 14px; color: var(--fg-3); flex: 0 0 auto; }
+.backlink:hover .backlink__open-icon,
+.backlink:focus-visible .backlink__open-icon { color: var(--accent); }
 .backlink__excerpt { margin-top: 4px; font-size: 12.5px; color: var(--fg-2); line-height: 1.5; }
 
 /* Sidecar — sticky right rail. Own scroll so long provenance / revisions
@@ -1488,6 +1492,21 @@
   gap: 6px;
   flex-wrap: wrap;
   margin-bottom: 6px;
+}
+.task-card__inspect {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  color: var(--fg-3);
+}
+.task-card__inspect .lucide {
+  width: 14px;
+  height: 14px;
+}
+.task-card:hover .task-card__inspect,
+.task-card.is-active .task-card__inspect {
+  color: var(--accent);
 }
 .task-card__title {
   display: block;

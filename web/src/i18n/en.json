@@ -153,6 +153,8 @@
   "task_inspector.edges": "Edges",
   "task_inspector.last_revision": "Last revision",
   "task_inspector.acceptance_ratio": "Acceptance",
+  "tasks.card_select_hint": "Select in Inspector; double-click or Enter opens detail",
+  "tasks.card_open_detail_hint": "Open full detail",
 
   "reader.written_by": "written by %s",
   "reader.toc_title": "On this page",
@@ -161,6 +163,7 @@
   "reader.published": "published %s",
   "reader.backlinks_empty_head": "Backlinks",
   "reader.backlinks_empty": "No artifacts reference %s yet. Graph edges populate as you write — any propose that mentions an existing slug creates a backlink.",
+  "reader.card_open_detail_hint": "Open detail",
   "reader.empty_filtered": "No %s artifacts in this area.",
   "reader.structure_sidecar_hint": "Live data is in the Sidecar",
   "reader.structure_sidecar_link": "View",

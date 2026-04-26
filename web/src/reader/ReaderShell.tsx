@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
-import { X } from "lucide-react";
+import { ArrowUpRight, PanelRightOpen, X } from "lucide-react";
 import type { Aggregate } from "./useReaderData";
 import { api, type Artifact, type ArtifactRef, type Area } from "../api/client";
 import { useI18n } from "../i18n";
@@ -715,13 +715,18 @@ function Body({
                   key={a.id}
                   to={filteredReaderHref(linkBase, a.slug, selectedArea, selectedType, badgeFilters)}
                   className={`backlink${isActive ? " is-active" : ""}`}
+                  title={t("reader.card_open_detail_hint")}
                   style={isActive ? {
                     borderColor: "var(--accent)",
                     background: "color-mix(in oklch, var(--accent) 10%, transparent)",
                   } : undefined}
                 >
                   <div className="backlink__head">
-                    <span>{a.title}</span>
+                    <span className="backlink__title">{a.title}</span>
+                    <ArrowUpRight
+                      className="lucide backlink__open-icon"
+                      aria-hidden="true"
+                    />
                   </div>
                   <div className="backlink__excerpt">
                     {(areaNameBySlug.get(a.area_slug) ?? a.area_slug)} · {a.author_id} · {new Date(a.updated_at).toLocaleDateString()}
@@ -1217,6 +1222,7 @@ function TaskCard({
       data-task-card-slug={a.slug}
       aria-selected={selected}
       className={`task-card${selected ? " is-active" : ""}`}
+      title={t("tasks.card_select_hint")}
       onClick={() => onSelect(a.slug)}
       onDoubleClick={() => navigate(detailHref)}
       onKeyDown={(e) => {
@@ -1251,10 +1257,14 @@ function TaskCard({
           </span>
         )}
         <span className="chip-area">{areaLabel}</span>
+        <span className="task-card__inspect" title={t("tasks.card_select_hint")}>
+          <PanelRightOpen className="lucide" aria-hidden="true" />
+        </span>
       </div>
       <Link
         to={detailHref}
         className="task-card__title task-card__title-link"
+        title={t("tasks.card_open_detail_hint")}
         onClick={(e) => e.stopPropagation()}
       >
         {a.title}
