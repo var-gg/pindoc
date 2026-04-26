@@ -1,24 +1,26 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router";
-import { Activity, AlignCenter, AlignJustify, CalendarDays, ChevronDown, CircleHelp, FileText, Inbox, Maximize2, Menu, Moon, Search, Share2, Sun } from "lucide-react";
+import { Activity, AlignCenter, AlignJustify, CalendarDays, ChevronDown, CircleHelp, ExternalLink, FileText, Inbox, Maximize2, Menu, Moon, Search, Share2, Sun } from "lucide-react";
 import type { ComponentType } from "react";
 import { api, type ProjectListItem } from "../api/client";
 import { useI18n, type Lang } from "../i18n";
 import type { Project } from "../api/client";
 import type { Theme } from "./theme";
 import type { ReaderWidth } from "./readerWidth";
+import { typeChipClass } from "./typeChip";
 
 type Props = {
   project: Project;
+  surface: SurfaceId;
   theme: Theme;
   onToggleTheme: () => void;
   onOpenPalette: () => void;
-  onOpenShortcuts: () => void;
   onToggleMenu: () => void;
   inboxCount: number;
   readerWidth: ReaderWidth;
   onChangeReaderWidth: (next: ReaderWidth) => void;
 };
+type SurfaceId = "today" | "reader" | "inbox" | "graph" | "tasks";
 
 // Width toggle ordering + icons. AlignCenter = narrow (tight column),
 // AlignJustify = default (balanced), Maximize2 = wide (full-bleed).
@@ -30,12 +32,38 @@ const WIDTH_OPTIONS: Array<{ mode: ReaderWidth; icon: ComponentType<{ className?
   { mode: "wide", icon: Maximize2, labelKey: "nav.width_wide" },
 ];
 
+const HELP_TYPES = [
+  "Decision",
+  "Analysis",
+  "Task",
+  "Debug",
+  "Glossary",
+  "Flow",
+  "TC",
+  "Feature",
+  "APIEndpoint",
+  "Screen",
+  "DataModel",
+  "VerificationReport",
+];
+
+const HELP_AREAS = [
+  "strategy",
+  "context",
+  "experience",
+  "system",
+  "operations",
+  "governance",
+  "cross-cutting",
+  "misc",
+];
+
 export function TopNav({
   project,
+  surface,
   theme,
   onToggleTheme,
   onOpenPalette,
-  onOpenShortcuts,
   onToggleMenu,
   inboxCount,
   readerWidth,
@@ -93,14 +121,7 @@ export function TopNav({
         <span className="kbd">⌘K</span>
       </button>
 
-      <button
-        className="nav__theme"
-        onClick={onOpenShortcuts}
-        aria-label={t("shortcuts.open")}
-        title={t("shortcuts.open")}
-      >
-        <CircleHelp className="lucide" />
-      </button>
+      <HelpPopover surface={surface} />
 
       <div className="nav__width" role="group" aria-label={t("nav.width_toggle")}>
         {WIDTH_OPTIONS.map(({ mode, icon: Icon, labelKey }) => {
@@ -148,6 +169,88 @@ export function TopNav({
       >
         <span style={{ fontFamily: "var(--font-mono)", fontSize: 10 }}>—</span>
       </div>
+    </div>
+  );
+}
+
+function HelpPopover({ surface }: { surface: SurfaceId }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClickAway(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    window.addEventListener("mousedown", onClickAway);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onClickAway);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className="nav-help" ref={ref}>
+      <button
+        type="button"
+        className="nav__theme nav-help__trigger"
+        onClick={() => setOpen((v) => !v)}
+        aria-label={t("help.open")}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        title={t("help.open")}
+      >
+        <CircleHelp className="lucide" />
+      </button>
+      {open && (
+        <div className="nav-help__popover" role="dialog" aria-label={t("help.title")}>
+          <div className="nav-help__surface">
+            <div className="nav-help__eyebrow">{t("help.surface_label")}</div>
+            <h2>{t(`help.surface.${surface}.title`)}</h2>
+            <p>{t(`help.surface.${surface}.description`)}</p>
+          </div>
+
+          <section className="nav-help__section">
+            <h3>{t("help.types_title")}</h3>
+            <div className="nav-help__grid nav-help__grid--types">
+              {HELP_TYPES.map((type) => (
+                <div key={type} className="nav-help__card">
+                  <span className={typeChipClass(type)}>{type}</span>
+                  <p>{t(`help.type.${type}.description`)}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="nav-help__section">
+            <h3>{t("help.areas_title")}</h3>
+            <div className="nav-help__grid">
+              {HELP_AREAS.map((area) => (
+                <div key={area} className="nav-help__card">
+                  <span className="chip-area">{t(`area.${area}`)}</span>
+                  <p>{t(`help.area.${area}.description`)}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <div className="nav-help__links" aria-label={t("help.docs_title")}>
+            <a href="https://github.com/var-gg/pindoc/blob/main/docs/19-area-taxonomy.md" target="_blank" rel="noreferrer">
+              <span>{t("help.docs_area_taxonomy")}</span>
+              <ExternalLink className="lucide" aria-hidden="true" />
+            </a>
+            <a href="https://github.com/var-gg/pindoc/blob/main/docs/glossary.md" target="_blank" rel="noreferrer">
+              <span>{t("help.docs_glossary")}</span>
+              <ExternalLink className="lucide" aria-hidden="true" />
+            </a>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

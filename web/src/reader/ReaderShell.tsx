@@ -369,10 +369,10 @@ export function ReaderShell({ view }: Props) {
     <div className="app-shell">
       <TopNav
         project={projectData}
+        surface={view}
         theme={theme}
         onToggleTheme={toggleTheme}
         onOpenPalette={() => setPaletteOpen(true)}
-        onOpenShortcuts={() => setShortcutsOpen(true)}
         onToggleMenu={() => setMenuOpen((v) => !v)}
         inboxCount={inboxStubCount()}
         readerWidth={readerWidth}

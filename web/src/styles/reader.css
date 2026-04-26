@@ -52,6 +52,97 @@
 .nav__menu .lucide { width: 20px; height: 20px; }
 .nav__lang { background: transparent; border: 0; padding: 6px 8px; color: var(--fg-2); cursor: pointer; border-radius: var(--r-2); font-family: var(--font-mono); font-size: 11px; }
 .nav__lang:hover { background: var(--bg-2); color: var(--fg-0); }
+.nav-help { position: relative; flex-shrink: 0; }
+.nav-help__trigger { display: inline-flex; align-items: center; justify-content: center; }
+.nav-help__popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 75;
+  width: min(680px, calc(100vw - 24px));
+  max-height: min(720px, calc(100vh - var(--nav-h) - 24px));
+  overflow-y: auto;
+  padding: 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-2);
+  box-shadow: var(--shadow-float);
+}
+.nav-help__surface {
+  padding: 10px 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.nav-help__eyebrow,
+.nav-help__section h3 {
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.3;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.nav-help__surface h2 {
+  margin: 0 0 5px;
+  color: var(--fg-0);
+  font-size: 16px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+.nav-help__surface p,
+.nav-help__card p {
+  margin: 0;
+  color: var(--fg-2);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.nav-help__section { margin-top: 12px; }
+.nav-help__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.nav-help__grid--types { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.nav-help__card {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  background: var(--bg-0);
+}
+.nav-help__card .type-chip,
+.nav-help__card .chip-area {
+  margin-bottom: 6px;
+}
+.nav-help__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.nav-help__links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 9px;
+  color: var(--fg-1);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-1);
+  font-size: 12px;
+  text-decoration: none;
+}
+.nav-help__links a:hover,
+.nav-help__links a:focus-visible {
+  color: var(--fg-0);
+  background: var(--bg-3);
+  border-color: var(--border-strong);
+  outline: none;
+}
+.nav-help__links .lucide { width: 13px; height: 13px; color: var(--fg-3); }
 
 /* Reader width toggle — segmented control, three icons (narrow/default/wide).
  * Task task-reader-width-modes. Kept flex-shrink:0 so the overall nav
@@ -1243,6 +1334,14 @@
   .nav { gap: 8px; padding: 0 12px; }
   .nav__tabs { display: none; }
   .nav__search { flex: 1; width: auto; }
+  .nav-help__popover {
+    right: -64px;
+    width: calc(100vw - 20px);
+  }
+  .nav-help__grid,
+  .nav-help__grid--types {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .reader-article,
   .surface-panel { padding: 24px 20px 120px; max-width: 100%; }
   .art-title { font-size: 24px; }
