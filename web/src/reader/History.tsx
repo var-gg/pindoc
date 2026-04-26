@@ -10,6 +10,7 @@ import {
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
 import { RevisionTypeBadge } from "./RevisionTypeBadge";
+import { SurfaceHeader } from "./SurfacePrimitives";
 
 type Load =
   | { kind: "loading" }
@@ -92,11 +93,8 @@ export function History() {
           <ChevronRight className="lucide" />
           <span className="current">{t("history.title")}</span>
         </div>
-        <h1 className="art-title">{t("history.title")}</h1>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 24 }}>
-          <div style={{ color: "var(--fg-3)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
-            {t("history.count", data.revisions.length)}
-          </div>
+        <SurfaceHeader name="history" count={data.revisions.length} />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 16, flexWrap: "wrap", marginBottom: 24 }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }} aria-label={t("history.type_filters")}>
             {revisionTypes.map((rt) => (
               <button

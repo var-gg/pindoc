@@ -4,6 +4,7 @@ import { ChevronRight } from "lucide-react";
 import { api, type AcceptanceChecklist, type DiffResp, type MetaDeltaEntry } from "../api/client";
 import { useI18n } from "../i18n";
 import { RevisionTypeBadge } from "./RevisionTypeBadge";
+import { SurfaceHeader } from "./SurfacePrimitives";
 
 type Load =
   | { kind: "loading" }
@@ -64,7 +65,7 @@ export function Diff() {
             rev {data.from.revision_number} → rev {data.to.revision_number}
           </span>
         </div>
-        <h1 className="art-title">{t("diff.title", data.from.revision_number, data.to.revision_number)}</h1>
+        <SurfaceHeader name="diff" count={data.stats.lines_added + data.stats.lines_removed} />
 
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", color: "var(--fg-3)", fontFamily: "var(--font-mono)", fontSize: 12, marginBottom: 32, paddingBottom: 20, borderBottom: "1px solid var(--border)" }}>
           <span>{data.from.author_id} → {data.to.author_id}</span>

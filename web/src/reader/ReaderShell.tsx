@@ -9,11 +9,11 @@ import { ReaderSurface, type DetailScope } from "./ReaderSurface";
 import { Sidebar } from "./Sidebar";
 import { Sidecar } from "./Sidecar";
 import { ShortcutsOverlay } from "./ShortcutsOverlay";
+import { EmptyState, SurfaceHeader } from "./SurfacePrimitives";
 import { Today } from "./Today";
 import { TopNav } from "./TopNav";
 import { initTheme, setTheme, type Theme } from "./theme";
 import { useReaderData } from "./useReaderData";
-import { typeChipClass } from "./typeChip";
 import { initReaderWidth, setReaderWidth as applyReaderWidth, type ReaderWidth } from "./readerWidth";
 import { localizedAreaName } from "./areaLocale";
 import {
@@ -582,6 +582,7 @@ function Body({
         baseRoute,
       })
     : null;
+  const hasActiveFilters = Boolean(selectedArea || selectedType || badgeFilters.length > 0);
 
   useEffect(() => {
     if (keyboardDisabled || view !== "reader" || !detailScope || detailScope.mismatch) return;
@@ -606,12 +607,12 @@ function Body({
   if (view === "graph") {
     return (
       <main className="content">
-        <div className="surface-stub">
-          <h1>{t("nav.graph")}</h1>
-          <p>{t("wiki.stub_graph")}</p>
-          <p>
-            <Link to="/ui/reader">{t("wiki.stub_graph_preview")}</Link>
-          </p>
+        <div className="surface-panel">
+          <SurfaceHeader name="graph" count={allList.length} />
+          <EmptyState
+            message={t("wiki.stub_graph")}
+            action={{ label: t("wiki.stub_graph_preview"), href: "/ui/reader" }}
+          />
         </div>
       </main>
     );
@@ -619,9 +620,9 @@ function Body({
   if (view === "inbox") {
     return (
       <main className="content">
-        <div className="surface-stub">
-          <h1>{t("nav.inbox")}</h1>
-          <p>{t("wiki.stub_inbox")}</p>
+        <div className="surface-panel">
+          <SurfaceHeader name="inbox" count={0} />
+          <EmptyState message={t("wiki.stub_inbox")} />
         </div>
       </main>
     );
@@ -686,10 +687,12 @@ function Body({
   return (
     <main className="content">
       <div className="reader-article">
-        <div className="side-section" style={{ padding: "0 0 12px" }}>
-          {t("wiki.section_artifacts")} · {list.length}
-        </div>
-        {(selectedArea || selectedType || badgeFilters.length > 0) && (
+        <SurfaceHeader
+          name="artifact"
+          count={list.length}
+          secondary={hasActiveFilters ? { label: t("surface.all"), count: allList.length } : undefined}
+        />
+        {hasActiveFilters && (
           <AppliedFilterBar
             selectedArea={selectedArea}
             selectedAreaLabel={selectedArea ? areaNameBySlug.get(selectedArea) ?? selectedArea : null}
@@ -701,9 +704,9 @@ function Body({
           />
         )}
         {list.length === 0 ? (
-          <div style={{ color: "var(--fg-3)", fontSize: 13 }}>{empty}</div>
+          <EmptyState message={empty} />
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div className="artifact-list">
             {list.map((a) => {
               const linkBase = `/p/${projectSlug}/wiki`;
               const isActive = currentSlug === a.slug;
@@ -718,7 +721,6 @@ function Body({
                   } : undefined}
                 >
                   <div className="backlink__head">
-                    <span className={typeChipClass(a.type)}>{a.type}</span>
                     <span>{a.title}</span>
                   </div>
                   <div className="backlink__excerpt">
@@ -847,9 +849,7 @@ function TasksKanban({
             onClearAreaFilter={onClearAreaFilter}
             onClearBadgeFilter={onClearBadgeFilter}
           />
-          <div className="task-empty-state">
-            <div className="task-empty-state__title">{empty}</div>
-          </div>
+          <EmptyState message={empty} />
         </div>
       </main>
     );
@@ -981,15 +981,13 @@ function TaskBoardHeader({
   onClearBadgeFilter: (key: BadgeFilterKey) => void;
 }) {
   const { t } = useI18n();
-  const title = selectedArea
-    ? t("tasks.scope_title_filtered", scopeLabel, filteredPendingCount, totalCount)
-    : t("tasks.scope_title_all", totalCount);
   return (
     <div className="task-board-head">
-      <div>
-        <div className="task-board-head__eyebrow">{t("nav.tasks")}</div>
-        <h1 className="task-board-head__title">{title}</h1>
-      </div>
+      <SurfaceHeader
+        name="task"
+        count={selectedArea || badgeFilters.length > 0 ? filteredPendingCount : totalCount}
+        secondary={selectedArea || badgeFilters.length > 0 ? { label: t("surface.all"), count: totalCount } : undefined}
+      />
       <div className="task-filter-bar" aria-label={t("tasks.filter_bar_label")}>
         <span className="task-filter-chip task-filter-chip--locked">
           <span className="task-filter-chip__key">Type</span>
@@ -1110,14 +1108,10 @@ function TaskFilterEmptyState({
 }) {
   const { t } = useI18n();
   return (
-    <div className="task-empty-state task-empty-state--filtered">
-      <div className="task-empty-state__title">{t("tasks.empty_filtered_head")}</div>
-      <div>{t("tasks.empty_filtered_total_pending", allPendingCount)}</div>
-      <button type="button" className="task-clear-filter" onClick={onClearFilters}>
-        {t("tasks.clear_filters")}
-        <span className="kbd">esc</span>
-      </button>
-    </div>
+    <EmptyState
+      message={`${t("tasks.empty_filtered_head")} ${t("tasks.empty_filtered_total_pending", allPendingCount)}`}
+      action={{ label: t("tasks.clear_filters"), onClick: onClearFilters }}
+    />
   );
 }
 

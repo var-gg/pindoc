@@ -8,6 +8,7 @@ import { PindocMarkdown } from "./Markdown";
 import { TrustCard } from "./TrustCard";
 import { localizedAreaName } from "./areaLocale";
 import type { BadgeFilter } from "./badgeFilters";
+import { EmptyState } from "./SurfacePrimitives";
 import { typeChipClass } from "./typeChip";
 
 type Props = {
@@ -43,8 +44,8 @@ export function ReaderSurface({
   if (!detail) {
     return (
       <div className="content">
-        <div className="surface-stub">
-          <p>{emptyMessage}</p>
+        <div className="surface-panel">
+          <EmptyState message={emptyMessage} />
         </div>
       </div>
     );
@@ -106,11 +107,15 @@ export function ReaderSurface({
         />
 
         <div className="art-meta">
-          <span className={`chip chip--${detail.status}`}>
-            <span className={`p-dot p-dot--${detail.status}`} />
-            {detail.status}
-          </span>
-          <span className={typeChipClass(detail.type)}>{detail.type}</span>
+          {detail.type === "Task" && (
+            <>
+              <span className={`chip chip--${detail.status}`}>
+                <span className={`p-dot p-dot--${detail.status}`} />
+                {detail.status}
+              </span>
+              <span className={typeChipClass(detail.type)}>{detail.type}</span>
+            </>
+          )}
           <BadgePopoverChip
             label={areaLabel}
             title={t("reader.badge_area_tip", areaLabel)}
@@ -246,7 +251,6 @@ export function ArtifactListRow({
   // Kept exported because both Reader and Tasks surfaces render lists.
   return (
     <a href={to} className={`wiki__list-row${isActive ? " is-active" : ""}`}>
-      <span className="wiki__chip">{artifact.type}</span>
       <span className="wiki__title">{artifact.title}</span>
     </a>
   );
