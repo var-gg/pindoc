@@ -1,13 +1,16 @@
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { ChevronLeft, ChevronRight, Languages, ListFilter } from "lucide-react";
-import type { Artifact, ArtifactRef } from "../api/client";
+import { api, type Artifact, type ArtifactRef } from "../api/client";
 import { useI18n } from "../i18n";
+import { estimateReadingTime } from "../utils/readingTime";
 import { ArtifactByline } from "./ArtifactByline";
 import { BadgePopoverChip } from "./BadgePopoverChip";
 import { PindocMarkdown } from "./Markdown";
 import { TrustCard } from "./TrustCard";
 import { localizedAreaName } from "./areaLocale";
 import type { BadgeFilter } from "./badgeFilters";
+import { createReadTracker, type ReadTrackerFlushReason, type ReadTrackerSnapshot } from "./readTracker";
 import { EmptyState } from "./SurfacePrimitives";
 import { typeChipClass } from "./typeChip";
 
@@ -40,6 +43,36 @@ export function ReaderSurface({
 }: Props) {
   const { t } = useI18n();
   const location = useLocation();
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [readSnapshot, setReadSnapshot] = useState<ReadTrackerSnapshot>(emptyReadSnapshot);
+  const activeTranslateLocale = new URLSearchParams(location.search).get("translate") ?? "";
+  const highlightedLocale = activeTranslateLocale || detail?.body_locale || "";
+  const readingEstimate = useMemo(
+    () => estimateReadingTime(detail?.body_markdown ?? "", highlightedLocale || detail?.body_locale),
+    [detail?.body_markdown, detail?.body_locale, highlightedLocale],
+  );
+  const completionPct = Math.min(100, Math.round(readSnapshot.scrollMaxPct * 100));
+  const readMinutes = formatReadMinutes(readSnapshot.activeSeconds);
+
+  useEffect(() => {
+    setReadSnapshot(emptyReadSnapshot());
+    const bodyElement = bodyRef.current;
+    if (!detail?.id || !projectSlug || !bodyElement) return;
+    const tracker = createReadTracker({
+      artifactId: detail.id,
+      locale: highlightedLocale || detail.body_locale,
+      bodyElement,
+      onUpdate: setReadSnapshot,
+      flush: async (payload, reason: ReadTrackerFlushReason) => {
+        await api.readEvent(projectSlug, payload, {
+          keepalive: reason === "hidden" || reason === "beforeunload",
+        }).catch(() => undefined);
+      },
+    });
+    return () => {
+      tracker.stop("route");
+    };
+  }, [detail?.id, detail?.body_locale, highlightedLocale, projectSlug]);
 
   if (!detail) {
     return (
@@ -69,8 +102,6 @@ export function ReaderSurface({
     ...(detail.related_by ?? []),
   ].filter((edge) => edge.relation === "translation_of");
   const translateLocales = ["en", "ko", "ja", "hi"];
-  const activeTranslateLocale = new URLSearchParams(location.search).get("translate") ?? "";
-  const highlightedLocale = activeTranslateLocale || detail.body_locale || "";
   const translateHref = (locale: string) => {
     const params = new URLSearchParams(location.search);
     if (locale === detail.body_locale) {
@@ -156,9 +187,13 @@ export function ReaderSurface({
           <ArtifactByline artifact={detail} />
           <span className="art-meta__sep">·</span>
           <span className="prov">{t("reader.published", publishedAt)}</span>
+          <span className="art-meta__sep">·</span>
+          <span className="prov art-reading-metrics">
+            {t("reader.reading_metrics", readingEstimate.estimatedMinutes, readMinutes, completionPct)}
+          </span>
         </div>
 
-        <div className="art-body">
+        <div className="art-body" ref={bodyRef}>
           <PindocMarkdown
             source={detail.body_markdown}
             projectSlug={projectSlug}
@@ -170,6 +205,25 @@ export function ReaderSurface({
       </article>
     </main>
   );
+}
+
+function emptyReadSnapshot(): ReadTrackerSnapshot {
+  return {
+    startedAtMs: 0,
+    endedAtMs: 0,
+    activeSeconds: 0,
+    idleSeconds: 0,
+    scrollMaxPct: 0,
+    visible: true,
+    intersecting: false,
+    idle: false,
+  };
+}
+
+function formatReadMinutes(seconds: number): string {
+  if (seconds <= 0) return "0";
+  if (seconds < 60) return "<1";
+  return String(Math.floor(seconds / 60));
 }
 
 function DetailScopeBar({ scope }: { scope: DetailScope | null }) {

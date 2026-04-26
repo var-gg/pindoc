@@ -70,3 +70,39 @@ func TestUsersEmailCanonicalMigrationContract(t *testing.T) {
 		}
 	}
 }
+
+func TestReadEventsMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0034_read_events.sql")
+	if err != nil {
+		t.Fatalf("read read_events migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"CREATE TABLE read_events",
+		"artifact_id    UUID NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE",
+		"user_id        UUID REFERENCES users(id) ON DELETE SET NULL",
+		"active_seconds DOUBLE PRECISION NOT NULL DEFAULT 0",
+		"scroll_max_pct DOUBLE PRECISION NOT NULL DEFAULT 0",
+		"CHECK (scroll_max_pct >= 0 AND scroll_max_pct <= 1)",
+		"CHECK (active_seconds <= EXTRACT(EPOCH FROM (ended_at - started_at)))",
+		"CREATE INDEX idx_read_events_artifact_started",
+		"ON read_events(artifact_id, started_at)",
+		"CREATE INDEX idx_read_events_user_started",
+		"ON read_events(user_id, started_at)",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("read_events migration Up missing %q:\n%s", want, up)
+		}
+	}
+	for _, want := range []string{
+		"-- +goose Down",
+		"DROP INDEX IF EXISTS idx_read_events_user_started",
+		"DROP INDEX IF EXISTS idx_read_events_artifact_started",
+		"DROP TABLE IF EXISTS read_events",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("read_events migration Down missing %q", want)
+		}
+	}
+}

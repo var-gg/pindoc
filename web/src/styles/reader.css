@@ -277,6 +277,7 @@
 .art-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 32px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
 .art-meta__sep { color: var(--fg-4); font-family: var(--font-mono); }
 .art-meta .prov { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 12px; color: var(--fg-2); }
+.art-reading-metrics { color: var(--fg-1); }
 .av { width: 20px; height: 20px; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 10px; font-weight: 500; background: oklch(90% 0.04 265); color: oklch(35% 0.14 265); flex-shrink: 0; }
 :root.theme-dark .av { background: oklch(30% 0.06 265); color: oklch(82% 0.10 265); }
 .av.cr { background: oklch(90% 0.05 310); color: oklch(38% 0.15 310); }

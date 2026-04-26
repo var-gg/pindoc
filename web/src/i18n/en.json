@@ -201,6 +201,7 @@
   "reader.byline_unknown": "(unknown)",
   "reader.byline_via": "via %s",
   "reader.published": "published %s",
+  "reader.reading_metrics": "estimated %s min / read %s min / completion %d%",
   "reader.backlinks_empty_head": "Backlinks",
   "reader.backlinks_empty": "No artifacts reference %s yet. Graph edges populate as you write — any propose that mentions an existing slug creates a backlink.",
   "reader.card_open_detail_hint": "Open detail",

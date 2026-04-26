@@ -131,15 +131,7 @@ func (d Deps) handleReadMark(w http.ResponseWriter, r *http.Request) {
 		}
 		input.RevisionWatermark = watermark
 	}
-	_, err := d.DB.Exec(r.Context(), `
-		INSERT INTO reader_watermarks (user_key, project_id, revision_watermark, seen_at)
-		SELECT $2, p.id, $3, now()
-		FROM projects p
-		WHERE p.slug = $1
-		ON CONFLICT (user_key, project_id)
-		DO UPDATE SET revision_watermark = EXCLUDED.revision_watermark, seen_at = now()
-	`, projectSlug, userKey, input.RevisionWatermark)
-	if err != nil {
+	if err := d.upsertReadWatermark(r, projectSlug, userKey, input.RevisionWatermark); err != nil {
 		d.Logger.Error("read mark", "err", err)
 		writeError(w, http.StatusInternalServerError, "write failed")
 		return
@@ -149,6 +141,29 @@ func (d Deps) handleReadMark(w http.ResponseWriter, r *http.Request) {
 		"user_key":           userKey,
 		"revision_watermark": input.RevisionWatermark,
 	})
+}
+
+func (d Deps) markCurrentProjectRevision(r *http.Request, projectSlug, userKey string) error {
+	watermark, err := changegroup.ProjectRevisionWatermark(r.Context(), d.DB, projectSlug)
+	if err != nil {
+		return err
+	}
+	if watermark <= 0 {
+		return nil
+	}
+	return d.upsertReadWatermark(r, projectSlug, userKey, watermark)
+}
+
+func (d Deps) upsertReadWatermark(r *http.Request, projectSlug, userKey string, revisionWatermark int) error {
+	_, err := d.DB.Exec(r.Context(), `
+		INSERT INTO reader_watermarks (user_key, project_id, revision_watermark, seen_at)
+		SELECT $2, p.id, $3, now()
+		FROM projects p
+		WHERE p.slug = $1
+		ON CONFLICT (user_key, project_id)
+		DO UPDATE SET revision_watermark = EXCLUDED.revision_watermark, seen_at = now()
+	`, projectSlug, userKey, revisionWatermark)
+	return err
 }
 
 func (d Deps) todaySummary(r *http.Request, projectSlug, userKey, locale string, baselineRev, maxRev int, filterHash string, groups []changegroup.Group) (changegroup.Brief, error) {

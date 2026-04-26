@@ -349,6 +349,24 @@ export type TodayResp = {
   max_revision_id: number;
 };
 
+export type ReadEventInput = {
+  artifact_id: string;
+  artifact_slug?: string;
+  started_at: string;
+  ended_at: string;
+  active_seconds: number;
+  scroll_max_pct: number;
+  idle_seconds: number;
+  locale?: string;
+};
+
+export type ReadEventResp = {
+  id: string;
+  artifact_id: string;
+  active_seconds: number;
+  scroll_max_pct: number;
+};
+
 const base = "";
 
 async function j<T>(path: string): Promise<T> {
@@ -587,17 +605,22 @@ export const api = {
     const q = qs.toString();
     return j<TodayResp>(`${p(project)}/change-groups${q ? `?${q}` : ""}`);
   },
-  markRead: async (project: string, revisionWatermark: number) => {
-    const res = await fetch(`${p(project)}/read-mark`, {
+  readEvent: async (
+    project: string,
+    input: ReadEventInput,
+    opts?: { keepalive?: boolean },
+  ) => {
+    const res = await fetch(`${p(project)}/read-events`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ revision_watermark: revisionWatermark }),
+      body: JSON.stringify(input),
+      keepalive: opts?.keepalive,
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       throw new Error(`${res.status} ${res.statusText}: ${body.slice(0, 200)}`);
     }
-    return res.json() as Promise<{ project_slug: string; revision_watermark: number }>;
+    return res.json() as Promise<ReadEventResp>;
   },
   exportProjectUrl: (project: string, params?: { area?: string; includeRevisions?: boolean; format?: "zip" | "tar" }) => {
     const qs = new URLSearchParams();

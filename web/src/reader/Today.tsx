@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, ChevronDown, ChevronRight, Download, Filter, Loader2, Sparkles } from "lucide-react";
 import { Link } from "react-router";
 import { api, type ChangeGroup, type TodayResp } from "../api/client";
@@ -33,8 +33,6 @@ export function Today({ projectSlug, selectedArea, areaNameBySlug, onSelectArea 
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<KindFilter>("all");
   const [autoOpen, setAutoOpen] = useState(false);
-  const streamRef = useRef<HTMLDivElement | null>(null);
-  const markedRef = useRef<number>(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,35 +49,6 @@ export function Today({ projectSlug, selectedArea, areaNameBySlug, onSelectArea 
       cancelled = true;
     };
   }, [projectSlug, selectedArea, lang]);
-
-  useEffect(() => {
-    if (!data || data.max_revision_id <= 0 || markedRef.current === data.max_revision_id) return;
-    const target = streamRef.current;
-    if (!target) return;
-    let timer: number | undefined;
-    const mark = () => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        api.markRead(projectSlug, data.max_revision_id).catch(() => undefined);
-        markedRef.current = data.max_revision_id;
-      }, 900);
-    };
-    if (!("IntersectionObserver" in window)) {
-      mark();
-      return () => window.clearTimeout(timer);
-    }
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting && entry.intersectionRatio >= 0.35)) {
-        mark();
-        observer.disconnect();
-      }
-    }, { threshold: [0.35] });
-    observer.observe(target);
-    return () => {
-      window.clearTimeout(timer);
-      observer.disconnect();
-    };
-  }, [data, projectSlug]);
 
   const groups = data?.groups ?? [];
   const visibleGroups = useMemo(
@@ -178,7 +147,7 @@ export function Today({ projectSlug, selectedArea, areaNameBySlug, onSelectArea 
           ))}
         </div>
 
-        <div className="today-stream" ref={streamRef}>
+        <div className="today-stream">
           {groups.length === 0 && (
             <EmptyState message={emptyMessage} />
           )}

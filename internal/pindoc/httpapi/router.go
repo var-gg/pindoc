@@ -124,6 +124,7 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/p/{project}/search", d.handleSearch)
 	mux.HandleFunc("GET /api/p/{project}/change-groups", d.handleChangeGroups)
 	mux.HandleFunc("POST /api/p/{project}/read-mark", d.handleReadMark)
+	mux.HandleFunc("POST /api/p/{project}/read-events", d.handleReadEvent)
 	mux.HandleFunc("GET /api/p/{project}/export", d.handleProjectExport)
 
 	// Operational metadata edit — the one write surface the HTTP API
