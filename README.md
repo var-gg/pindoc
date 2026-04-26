@@ -7,10 +7,10 @@
 모든 쓰기는 코딩 에이전트(Claude Code / Cursor / Cline / Codex)를 통해 일어나고,
 사람은 승인·거절·방향 제시만 합니다. 모든 문서는 코드 커밋·파일 경로에 **핀(pin)** 됩니다.
 
-`var.gg` 생태계의 첫 플래그십 제품. Self-host first. 최종 로컬 부팅 목표는
+`var.gg` 생태계의 첫 플래그십 제품. Self-host first. 로컬 기본 경로는
 `docker compose up -d` 한 번으로 Postgres + pgvector + Pindoc HTTP daemon까지
-뜨는 흐름이다. 현재 M1 개발 경로는 Docker Compose로 DB를 띄우고,
-`pindoc-server -http 127.0.0.1:5830`를 host-native daemon으로 실행한다.
+띄우는 흐름이다. 코드 수정 중 빠른 반복이 필요할 때만 host-native
+`pindoc-server -http 127.0.0.1:5830` 경로를 보조로 쓴다.
 
 Apache License 2.0. 기여 가이드와 CLA는 [CONTRIBUTING.md](CONTRIBUTING.md) 참조.
 
@@ -102,6 +102,9 @@ M1 + 3차 peer review 반영 + 1호 사용자 dogfood readiness 완료.
 # Postgres + Pindoc HTTP daemon + Reader SPA
 docker compose up -d --build
 
+# Browser: http://localhost:5830/
+# 빈 인스턴스에서는 http://localhost:5830/projects/new 에서 첫 프로젝트 생성
+
 # 선택: HTTP embedder를 명시적으로 쓸 때만 TEI 기동.
 # daemon 컨테이너는 host PINDOC_EMBED_PROVIDER를 읽지 않고
 # PINDOC_COMPOSE_EMBED_PROVIDER로만 opt-in한다.
@@ -128,7 +131,11 @@ go build -o bin/pindoc-server ./cmd/pindoc-server
 cd web && pnpm install && pnpm dev   # http://localhost:5830
 ```
 
-Windows 개발자는 데몬을 user-mode Scheduled Task로 등록하면 이후 agent가 admin 권한 없이 재시작할 수 있다.
+### Running in background (OS-specific)
+
+Docker Compose를 쓰는 설치는 `restart: unless-stopped`로 백그라운드 재시작을 맡긴다. host-native daemon을 직접 운영할 때만 아래 OS별 자동 기동 경로를 사용한다.
+
+**Windows**: user-mode Scheduled Task로 등록하면 이후 agent가 admin 권한 없이 재시작할 수 있다.
 
 ```powershell
 # 이전 NSSM 서비스가 있다면 관리자 PowerShell에서 1회만 실행
@@ -140,6 +147,10 @@ powershell -ExecutionPolicy Bypass -File scripts\install-user-mode.ps1
 # 코드 변경 후 agent/개발자가 직접 build + restart + health check
 powershell -ExecutionPolicy Bypass -File scripts\dev-restart.ps1
 ```
+
+**macOS**: `~/Library/LaunchAgents/dev.pindoc.server.plist`에 `RunAtLoad` + `KeepAlive`를 두고 `pindoc-server -http 127.0.0.1:5830`을 실행한다.
+
+**Linux**: `~/.config/systemd/user/pindoc-server.service`를 만들고 `systemctl --user enable --now pindoc-server`를 사용한다.
 
 **MCP 클라이언트에 등록**: 전역 또는 워크스페이스 MCP 설정에 아래 URL 하나를 넣는다. 새 세션에서 `pindoc.ping` 실행하면 handshake 성공. 임시 포트 `5832`로 띄웠다면 URL 포트만 `5832`로 바꾼다.
 
@@ -172,15 +183,10 @@ go build -o bin/pindoc-server ./cmd/pindoc-server
 
 `pindoc.harness.install`이 생성하는 `PINDOC.md`는 YAML frontmatter(`project_slug`, `project_id`, `locale`, `schema_version`)를 포함한다. Frontmatter는 이후 workspace detection의 명시적 source다. Section X는 정책 wiki를 `context.for_task`의 `applicable_rules[]`로 자동 적용하는 규약을 설명하고, Section 12는 chip/parallel work가 시작·진행·merge·중단될 때 Pindoc Task status와 acceptance checkbox를 어떻게 갱신할지 규정한다. 기본 응답은 호환성을 위해 `response_format=full`이지만, 반복 호출은 `file_only` 또는 이전 etag(`if_content_etag`, `if_style_snippet_etag`)로 대형 body 재전송을 피한다.
 
-Windows 기본 운영은 `scripts\install-user-mode.ps1` 이다. 기존
+Windows host-native 기본 운영은 `scripts\install-user-mode.ps1` 이다. 기존
 `scripts\install-service.ps1` NSSM 경로는 deprecated legacy 옵션으로만 남긴다.
 지금 Windows에서 재시작 권한 문제가 나면 legacy NSSM 서비스가 아직 남아있는
-상태다. 관리자 PowerShell에서 `scripts\uninstall-service.ps1`을 한 번 실행한 뒤,
-일반 PowerShell에서 `scripts\install-user-mode.ps1`로 전환한다. macOS에서는
-`~/Library/LaunchAgents/dev.pindoc.server.plist`에 `RunAtLoad` + `KeepAlive`를
-두고 `pindoc-server -http 127.0.0.1:5830`을 실행하면 된다. Linux에서는
-`~/.config/systemd/user/pindoc-server.service`를 만들고
-`systemctl --user enable --now pindoc-server`를 사용한다.
+상태다.
 
 상세 설계: Decision `mcp-scope-account-level-industry-standard`.
 

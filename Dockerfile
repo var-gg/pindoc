@@ -23,6 +23,9 @@ ARG COMMIT=unknown
 RUN CGO_ENABLED=1 go build \
     -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
     -o /out/pindoc-server ./cmd/pindoc-server
+RUN CGO_ENABLED=1 go build \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+    -o /out/pindoc-api ./cmd/pindoc-api
 
 FROM debian:bookworm-slim AS runtime
 
@@ -38,6 +41,7 @@ RUN groupadd --system pindoc \
 WORKDIR /app
 
 COPY --from=go-builder /out/pindoc-server /usr/local/bin/pindoc-server
+COPY --from=go-builder /out/pindoc-api /usr/local/bin/pindoc-api
 COPY --from=web-builder /src/web/dist /app/web/dist
 
 ENV PINDOC_DATABASE_URL=postgres://pindoc:pindoc_dev@db:5432/pindoc?sslmode=disable
