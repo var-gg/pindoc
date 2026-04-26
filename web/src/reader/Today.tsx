@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Archive, CheckCircle2, ChevronDown, ChevronRight, Download, Filter, Loader2, Sparkles } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, Download, Filter, Loader2, Sparkles } from "lucide-react";
 import { Link } from "react-router";
 import { api, type ChangeGroup, type TodayResp } from "../api/client";
 import { useI18n } from "../i18n";
+import { EmptyState } from "./SurfacePrimitives";
 
 type Props = {
   projectSlug: string;
@@ -94,6 +95,18 @@ export function Today({ projectSlug, selectedArea, areaNameBySlug, onSelectArea 
   const autoGroups = visibleGroups.filter((g) => g.group_kind === "auto_sync" || g.group_kind === "maintenance");
   const primaryGroups = visibleGroups.filter((g) => g.group_kind !== "auto_sync" && g.group_kind !== "maintenance");
   const collapsedAuto = autoGroups.length > 0 && !autoOpen;
+  const scopeName = selectedArea
+    ? areaNameBySlug.get(selectedArea) ?? selectedArea
+    : t("today.scope_all");
+  const scopeMeta = selectedArea
+    ? t("today.scope_area", scopeName)
+    : t("today.scope_all");
+  const emptyMessage = selectedArea
+    ? t("today.empty_area", scopeName)
+    : t("today.empty_all");
+  const emptyFilteredMessage = selectedArea
+    ? t("today.empty_filtered_area", scopeName)
+    : t("today.empty_filtered_all");
   const baselineLabel = data?.baseline.last_seen_at
     ? new Date(data.baseline.last_seen_at).toLocaleString()
     : data?.baseline.defaulted_to_days
@@ -122,9 +135,9 @@ export function Today({ projectSlug, selectedArea, areaNameBySlug, onSelectArea 
             <div className="today-head__eyebrow">{t("today.eyebrow")}</div>
             <h1>{t("today.title")}</h1>
             <div className="today-head__meta">
-              <span>{baselineLabel}</span>
-              <span>{data.max_revision_id} rev</span>
-              {selectedArea && <span>{areaNameBySlug.get(selectedArea) ?? selectedArea}</span>}
+              <span>{scopeMeta}</span>
+              <span>{t("today.baseline_meta", baselineLabel)}</span>
+              <span>{t("today.rev_meta", data.max_revision_id)}</span>
             </div>
           </div>
           <div className="today-head__actions">
@@ -167,10 +180,7 @@ export function Today({ projectSlug, selectedArea, areaNameBySlug, onSelectArea 
 
         <div className="today-stream" ref={streamRef}>
           {groups.length === 0 && (
-            <div className="today-empty">
-              <Archive className="lucide" />
-              <div>{t("today.empty")}</div>
-            </div>
+            <EmptyState message={emptyMessage} />
           )}
           {primaryGroups.map((group) => (
             <ChangeGroupCard
@@ -200,10 +210,7 @@ export function Today({ projectSlug, selectedArea, areaNameBySlug, onSelectArea 
             </section>
           )}
           {groups.length > 0 && visibleGroups.length === 0 && (
-            <div className="today-empty">
-              <Archive className="lucide" />
-              <div>{t("today.empty_filtered")}</div>
-            </div>
+            <EmptyState message={emptyFilteredMessage} />
           )}
         </div>
       </div>
