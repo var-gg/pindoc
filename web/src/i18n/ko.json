@@ -197,6 +197,7 @@
   "task_inspector.acceptance_ratio": "Acceptance",
   "tasks.card_select_hint": "Inspector에서 선택; 더블클릭 또는 Enter로 상세 열기",
   "tasks.card_open_detail_hint": "전체 상세 열기",
+  "tasks.priority_hint": "우선순위 %s",
 
   "reader.written_by": "%s 작성",
   "reader.toc_title": "이 문서",
@@ -212,6 +213,8 @@
   "reader.inspector_loading": "Inspector를 불러오는 중...",
   "reader.inspector_open_detail": "전체 보기",
   "reader.empty_filtered": "이 영역에 %s artifact가 없습니다.",
+  "reader.body_language": "Artifact 본문 언어",
+  "reader.translate_to": "%s로 번역",
   "reader.structure_sidecar_hint": "구조화 데이터는 Inspector에 있습니다",
   "reader.structure_sidecar_link": "보기",
   "reader.structure_expand": "본문 섹션 펼치기",

@@ -197,6 +197,7 @@
   "task_inspector.acceptance_ratio": "Acceptance",
   "tasks.card_select_hint": "Select in Inspector; double-click or Enter opens detail",
   "tasks.card_open_detail_hint": "Open full detail",
+  "tasks.priority_hint": "Priority %s",
 
   "reader.written_by": "written by %s",
   "reader.toc_title": "On this page",
@@ -212,6 +213,8 @@
   "reader.inspector_loading": "Loading Inspector...",
   "reader.inspector_open_detail": "Open full detail",
   "reader.empty_filtered": "No %s artifacts in this area.",
+  "reader.body_language": "Artifact body language",
+  "reader.translate_to": "Translate to %s",
   "reader.structure_sidecar_hint": "Structured data is in the Inspector",
   "reader.structure_sidecar_link": "View",
   "reader.structure_expand": "Expand body section",

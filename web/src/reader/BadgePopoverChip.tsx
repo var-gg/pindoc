@@ -3,10 +3,11 @@ import type { CSSProperties, ReactNode } from "react";
 import { Link } from "react-router";
 import { BookOpen, ListFilter } from "lucide-react";
 import { useI18n } from "../i18n";
+import { Tooltip } from "./Tooltip";
 
 type Props = {
   label: ReactNode;
-  title: string;
+  description: string;
   className: string;
   style?: CSSProperties;
   onApply?: () => void;
@@ -16,7 +17,7 @@ type Props = {
 
 export function BadgePopoverChip({
   label,
-  title,
+  description,
   className,
   style,
   onApply,
@@ -40,21 +41,22 @@ export function BadgePopoverChip({
 
   return (
     <span className="badge-chip-wrap">
-      <button
-        type="button"
-        className={`${className} badge-popover-chip`}
-        style={style}
-        title={title}
-        aria-expanded={open}
-        aria-controls={open ? id : undefined}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {label}
-      </button>
+      <Tooltip content={description}>
+        <button
+          type="button"
+          className={`${className} badge-popover-chip`}
+          style={style}
+          aria-expanded={open}
+          aria-controls={open ? id : undefined}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {label}
+        </button>
+      </Tooltip>
       {open && (
         <div id={id} className="badge-popover" role="dialog" aria-label={t("reader.badge_popover_label")}>
           <div className="badge-popover__title">{label}</div>
-          <p>{title}</p>
+          <p>{description}</p>
           <div className="badge-popover__actions">
             {onApply && (
               <button

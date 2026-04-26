@@ -7,6 +7,7 @@ import { compareAreas, isFixedTaxonomyArea, localizedAreaName } from "./areaLoca
 import type { Aggregate } from "./useReaderData";
 import { visualArea, visualDescription, visualLabel, visualType } from "./visualLanguage";
 import { visualIconComponent } from "./visualLanguageIcons";
+import { Tooltip } from "./Tooltip";
 
 type Props = {
   areas: Area[];
@@ -137,15 +138,16 @@ export function Sidebar({
           <div className="side-section" style={{ marginTop: 12 }}>
             {t("sidebar.types")}
           </div>
-          <div
-            className="side-item"
-            style={{ color: "var(--fg-3)", cursor: "default" }}
-            title={t("sidebar.type_locked_hint")}
-          >
-            <Check className="lucide" />
-            <span>Task</span>
-            <span className="side-item__count">{t("sidebar.type_locked_badge")}</span>
-          </div>
+          <Tooltip content={t("sidebar.type_locked_hint")}>
+            <div
+              className="side-item"
+              style={{ color: "var(--fg-3)", cursor: "default" }}
+            >
+              <Check className="lucide" />
+              <span>Task</span>
+              <span className="side-item__count">{t("sidebar.type_locked_badge")}</span>
+            </div>
+          </Tooltip>
         </>
       ) : (
         types.length > 0 && (
@@ -159,21 +161,21 @@ export function Sidebar({
               const label = typeVisual ? visualLabel(typeVisual, lang) : key;
               const title = typeVisual ? visualDescription(typeVisual, lang) : t("sidebar.type_fixed_hint");
               return (
-                <button
-                  type="button"
-                  key={key}
-                  className={`side-item${selectedType === key ? " active" : ""}`}
-                  onClick={() => onSelectType(selectedType === key ? null : key)}
-                  title={title}
-                >
-                  <Icon className="lucide" />
-                  <span className="side-item__label">{label}</span>
-                  <Lock
-                    className="side-item__taxonomy side-item__taxonomy--fixed"
-                    aria-label={t("sidebar.type_fixed_hint")}
-                  />
-                  <span className="side-item__count">{count}</span>
-                </button>
+                <Tooltip key={key} content={title}>
+                  <button
+                    type="button"
+                    className={`side-item${selectedType === key ? " active" : ""}`}
+                    onClick={() => onSelectType(selectedType === key ? null : key)}
+                  >
+                    <Icon className="lucide" />
+                    <span className="side-item__label">{label}</span>
+                    <Lock
+                      className="side-item__taxonomy side-item__taxonomy--fixed"
+                      aria-label={t("sidebar.type_fixed_hint")}
+                    />
+                    <span className="side-item__count">{count}</span>
+                  </button>
+                </Tooltip>
               );
             })}
           </>
@@ -183,15 +185,16 @@ export function Sidebar({
       <div className="side-section" style={{ marginTop: 12 }}>
         {t("sidebar.view")}
       </div>
-      <button
-        type="button"
-        className={`side-item${showTemplates ? " active" : ""}`}
-        onClick={onToggleTemplates}
-        title={t("sidebar.templates_hint")}
-      >
-        <LayoutTemplate className="lucide" />
-        <span>{t("sidebar.templates")}</span>
-      </button>
+      <Tooltip content={t("sidebar.templates_hint")}>
+        <button
+          type="button"
+          className={`side-item${showTemplates ? " active" : ""}`}
+          onClick={onToggleTemplates}
+        >
+          <LayoutTemplate className="lucide" />
+          <span>{t("sidebar.templates")}</span>
+        </button>
+      </Tooltip>
 
       {agents.length > 0 && (
         <>
@@ -261,52 +264,53 @@ function AreaTreeNode({
 
   return (
     <>
-      <button
-        type="button"
-        className={`side-item side-item--area${level > 0 ? " side-item--area-child" : ""}${active ? " active" : ""}${empty ? " empty" : ""}`}
-        style={style}
-        onClick={() => onSelectArea(active ? null : node.slug)}
-        title={areaTitle}
-      >
-        {hasChildren ? (
-          <span
-            role="button"
-            tabIndex={0}
-            onClick={(e) => {
-              e.stopPropagation();
-              setExpanded((v) => !v);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
+      <Tooltip content={areaTitle}>
+        <button
+          type="button"
+          className={`side-item side-item--area${level > 0 ? " side-item--area-child" : ""}${active ? " active" : ""}${empty ? " empty" : ""}`}
+          style={style}
+          onClick={() => onSelectArea(active ? null : node.slug)}
+        >
+          {hasChildren ? (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
                 e.stopPropagation();
                 setExpanded((v) => !v);
-              }
-            }}
-            className="side-item__toggle"
-            aria-label={expanded ? "collapse" : "expand"}
-            style={{ display: "inline-flex", alignItems: "center" }}
-          >
-            {expanded ? <ChevronDown className="lucide" /> : <ChevronRight className="lucide" />}
-          </span>
-        ) : (
-          <span style={{ width: 14, display: "inline-block" }} />
-        )}
-        <AreaIcon className="lucide side-item__area-icon" />
-        <span className="side-item__label">{areaLabel}</span>
-        {fixed ? (
-          <Lock
-            className="side-item__taxonomy side-item__taxonomy--fixed"
-            aria-label={taxonomyHint}
-          />
-        ) : (
-          <span
-            className="side-item__taxonomy side-item__taxonomy--promoted"
-            aria-label={taxonomyHint}
-          />
-        )}
-        <span className="side-item__count">{subtreeCount}</span>
-      </button>
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setExpanded((v) => !v);
+                }
+              }}
+              className="side-item__toggle"
+              aria-label={expanded ? "collapse" : "expand"}
+              style={{ display: "inline-flex", alignItems: "center" }}
+            >
+              {expanded ? <ChevronDown className="lucide" /> : <ChevronRight className="lucide" />}
+            </span>
+          ) : (
+            <span style={{ width: 14, display: "inline-block" }} />
+          )}
+          <AreaIcon className="lucide side-item__area-icon" />
+          <span className="side-item__label">{areaLabel}</span>
+          {fixed ? (
+            <Lock
+              className="side-item__taxonomy side-item__taxonomy--fixed"
+              aria-label={taxonomyHint}
+            />
+          ) : (
+            <span
+              className="side-item__taxonomy side-item__taxonomy--promoted"
+              aria-label={taxonomyHint}
+            />
+          )}
+          <span className="side-item__count">{subtreeCount}</span>
+        </button>
+      </Tooltip>
       {hasChildren && expanded && node.children.map((child) => (
         <AreaTreeNode
           key={child.id}

@@ -6,19 +6,21 @@ import { Telemetry } from "./ops/Telemetry";
 import { CreateProjectPage } from "./reader/CreateProjectPage";
 import { Diff } from "./reader/Diff";
 import { History } from "./reader/History";
+import { PindocTooltipProvider } from "./reader/Tooltip";
 import { ReaderShell } from "./reader/ReaderShell";
 import { findSurface, previews, uiKits } from "./surfaces";
 
 export function App() {
   return (
-    <Routes>
-      {/* Design-system scaffold. Lives at /design so the bare root can
+    <PindocTooltipProvider>
+      <Routes>
+        {/* Design-system scaffold. Lives at /design so the bare root can
           canonical-redirect to a project-scoped URL. */}
-      <Route path="/design" element={<ShellLayout />}>
-        <Route index element={<Home />} />
-        <Route path="preview/:slug" element={<EmbeddedPreview />} />
-      </Route>
-      <Route path="/ui/:slug" element={<UiKitViewport />} />
+        <Route path="/design" element={<ShellLayout />}>
+          <Route index element={<Home />} />
+          <Route path="preview/:slug" element={<EmbeddedPreview />} />
+        </Route>
+        <Route path="/ui/:slug" element={<UiKitViewport />} />
 
       {/* Canonical project-scoped surfaces. Locale is project metadata, not
           route identity, after task-canonical-locale-migration. */}
@@ -66,8 +68,9 @@ export function App() {
       <Route path="/ops/telemetry" element={<Telemetry />} />
 
       {/* Bare root. / redirects to /p/:default/today. */}
-      <Route path="/" element={<LegacyRedirect base="today" />} />
-    </Routes>
+        <Route path="/" element={<LegacyRedirect base="today" />} />
+      </Routes>
+    </PindocTooltipProvider>
   );
 }
 

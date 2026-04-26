@@ -8,6 +8,7 @@ import { ArtifactByline } from "./ArtifactByline";
 import { BadgePopoverChip } from "./BadgePopoverChip";
 import { PindocMarkdown } from "./Markdown";
 import { TrustCard } from "./TrustCard";
+import { Tooltip } from "./Tooltip";
 import { localizedAreaName } from "./areaLocale";
 import type { BadgeFilter } from "./badgeFilters";
 import { createReadTracker, type ReadTrackerFlushReason, type ReadTrackerSnapshot } from "./readTracker";
@@ -144,15 +145,17 @@ export function ReaderSurface({
           )}
           <BadgePopoverChip
             label={areaLabel}
-            title={t("reader.badge_area_tip", areaLabel)}
+            description={t("reader.badge_area_tip", areaLabel)}
             className="chip chip--area"
             onApply={onApplyAreaFilter ? () => onApplyAreaFilter(detail.area_slug) : undefined}
             legendHref={legendHref}
           />
           {detail.body_locale ? (
-            <span className="chip chip--area" title="Artifact body language">
-              lang: {detail.body_locale}
-            </span>
+            <Tooltip content={t("reader.body_language")}>
+              <span className="chip chip--area">
+                lang: {detail.body_locale}
+              </span>
+            </Tooltip>
           ) : null}
           <span className="translate-toggle" aria-label="Translation target">
             <Languages className="lucide" aria-hidden="true" />
@@ -162,21 +165,21 @@ export function ReaderSurface({
                 to={translateHref(locale)}
                 className={`translate-toggle__option${highlightedLocale === locale ? " is-active" : ""}`}
                 aria-current={highlightedLocale === locale ? "true" : undefined}
-                title={`translate=${locale}`}
+                aria-label={t("reader.translate_to", locale.toUpperCase())}
               >
                 {locale.toUpperCase()}
               </Link>
             ))}
           </span>
           {projectSlug && translationEdges.map((edge) => (
-            <Link
-              key={`translation-${edge.artifact_id}`}
-              to={`/p/${projectSlug}/wiki/${edge.slug}`}
-              className="chip chip--area"
-              title={edge.title}
-            >
-              translation
-            </Link>
+            <Tooltip key={`translation-${edge.artifact_id}`} content={edge.title}>
+              <Link
+                to={`/p/${projectSlug}/wiki/${edge.slug}`}
+                className="chip chip--area"
+              >
+                translation
+              </Link>
+            </Tooltip>
           ))}
           <span className="art-meta__sep">·</span>
           <ArtifactByline artifact={detail} />
@@ -244,10 +247,12 @@ function DetailScopeBar({ scope }: { scope: DetailScope | null }) {
       ) : (
         <div className="detail-scope-bar__nav" aria-label={t("reader.scope_sibling_nav")}>
           {scope.prev && scope.prevHref ? (
-            <Link to={scope.prevHref} className="detail-scope-bar__button" title={scope.prev.title}>
-              <ChevronLeft className="lucide" />
-              {t("reader.scope_prev")}
-            </Link>
+            <Tooltip content={scope.prev.title}>
+              <Link to={scope.prevHref} className="detail-scope-bar__button">
+                <ChevronLeft className="lucide" />
+                {t("reader.scope_prev")}
+              </Link>
+            </Tooltip>
           ) : (
             <span className="detail-scope-bar__button is-disabled">
               <ChevronLeft className="lucide" />
@@ -255,10 +260,12 @@ function DetailScopeBar({ scope }: { scope: DetailScope | null }) {
             </span>
           )}
           {scope.next && scope.nextHref ? (
-            <Link to={scope.nextHref} className="detail-scope-bar__button" title={scope.next.title}>
-              {t("reader.scope_next")}
-              <ChevronRight className="lucide" />
-            </Link>
+            <Tooltip content={scope.next.title}>
+              <Link to={scope.nextHref} className="detail-scope-bar__button">
+                {t("reader.scope_next")}
+                <ChevronRight className="lucide" />
+              </Link>
+            </Tooltip>
           ) : (
             <span className="detail-scope-bar__button is-disabled">
               {t("reader.scope_next")}

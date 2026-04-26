@@ -8,6 +8,8 @@ import {
   visualType,
 } from "./visualLanguage";
 import { visualIconComponent } from "./visualLanguageIcons";
+import { BadgeWithExplain } from "./BadgeWithExplain";
+import { Tooltip } from "./Tooltip";
 
 type ArtifactTypeChipProps = {
   type: string;
@@ -25,9 +27,6 @@ type TypeCountChipProps = {
   count: number;
 };
 
-// Temporary visual-language chip layer. Radix Tooltip/BageWithExplain will
-// own hover explanations later; this keeps cards on the same icon/color
-// tokens now without introducing another tooltip API.
 export function ArtifactTypeChip({ type, compact }: ArtifactTypeChipProps) {
   const { lang } = useI18n();
   const entry = visualType(type);
@@ -35,13 +34,14 @@ export function ArtifactTypeChip({ type, compact }: ArtifactTypeChipProps) {
   const label = entry ? visualLabel(entry, lang) : type;
   const description = entry ? visualDescription(entry, lang) : type;
   return (
-    <span
+    <BadgeWithExplain
+      label={compact ? type : label}
+      description={description}
       className={`${typeChipClass(type)} type-chip--visual${compact ? " type-chip--compact" : ""}`}
-      aria-label={description}
     >
       <Icon className="lucide" aria-hidden="true" />
       <span>{compact ? type : label}</span>
-    </span>
+    </BadgeWithExplain>
   );
 }
 
@@ -64,22 +64,24 @@ export function VisualAreaChip({ areaSlug, label, onClick }: AreaChipProps) {
 
   if (onClick) {
     return (
-      <button
-        type="button"
-        className={className}
-        style={style}
-        aria-label={description}
-        onClick={onClick}
-      >
-        {content}
-      </button>
+      <Tooltip content={description}>
+        <button
+          type="button"
+          className={className}
+          style={style}
+          aria-label={description}
+          onClick={onClick}
+        >
+          {content}
+        </button>
+      </Tooltip>
     );
   }
 
   return (
-    <span className={className} style={style} aria-label={description}>
+    <BadgeWithExplain label={visualLabelText} description={description} className={className} style={style}>
       {content}
-    </span>
+    </BadgeWithExplain>
   );
 }
 
@@ -88,12 +90,17 @@ export function TypeCountChip({ type, count }: TypeCountChipProps) {
   const entry = visualType(type);
   const Icon = visualIconComponent(entry?.icon);
   const label = entry ? visualLabel(entry, lang) : type;
+  const description = entry ? visualDescription(entry, lang) : label;
   return (
-    <span className={`${typeChipClass(type)} type-chip--visual type-chip--count`} aria-label={`${label} ${count}`}>
+    <BadgeWithExplain
+      label={`${label} ${count}`}
+      description={description}
+      className={`${typeChipClass(type)} type-chip--visual type-chip--count`}
+    >
       <Icon className="lucide" aria-hidden="true" />
       <span>{shortTypeLabel(type)}</span>
       {count > 1 && <span className="type-chip__count">{count}</span>}
-    </span>
+    </BadgeWithExplain>
   );
 }
 

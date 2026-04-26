@@ -1571,6 +1571,21 @@
 .empty-state__action--static {
   cursor: default;
 }
+.pindoc-tooltip {
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 7px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-1);
+  background: var(--bg-0);
+  color: var(--fg-1);
+  box-shadow: var(--shadow-float);
+  font-size: 12px;
+  line-height: 1.45;
+  z-index: 200;
+}
+.pindoc-tooltip__arrow {
+  fill: var(--bg-0);
+}
 .artifact-list {
   display: flex;
   flex-direction: column;

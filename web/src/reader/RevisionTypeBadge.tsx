@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import type { RevisionType } from "../api/client";
 import { useI18n } from "../i18n";
+import { Tooltip } from "./Tooltip";
 
 type Props = {
   revisionType?: RevisionType;
@@ -12,18 +13,19 @@ export function RevisionTypeBadge({ revisionType, compact = false, style }: Prop
   const { t } = useI18n();
   if (!revisionType) return null;
   return (
-    <span
-      className={`chip chip--${revisionTypeChipClass(revisionType)}`}
-      title={t(`revision_type.${revisionType}`)}
-      style={{
-        height: compact ? 18 : 20,
-        paddingInline: compact ? 6 : 8,
-        fontSize: compact ? 10 : 11,
-        ...style,
-      }}
-    >
-      {t(`revision_type.${revisionType}`)}
-    </span>
+    <Tooltip content={t(`revision_type.${revisionType}`)}>
+      <span
+        className={`chip chip--${revisionTypeChipClass(revisionType)}`}
+        style={{
+          height: compact ? 18 : 20,
+          paddingInline: compact ? 6 : 8,
+          fontSize: compact ? 10 : 11,
+          ...style,
+        }}
+      >
+        {t(`revision_type.${revisionType}`)}
+      </span>
+    </Tooltip>
   );
 }
 

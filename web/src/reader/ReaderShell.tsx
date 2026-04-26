@@ -12,6 +12,7 @@ import { Sidebar } from "./Sidebar";
 import { Sidecar } from "./Sidecar";
 import { ShortcutsOverlay } from "./ShortcutsOverlay";
 import { EmptyState, SurfaceHeader } from "./SurfacePrimitives";
+import { Tooltip } from "./Tooltip";
 import { Today } from "./Today";
 import { TopNav } from "./TopNav";
 import { ArtifactTypeChip, VisualAreaChip } from "./VisualChips";
@@ -808,7 +809,6 @@ function Body({
                   tabIndex={0}
                   role="button"
                   aria-selected={isActive}
-                  title={t("reader.card_select_hint")}
                   onClick={() => onSelectInspectorArtifact(a.slug)}
                   onDoubleClick={() => navigate(href)}
                   onKeyDown={(e) => {
@@ -830,9 +830,11 @@ function Body({
                 >
                   <div className="backlink__head">
                     <span className="backlink__title">{a.title}</span>
-                    <span className="backlink__inspect" aria-label={t("reader.card_select_hint")}>
-                      <PanelRightOpen className="lucide" aria-hidden="true" />
-                    </span>
+                    <Tooltip content={t("reader.card_select_hint")}>
+                      <span className="backlink__inspect" aria-label={t("reader.card_select_hint")}>
+                        <PanelRightOpen className="lucide" aria-hidden="true" />
+                      </span>
+                    </Tooltip>
                   </div>
                   <div className="backlink__excerpt">
                     <span className="backlink__badges">
@@ -1158,15 +1160,16 @@ function TaskBoardHeader({
           <span className="task-filter-chip">
             <span className="task-filter-chip__key">Area</span>
             <span>{scopeLabel}</span>
-            <button
-              type="button"
-              className="task-filter-chip__remove"
-              onClick={onClearAreaFilter}
-              aria-label={t("tasks.filter_remove_area", scopeLabel)}
-              title={t("tasks.filter_remove_area", scopeLabel)}
-            >
-              <X className="lucide" />
-            </button>
+            <Tooltip content={t("tasks.filter_remove_area", scopeLabel)}>
+              <button
+                type="button"
+                className="task-filter-chip__remove"
+                onClick={onClearAreaFilter}
+                aria-label={t("tasks.filter_remove_area", scopeLabel)}
+              >
+                <X className="lucide" />
+              </button>
+            </Tooltip>
           </span>
         )}
         {badgeFilters.map((filter) => (
@@ -1247,15 +1250,16 @@ function FilterChip({
     <span className="task-filter-chip">
       <span className="task-filter-chip__key">{keyLabel}</span>
       <span>{label}</span>
-      <button
-        type="button"
-        className="task-filter-chip__remove"
-        onClick={onRemove}
-        aria-label={removeLabel}
-        title={removeLabel}
-      >
-        <X className="lucide" />
-      </button>
+      <Tooltip content={removeLabel}>
+        <button
+          type="button"
+          className="task-filter-chip__remove"
+          onClick={onRemove}
+          aria-label={removeLabel}
+        >
+          <X className="lucide" />
+        </button>
+      </Tooltip>
     </span>
   );
 }
@@ -1335,17 +1339,18 @@ function TaskColumn({
           />
         ))}
         {hiddenCount > 0 && (
-          <button
-            type="button"
-            className="task-show-more"
-            onClick={onShowMore}
-            title={t("tasks.showing_count", visibleItems.length, items.length)}
-          >
-            <span>{t("tasks.show_more", nextCount)}</span>
-            <span className="task-show-more__meta">
-              {t("tasks.showing_count", visibleItems.length, items.length)}
-            </span>
-          </button>
+          <Tooltip content={t("tasks.showing_count", visibleItems.length, items.length)}>
+            <button
+              type="button"
+              className="task-show-more"
+              onClick={onShowMore}
+            >
+              <span>{t("tasks.show_more", nextCount)}</span>
+              <span className="task-show-more__meta">
+                {t("tasks.showing_count", visibleItems.length, items.length)}
+              </span>
+            </button>
+          </Tooltip>
         )}
         {items.length === 0 && (
           hasActiveFilters ? (
@@ -1400,7 +1405,6 @@ function TaskCard({
       data-task-card-slug={a.slug}
       aria-selected={selected}
       className={`task-card${selected ? " is-active" : ""}`}
-      title={t("tasks.card_select_hint")}
       onClick={() => onSelect(a.slug)}
       onDoubleClick={() => navigate(detailHref)}
       onKeyDown={(e) => {
@@ -1429,24 +1433,29 @@ function TaskCard({
       )}
       <div className="task-card__meta">
         {prioClass && (
-          <span className={prioClass} title={`priority ${priority}`}>
-            <span className="dot" />
-            {priority?.toUpperCase()}
-          </span>
+          <Tooltip content={t("tasks.priority_hint", priority?.toUpperCase() ?? "")}>
+            <span className={prioClass}>
+              <span className="dot" />
+              {priority?.toUpperCase()}
+            </span>
+          </Tooltip>
         )}
         <span className="chip-area">{areaLabel}</span>
-        <span className="task-card__inspect" title={t("tasks.card_select_hint")}>
-          <PanelRightOpen className="lucide" aria-hidden="true" />
-        </span>
+        <Tooltip content={t("tasks.card_select_hint")}>
+          <span className="task-card__inspect">
+            <PanelRightOpen className="lucide" aria-hidden="true" />
+          </span>
+        </Tooltip>
       </div>
-      <Link
-        to={detailHref}
-        className="task-card__title task-card__title-link"
-        title={t("tasks.card_open_detail_hint")}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {a.title}
-      </Link>
+      <Tooltip content={t("tasks.card_open_detail_hint")}>
+        <Link
+          to={detailHref}
+          className="task-card__title task-card__title-link"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {a.title}
+        </Link>
+      </Tooltip>
       <div className="task-card__foot">
         {a.task_meta?.assignee && <span>{a.task_meta.assignee}</span>}
         {a.task_meta?.due_at && (

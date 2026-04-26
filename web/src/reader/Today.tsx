@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router";
 import { api, type ChangeGroup, type TodayResp } from "../api/client";
 import { useI18n } from "../i18n";
 import { EmptyState } from "./SurfacePrimitives";
+import { Tooltip } from "./Tooltip";
 import { TypeCountChip, VisualAreaChip } from "./VisualChips";
 
 type Props = {
@@ -252,7 +253,6 @@ function ChangeGroupCard({
       tabIndex={isInteractive ? 0 : undefined}
       role={isInteractive ? "button" : undefined}
       aria-selected={isInteractive ? isActive : undefined}
-      title={isInteractive ? t("today.card_select_hint") : undefined}
       onClick={selectArtifact}
       onDoubleClick={openDetail}
       onKeyDown={onKeyDown}
@@ -325,9 +325,11 @@ function ExportButton({ url, label, iconOnly }: { url: string; label: string; ic
   }
   if (iconOnly) {
     return (
-      <button type="button" className="today-icon-btn" onClick={onClick} title={label} aria-label={label} disabled={loading}>
-        {loading ? <Loader2 className="lucide today-spin" /> : <Download className="lucide" />}
-      </button>
+      <Tooltip content={label}>
+        <button type="button" className="today-icon-btn" onClick={onClick} aria-label={label} disabled={loading}>
+          {loading ? <Loader2 className="lucide today-spin" /> : <Download className="lucide" />}
+        </button>
+      </Tooltip>
     );
   }
   return (

@@ -10,6 +10,7 @@ import type { ReaderWidth } from "./readerWidth";
 import { typeChipClass } from "./typeChip";
 import { topLevelVisualAreaSlugs, visualDescription, visualLabel, visualLanguage } from "./visualLanguage";
 import { visualIconComponent } from "./visualLanguageIcons";
+import { Tooltip } from "./Tooltip";
 
 type Props = {
   project: Project;
@@ -103,17 +104,17 @@ export function TopNav({
         {WIDTH_OPTIONS.map(({ mode, icon: Icon, labelKey }) => {
           const active = readerWidth === mode;
           return (
-            <button
-              key={mode}
-              type="button"
-              className={`nav__width-btn${active ? " is-active" : ""}`}
-              onClick={() => onChangeReaderWidth(mode)}
-              aria-pressed={active}
-              aria-label={t(labelKey)}
-              title={t(labelKey)}
-            >
-              <Icon className="lucide" />
-            </button>
+            <Tooltip key={mode} content={t(labelKey)}>
+              <button
+                type="button"
+                className={`nav__width-btn${active ? " is-active" : ""}`}
+                onClick={() => onChangeReaderWidth(mode)}
+                aria-pressed={active}
+                aria-label={t(labelKey)}
+              >
+                <Icon className="lucide" />
+              </button>
+            </Tooltip>
           );
         })}
       </div>
@@ -122,14 +123,15 @@ export function TopNav({
         {lang === "ko" ? "KO" : "EN"}
       </button>
 
-      <NavLink
-        to="/ops/telemetry"
-        className="nav__theme"
-        aria-label={t("nav.telemetry")}
-        title={t("nav.telemetry")}
-      >
-        <Activity className="lucide" />
-      </NavLink>
+      <Tooltip content={t("nav.telemetry")}>
+        <NavLink
+          to="/ops/telemetry"
+          className="nav__theme"
+          aria-label={t("nav.telemetry")}
+        >
+          <Activity className="lucide" />
+        </NavLink>
+      </Tooltip>
 
       <button className="nav__theme" onClick={onToggleTheme} aria-label={t("nav.theme_toggle")}>
         {theme === "dark" ? <Moon className="lucide" /> : <Sun className="lucide" />}
@@ -138,13 +140,14 @@ export function TopNav({
       {/* Avatar placeholder — V1 self-host binds it to the GitHub OAuth
           user; M1 has no auth yet, so the tooltip spells that out rather
           than putting random project initials here. */}
-      <div
-        className="nav__user"
-        title={t("nav.user_placeholder")}
-        style={{ opacity: 0.55 }}
-      >
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 10 }}>—</span>
-      </div>
+      <Tooltip content={t("nav.user_placeholder")}>
+        <div
+          className="nav__user"
+          style={{ opacity: 0.55 }}
+        >
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10 }}>—</span>
+        </div>
+      </Tooltip>
     </div>
   );
 }
@@ -172,17 +175,18 @@ function HelpPopover({ surface }: { surface: SurfaceId }) {
 
   return (
     <div className="nav-help" ref={ref}>
-      <button
-        type="button"
-        className="nav__theme nav-help__trigger"
-        onClick={() => setOpen((v) => !v)}
-        aria-label={t("help.open")}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        title={t("help.open")}
-      >
-        <CircleHelp className="lucide" />
-      </button>
+      <Tooltip content={t("help.open")}>
+        <button
+          type="button"
+          className="nav__theme nav-help__trigger"
+          onClick={() => setOpen((v) => !v)}
+          aria-label={t("help.open")}
+          aria-expanded={open}
+          aria-haspopup="dialog"
+        >
+          <CircleHelp className="lucide" />
+        </button>
+      </Tooltip>
       {open && (
         <div className="nav-help__popover" role="dialog" aria-label={t("help.title")}>
           <div className="nav-help__surface">

@@ -64,7 +64,7 @@ export function TrustCard({
         <BadgePopoverChip
           key={`${c.label}-${i}`}
           label={c.label}
-          title={c.title}
+          description={c.title}
           className={`chip chip--trust chip--trust-${c.tone}`}
           onApply={c.filter && onApplyFilter ? () => onApplyFilter(c.filter!) : undefined}
           legendHref={legendHref}

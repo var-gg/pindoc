@@ -28,6 +28,8 @@ import { headingsFromBody } from "./slug";
 import { isStructureOverlapHeading, structureOverlapSectionsFromBody } from "./structureSections";
 import { typeChipClass } from "./typeChip";
 import { RevisionTypeBadge } from "./RevisionTypeBadge";
+import { BadgeWithExplain } from "./BadgeWithExplain";
+import { Tooltip } from "./Tooltip";
 import {
   visualDescription,
   visualLabel,
@@ -172,7 +174,7 @@ export function Sidecar({
         <MiniGraph detail={detail} projectSlug={projectSlug} />
       </div>
 
-      <SidecarStaticSection title={t("sidecar.relations")}>
+      <SidecarStaticSection heading={t("sidecar.relations")}>
         {bodyOverlapSections.length > 0 && (
           <BodyOverlapLink count={bodyOverlapSections.length} />
         )}
@@ -187,7 +189,7 @@ export function Sidecar({
 
       <SidecarCollapsibleSection
         id="provenance"
-        title={t("sidecar.provenance")}
+        heading={t("sidecar.provenance")}
         collapsed={collapsed.provenance}
         onToggle={toggleSection}
       >
@@ -200,7 +202,7 @@ export function Sidecar({
 
       <SidecarCollapsibleSection
         id="policy"
-        title={t("sidecar.policy")}
+        heading={t("sidecar.policy")}
         collapsed={collapsed.policy}
         onToggle={toggleSection}
       >
@@ -209,7 +211,7 @@ export function Sidecar({
 
       <SidecarCollapsibleSection
         id="timeline"
-        title={t("sidecar.timeline")}
+        heading={t("sidecar.timeline")}
         collapsed={collapsed.timeline}
         onToggle={toggleSection}
       >
@@ -218,7 +220,7 @@ export function Sidecar({
 
       <SidecarCollapsibleSection
         id="meta"
-        title={t("sidecar.meta")}
+        heading={t("sidecar.meta")}
         collapsed={collapsed.meta}
         onToggle={toggleSection}
       >
@@ -280,9 +282,11 @@ function IdentityStrip({ detail }: { detail: Artifact }) {
   return (
     <div className="sidecar-identity">
       <span className={typeChipClass(detail.type)}>{detail.type}</span>
-      <span className="sidecar-identity__slug" title={detail.slug}>
-        {detail.slug}
-      </span>
+      <Tooltip content={detail.slug}>
+        <span className="sidecar-identity__slug">
+          {detail.slug}
+        </span>
+      </Tooltip>
       <span className="sidecar-identity__status">{lifecycle}</span>
     </div>
   );
@@ -313,28 +317,28 @@ function QuickActions({ detail, artifactHref }: { detail: Artifact; artifactHref
         const description = visualDescription(entry, lang);
         if (action.kind === "link") {
           return (
-            <Link
-              key={action.id}
-              className="sidecar-action"
-              title={description}
-              aria-label={label}
-              to={action.to}
-            >
-              <Icon className="lucide" />
-            </Link>
+            <Tooltip key={action.id} content={description}>
+              <Link
+                className="sidecar-action"
+                aria-label={label}
+                to={action.to}
+              >
+                <Icon className="lucide" />
+              </Link>
+            </Tooltip>
           );
         }
         return (
-          <button
-            key={action.id}
-            type="button"
-            className="sidecar-action"
-            title={description}
-            aria-label={label}
-            onClick={action.onClick}
-          >
-            <Icon className="lucide" />
-          </button>
+          <Tooltip key={action.id} content={description}>
+            <button
+              type="button"
+              className="sidecar-action"
+              aria-label={label}
+              onClick={action.onClick}
+            >
+              <Icon className="lucide" />
+            </button>
+          </Tooltip>
         );
       })}
     </div>
@@ -393,11 +397,11 @@ function copyToClipboard(text: string) {
   void navigator.clipboard.writeText(text);
 }
 
-function SidecarStaticSection({ title, children }: { title: string; children: ReactNode }) {
+function SidecarStaticSection({ heading, children }: { heading: string; children: ReactNode }) {
   return (
     <section className="sidecar-section">
       <div className="sidecar-section__head sidecar-section__head--static">
-        <span>{title}</span>
+        <span>{heading}</span>
       </div>
       <div className="sidecar-section__body">{children}</div>
     </section>
@@ -406,13 +410,13 @@ function SidecarStaticSection({ title, children }: { title: string; children: Re
 
 function SidecarCollapsibleSection({
   id,
-  title,
+  heading,
   collapsed,
   onToggle,
   children,
 }: {
   id: CollapsibleKey;
-  title: string;
+  heading: string;
   collapsed: boolean;
   onToggle: (key: CollapsibleKey) => void;
   children: ReactNode;
@@ -420,16 +424,17 @@ function SidecarCollapsibleSection({
   const { t } = useI18n();
   return (
     <section className="sidecar-section">
-      <button
-        type="button"
-        className="sidecar-section__head"
-        aria-expanded={!collapsed}
-        title={collapsed ? t("sidecar.expand_section") : t("sidecar.collapse_section")}
-        onClick={() => onToggle(id)}
-      >
-        {collapsed ? <ChevronRight className="lucide" /> : <ChevronDown className="lucide" />}
-        <span>{title}</span>
-      </button>
+      <Tooltip content={collapsed ? t("sidecar.expand_section") : t("sidecar.collapse_section")}>
+        <button
+          type="button"
+          className="sidecar-section__head"
+          aria-expanded={!collapsed}
+          onClick={() => onToggle(id)}
+        >
+          {collapsed ? <ChevronRight className="lucide" /> : <ChevronDown className="lucide" />}
+          <span>{heading}</span>
+        </button>
+      </Tooltip>
       {!collapsed && <div className="sidecar-section__body">{children}</div>}
     </section>
   );
@@ -573,26 +578,27 @@ function MiniGraph({
           );
         })}
       </svg>
-      <Link
-        to={`/p/${projectSlug}/wiki/${detail.slug}`}
-        className={`mini-graph__node mini-graph__node--center mini-graph__node--${graphTypeClassSuffix(detail.type)}`}
-        style={{ left: MINI_GRAPH_CENTER.x, top: MINI_GRAPH_CENTER.y }}
-        title={detail.title}
-      >
-        <span className="mini-graph__node-type">{detail.type}</span>
-        <span className="mini-graph__node-label">{detail.title}</span>
-      </Link>
-      {visible.map(({ edge }, i) => (
+      <Tooltip content={detail.title}>
         <Link
-          key={`${edge.artifact_id}-${edge.relation}-${i}`}
-          to={`/p/${projectSlug}/wiki/${edge.slug}`}
-          className={`mini-graph__node mini-graph__node--${graphTypeClassSuffix(edge.type)}`}
-          style={{ left: positions[i].x, top: positions[i].y }}
-          title={`${edge.title} (${edge.type})`}
+          to={`/p/${projectSlug}/wiki/${detail.slug}`}
+          className={`mini-graph__node mini-graph__node--center mini-graph__node--${graphTypeClassSuffix(detail.type)}`}
+          style={{ left: MINI_GRAPH_CENTER.x, top: MINI_GRAPH_CENTER.y }}
         >
-          <span className="mini-graph__node-type">{edge.type}</span>
-          <span className="mini-graph__node-label">{edge.title}</span>
+          <span className="mini-graph__node-type">{detail.type}</span>
+          <span className="mini-graph__node-label">{detail.title}</span>
         </Link>
+      </Tooltip>
+      {visible.map(({ edge }, i) => (
+        <Tooltip key={`${edge.artifact_id}-${edge.relation}-${i}`} content={`${edge.title} (${edge.type})`}>
+          <Link
+            to={`/p/${projectSlug}/wiki/${edge.slug}`}
+            className={`mini-graph__node mini-graph__node--${graphTypeClassSuffix(edge.type)}`}
+            style={{ left: positions[i].x, top: positions[i].y }}
+          >
+            <span className="mini-graph__node-type">{edge.type}</span>
+            <span className="mini-graph__node-label">{edge.title}</span>
+          </Link>
+        </Tooltip>
       ))}
       {hidden > 0 && (
         <Link to={`/p/${projectSlug}/graph`} className="mini-graph__more">
@@ -654,24 +660,25 @@ function ConnectedArtifacts({
       <ul className="relation-list">
         {rows.map(({ edge, direction }) => (
           <li key={`${direction}-${edge.relation}-${edge.artifact_id}`}>
-            <Link
-              to={`/p/${projectSlug}/wiki/${edge.slug}`}
-              className="relation-card"
-              title={edge.title}
-            >
-              <span className="relation-card__dir" aria-hidden="true">
-                {direction === "out" ? (
-                  <ArrowUpRight className="lucide" />
-                ) : (
-                  <ArrowDownLeft className="lucide" />
-                )}
-              </span>
-              <RelationIcon relation={edge.relation} />
-              <span className="relation-card__body">
-                <span className="relation-card__title">{edge.title}</span>
-                <span className="relation-card__type">{edge.type}</span>
-              </span>
-            </Link>
+            <Tooltip content={edge.title}>
+              <Link
+                to={`/p/${projectSlug}/wiki/${edge.slug}`}
+                className="relation-card"
+              >
+                <span className="relation-card__dir" aria-hidden="true">
+                  {direction === "out" ? (
+                    <ArrowUpRight className="lucide" />
+                  ) : (
+                    <ArrowDownLeft className="lucide" />
+                  )}
+                </span>
+                <RelationIcon relation={edge.relation} />
+                <span className="relation-card__body">
+                  <span className="relation-card__title">{edge.title}</span>
+                  <span className="relation-card__type">{edge.type}</span>
+                </span>
+              </Link>
+            </Tooltip>
           </li>
         ))}
       </ul>
@@ -689,9 +696,9 @@ function RelationIcon({ relation }: { relation: string }) {
     ? { "--relation-color": `var(${entry.color_token})` } as React.CSSProperties & Record<"--relation-color", string>
     : undefined;
   return (
-    <span className="relation-card__relation" title={description} aria-label={label} style={style}>
+    <BadgeWithExplain label={label} description={description} className="relation-card__relation" style={style}>
       <Icon className="lucide" />
-    </span>
+    </BadgeWithExplain>
   );
 }
 
@@ -756,10 +763,10 @@ function PolicyRow({ enumKey, label, value }: { enumKey: VisualMetaEnumKey; labe
     <div className="provenance__row">
       <span className="k">{label}</span>
       <span className="v">
-        <span className="policy-enum-chip" title={description} style={style}>
+        <BadgeWithExplain label={valueLabel} description={description} className="policy-enum-chip" style={style}>
           <Icon className="lucide" />
           {valueLabel}
-        </span>
+        </BadgeWithExplain>
       </span>
     </div>
   );
@@ -853,12 +860,11 @@ function PinsList({ pins }: { pins: PinRef[] }) {
                   gap: 6,
                   alignItems: "baseline",
                 }}
-                title={description}
               >
-                <span className="pin-kind-chip" style={style}>
+                <BadgeWithExplain label={label} description={description} className="pin-kind-chip" style={style}>
                   <PinIcon className="lucide" />
                   {label}
-                </span>
+                </BadgeWithExplain>
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {p.path}
                   {p.lines_start
@@ -885,12 +891,13 @@ function SourceSessionLine({ session }: { session: SourceSessionRef }) {
         <span style={{ color: "var(--fg-3)" }}>ephemeral — not recorded</span>
       )}
       {session.source_session ? (
-        <span
-          style={{ color: "var(--fg-3)", fontFamily: "var(--font-mono)", marginLeft: 6 }}
-          title={session.source_session}
-        >
-          · {session.source_session.slice(0, 10)}…
-        </span>
+        <Tooltip content={session.source_session}>
+          <span
+            style={{ color: "var(--fg-3)", fontFamily: "var(--font-mono)", marginLeft: 6 }}
+          >
+            · {session.source_session.slice(0, 10)}…
+          </span>
+        </Tooltip>
       ) : null}
     </div>
   );
@@ -909,10 +916,10 @@ function NextContextLine({ meta }: { meta: ArtifactMeta }) {
   return (
     <div style={{ fontSize: 11, color: "var(--fg-2)" }}>
       <span style={{ color: "var(--fg-3)" }}>Context: </span>
-      <span className="policy-enum-chip" style={style}>
+      <BadgeWithExplain label={label} description={why} className="policy-enum-chip" style={style}>
         <Icon className="lucide" />
         {label}
-      </span>
+      </BadgeWithExplain>
       {why && <span style={{ color: "var(--fg-3)", marginLeft: 6 }}>· {why}</span>}
     </div>
   );
