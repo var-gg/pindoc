@@ -92,11 +92,6 @@ export function ReaderSurface({
     projectSlug
       ? `/p/${projectSlug}/wiki/visual-language-reference`
       : undefined;
-  const hasLiveSidecarData =
-    Boolean(detail.superseded_by) ||
-    (detail.relates_to?.length ?? 0) > 0 ||
-    (detail.related_by?.length ?? 0) > 0 ||
-    (detail.pins?.length ?? 0) > 0;
   const translationEdges = [
     ...(detail.relates_to ?? []),
     ...(detail.related_by ?? []),
@@ -197,11 +192,9 @@ export function ReaderSurface({
           <PindocMarkdown
             source={detail.body_markdown}
             projectSlug={projectSlug}
-            collapseStructureSections={hasLiveSidecarData}
+            collapseStructureSections
           />
         </div>
-
-        <RelatedHint detail={detail} />
       </article>
     </main>
   );
@@ -274,21 +267,6 @@ function DetailScopeBar({ scope }: { scope: DetailScope | null }) {
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-function RelatedHint({ detail }: { detail: Artifact }) {
-  const { t } = useI18n();
-  // Real backlinks need artifact_edges table (Phase 3+). For M1 we show
-  // a truthful placeholder so the visual treatment stays and the data
-  // gap is obvious to the reader.
-  return (
-    <div className="backlinks">
-      <h4>{t("reader.backlinks_empty_head")}</h4>
-      <div style={{ fontSize: 13, color: "var(--fg-3)" }}>
-        {t("reader.backlinks_empty", detail.slug)}
-      </div>
     </div>
   );
 }

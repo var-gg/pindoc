@@ -25,6 +25,7 @@ import { localizedAreaName } from "./areaLocale";
 import { TaskControls } from "./TaskControls";
 import { Toc } from "./Toc";
 import { headingsFromBody } from "./slug";
+import { isStructureOverlapHeading, structureOverlapSectionsFromBody } from "./structureSections";
 import { typeChipClass } from "./typeChip";
 import { RevisionTypeBadge } from "./RevisionTypeBadge";
 import {
@@ -104,7 +105,11 @@ export function Sidecar({
   // `href="#..."` without a DOM round-trip. Computed here (not ReaderSurface)
   // so Sidecar owns the TOC lifecycle alongside its other metadata rails.
   const headings = useMemo(
-    () => (detail ? headingsFromBody(detail.body_markdown) : []),
+    () => (detail ? headingsFromBody(detail.body_markdown).filter((h) => !isStructureOverlapHeading(h.text)) : []),
+    [detail],
+  );
+  const bodyOverlapSections = useMemo(
+    () => (detail ? structureOverlapSectionsFromBody(detail.body_markdown).filter((section) => section.body.trim() !== "") : []),
     [detail],
   );
 
@@ -168,6 +173,9 @@ export function Sidecar({
       </div>
 
       <SidecarStaticSection title={t("sidecar.relations")}>
+        {bodyOverlapSections.length > 0 && (
+          <BodyOverlapLink count={bodyOverlapSections.length} />
+        )}
         <ConnectedArtifacts
           projectSlug={projectSlug}
           relates={detail.relates_to ?? []}
@@ -227,6 +235,16 @@ export function Sidecar({
         />
       </SidecarCollapsibleSection>
     </aside>
+  );
+}
+
+function BodyOverlapLink({ count }: { count: number }) {
+  const { t } = useI18n();
+  return (
+    <div className="sidecar-body-overlap">
+      <span>{t("sidecar.body_overlap", count)}</span>
+      <a href="#reader-original-structure">{t("sidecar.body_overlap_open")}</a>
+    </div>
   );
 }
 
