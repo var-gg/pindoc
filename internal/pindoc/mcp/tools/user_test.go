@@ -55,3 +55,10 @@ func TestClassifyUserCurrentIdentity(t *testing.T) {
 		}
 	})
 }
+
+func TestCanonicalUserEmail(t *testing.T) {
+	got := canonicalUserEmail("  RhkdWjs750@Naver.COM  ")
+	if got != "rhkdwjs750@naver.com" {
+		t.Fatalf("canonicalUserEmail = %q", got)
+	}
+}

@@ -166,6 +166,7 @@ func (d Deps) handleUserList(w http.ResponseWriter, r *http.Request) {
 	rows, err := d.DB.Query(r.Context(), `
 		SELECT id::text, display_name, github_handle, source
 		FROM users
+		WHERE deleted_at IS NULL
 		ORDER BY display_name
 	`)
 	if err != nil {

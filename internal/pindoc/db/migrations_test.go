@@ -35,3 +35,38 @@ func TestProjectMembersMigrationContract(t *testing.T) {
 		}
 	}
 }
+
+func TestUsersEmailCanonicalMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0033_users_email_canonical.sql")
+	if err != nil {
+		t.Fatalf("read users email canonical migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"ADD COLUMN deleted_at TIMESTAMPTZ NULL",
+		"USERS_EMAIL_LOWER_DUPLICATE",
+		"GROUP BY lower(email)",
+		"DROP INDEX IF EXISTS idx_users_email_unique",
+		"CREATE UNIQUE INDEX idx_users_email_unique",
+		"AND deleted_at IS NULL",
+		"CREATE UNIQUE INDEX users_email_lower_idx",
+		"ON users (lower(email))",
+		"WHERE deleted_at IS NULL",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("users email canonical migration Up missing %q:\n%s", want, up)
+		}
+	}
+	for _, want := range []string{
+		"-- +goose Down",
+		"DROP INDEX IF EXISTS users_email_lower_idx",
+		"CREATE UNIQUE INDEX idx_users_email_unique",
+		"WHERE email IS NOT NULL",
+		"ALTER TABLE users DROP COLUMN IF EXISTS deleted_at",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("users email canonical migration Down missing %q", want)
+		}
+	}
+}

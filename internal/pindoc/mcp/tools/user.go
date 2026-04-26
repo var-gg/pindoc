@@ -203,7 +203,7 @@ func RegisterUserUpdate(server *sdk.Server, deps Deps) {
 			// strings on the wire so explicit clearing needs a sentinel.
 			// V1 accepts only set/override; clearing is an Open question.
 			if in.Email != "" {
-				e := strings.TrimSpace(in.Email)
+				e := canonicalUserEmail(in.Email)
 				if !strings.Contains(e, "@") {
 					failed = append(failed, "EMAIL_INVALID")
 					checklist = append(checklist, "email must contain '@'. Full RFC 5322 validation is intentionally relaxed for V1.")
@@ -287,7 +287,7 @@ func RegisterUserUpdate(server *sdk.Server, deps Deps) {
 				// Uniqueness (email / github_handle) shows up as a Postgres
 				// error here. Surface as stable code instead of 500.
 				errStr := err.Error()
-				if strings.Contains(errStr, "idx_users_email_unique") {
+				if strings.Contains(errStr, "idx_users_email_unique") || strings.Contains(errStr, "users_email_lower_idx") {
 					return nil, userUpdateOutput{
 						Status:    "not_ready",
 						ErrorCode: "EMAIL_TAKEN",
@@ -379,7 +379,7 @@ func UpsertUserFromEnv(ctx context.Context, deps Deps, userName, userEmail strin
 		return "", nil
 	}
 	name := strings.TrimSpace(userName)
-	email := strings.TrimSpace(userEmail)
+	email := canonicalUserEmail(userEmail)
 
 	// Prefer email as the uniqueness anchor when both are set — otherwise
 	// the same user running with two different display_names would mint a
@@ -388,7 +388,7 @@ func UpsertUserFromEnv(ctx context.Context, deps Deps, userName, userEmail strin
 	var existingID string
 	if email != "" {
 		err := deps.DB.QueryRow(ctx,
-			`SELECT id::text FROM users WHERE email = $1 LIMIT 1`, email,
+			`SELECT id::text FROM users WHERE lower(email) = $1 AND deleted_at IS NULL LIMIT 1`, email,
 		).Scan(&existingID)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return "", fmt.Errorf("lookup user by email: %w", err)
@@ -396,7 +396,7 @@ func UpsertUserFromEnv(ctx context.Context, deps Deps, userName, userEmail strin
 	}
 	if existingID == "" {
 		err := deps.DB.QueryRow(ctx,
-			`SELECT id::text FROM users WHERE display_name = $1 AND email IS NOT DISTINCT FROM NULLIF($2, '') LIMIT 1`,
+			`SELECT id::text FROM users WHERE display_name = $1 AND email IS NOT DISTINCT FROM NULLIF($2, '') AND deleted_at IS NULL LIMIT 1`,
 			name, email,
 		).Scan(&existingID)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -425,4 +425,8 @@ func UpsertUserFromEnv(ctx context.Context, deps Deps, userName, userEmail strin
 		return "", fmt.Errorf("insert user: %w", err)
 	}
 	return newID, nil
+}
+
+func canonicalUserEmail(raw string) string {
+	return strings.ToLower(strings.TrimSpace(raw))
 }
