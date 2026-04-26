@@ -180,6 +180,27 @@ func TestGitHubOAuthCallbackIntegration(t *testing.T) {
 	if role != invites.RoleEditor {
 		t.Fatalf("joined role = %q, want editor", role)
 	}
+
+	secondInvite, _, err := invites.Issue(ctx, pool, invites.IssueInput{
+		ProjectID: projectID,
+		Role:      invites.RoleViewer,
+		IssuedBy:  ownerID,
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("issue second invite: %v", err)
+	}
+	completeReturnTo := "/signup/complete?project=" + url.QueryEscape(projectSlug)
+	completeLoginURL := ts.URL + "/auth/github/login?" + url.Values{
+		"invite":    {secondInvite},
+		"return_to": {completeReturnTo},
+	}.Encode()
+	loc = redirectLocation(t, httpClient, completeLoginURL)
+	loc = redirectLocation(t, httpClient, loc.String())
+	loc = redirectLocation(t, httpClient, loc.String())
+	if loc.Path != "/signup/complete" || loc.Query().Get("project") != projectSlug {
+		t.Fatalf("signup complete redirect = %s, want %s", loc.String(), completeReturnTo)
+	}
 }
 
 func TestSelectPrimaryVerifiedGitHubEmail(t *testing.T) {

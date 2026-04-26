@@ -4,6 +4,7 @@ import { PanelRightOpen, X } from "lucide-react";
 import type { Aggregate } from "./useReaderData";
 import { api, type Artifact, type ArtifactRef, type Area } from "../api/client";
 import { useI18n } from "../i18n";
+import { InviteModal } from "../project/InviteModal";
 import { CmdK } from "./CmdK";
 import { GraphSurface } from "./Graph";
 import { Inbox } from "./Inbox";
@@ -62,6 +63,7 @@ export function ReaderShell({ view }: Props) {
   const [readerWidth, setReaderWidthState] = useState<ReaderWidth>(() => initReaderWidth());
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [wikiInspectorSlug, setWikiInspectorSlug] = useState<string | null>(null);
   const [wikiInspectorDetail, setWikiInspectorDetail] = useState<Artifact | null>(null);
@@ -462,6 +464,7 @@ export function ReaderShell({ view }: Props) {
         inboxCount={inboxCount}
         readerWidth={readerWidth}
         onChangeReaderWidth={changeReaderWidth}
+        onOpenInvite={() => setInviteOpen(true)}
       />
       <div className="main">
         <Sidebar
@@ -515,6 +518,7 @@ export function ReaderShell({ view }: Props) {
         />
       </div>
       <CmdK projectSlug={project} open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <InviteModal project={projectData} open={inviteOpen} onClose={() => setInviteOpen(false)} />
       <ShortcutsOverlay
         open={shortcutsOpen}
         view={view}

@@ -100,7 +100,7 @@ func (d Deps) handleInviteIssue(w http.ResponseWriter, r *http.Request) {
 		writeInviteError(w, http.StatusInternalServerError, "INVITE_ISSUE_FAILED", "failed to issue invite")
 		return
 	}
-	u := d.inviteBaseURL(r) + "/join?invite=" + url.QueryEscape(rawToken)
+	u := d.inviteBaseURL(r) + "/signup?invite=" + url.QueryEscape(rawToken)
 	writeJSON(w, http.StatusOK, inviteIssueResponse{InviteURL: u, ExpiresAt: rec.ExpiresAt})
 }
 

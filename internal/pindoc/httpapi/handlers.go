@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	pauth "github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/projects"
@@ -26,6 +27,7 @@ type projectInfo struct {
 	Color           string `json:"color,omitempty"`
 	PrimaryLanguage string `json:"primary_language"`
 	SensitiveOps    string `json:"sensitive_ops"`
+	CurrentRole     string `json:"current_role,omitempty"`
 	// Locale is a compatibility alias for PrimaryLanguage. Locale is no
 	// longer part of project identity or Reader URLs after task-canonical-
 	// locale-migration.
@@ -277,7 +279,33 @@ func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Rendering = pindocRenderingCaps
 	out.Capabilities = ProjectCaps{ReviewQueueSupported: true}
+	out.CurrentRole = d.currentProjectRole(r.Context(), r, out.Slug)
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (d Deps) currentProjectRole(ctx context.Context, r *http.Request, projectSlug string) string {
+	switch d.authMode() {
+	case config.AuthModeTrustedLocal, "":
+		return pauth.RoleOwner
+	case config.AuthModeOAuthGitHub:
+		if d.DB == nil || d.OAuth == nil {
+			return ""
+		}
+		userID := d.OAuth.BrowserSessionUserID(r)
+		if strings.TrimSpace(userID) == "" {
+			return ""
+		}
+		scope, err := pauth.ResolveProject(ctx, d.DB, &pauth.Principal{
+			UserID:   userID,
+			AuthMode: pauth.AuthModeOAuthGitHub,
+		}, projectSlug)
+		if err != nil {
+			return ""
+		}
+		return scope.Role
+	default:
+		return ""
+	}
 }
 
 type areaRow struct {

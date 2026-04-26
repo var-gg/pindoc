@@ -8,6 +8,7 @@ import { Diff } from "./reader/Diff";
 import { History } from "./reader/History";
 import { PindocTooltipProvider } from "./reader/Tooltip";
 import { ReaderShell } from "./reader/ReaderShell";
+import { SignupCompletePage } from "./signup/SignupCompletePage";
 import { SignupPage } from "./signup/SignupPage";
 import { findSurface, previews, uiKits } from "./surfaces";
 
@@ -36,6 +37,7 @@ export function App() {
       <Route path="/p/:project/inbox" element={<ReaderShell view="inbox" />} />
       <Route path="/help/design-legend" element={<DesignLegendRedirect />} />
       <Route path="/signup" element={<SignupPage />} />
+      <Route path="/signup/complete" element={<SignupCompletePage />} />
 
       {/* Project bootstrap (Decision project-bootstrap-canonical-flow-
           reader-ui-first-class). The 1급 사용자 진입점 for new

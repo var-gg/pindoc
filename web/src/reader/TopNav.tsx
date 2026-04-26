@@ -5,6 +5,7 @@ import type { ComponentType } from "react";
 import { api, type ProjectListItem } from "../api/client";
 import { useI18n, type Lang } from "../i18n";
 import type { Project } from "../api/client";
+import { InviteButton } from "../project/InviteButton";
 import type { Theme } from "./theme";
 import type { ReaderWidth } from "./readerWidth";
 import { typeChipClass } from "./typeChip";
@@ -22,6 +23,7 @@ type Props = {
   inboxCount: number;
   readerWidth: ReaderWidth;
   onChangeReaderWidth: (next: ReaderWidth) => void;
+  onOpenInvite?: () => void;
 };
 type SurfaceId = "today" | "reader" | "inbox" | "graph" | "tasks";
 
@@ -45,10 +47,12 @@ export function TopNav({
   inboxCount,
   readerWidth,
   onChangeReaderWidth,
+  onOpenInvite,
 }: Props) {
   const { t, lang, setLang } = useI18n();
   const nextLang: Lang = lang === "ko" ? "en" : "ko";
   const baseRoute = `/p/${project.slug}`;
+  const canInvite = project.current_role === "owner" && Boolean(onOpenInvite);
 
   return (
     <div className="nav">
@@ -97,6 +101,12 @@ export function TopNav({
         <span>{t("nav.search_hint")}</span>
         <span className="kbd">⌘K</span>
       </button>
+
+      {canInvite && (
+        <Tooltip content={t("invite.nav.tooltip")}>
+          <InviteButton label={t("invite.nav.tooltip")} onClick={onOpenInvite!} />
+        </Tooltip>
+      )}
 
       <HelpPopover surface={surface} />
 

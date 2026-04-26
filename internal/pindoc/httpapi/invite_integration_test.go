@@ -74,6 +74,42 @@ func TestInviteIssueConsumeIntegration(t *testing.T) {
 		AuthMode:           config.AuthModeOAuthGitHub,
 	})
 
+	ownerProject := doInviteRequest(t, handler, oauthSvc, ownerID, http.MethodGet, "/api/p/"+slug, "")
+	if ownerProject.Code != http.StatusOK {
+		t.Fatalf("owner project status = %d, want 200; body=%s", ownerProject.Code, ownerProject.Body.String())
+	}
+	var ownerProjectBody projectInfo
+	if err := json.NewDecoder(ownerProject.Body).Decode(&ownerProjectBody); err != nil {
+		t.Fatalf("decode owner project: %v", err)
+	}
+	if ownerProjectBody.CurrentRole != pauth.RoleOwner {
+		t.Fatalf("owner current_role = %q, want owner", ownerProjectBody.CurrentRole)
+	}
+
+	viewerProject := doInviteRequest(t, handler, oauthSvc, viewerID, http.MethodGet, "/api/p/"+slug, "")
+	if viewerProject.Code != http.StatusOK {
+		t.Fatalf("viewer project status = %d, want 200; body=%s", viewerProject.Code, viewerProject.Body.String())
+	}
+	var viewerProjectBody projectInfo
+	if err := json.NewDecoder(viewerProject.Body).Decode(&viewerProjectBody); err != nil {
+		t.Fatalf("decode viewer project: %v", err)
+	}
+	if viewerProjectBody.CurrentRole != invites.RoleViewer {
+		t.Fatalf("viewer current_role = %q, want viewer", viewerProjectBody.CurrentRole)
+	}
+
+	anonymousProject := doInviteRequest(t, handler, nil, "", http.MethodGet, "/api/p/"+slug, "")
+	if anonymousProject.Code != http.StatusOK {
+		t.Fatalf("anonymous project status = %d, want 200; body=%s", anonymousProject.Code, anonymousProject.Body.String())
+	}
+	var anonymousProjectBody projectInfo
+	if err := json.NewDecoder(anonymousProject.Body).Decode(&anonymousProjectBody); err != nil {
+		t.Fatalf("decode anonymous project: %v", err)
+	}
+	if anonymousProjectBody.CurrentRole != "" {
+		t.Fatalf("anonymous current_role = %q, want empty", anonymousProjectBody.CurrentRole)
+	}
+
 	ownerRoleResp := doInviteRequest(t, handler, oauthSvc, ownerID, http.MethodPost, "/api/p/"+slug+"/invite", `{"role":"owner"}`)
 	if ownerRoleResp.Code != http.StatusBadRequest {
 		t.Fatalf("owner role issue status = %d, want 400; body=%s", ownerRoleResp.Code, ownerRoleResp.Body.String())
@@ -95,6 +131,9 @@ func TestInviteIssueConsumeIntegration(t *testing.T) {
 	inviteURL, err := url.Parse(issueBody.InviteURL)
 	if err != nil {
 		t.Fatalf("parse invite URL: %v", err)
+	}
+	if inviteURL.Path != "/signup" {
+		t.Fatalf("invite URL path = %q, want /signup", inviteURL.Path)
 	}
 	rawToken := inviteURL.Query().Get("invite")
 	if !strings.HasPrefix(rawToken, "jt_") {

@@ -36,6 +36,7 @@ export type Project = {
   color?: string;
   primary_language: string;
   sensitive_ops?: "auto" | "confirm";
+  current_role?: "owner" | "editor" | "viewer";
   // Compatibility alias for primary_language. Locale is metadata, not a
   // route or identity key.
   locale?: string;
@@ -486,6 +487,30 @@ export type CreateProjectResp = {
   templates_created: number;
 };
 
+export type InviteRole = "editor" | "viewer";
+
+export type InviteIssueInput = {
+  role: InviteRole;
+  expires_in_hours: number;
+};
+
+export type InviteIssueResp = {
+  invite_url: string;
+  expires_at: string;
+};
+
+export type InviteJoinInfo = {
+  project_slug: string;
+  project_name: string;
+  role: InviteRole;
+  expires_at: string;
+};
+
+export type InviteError = {
+  error_code: string;
+  message: string;
+};
+
 // ProjectCreateError mirrors the REST envelope from
 // internal/pindoc/httpapi/projects.go. error_code values: SLUG_INVALID /
 // SLUG_RESERVED / SLUG_TAKEN / NAME_REQUIRED / LANG_REQUIRED /
@@ -609,6 +634,55 @@ export const api = {
 
   // Project-scoped
   project: (project: string) => j<Project>(p(project)),
+  issueInvite: async (
+    project: string,
+    input: InviteIssueInput,
+  ): Promise<InviteIssueResp> => {
+    const res = await fetch(`${p(project)}/invite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      let parsed: InviteError | null = null;
+      try {
+        parsed = (await res.json()) as InviteError;
+      } catch {
+        // fall through to generic
+      }
+      const err = new Error(
+        parsed?.message ?? `${res.status} ${res.statusText}`,
+      ) as Error & Partial<InviteError>;
+      if (parsed) {
+        err.error_code = parsed.error_code;
+        err.message = parsed.message;
+      }
+      throw err;
+    }
+    return (await res.json()) as InviteIssueResp;
+  },
+  inviteInfo: async (invite: string): Promise<InviteJoinInfo> => {
+    const res = await fetch(`/join?invite=${encodeURIComponent(invite)}`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      let parsed: InviteError | null = null;
+      try {
+        parsed = (await res.json()) as InviteError;
+      } catch {
+        // fall through to generic
+      }
+      const err = new Error(
+        parsed?.message ?? `${res.status} ${res.statusText}`,
+      ) as Error & Partial<InviteError>;
+      if (parsed) {
+        err.error_code = parsed.error_code;
+        err.message = parsed.message;
+      }
+      throw err;
+    }
+    return (await res.json()) as InviteJoinInfo;
+  },
   areas: (project: string, params?: { includeTemplates?: boolean }) => {
     const qs = new URLSearchParams();
     if (params?.includeTemplates) qs.set("include_templates", "true");

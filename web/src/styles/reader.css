@@ -1763,6 +1763,10 @@
   background: var(--bg-1);
 }
 
+.signup-panel--wide {
+  width: min(100%, 620px);
+}
+
 .signup-panel__brand {
   display: flex;
   align-items: center;
@@ -1838,6 +1842,15 @@
   color: var(--fg-1);
 }
 
+.signup-panel__notice--neutral {
+  border-color: var(--border);
+  background: var(--bg-0);
+}
+
+.signup-panel__spinner {
+  animation: cp-spin 1s linear infinite;
+}
+
 .signup-panel__notice strong {
   display: block;
   margin-bottom: 2px;
@@ -1858,6 +1871,223 @@
 
 .signup-panel__secondary:hover {
   color: var(--fg-0);
+}
+
+/* Team invite modal */
+.invite-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-4);
+  background: rgba(0, 0, 0, 0.48);
+}
+
+.invite-modal__panel {
+  width: min(100%, 500px);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  display: grid;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-2);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-float);
+}
+
+.invite-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.invite-modal__header h2 {
+  margin: 0;
+  color: var(--fg-0);
+  font-size: 18px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.invite-modal__eyebrow {
+  margin: 0 0 4px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.invite-modal__close {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--fg-2);
+  cursor: pointer;
+}
+
+.invite-modal__close:hover {
+  background: var(--bg-2);
+  color: var(--fg-0);
+}
+
+.invite-modal__close .lucide {
+  width: 15px;
+  height: 15px;
+}
+
+.invite-modal__form {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.invite-modal__field {
+  min-width: 0;
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.invite-modal__field legend,
+.invite-modal__field > span {
+  color: var(--fg-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.invite-modal__segments {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.invite-modal__segment {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  background: var(--bg-0);
+  color: var(--fg-2);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.invite-modal__segment input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.invite-modal__segment.is-active {
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  color: var(--fg-0);
+}
+
+.invite-modal__field select {
+  height: 36px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  background: var(--bg-0);
+  color: var(--fg-0);
+  font: inherit;
+}
+
+.invite-modal__submit,
+.invite-modal__copy {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-4);
+  border-radius: var(--r-2);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.invite-modal__submit {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--bg-0);
+}
+
+.invite-modal__submit:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.invite-modal__spinner {
+  width: 14px;
+  height: 14px;
+  animation: cp-spin 1s linear infinite;
+}
+
+.invite-modal__error {
+  padding: 8px 10px;
+  border: 1px solid var(--stale);
+  border-radius: var(--r-1);
+  background: color-mix(in oklch, var(--stale) 12%, transparent);
+  color: var(--fg-1);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.invite-modal__result {
+  display: grid;
+  gap: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+.invite-modal__result dl {
+  margin: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.invite-modal__result div {
+  display: grid;
+  gap: 4px;
+}
+
+.invite-modal__result dt {
+  color: var(--fg-3);
+  font-size: 12px;
+}
+
+.invite-modal__result dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--fg-0);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.invite-modal__copy {
+  border: 1px solid var(--border);
+  background: var(--bg-0);
+  color: var(--fg-0);
+}
+
+.invite-modal__copy:hover {
+  background: var(--bg-2);
 }
 
 /* Responsive */

@@ -209,7 +209,7 @@ func (s *OAuthService) handleGitHubCallback(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	returnTo := s.github.safeReturnTo(state.ReturnTo)
-	if (returnTo == "/" || strings.HasPrefix(returnTo, "/signup")) && joined.ProjectSlug != "" {
+	if (returnTo == "/" || returnTo == "/signup" || strings.HasPrefix(returnTo, "/signup?")) && joined.ProjectSlug != "" {
 		returnTo = "/p/" + url.PathEscape(joined.ProjectSlug) + "/today"
 	}
 	http.Redirect(w, r, returnTo, http.StatusFound)
