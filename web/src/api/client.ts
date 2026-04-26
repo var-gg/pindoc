@@ -473,6 +473,7 @@ export type CreateProjectInput = {
   primary_language: "en" | "ko" | "ja";
   description?: string;
   color?: string;
+  git_remote_url?: string;
   owner_id?: string;
 };
 

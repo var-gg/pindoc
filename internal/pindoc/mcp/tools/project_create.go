@@ -25,6 +25,7 @@ type projectCreateInput struct {
 	PrimaryLanguage string `json:"primary_language" jsonschema:"required; one of en | ko | ja. Must be explicitly confirmed with the user; no default. Immutable after create — recreate the project if wrong"`
 	Description     string `json:"description,omitempty" jsonschema:"one-line description shown on the project switcher; optional"`
 	Color           string `json:"color,omitempty" jsonschema:"CSS color string (hex or oklch) used for the sidebar accent; optional"`
+	GitRemoteURL    string `json:"git_remote_url,omitempty" jsonschema:"optional git remote URL; normalized into project_repos for workspace detection"`
 	// OwnerID is optional; defaults to 'default' for single-owner self-
 	// host deployments. Larger deployments (multiple users sharing one
 	// instance) set this to the logical owner identifier. Not a user
@@ -97,6 +98,7 @@ func RegisterProjectCreate(server *sdk.Server, deps Deps) {
 				Description:     in.Description,
 				Color:           in.Color,
 				PrimaryLanguage: in.PrimaryLanguage,
+				GitRemoteURL:    in.GitRemoteURL,
 				OwnerID:         in.OwnerID,
 				OwnerUserID:     principalUserID(p),
 			})
@@ -170,6 +172,8 @@ func projectCreateErrorCode(err error) string {
 		return "LANG_REQUIRED"
 	case errors.Is(err, projects.ErrLangInvalid):
 		return "LANG_INVALID"
+	case errors.Is(err, projects.ErrGitRemoteURLInvalid):
+		return "GIT_REMOTE_URL_INVALID"
 	default:
 		return ""
 	}
@@ -192,6 +196,8 @@ func projectCreateChecklistMessage(lang, code string, err error) string {
 		return "primary_language는 필수입니다. 사용자에게 en, ko, ja 중 하나를 명시적으로 확인하세요."
 	case "LANG_INVALID":
 		return "primary_language는 en, ko, ja 중 하나여야 합니다."
+	case "GIT_REMOTE_URL_INVALID":
+		return "git_remote_url은 github.com/owner/repo 형태로 정규화 가능한 Git remote URL이어야 합니다."
 	default:
 		return err.Error()
 	}
@@ -229,6 +235,11 @@ and the new slug works on the very next call without reconnect.
 The response includes a one-use bootstrap_receipt/search_receipt for the
 first artifact.propose call in the new project, so agents do not need an
 extra search round-trip before writing the initial artifact.
+
+Optional git_remote_url stores the project's origin repository in
+project_repos after normalizing https/ssh/SCP-style Git remote URLs to
+host/owner/repo. This enables future pindoc.workspace.detect lookup by
+git remote get-url origin.
 `
 
 func projectCreateNextSteps(lang, projectSlug string) []NextToolHint {

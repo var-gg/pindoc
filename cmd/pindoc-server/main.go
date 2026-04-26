@@ -113,6 +113,11 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("db ready", "migrations", "applied")
+	if normalized, err := projects.BootstrapDefaultProjectRepoFromWorkdir(ctx, pool, cfg.ProjectSlug, ""); err != nil {
+		logger.Info("default project repo bootstrap skipped", "project_slug", cfg.ProjectSlug, "err", err)
+	} else if normalized != "" {
+		logger.Info("default project repo bootstrap checked", "project_slug", cfg.ProjectSlug, "git_remote_url", normalized)
+	}
 
 	embedder, err := embed.Build(cfg.Embed)
 	if err != nil {

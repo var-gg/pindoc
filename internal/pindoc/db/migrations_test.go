@@ -276,3 +276,36 @@ func TestUsersOAuthProviderMigrationContract(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectReposMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0039_project_repos.sql")
+	if err != nil {
+		t.Fatalf("read project_repos migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"CREATE TABLE project_repos",
+		"id                      UUID PRIMARY KEY DEFAULT gen_random_uuid()",
+		"project_id              UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE",
+		"git_remote_url          TEXT NOT NULL",
+		"git_remote_url_original TEXT NOT NULL DEFAULT ''",
+		"default_branch          TEXT NOT NULL DEFAULT 'main'",
+		"UNIQUE (project_id, git_remote_url)",
+		"CREATE INDEX idx_project_repos_git_remote_url",
+		"ON project_repos(git_remote_url)",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("project_repos migration Up missing %q:\n%s", want, up)
+		}
+	}
+	for _, want := range []string{
+		"-- +goose Down",
+		"DROP INDEX IF EXISTS idx_project_repos_git_remote_url",
+		"DROP TABLE IF EXISTS project_repos",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("project_repos migration Down missing %q", want)
+		}
+	}
+}

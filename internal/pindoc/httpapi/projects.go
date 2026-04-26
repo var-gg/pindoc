@@ -20,6 +20,7 @@ type projectCreateRequest struct {
 	Description     string `json:"description,omitempty"`
 	Color           string `json:"color,omitempty"`
 	PrimaryLanguage string `json:"primary_language"`
+	GitRemoteURL    string `json:"git_remote_url,omitempty"`
 	OwnerID         string `json:"owner_id,omitempty"`
 }
 
@@ -42,8 +43,8 @@ type projectCreateResponse struct {
 // projectCreateError mirrors the task_meta error envelope so UI can use
 // one error mapper for both surfaces. error_code values match the
 // projects package sentinels (SLUG_INVALID, SLUG_RESERVED, SLUG_TAKEN,
-// NAME_REQUIRED, LANG_REQUIRED, LANG_INVALID) plus generic BAD_JSON /
-// INTERNAL_ERROR.
+// NAME_REQUIRED, LANG_REQUIRED, LANG_INVALID, GIT_REMOTE_URL_INVALID)
+// plus generic BAD_JSON / INTERNAL_ERROR.
 type projectCreateError struct {
 	ErrorCode string `json:"error_code"`
 	Message   string `json:"message"`
@@ -83,6 +84,7 @@ func (d Deps) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 		Description:     in.Description,
 		Color:           in.Color,
 		PrimaryLanguage: in.PrimaryLanguage,
+		GitRemoteURL:    in.GitRemoteURL,
 		OwnerID:         in.OwnerID,
 	})
 	if err != nil {
@@ -139,6 +141,8 @@ func mapProjectCreateError(err error) (int, string) {
 		return http.StatusBadRequest, "LANG_REQUIRED"
 	case errors.Is(err, projects.ErrLangInvalid):
 		return http.StatusBadRequest, "LANG_INVALID"
+	case errors.Is(err, projects.ErrGitRemoteURLInvalid):
+		return http.StatusBadRequest, "GIT_REMOTE_URL_INVALID"
 	default:
 		return http.StatusInternalServerError, "INTERNAL_ERROR"
 	}

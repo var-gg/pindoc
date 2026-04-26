@@ -496,6 +496,7 @@
   "new_project.error.NAME_REQUIRED": "이름은 필수 입력입니다.",
   "new_project.error.LANG_REQUIRED": "주 언어를 골라 주세요. 생성 후 변경할 수 없으므로 신중히.",
   "new_project.error.LANG_INVALID": "지원되는 언어는 en / ko / ja 입니다. 주 언어는 생성 후 변경 불가입니다.",
+  "new_project.error.GIT_REMOTE_URL_INVALID": "Git remote URL은 host/owner/repo 형태로 정규화할 수 있어야 합니다.",
   "new_project.error.BAD_JSON": "요청 형식이 잘못됐습니다. 새로고침 후 다시 시도해 주세요.",
   "new_project.error.INTERNAL_ERROR": "서버 오류가 발생했습니다. pindoc-api 로그를 확인해 주세요.",
   "new_project.error.UNKNOWN": "알 수 없는 오류가 발생했습니다.",

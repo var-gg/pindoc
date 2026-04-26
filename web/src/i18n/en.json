@@ -496,6 +496,7 @@
   "new_project.error.NAME_REQUIRED": "Name is required.",
   "new_project.error.LANG_REQUIRED": "Pick a primary language. It cannot be changed after create.",
   "new_project.error.LANG_INVALID": "Supported languages are en / ko / ja. Primary language is immutable after create.",
+  "new_project.error.GIT_REMOTE_URL_INVALID": "Git remote URL must be a recognizable GitHub-style host/owner/repo remote.",
   "new_project.error.BAD_JSON": "Request format invalid. Refresh and try again.",
   "new_project.error.INTERNAL_ERROR": "Server error. Check pindoc-api logs.",
   "new_project.error.UNKNOWN": "Unknown error.",

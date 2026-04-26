@@ -21,6 +21,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/httpapi"
+	"github.com/var-gg/pindoc/internal/pindoc/projects"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
 	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
 )
@@ -65,6 +66,11 @@ func main() {
 	if err := db.Migrate(ctx, pool.Pool); err != nil {
 		logger.Error("db migrate", "err", err)
 		os.Exit(1)
+	}
+	if normalized, err := projects.BootstrapDefaultProjectRepoFromWorkdir(ctx, pool, cfg.ProjectSlug, ""); err != nil {
+		logger.Info("default project repo bootstrap skipped", "project_slug", cfg.ProjectSlug, "err", err)
+	} else if normalized != "" {
+		logger.Info("default project repo bootstrap checked", "project_slug", cfg.ProjectSlug, "git_remote_url", normalized)
 	}
 
 	ssStore, err := settings.New(ctx, pool)

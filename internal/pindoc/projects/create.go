@@ -63,6 +63,7 @@ type CreateProjectInput struct {
 	Description     string // optional
 	Color           string // optional CSS color
 	PrimaryLanguage string // required, one of SupportedLanguages
+	GitRemoteURL    string // optional; stored in project_repos as name=origin
 	OwnerID         string // optional, defaults to "default"
 	OwnerUserID     string // optional users.id; creates project_members owner row when present
 }
@@ -147,6 +148,7 @@ func CreateProject(
 	name := strings.TrimSpace(in.Name)
 	desc := strings.TrimSpace(in.Description)
 	color := strings.TrimSpace(in.Color)
+	gitRemoteURL := strings.TrimSpace(in.GitRemoteURL)
 	ownerID := strings.TrimSpace(in.OwnerID)
 	if ownerID == "" {
 		ownerID = "default"
@@ -161,6 +163,11 @@ func CreateProject(
 	lang, err := NormalizeLanguage(in.PrimaryLanguage)
 	if err != nil {
 		return zero, err
+	}
+	if gitRemoteURL != "" {
+		if _, err := NormalizeGitRemoteURL(gitRemoteURL); err != nil {
+			return zero, err
+		}
 	}
 
 	var descPtr, colorPtr *string
@@ -183,6 +190,15 @@ func CreateProject(
 			return zero, fmt.Errorf("%w: project slug %q already exists under owner %q — pick a different slug", ErrSlugTaken, slug, ownerID)
 		}
 		return zero, fmt.Errorf("project insert: %w", err)
+	}
+	if gitRemoteURL != "" {
+		if _, err := AddProjectRepo(ctx, tx, ProjectRepoInput{
+			ProjectID:    projectID,
+			GitRemoteURL: gitRemoteURL,
+			Name:         "origin",
+		}); err != nil {
+			return zero, err
+		}
 	}
 
 	areasCreated, err := seedAreas(ctx, tx, projectID, lang)

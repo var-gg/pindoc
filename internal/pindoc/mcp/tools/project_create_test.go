@@ -21,6 +21,9 @@ func TestProjectCreateDescriptionAdvertisesAreaSeed(t *testing.T) {
 	if !strings.Contains(projectCreateDescription, "bootstrap_receipt") {
 		t.Fatalf("project_create description should advertise bootstrap receipt")
 	}
+	if !strings.Contains(projectCreateDescription, "git_remote_url") || !strings.Contains(projectCreateDescription, "project_repos") {
+		t.Fatalf("project_create description should advertise git remote project_repos support")
+	}
 }
 
 // TestProjectCreateDescriptionRequiresExplicitImmutableLanguage locks the
