@@ -81,7 +81,7 @@ func main() {
 		logger.Error("config load failed", "err", err)
 		os.Exit(1)
 	}
-	if err := validateServerAuthMode(cfg.AuthMode); err != nil {
+	if err := validateServerConfig(cfg); err != nil {
 		logger.Error("auth mode unsupported", "err", err)
 		os.Exit(1)
 	}
@@ -211,14 +211,18 @@ func main() {
 				os.Exit(1)
 			}
 			publicBaseURL := daemonPublicBaseURL(ssStore.Get().PublicBaseURL, httpAddr)
+			redirectBaseURL := daemonPublicBaseURL(firstNonEmpty(cfg.OAuthRedirectBaseURL, ssStore.Get().PublicBaseURL), httpAddr)
 			oauthSvc, err = pauth.NewOAuthService(ctx, pool, pauth.OAuthConfig{
-				Issuer:          publicBaseURL,
-				PublicBaseURL:   publicBaseURL,
-				SigningKeyPath:  cfg.OAuthSigningKeyPath,
-				ClientID:        cfg.OAuthClientID,
-				ClientSecret:    cfg.OAuthClientSecret,
-				RedirectURIs:    cfg.OAuthRedirectURIs,
-				BootstrapUserID: oauthUserID,
+				Issuer:             publicBaseURL,
+				PublicBaseURL:      publicBaseURL,
+				RedirectBaseURL:    redirectBaseURL,
+				SigningKeyPath:     cfg.OAuthSigningKeyPath,
+				ClientID:           cfg.OAuthClientID,
+				ClientSecret:       cfg.OAuthClientSecret,
+				RedirectURIs:       cfg.OAuthRedirectURIs,
+				BootstrapUserID:    oauthUserID,
+				GitHubClientID:     cfg.GitHubClientID,
+				GitHubClientSecret: cfg.GitHubClientSecret,
 			})
 			if err != nil {
 				logger.Error("oauth service init failed", "err", err)
@@ -394,6 +398,28 @@ func validateServerAuthMode(mode config.AuthMode) error {
 	}
 }
 
+func validateServerConfig(cfg *config.Config) error {
+	if cfg == nil {
+		return fmt.Errorf("config is required")
+	}
+	if err := validateServerAuthMode(cfg.AuthMode); err != nil {
+		return err
+	}
+	if cfg.AuthMode == config.AuthModeOAuthGitHub {
+		missing := []string{}
+		if strings.TrimSpace(cfg.GitHubClientID) == "" {
+			missing = append(missing, "PINDOC_GITHUB_CLIENT_ID")
+		}
+		if strings.TrimSpace(cfg.GitHubClientSecret) == "" {
+			missing = append(missing, "PINDOC_GITHUB_CLIENT_SECRET")
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("PINDOC_AUTH_MODE=oauth_github requires %s", strings.Join(missing, " and "))
+		}
+	}
+	return nil
+}
+
 func daemonPublicBaseURL(publicBaseURL, addr string) string {
 	publicBaseURL = strings.TrimRight(strings.TrimSpace(publicBaseURL), "/")
 	if publicBaseURL != "" {
@@ -412,6 +438,15 @@ func daemonPublicBaseURL(publicBaseURL, addr string) string {
 		host = net.JoinHostPort(h, p)
 	}
 	return "http://" + host
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func stubEmbedderWarning() string {

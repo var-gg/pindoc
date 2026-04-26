@@ -69,9 +69,12 @@ func TestLoadInvalidAuthMode(t *testing.T) {
 
 func TestLoadOAuthDefaultsAndRedirectList(t *testing.T) {
 	t.Setenv("PINDOC_OAUTH_REDIRECT_URIS", " http://127.0.0.1:1111/cb, http://localhost:2222/cb ;http://127.0.0.1:1111/cb ")
+	t.Setenv("PINDOC_OAUTH_REDIRECT_BASE_URL", " http://127.0.0.1:5830 ")
 	t.Setenv("PINDOC_OAUTH_CLIENT_ID", " test-client ")
 	t.Setenv("PINDOC_OAUTH_CLIENT_SECRET", " secret ")
 	t.Setenv("PINDOC_OAUTH_SIGNING_KEY_PATH", "C:/tmp/pindoc-oauth.pem")
+	t.Setenv("PINDOC_GITHUB_CLIENT_ID", " github-client ")
+	t.Setenv("PINDOC_GITHUB_CLIENT_SECRET", " github-secret ")
 
 	cfg, err := Load()
 	if err != nil {
@@ -85,6 +88,15 @@ func TestLoadOAuthDefaultsAndRedirectList(t *testing.T) {
 	}
 	if cfg.OAuthSigningKeyPath != "C:/tmp/pindoc-oauth.pem" {
 		t.Fatalf("OAuthSigningKeyPath = %q", cfg.OAuthSigningKeyPath)
+	}
+	if cfg.OAuthRedirectBaseURL != "http://127.0.0.1:5830" {
+		t.Fatalf("OAuthRedirectBaseURL = %q", cfg.OAuthRedirectBaseURL)
+	}
+	if cfg.GitHubClientID != "github-client" {
+		t.Fatalf("GitHubClientID = %q", cfg.GitHubClientID)
+	}
+	if cfg.GitHubClientSecret != "github-secret" {
+		t.Fatalf("GitHubClientSecret = %q", cfg.GitHubClientSecret)
 	}
 	want := []string{"http://127.0.0.1:1111/cb", "http://localhost:2222/cb"}
 	if !reflect.DeepEqual(cfg.OAuthRedirectURIs, want) {

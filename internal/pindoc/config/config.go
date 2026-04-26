@@ -74,13 +74,15 @@ type Config struct {
 	UserEmail string
 
 	// OAuth 2.1 authorization-server settings for auth_mode=oauth_github.
-	// The first iteration keeps one operator-provisioned client and a
-	// locally persisted RSA signing key; GitHub identity exchange lands in
-	// the follow-up IdP task, while fosite owns code/token/PKCE semantics.
-	OAuthSigningKeyPath string
-	OAuthClientID       string
-	OAuthClientSecret   string
-	OAuthRedirectURIs   []string
+	// Pindoc acts as the MCP-facing OAuth authorization server while
+	// GitHub is the upstream identity provider used during signup/login.
+	OAuthSigningKeyPath  string
+	OAuthClientID        string
+	OAuthClientSecret    string
+	OAuthRedirectURIs    []string
+	OAuthRedirectBaseURL string
+	GitHubClientID       string
+	GitHubClientSecret   string
 }
 
 type SummaryConfig struct {
@@ -155,6 +157,9 @@ func Load() (*Config, error) {
 		OAuthSigningKeyPath:   env("PINDOC_OAUTH_SIGNING_KEY_PATH", "./data/oauth-signing.pem"),
 		OAuthClientID:         strings.TrimSpace(env("PINDOC_OAUTH_CLIENT_ID", "claude-desktop")),
 		OAuthClientSecret:     strings.TrimSpace(env("PINDOC_OAUTH_CLIENT_SECRET", "")),
+		OAuthRedirectBaseURL:  strings.TrimSpace(env("PINDOC_OAUTH_REDIRECT_BASE_URL", "")),
+		GitHubClientID:        strings.TrimSpace(env("PINDOC_GITHUB_CLIENT_ID", "")),
+		GitHubClientSecret:    strings.TrimSpace(env("PINDOC_GITHUB_CLIENT_SECRET", "")),
 		OAuthRedirectURIs: envList("PINDOC_OAUTH_REDIRECT_URIS", []string{
 			"http://127.0.0.1:3846/callback",
 			"http://localhost:3846/callback",

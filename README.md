@@ -115,9 +115,12 @@ docker compose up -d --build
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `PINDOC_AUTH_MODE` | `trusted_local` | 인증 모드 enum. 허용값은 `trusted_local`, `public_readonly`, `single_user`, `oauth_github`. 현재 V1 런타임은 `trusted_local`만 지원하고 나머지는 명확한 startup error로 거절한다. |
+| `PINDOC_AUTH_MODE` | `trusted_local` | 인증 모드 enum. 허용값은 `trusted_local`, `public_readonly`, `single_user`, `oauth_github`. `oauth_github`는 GitHub Client ID/Secret이 있을 때만 부팅한다. |
 | `PINDOC_PROJECT` | `pindoc` | `project_slug`를 생략한 일부 read/config 호출의 fallback 프로젝트. |
 | `PINDOC_DAEMON_PORT` | `5830` | Docker Compose daemon의 host port override. |
+| `PINDOC_PUBLIC_BASE_URL` | `http://127.0.0.1:${PINDOC_DAEMON_PORT}` | MCP resource/issuer metadata에 노출되는 public base URL. |
+| `PINDOC_OAUTH_REDIRECT_BASE_URL` | empty | GitHub OAuth callback base URL override. 비어 있으면 `PINDOC_PUBLIC_BASE_URL`을 쓴다. GitHub App callback은 `{base}/auth/github/callback`이다. |
+| `PINDOC_GITHUB_CLIENT_ID` / `PINDOC_GITHUB_CLIENT_SECRET` | empty | `PINDOC_AUTH_MODE=oauth_github`에서 필수인 GitHub OAuth App credentials. |
 
 Windows에서 기존 NSSM 서비스가 아직 5830 포트를 점유 중이면, 관리자
 PowerShell에서 제거하기 전까지 Docker daemon을 임시 포트로 띄운다.
@@ -126,6 +129,21 @@ PowerShell에서 제거하기 전까지 Docker daemon을 임시 포트로 띄운
 $env:PINDOC_DAEMON_PORT = "5832"
 docker compose up -d --build pindoc-server-daemon
 ```
+
+GitHub OAuth를 켤 때는 GitHub OAuth App의 callback URL을
+`http://127.0.0.1:5830/auth/github/callback`(포트 override 시 해당 포트)로
+등록한 뒤 아래처럼 기동한다.
+
+```bash
+PINDOC_AUTH_MODE=oauth_github \
+PINDOC_GITHUB_CLIENT_ID=... \
+PINDOC_GITHUB_CLIENT_SECRET=... \
+docker compose up -d --build pindoc-server-daemon
+```
+
+초대 링크는 `/signup?invite=<token>` 형태로 Reader에서 열며, 현재 구현은
+GitHub verified primary email로 기존 `users.email` 행을 자동 링크하거나 새
+행을 만든다. invite token 발급/소비는 별도 후속 task 범위다.
 
 Host-native 개발 경로가 필요하면 아래처럼 직접 실행할 수 있다.
 

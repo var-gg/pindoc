@@ -68,6 +68,9 @@ services:
       PINDOC_OAUTH_CLIENT_ID: ${PINDOC_OAUTH_CLIENT_ID:-claude-desktop}
       PINDOC_OAUTH_CLIENT_SECRET: ${PINDOC_OAUTH_CLIENT_SECRET:-}
       PINDOC_OAUTH_REDIRECT_URIS: ${PINDOC_OAUTH_REDIRECT_URIS:-http://127.0.0.1:3846/callback,http://localhost:3846/callback}
+      PINDOC_OAUTH_REDIRECT_BASE_URL: ${PINDOC_OAUTH_REDIRECT_BASE_URL:-}
+      PINDOC_GITHUB_CLIENT_ID: ${PINDOC_GITHUB_CLIENT_ID:-}
+      PINDOC_GITHUB_CLIENT_SECRET: ${PINDOC_GITHUB_CLIENT_SECRET:-}
       # Do not pass host PINDOC_EMBED_PROVIDER through here. A one-off
       # `PINDOC_EMBED_PROVIDER=stub docker compose up` previously made the
       # daemon silently index with hash embeddings. Compose users must opt

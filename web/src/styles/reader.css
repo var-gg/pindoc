@@ -1743,6 +1743,123 @@
 .reader-state--error strong { color: var(--stale); display: block; margin-bottom: var(--sp-2); }
 .reader-state code { font-family: var(--font-mono); background: var(--bg-2); padding: 2px 6px; border-radius: var(--r-1); }
 
+/* Signup */
+.signup-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-5);
+  background: var(--bg-0);
+  color: var(--fg-1);
+}
+
+.signup-panel {
+  width: min(100%, 420px);
+  display: grid;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  background: var(--bg-1);
+}
+
+.signup-panel__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--fg-0);
+  font-weight: 700;
+}
+
+.signup-panel h1 {
+  margin: 0;
+  color: var(--fg-0);
+  font-size: var(--fs-xl);
+  letter-spacing: 0;
+}
+
+.signup-panel__meta {
+  margin: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.signup-panel__meta div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  background: var(--bg-0);
+}
+
+.signup-panel__meta dt {
+  color: var(--fg-3);
+  font-size: var(--fs-sm);
+}
+
+.signup-panel__meta dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--fg-0);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.signup-panel__button {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-4);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-2);
+  background: var(--accent);
+  color: var(--bg-0);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.signup-panel__button:hover {
+  filter: brightness(1.04);
+}
+
+.signup-panel__notice {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--stale);
+  border-radius: var(--r-2);
+  background: color-mix(in oklch, var(--stale) 12%, transparent);
+  color: var(--fg-1);
+}
+
+.signup-panel__notice strong {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--fg-0);
+}
+
+.signup-panel__notice p {
+  margin: 0;
+  color: var(--fg-2);
+}
+
+.signup-panel__secondary {
+  justify-self: center;
+  color: var(--fg-2);
+  font-size: var(--fs-sm);
+  text-decoration: none;
+}
+
+.signup-panel__secondary:hover {
+  color: var(--fg-0);
+}
+
 /* Responsive */
 @media (max-width: 1023px) {
   .main { grid-template-columns: minmax(0, 1fr); }

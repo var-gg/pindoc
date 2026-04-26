@@ -39,13 +39,20 @@ const (
 )
 
 type OAuthConfig struct {
-	Issuer          string
-	PublicBaseURL   string
-	SigningKeyPath  string
-	ClientID        string
-	ClientSecret    string
-	RedirectURIs    []string
-	BootstrapUserID string
+	Issuer             string
+	PublicBaseURL      string
+	RedirectBaseURL    string
+	SigningKeyPath     string
+	ClientID           string
+	ClientSecret       string
+	RedirectURIs       []string
+	BootstrapUserID    string
+	GitHubClientID     string
+	GitHubClientSecret string
+	GitHubAuthURL      string
+	GitHubTokenURL     string
+	GitHubAPIBaseURL   string
+	HTTPClient         *http.Client
 }
 
 type OAuthService struct {
@@ -58,6 +65,8 @@ type OAuthService struct {
 	publicBaseURL   string
 	clientID        string
 	bootstrapUserID string
+	cookieSecret    []byte
+	github          *githubOAuth
 }
 
 func NewOAuthService(ctx context.Context, pool *db.Pool, cfg OAuthConfig) (*OAuthService, error) {
@@ -79,6 +88,7 @@ func NewOAuthService(ctx context.Context, pool *db.Pool, cfg OAuthConfig) (*OAut
 		return nil, err
 	}
 	globalSecret := oauthGlobalSecret(key)
+	cookieSecret := append([]byte(nil), globalSecret[:]...)
 
 	fositeConfig := &fosite.Config{
 		AccessTokenLifespan:            defaultAccessTokenTTL,
@@ -140,6 +150,10 @@ func NewOAuthService(ctx context.Context, pool *db.Pool, cfg OAuthConfig) (*OAut
 		compose.OAuth2TokenIntrospectionFactory,
 		compose.OAuth2TokenRevocationFactory,
 	)
+	githubOAuth, err := newGitHubOAuth(cfg, cookieSecret)
+	if err != nil {
+		return nil, err
+	}
 
 	return &OAuthService{
 		provider:        provider,
@@ -151,6 +165,8 @@ func NewOAuthService(ctx context.Context, pool *db.Pool, cfg OAuthConfig) (*OAut
 		publicBaseURL:   publicBaseURL,
 		clientID:        clientID,
 		bootstrapUserID: strings.TrimSpace(cfg.BootstrapUserID),
+		cookieSecret:    cookieSecret,
+		github:          githubOAuth,
 	}, nil
 }
 
@@ -212,6 +228,10 @@ func (s *OAuthService) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /oauth/authorize", s.handleAuthorize)
 	mux.HandleFunc("POST /oauth/token", s.handleToken)
 	mux.HandleFunc("POST /oauth/revoke", s.handleRevoke)
+	if s.github != nil {
+		mux.HandleFunc("GET /auth/github/login", s.handleGitHubLogin)
+		mux.HandleFunc("GET /auth/github/callback", s.handleGitHubCallback)
+	}
 }
 
 func (s *OAuthService) handleProtectedResourceMetadata(w http.ResponseWriter, _ *http.Request) {
@@ -266,9 +286,16 @@ func (s *OAuthService) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	for _, audience := range ar.GetRequestedAudience() {
 		ar.GrantAudience(audience)
 	}
-	subject := strings.TrimSpace(s.bootstrapUserID)
+	subject := strings.TrimSpace(s.browserSessionUserID(r))
 	if subject == "" {
-		s.provider.WriteAuthorizeError(ctx, w, ar, fosite.ErrAccessDenied.WithHint("PINDOC_USER_NAME is required until GitHub OAuth identity exchange lands."))
+		subject = strings.TrimSpace(s.bootstrapUserID)
+	}
+	if subject == "" {
+		if s.github != nil {
+			http.Redirect(w, r, s.github.signupURLForAuthorize(r), http.StatusFound)
+			return
+		}
+		s.provider.WriteAuthorizeError(ctx, w, ar, fosite.ErrAccessDenied.WithHint("GitHub OAuth login is required before authorizing this client."))
 		return
 	}
 	resp, err := s.provider.NewAuthorizeResponse(ctx, ar, s.newJWTSession(subject))

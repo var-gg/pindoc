@@ -210,3 +210,36 @@ func TestOAuthStorageMigrationContract(t *testing.T) {
 		}
 	}
 }
+
+func TestUsersOAuthProviderMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0038_users_oauth_provider.sql")
+	if err != nil {
+		t.Fatalf("read users oauth provider migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"ADD COLUMN IF NOT EXISTS provider TEXT NULL",
+		"ADD COLUMN IF NOT EXISTS provider_uid TEXT NULL",
+		"ADD CONSTRAINT users_provider_check",
+		"CHECK (provider IS NULL OR provider IN ('github'))",
+		"CREATE UNIQUE INDEX IF NOT EXISTS users_provider_uid_unique",
+		"ON users (provider, provider_uid)",
+		"AND deleted_at IS NULL",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("users oauth provider migration Up missing %q:\n%s", want, up)
+		}
+	}
+	for _, want := range []string{
+		"-- +goose Down",
+		"DROP INDEX IF EXISTS users_provider_uid_unique",
+		"DROP CONSTRAINT IF EXISTS users_provider_check",
+		"DROP COLUMN IF EXISTS provider_uid",
+		"DROP COLUMN IF EXISTS provider",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("users oauth provider migration Down missing %q", want)
+		}
+	}
+}

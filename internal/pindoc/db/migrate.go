@@ -23,7 +23,19 @@ var migrationsFS embed.FS
 // only the Up block is applied. The Down block is preserved in-source
 // for manual rollback via psql.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
-	if _, err := pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+	lockConn, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire migration lock connection: %w", err)
+	}
+	defer lockConn.Release()
+	if _, err := lockConn.Exec(ctx, `SELECT pg_advisory_lock(hashtext('pindoc_schema_migrations'))`); err != nil {
+		return fmt.Errorf("acquire migration lock: %w", err)
+	}
+	defer func() {
+		_, _ = lockConn.Exec(context.Background(), `SELECT pg_advisory_unlock(hashtext('pindoc_schema_migrations'))`)
+	}()
+
+	if _, err := lockConn.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		id           TEXT PRIMARY KEY,
 		applied_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 	)`); err != nil {
@@ -44,7 +56,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 
 	for _, name := range files {
 		var exists bool
-		if err := pool.QueryRow(ctx,
+		if err := lockConn.QueryRow(ctx,
 			`SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE id = $1)`,
 			name).Scan(&exists); err != nil {
 			return fmt.Errorf("check %s: %w", name, err)
@@ -62,7 +74,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 			return fmt.Errorf("%s: no +goose Up block found", name)
 		}
 
-		tx, err := pool.Begin(ctx)
+		tx, err := lockConn.Begin(ctx)
 		if err != nil {
 			return fmt.Errorf("begin tx for %s: %w", name, err)
 		}
