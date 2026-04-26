@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, Folder, FolderOpen, FileText, Zap, Bug, Book, BookOpen, Hash, Check, Code, LayoutTemplate } from "lucide-react";
+import { ChevronDown, ChevronRight, Folder, FolderOpen, FileText, Zap, Bug, Book, BookOpen, Hash, Check, Code, LayoutTemplate, Lock } from "lucide-react";
 import type { ComponentType } from "react";
 import type { Area } from "../api/client";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
-import { compareAreas, localizedAreaName } from "./areaLocale";
+import { compareAreas, isFixedTaxonomyArea, localizedAreaName } from "./areaLocale";
 import type { Aggregate } from "./useReaderData";
 
 type Props = {
@@ -69,13 +69,13 @@ function subtreeArtifactCount(node: AreaNode): number {
   return node.artifact_count + node.children.reduce((sum, child) => sum + subtreeArtifactCount(child), 0);
 }
 
-function areaNodeTitle(node: AreaNode, subtreeCount: number): string | undefined {
-  if (node.children.length === 0) return node.description || undefined;
+function areaNodeTitle(node: AreaNode, subtreeCount: number, taxonomyHint: string): string | undefined {
+  if (node.children.length === 0) return [taxonomyHint, node.description].filter(Boolean).join("\n") || undefined;
   const childCount = subtreeCount - node.artifact_count;
   const countSummary = node.artifact_count > 0
     ? `직접: ${node.artifact_count} / 자식: ${childCount} / 합계: ${subtreeCount}`
     : `직접: 0 / 자식: ${childCount}`;
-  return [node.description, countSummary].filter(Boolean).join("\n") || undefined;
+  return [taxonomyHint, node.description, countSummary].filter(Boolean).join("\n") || undefined;
 }
 
 function containsSelected(node: AreaNode, selectedArea: string | null): boolean {
@@ -172,9 +172,14 @@ export function Sidebar({
                   key={key}
                   className={`side-item${selectedType === key ? " active" : ""}`}
                   onClick={() => onSelectType(selectedType === key ? null : key)}
+                  title={t("sidebar.type_fixed_hint")}
                 >
                   <Icon className="lucide" />
-                  <span>{key}</span>
+                  <span className="side-item__label">{key}</span>
+                  <Lock
+                    className="side-item__taxonomy side-item__taxonomy--fixed"
+                    aria-label={t("sidebar.type_fixed_hint")}
+                  />
                   <span className="side-item__count">{count}</span>
                 </button>
               );
@@ -244,6 +249,8 @@ function AreaTreeNode({
   const subtreeCount = subtreeArtifactCount(node);
   const empty = subtreeCount === 0;
   const indent = { paddingLeft: 8 + level * 14 } as React.CSSProperties;
+  const fixed = isFixedTaxonomyArea(node.slug);
+  const taxonomyHint = fixed ? t("sidebar.area_fixed_hint") : t("sidebar.area_user_promoted_hint");
 
   useEffect(() => {
     if (selectedInside) setExpanded(true);
@@ -256,7 +263,7 @@ function AreaTreeNode({
         className={`side-item${active ? " active" : ""}${empty ? " empty" : ""}`}
         style={indent}
         onClick={() => onSelectArea(active ? null : node.slug)}
-        title={areaNodeTitle(node, subtreeCount)}
+        title={areaNodeTitle(node, subtreeCount, taxonomyHint)}
       >
         {hasChildren ? (
           <span
@@ -283,7 +290,18 @@ function AreaTreeNode({
           <span style={{ width: 14, display: "inline-block" }} />
         )}
         {active ? <FolderOpen className="lucide" /> : <Folder className="lucide" />}
-        <span>{localizedAreaName(t, node.slug, node.name)}</span>
+        <span className="side-item__label">{localizedAreaName(t, node.slug, node.name)}</span>
+        {fixed ? (
+          <Lock
+            className="side-item__taxonomy side-item__taxonomy--fixed"
+            aria-label={taxonomyHint}
+          />
+        ) : (
+          <span
+            className="side-item__taxonomy side-item__taxonomy--promoted"
+            aria-label={taxonomyHint}
+          />
+        )}
         <span className="side-item__count">{subtreeCount}</span>
       </button>
       {hasChildren && expanded && node.children.map((child) => (

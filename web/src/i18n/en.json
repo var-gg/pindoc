@@ -77,6 +77,9 @@
   "sidebar.templates_hint": "Toggle inclusion of _template_ artifacts (per-type recommended structure) in the list",
   "sidebar.type_locked_badge": "locked",
   "sidebar.type_locked_hint": "task pins Type to Task. Switch to wiki for cross-type filtering.",
+  "sidebar.area_fixed_hint": "Fixed taxonomy (docs/19)",
+  "sidebar.area_user_promoted_hint": "User-promoted sub-area",
+  "sidebar.type_fixed_hint": "Fixed Type taxonomy",
 
   "surface.all": "all",
 

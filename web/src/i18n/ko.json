@@ -77,6 +77,9 @@
   "sidebar.templates_hint": "타입별 권장 섹션 구조(_template_ prefix) artifact를 목록에 포함/제외",
   "sidebar.type_locked_badge": "고정",
   "sidebar.type_locked_hint": "task에서는 Type이 Task로 고정됩니다. 교차 필터가 필요하면 wiki로 전환하세요.",
+  "sidebar.area_fixed_hint": "Fixed taxonomy (docs/19) · 고정 분류",
+  "sidebar.area_user_promoted_hint": "User-promoted sub-area · 사용자 승급",
+  "sidebar.type_fixed_hint": "Fixed Type taxonomy · 고정 Type 분류",
 
   "surface.all": "전체",
 

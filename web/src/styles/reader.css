@@ -86,7 +86,14 @@
 .side-item.empty:not(.active) { color: var(--fg-3); }
 .side-item.empty:not(.active) .lucide,
 .side-item.empty:not(.active) .side-item__count { color: var(--fg-4); }
+.side-item__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-item__taxonomy { width: 12px; height: 12px; flex: 0 0 auto; margin-left: auto; color: var(--fg-4); }
+.side-item__taxonomy--fixed { color: var(--fg-3); }
+.side-item__taxonomy--promoted { width: 6px; height: 6px; margin-right: 3px; border-radius: 50%; background: var(--fg-4); opacity: 0.72; }
+.side-item.active .side-item__taxonomy--fixed { color: var(--fg-1); }
+.side-item.active .side-item__taxonomy--promoted { background: var(--fg-2); opacity: 1; }
 .side-item__count { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); margin-left: auto; flex: 0 0 auto; }
+.side-item__taxonomy + .side-item__count { margin-left: 0; }
 .side-sub .side-item { padding-left: 28px; }
 
 /* Content — single article column. Scroll container is window (no own
