@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -103,6 +104,26 @@ func TestResolveArtifactMeta(t *testing.T) {
 				Audience:          "owner_only",
 			},
 		},
+		{
+			name: "applicable rule metadata is preserved",
+			input: &ArtifactMetaInput{
+				SourceType:        "artifact",
+				AppliesToAreas:    []string{" ui ", "ui", "experience/*"},
+				AppliesToTypes:    []string{"Task", "Decision", "Task"},
+				RuleSeverity:      "binding",
+				RuleExcerpt:       "  Follow the design contract.  ",
+				VerificationState: "verified",
+			},
+			body: "policy body",
+			want: ResolvedArtifactMeta{
+				SourceType:        "artifact",
+				VerificationState: "verified",
+				AppliesToAreas:    []string{"ui", "experience/*"},
+				AppliesToTypes:    []string{"Task", "Decision"},
+				RuleSeverity:      "binding",
+				RuleExcerpt:       "Follow the design contract.",
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -138,6 +159,67 @@ func TestArtifactMetaToJSONOmitsEmpty(t *testing.T) {
 	if parsed["next_context_policy"] != "default" {
 		t.Fatalf("expected next_context_policy=default, got %v", parsed["next_context_policy"])
 	}
+}
+
+func TestArtifactMetaToJSONIncludesApplicableRuleFields(t *testing.T) {
+	js := artifactMetaToJSON(ResolvedArtifactMeta{
+		AppliesToAreas: []string{"ui", "experience/*"},
+		AppliesToTypes: []string{"Task"},
+		RuleSeverity:   "guidance",
+		RuleExcerpt:    "Use the shared empty-state component.",
+	})
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(js), &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if parsed["rule_severity"] != "guidance" {
+		t.Fatalf("expected rule_severity=guidance, got %v", parsed["rule_severity"])
+	}
+	if parsed["rule_excerpt"] != "Use the shared empty-state component." {
+		t.Fatalf("expected rule_excerpt to round-trip, got %v", parsed["rule_excerpt"])
+	}
+	areas, ok := parsed["applies_to_areas"].([]any)
+	if !ok || len(areas) != 2 || areas[0] != "ui" || areas[1] != "experience/*" {
+		t.Fatalf("unexpected applies_to_areas: %#v", parsed["applies_to_areas"])
+	}
+	types, ok := parsed["applies_to_types"].([]any)
+	if !ok || len(types) != 1 || types[0] != "Task" {
+		t.Fatalf("unexpected applies_to_types: %#v", parsed["applies_to_types"])
+	}
+}
+
+func TestApplicableRuleMetaPreflightValidation(t *testing.T) {
+	in := artifactProposeInput{
+		Type:         "Decision",
+		AreaSlug:     "policies",
+		Title:        "Policy",
+		BodyMarkdown: "## Context\nx\n\n## Decision\nx",
+		AuthorID:     "codex",
+		ArtifactMeta: &ArtifactMetaInput{
+			AppliesToAreas: []string{"ui/**"},
+			AppliesToTypes: []string{"Bogus"},
+			RuleSeverity:   "must",
+		},
+	}
+	_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
+	for _, want := range []string{
+		"META_APPLIES_AREA_INVALID",
+		"META_APPLIES_TYPE_INVALID",
+		"META_RULE_SEVERITY_INVALID",
+	} {
+		if !containsString(failed, want) {
+			t.Fatalf("failed[] missing %s: %v", want, failed)
+		}
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // TestDetectUnclassifiedUserChat exercises the SOURCE_TYPE_UNCLASSIFIED

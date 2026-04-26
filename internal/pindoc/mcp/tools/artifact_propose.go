@@ -135,9 +135,11 @@ type artifactProposeInput struct {
 	ScopeDefer *ScopeDeferInput `json:"scope_defer,omitempty" jsonschema:"payload for shape=scope_defer — checkbox locator + to_artifact + reason"`
 
 	// ArtifactMeta carries epistemic axes that classify the artifact's
-	// trustworthiness and memory scope. All fields optional — server
-	// resolves defaults via resolveArtifactMeta based on pins, update path,
-	// and body heuristics. See docs/04-data-model.md for axis definitions.
+	// trustworthiness and memory scope, plus optional rule-scoping fields
+	// used by context.for_task's Applicable Rules mechanism. All fields
+	// optional — server resolves defaults via resolveArtifactMeta based on
+	// pins, update path, and body heuristics. See docs/04-data-model.md for
+	// field definitions.
 	//
 	// Axes:
 	//   source_type         — code | artifact | user_chat | external | mixed
@@ -146,11 +148,14 @@ type artifactProposeInput struct {
 	//   audience            — owner_only | approvers | project_readers
 	//   next_context_policy — default | opt_in | excluded
 	//   verification_state  — verified | partially_verified | unverified
+	//   applies_to_areas    — area slugs or wildcard scopes such as ui/*
+	//   applies_to_types    — artifact types; empty means all types
+	//   rule_severity       — binding | guidance | reference
+	//   rule_excerpt        — short excerpt surfaced in applicable_rules
 	//
-	// On update_of the supplied meta MERGES with existing meta (unset keys
-	// keep previous values). Fully replacing requires explicit empty strings
-	// which resolveArtifactMeta treats as "caller cleared this axis".
-	ArtifactMeta *ArtifactMetaInput `json:"artifact_meta,omitempty" jsonschema:"epistemic axes — source_type, consent_state, confidence, audience, next_context_policy, verification_state (all optional)"`
+	// On update_of the supplied meta replaces the existing artifact_meta
+	// JSONB. Omit artifact_meta to preserve the previous value.
+	ArtifactMeta *ArtifactMetaInput `json:"artifact_meta,omitempty" jsonschema:"epistemic axes and optional applicable-rule metadata (all fields optional)"`
 
 	// TaskMeta carries typed tracker dimensions for type=Task artifacts
 	// (Phase 15b). Ignored for any other type. All fields optional:
@@ -245,12 +250,16 @@ var validTaskPriorities = map[string]struct{}{
 // field is optional; resolveArtifactMeta fills defaults based on pins,
 // update path, and body heuristics.
 type ArtifactMetaInput struct {
-	SourceType        string `json:"source_type,omitempty" jsonschema:"code | artifact | user_chat | external | mixed"`
-	ConsentState      string `json:"consent_state,omitempty" jsonschema:"not_needed | requested | granted | denied"`
-	Confidence        string `json:"confidence,omitempty" jsonschema:"low | medium | high"`
-	Audience          string `json:"audience,omitempty" jsonschema:"owner_only | approvers | project_readers"`
-	NextContextPolicy string `json:"next_context_policy,omitempty" jsonschema:"default | opt_in | excluded"`
-	VerificationState string `json:"verification_state,omitempty" jsonschema:"verified | partially_verified | unverified"`
+	SourceType        string   `json:"source_type,omitempty" jsonschema:"code | artifact | user_chat | external | mixed"`
+	ConsentState      string   `json:"consent_state,omitempty" jsonschema:"not_needed | requested | granted | denied"`
+	Confidence        string   `json:"confidence,omitempty" jsonschema:"low | medium | high"`
+	Audience          string   `json:"audience,omitempty" jsonschema:"owner_only | approvers | project_readers"`
+	NextContextPolicy string   `json:"next_context_policy,omitempty" jsonschema:"default | opt_in | excluded"`
+	VerificationState string   `json:"verification_state,omitempty" jsonschema:"verified | partially_verified | unverified"`
+	AppliesToAreas    []string `json:"applies_to_areas,omitempty" jsonschema:"area_slug list; wildcard scopes like ui/* supported"`
+	AppliesToTypes    []string `json:"applies_to_types,omitempty" jsonschema:"artifact type list; omitted or empty means all types"`
+	RuleSeverity      string   `json:"rule_severity,omitempty" jsonschema:"binding | guidance | reference; presence marks this artifact as an applicable rule"`
+	RuleExcerpt       string   `json:"rule_excerpt,omitempty" jsonschema:"short excerpt returned by context.for_task applicable_rules; default derives from the first H2 section"`
 }
 
 var validSourceTypes = map[string]struct{}{
@@ -270,6 +279,27 @@ var validNextContextPolicies = map[string]struct{}{
 }
 var validVerificationStates = map[string]struct{}{
 	"verified": {}, "partially_verified": {}, "unverified": {},
+}
+var validRuleSeverities = map[string]struct{}{
+	"binding": {}, "guidance": {}, "reference": {},
+}
+
+func validRuleAreaScope(scope string) bool {
+	s := strings.TrimSpace(scope)
+	if s == "" {
+		return false
+	}
+	if s == "*" {
+		return true
+	}
+	if strings.ContainsAny(s, " \t\r\n") || strings.Contains(s, "//") {
+		return false
+	}
+	if strings.HasSuffix(s, "/*") {
+		base := strings.TrimSuffix(s, "/*")
+		return base != "" && !strings.Contains(base, "*")
+	}
+	return !strings.Contains(s, "*")
 }
 
 // ArtifactRelationInput is the agent-facing shape for one edge.
@@ -1669,6 +1699,24 @@ func preflight(ctx context.Context, deps Deps, projectSlug string, in *artifactP
 				push(fmt.Sprintf("artifact_meta.verification_state %q is not one of verified|partially_verified|unverified", v), "META_VERIFICATION_INVALID")
 			}
 		}
+		for _, area := range m.AppliesToAreas {
+			if !validRuleAreaScope(area) {
+				push(fmt.Sprintf("artifact_meta.applies_to_areas contains invalid scope %q; use area_slug, *, or wildcard scope like ui/*", area), "META_APPLIES_AREA_INVALID")
+				break
+			}
+		}
+		for _, artifactType := range m.AppliesToTypes {
+			t := strings.TrimSpace(artifactType)
+			if _, ok := validArtifactTypes[t]; !ok {
+				push(fmt.Sprintf("artifact_meta.applies_to_types contains invalid type %q", artifactType), "META_APPLIES_TYPE_INVALID")
+				break
+			}
+		}
+		if v := strings.TrimSpace(m.RuleSeverity); v != "" {
+			if _, ok := validRuleSeverities[v]; !ok {
+				push(fmt.Sprintf("artifact_meta.rule_severity %q is not one of binding|guidance|reference", v), "META_RULE_SEVERITY_INVALID")
+			}
+		}
 	}
 
 	// Type-specific guardrails. The previous code hard-coded keywords
@@ -2335,6 +2383,12 @@ func patchFieldsFor(code string) []string {
 		return []string{"pins"}
 	case "TASK_META_WRONG_TYPE":
 		return []string{"task_meta"}
+	case "META_APPLIES_AREA_INVALID":
+		return []string{"artifact_meta.applies_to_areas"}
+	case "META_APPLIES_TYPE_INVALID":
+		return []string{"artifact_meta.applies_to_types"}
+	case "META_RULE_SEVERITY_INVALID":
+		return []string{"artifact_meta.rule_severity"}
 	case "TASK_STATUS_INVALID":
 		return []string{"task_meta.status"}
 	case "TASK_PRIORITY_INVALID":
@@ -2560,6 +2614,10 @@ type ResolvedArtifactMeta struct {
 	Audience          string   `json:"audience,omitempty"`
 	NextContextPolicy string   `json:"next_context_policy,omitempty"`
 	VerificationState string   `json:"verification_state,omitempty"`
+	AppliesToAreas    []string `json:"applies_to_areas,omitempty"`
+	AppliesToTypes    []string `json:"applies_to_types,omitempty"`
+	RuleSeverity      string   `json:"rule_severity,omitempty"`
+	RuleExcerpt       string   `json:"rule_excerpt,omitempty"`
 	Warnings          []string `json:"-"`
 }
 
@@ -2598,6 +2656,10 @@ func resolveArtifactMeta(in *ArtifactMetaInput, pins []ArtifactPinInput, body st
 		out.Audience = strings.TrimSpace(in.Audience)
 		out.NextContextPolicy = strings.TrimSpace(in.NextContextPolicy)
 		out.VerificationState = strings.TrimSpace(in.VerificationState)
+		out.AppliesToAreas = normalizeStringSlice(in.AppliesToAreas)
+		out.AppliesToTypes = normalizeStringSlice(in.AppliesToTypes)
+		out.RuleSeverity = strings.TrimSpace(in.RuleSeverity)
+		out.RuleExcerpt = strings.TrimSpace(in.RuleExcerpt)
 	}
 
 	hasCodePin := false
@@ -2679,11 +2741,46 @@ func artifactMetaToJSON(r ResolvedArtifactMeta) string {
 	if r.VerificationState != "" {
 		payload["verification_state"] = r.VerificationState
 	}
+	if len(r.AppliesToAreas) > 0 {
+		payload["applies_to_areas"] = r.AppliesToAreas
+	}
+	if len(r.AppliesToTypes) > 0 {
+		payload["applies_to_types"] = r.AppliesToTypes
+	}
+	if r.RuleSeverity != "" {
+		payload["rule_severity"] = r.RuleSeverity
+	}
+	if r.RuleExcerpt != "" {
+		payload["rule_excerpt"] = r.RuleExcerpt
+	}
 	buf, err := json.Marshal(payload)
 	if err != nil {
 		return "{}"
 	}
 	return string(buf)
+}
+
+func normalizeStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		v := strings.TrimSpace(value)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // classifyConversationDerived returns true when the agent has explicitly

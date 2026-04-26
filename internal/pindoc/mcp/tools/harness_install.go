@@ -209,9 +209,10 @@ asking the user for approval, agent-only write surface).
 
 // renderPindocMD is intentionally one string template for M1. When PINDOC.md
 // stabilises (see docs/09-pindoc-md-spec.md) we split this out to a
-// dedicated package with per-section conditionals. Today it is under 100
-// lines — a single string is simpler to review.
+// dedicated package with per-section conditionals. Today the sections are
+// still plain text helpers so updates stay easy to diff.
 func renderPindocMD(projectName, projectID, projectSlug, language, locale, serverVersion string, includeSection12 bool) string {
+	applicableRulesSection := renderApplicableRulesSection()
 	section12 := ""
 	if includeSection12 {
 		section12 = "\n\n" + renderTaskLifecycleSection()
@@ -309,7 +310,8 @@ fields such as priority or due_at unless a narrower task-specific tool
 exists. Status changes are not assignment changes: claimed_done still
 goes through artifact.propose with the Task status gate, and verified
 goes through pindoc.artifact.verify.
-%s
+
+%s%s
 
 ## Conversation vs Memory
 
@@ -615,10 +617,41 @@ the update_of value you should pass on retry — follow it.
 		projectSlug, projectID, locale,
 		projectName, serverVersion, language,
 		projectSlug, language,
-		section12,
+		applicableRulesSection, section12,
 		projectSlug, projectSlug, projectSlug, projectSlug, projectSlug, projectSlug, projectSlug,
 		languageLabel(language),
 	)
+}
+
+func renderApplicableRulesSection() string {
+	return `## Section X — Applicable Rules Mechanism
+
+Policy wiki artifacts can automatically apply to worker tasks through
+artifact_meta rule metadata. This is universal Pindoc mechanism; each
+project still owns its own policy content and severity choices.
+
+Wiki author:
+- Mark a policy artifact with artifact_meta.rule_severity="binding",
+  "guidance", or "reference". That field is the rule marker.
+- Optionally set artifact_meta.applies_to_areas and applies_to_types.
+  If applies_to_areas is omitted, the artifact applies to its own area
+  and sub-areas. Cross-cutting areas such as security, privacy,
+  accessibility, reliability, observability, and localization apply to
+  every task automatically.
+- Keep artifact_meta.rule_excerpt short. context.for_task surfaces this
+  excerpt; if omitted, the server derives one from the first H2 section.
+
+Task author:
+- Do not manually attach every policy as references. Let context.for_task
+  infer applicable_rules from rule metadata and area hierarchy.
+
+Task worker:
+- Before implementation, call pindoc.context.for_task and scan
+  applicable_rules[].excerpt.
+- binding means pause for explicit confirmation before knowingly
+  violating it. guidance is the default path unless local facts disagree.
+  reference is background to read when relevant.
+- If the excerpt is not enough, read the rule artifact via its agent_ref.`
 }
 
 func renderTaskLifecycleSection() string {

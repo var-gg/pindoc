@@ -95,6 +95,10 @@ export type ArtifactMeta = {
   audience?: "owner_only" | "approvers" | "project_readers";
   next_context_policy?: "default" | "opt_in" | "excluded";
   verification_state?: "verified" | "partially_verified" | "unverified";
+  applies_to_areas?: string[];
+  applies_to_types?: string[];
+  rule_severity?: "binding" | "guidance" | "reference";
+  rule_excerpt?: string;
 };
 
 // SourceSessionRef is the pass-through of the JSONB column by the same name.

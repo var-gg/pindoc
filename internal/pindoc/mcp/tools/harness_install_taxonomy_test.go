@@ -118,6 +118,24 @@ func TestRenderPindocMDTaskLifecycleSection(t *testing.T) {
 	}
 }
 
+func TestRenderPindocMDApplicableRulesSection(t *testing.T) {
+	body := renderPindocMD("Pindoc", "project-123", "pindoc", "ko", "ko", "test", true)
+
+	for _, want := range []string{
+		"## Section X — Applicable Rules Mechanism",
+		"artifact_meta.rule_severity",
+		"applies_to_areas",
+		"context.for_task",
+		"applicable_rules",
+		"Cross-cutting areas",
+		"binding means pause for explicit confirmation",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("rendered PINDOC.md missing Applicable Rules guidance %q", want)
+		}
+	}
+}
+
 func TestRenderPindocMDOmitsTaskLifecycleSection(t *testing.T) {
 	body := renderPindocMD("Pindoc", "project-123", "pindoc", "ko", "ko", "test", false)
 

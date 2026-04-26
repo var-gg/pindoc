@@ -2,7 +2,7 @@
 
 `PINDOC.md`는 에이전트가 **매 세션 시작 시 로드하는 행동 규약**입니다. `pindoc init` 또는 `pindoc.harness.install`이 프로젝트 루트에 자동 생성하고, `CLAUDE.md` / `AGENTS.md` / `.cursorrules`가 이를 참조합니다.
 
-현재 harness 출력은 파일 상단 YAML frontmatter(`project_slug`, `project_id`, `locale`, `schema_version`)를 포함한다. 이 frontmatter는 workspace detection의 Priority 1 explicit override이고, `locale`은 canonical identity가 아니라 사용자의 보기 언어 선호다. Section 12는 chip/parallel work가 Pindoc Task의 open → claimed_done → verified 흐름과 acceptance checkbox 갱신을 놓치지 않도록 pre-spawn, during, after-merge, interrupted, retroactive policy를 명시한다.
+현재 harness 출력은 파일 상단 YAML frontmatter(`project_slug`, `project_id`, `locale`, `schema_version`)를 포함한다. 이 frontmatter는 workspace detection의 Priority 1 explicit override이고, `locale`은 canonical identity가 아니라 사용자의 보기 언어 선호다. Section X는 Applicable Rules Mechanism을 설명해 `context.for_task`의 `applicable_rules[]`를 worker가 자동으로 읽게 하고, Section 12는 chip/parallel work가 Pindoc Task의 open → claimed_done → verified 흐름과 acceptance checkbox 갱신을 놓치지 않도록 pre-spawn, during, after-merge, interrupted, retroactive policy를 명시한다.
 
 이 문서는 두 부분으로 구성:
 1. **템플릿 원문** — `pindoc init`이 생성하는 실제 파일 내용
@@ -126,6 +126,21 @@ Decision, Evidence 같은 설명 섹션을 쓰고, artifact 간 관계는 본문
 `## 연관`, `## 역참조`, `## Dependencies / 선후`, `## 리소스 경로` 같은
 H2가 graph metadata를 본문에 중복하면 서버는 publish를 막지 않고
 `SECTION_DUPLICATES_EDGES` warning을 반환할 수 있습니다.
+
+### 2.2 Applicable Rules Mechanism
+
+정책 wiki는 `artifact_meta.rule_severity`(`binding` / `guidance` /
+`reference`)를 설정하면 task worker에게 자동 적용됩니다. Task author가
+references를 직접 붙이지 않아도 worker는 작업 시작 시
+`pindoc.context.for_task`를 호출하고 응답의 `applicable_rules[]` excerpt를
+스캔합니다. 더 깊은 맥락이 필요할 때만 해당 rule의 `agent_ref`로
+`pindoc.artifact.read`를 호출합니다.
+
+`applies_to_areas`를 생략하면 rule artifact의 own area + sub-area에
+적용되고, cross-cutting child area(security/privacy/accessibility 등)의
+rule은 모든 task에 자동 적용됩니다. `binding`은 의도적으로 위반하려면
+사용자 확인이 필요한 강도이고, `guidance`는 기본 경로, `reference`는
+관련 시 참고하는 배경입니다.
 
 ## 3. Referenced Confirmation 프로토콜
 
