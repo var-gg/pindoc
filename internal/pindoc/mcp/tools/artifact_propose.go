@@ -20,6 +20,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/i18n"
+	"github.com/var-gg/pindoc/internal/pindoc/receipts"
 )
 
 // ValidArtifactTypes are the types Phase 2 accepts. Tier A (7) + Tier B
@@ -93,6 +94,12 @@ type artifactProposeInput struct {
 	// Different from update_of: update appends a revision to the same
 	// artifact; supersede creates a replacement and archives the old one.
 	SupersedeOf string `json:"supersede_of,omitempty" jsonschema:"id, slug, or pindoc:// URL of the artifact being replaced"`
+
+	// UnrelatedReason is the Task-only escape hatch for the supersede
+	// safety gate. When a new Task semantically overlaps active Tasks in
+	// the same area, the caller must either set supersede_of or explain why
+	// the new Task is intentionally unrelated.
+	UnrelatedReason string `json:"unrelated_reason,omitempty" jsonschema:"Task-only escape hatch when semantic conflict candidates are active but not superseded; minimum 20 characters when used"`
 
 	// Pins attach code references to the artifact. All optional — the
 	// server stores whatever is provided. path is the only required field
@@ -551,6 +558,38 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						}, nil
 					}
 				}
+				if in.Type == "Task" {
+					activeTasks, err := activeTasksInArea(ctx, deps, projectID, areaID, "")
+					if err != nil {
+						return nil, artifactProposeOutput{}, fmt.Errorf("active task exposure check: %w", err)
+					}
+					if len(activeTasks) > 0 && !receiptSnapshotsContainAny(res.Snapshots, activeTasks) {
+						related := make([]RelatedRef, 0, len(activeTasks))
+						for _, c := range activeTasks {
+							related = append(related, makeRelated(
+								deps, scope, c.Slug, c.ArtifactID, "Task", c.Title,
+								"active Task in same area; read acceptance before creating a new Task",
+							))
+							if len(related) >= semanticConflictLimit {
+								break
+							}
+						}
+						return nil, artifactProposeOutput{
+							Status:    "not_ready",
+							ErrorCode: "TASK_ACTIVE_CONTEXT_REQUIRED",
+							Failed:    []string{"TASK_ACTIVE_CONTEXT_REQUIRED"},
+							Checklist: []string{
+								"New Task create path must expose active same-area Task acceptance through the search_receipt snapshot.",
+							},
+							SuggestedActions: []string{
+								"Call pindoc.artifact.search with type=Task and the same area, or read the related Task(s), then retry with a fresh receipt.",
+							},
+							NextTools:       []string{"pindoc.artifact.search", "pindoc.artifact.read"},
+							PatchableFields: []string{"basis.search_receipt"},
+							Related:         related,
+						}, nil
+					}
+				}
 			}
 
 			// --- Resolve supersede_of target first (if set) --------------
@@ -596,6 +635,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 					WHERE project_id = $1
 					  AND lower(title) = lower($2)
 					  AND status <> 'archived'
+					  AND status <> 'superseded'
 					LIMIT 1
 				`, projectID, in.Title).Scan(&existingID, &existingSlug)
 				if err == nil {
@@ -633,31 +673,51 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 					candidates, err := findSemanticConflicts(ctx, deps, projectID, in.Title, in.BodyMarkdown)
 					if err != nil {
 						deps.Logger.Warn("semantic conflict check failed — skipping gate", "err", err)
-					} else if len(candidates) > 0 {
-						rel := make([]string, 0, len(candidates))
-						related := make([]RelatedRef, 0, len(candidates))
-						for _, c := range candidates {
-							rel = append(rel, fmt.Sprintf("[%s] %s — /p/%s/wiki/%s (distance %.3f)", c.Type, c.Title, scope.ProjectSlug, c.Slug, c.Distance))
-							related = append(related, makeRelated(
-								deps, scope, c.Slug, c.ArtifactID, c.Type, c.Title,
-								fmt.Sprintf("cosine distance %.3f", c.Distance),
-							))
+					} else if in.Type == "Task" && len(candidates) > 0 {
+						taskCandidates, err := filterTaskSemanticCandidates(ctx, deps, projectID, areaID, candidates)
+						if err != nil {
+							return nil, artifactProposeOutput{}, fmt.Errorf("filter task semantic conflicts: %w", err)
 						}
-						return nil, artifactProposeOutput{
-							Status:    "not_ready",
-							ErrorCode: "POSSIBLE_DUP",
-							Failed:    []string{"POSSIBLE_DUP"},
-							Checklist: []string{
-								fmt.Sprintf(i18n.T(lang, "preflight.possible_dup"), candidates[0].Slug, candidates[0].Distance),
-							},
-							SuggestedActions: append(
-								[]string{i18n.T(lang, "suggested.read_similar")},
-								rel...,
-							),
-							NextTools:       defaultNextTools("POSSIBLE_DUP"),
-							PatchableFields: patchFieldsFor("POSSIBLE_DUP"),
-							Related:         related,
-						}, nil
+						if len(taskCandidates) > 0 {
+							unrelatedReason := strings.TrimSpace(in.UnrelatedReason)
+							if unrelatedReason != "" && utf8.RuneCountInString(unrelatedReason) < unrelatedReasonMinRunes {
+								return nil, artifactProposeOutput{
+									Status:    "not_ready",
+									ErrorCode: "UNRELATED_REASON_TOO_SHORT",
+									Failed:    []string{"UNRELATED_REASON_TOO_SHORT"},
+									Checklist: []string{
+										fmt.Sprintf("unrelated_reason must be at least %d characters when bypassing active Task semantic conflicts.", unrelatedReasonMinRunes),
+									},
+									PatchableFields: []string{"unrelated_reason"},
+								}, nil
+							}
+							if unrelatedReason == "" {
+								rel := make([]string, 0, len(candidates))
+								related := make([]RelatedRef, 0, len(taskCandidates))
+								for _, c := range taskCandidates {
+									rel = append(rel, fmt.Sprintf("[%s] %s — /p/%s/wiki/%s (distance %.3f)", c.Type, c.Title, scope.ProjectSlug, c.Slug, c.Distance))
+									related = append(related, makeRelated(
+										deps, scope, c.Slug, c.ArtifactID, c.Type, c.Title,
+										fmt.Sprintf("cosine distance %.3f", c.Distance),
+									))
+								}
+								return nil, artifactProposeOutput{
+									Status:    "not_ready",
+									ErrorCode: "TASK_SUPERSEDE_REQUIRED",
+									Failed:    []string{"TASK_SUPERSEDE_REQUIRED"},
+									Checklist: []string{
+										fmt.Sprintf("New Task semantically overlaps active Task %q (distance %.3f). Use supersede_of or provide unrelated_reason.", taskCandidates[0].Slug, taskCandidates[0].Distance),
+									},
+									SuggestedActions: append(
+										[]string{"Read the candidate Task acceptance, then retry with supersede_of=<old-task-slug> or unrelated_reason=<why it does not overlap>."},
+										rel...,
+									),
+									NextTools:       []string{"pindoc.artifact.read", "pindoc.artifact.propose"},
+									PatchableFields: []string{"supersede_of", "unrelated_reason"},
+									Related:         related,
+								}, nil
+							}
+						}
 					}
 				}
 			}
@@ -692,6 +752,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			if bodyLocale == "" {
 				bodyLocale = "en"
 			}
+			commitMsgWarnings := applyCreateCommitMsgFallback(&in)
 
 			// --- INSERT + event in one tx --------------------------------
 			tx, err := deps.DB.Begin(ctx)
@@ -806,9 +867,10 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 					artifact_id, revision_number, title, body_markdown, body_hash, tags,
 					completeness, author_kind, author_id, author_version, commit_msg,
 					source_session_ref, revision_shape
-				) VALUES ($1, 1, $2, $3, $4, $5, $6, 'agent', $7, $8, 'initial', $9, 'body_patch')
+				) VALUES ($1, 1, $2, $3, $4, $5, $6, 'agent', $7, $8, $9, $10, 'body_patch')
 			`, newID, in.Title, in.BodyMarkdown, bodyHash(in.BodyMarkdown), in.Tags,
 				completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion),
+				in.CommitMsg,
 				buildSourceSessionRef(p, in),
 			); err != nil {
 				return nil, artifactProposeOutput{}, fmt.Errorf("initial revision insert: %w", err)
@@ -819,6 +881,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			}
 
 			warnings := createWarnings(ctx, deps, projectID, in.Title, in.BodyMarkdown)
+			warnings = append(warnings, commitMsgWarnings...)
 			warnings = append(warnings, pinPathWarnings(deps, in.Pins)...)
 			warnings = append(warnings, titleLengthWarnings(in.Title)...)
 			warnings = append(warnings, bodyH1Warnings(in.BodyMarkdown)...)
@@ -922,11 +985,11 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	var artifactID, projectID, currentBody, currentTitle, currentType, currentSlug string
 	var currentTags []string
 	var currentCompleteness string
-	var currentMetaRaw []byte
+	var currentMetaRaw, currentTaskMetaRaw []byte
 	var lastRev int
 	err := deps.DB.QueryRow(ctx, `
 		SELECT a.id::text, a.project_id::text, a.body_markdown, a.title, a.type, a.slug,
-		       a.tags, a.completeness, a.artifact_meta,
+		       a.tags, a.completeness, a.artifact_meta, a.task_meta,
 		       COALESCE((SELECT max(revision_number) FROM artifact_revisions WHERE artifact_id = a.id), 0)
 		FROM artifacts a
 		JOIN projects p ON p.id = a.project_id
@@ -934,7 +997,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		LIMIT 1
 	`, scope.ProjectSlug, ref).Scan(
 		&artifactID, &projectID, &currentBody, &currentTitle, &currentType, &currentSlug,
-		&currentTags, &currentCompleteness, &currentMetaRaw, &lastRev,
+		&currentTags, &currentCompleteness, &currentMetaRaw, &currentTaskMetaRaw, &lastRev,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, artifactProposeOutput{
@@ -1113,6 +1176,8 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		patchWarnings = append(patchWarnings, w...)
 	}
 
+	autoClaimedDone := shouldAutoClaimDone(currentType, currentTaskMetaRaw, in.BodyMarkdown)
+
 	// Optimistic lock: version provided but stale → VER_CONFLICT.
 	if *in.ExpectedVersion != lastRev {
 		return nil, artifactProposeOutput{
@@ -1231,13 +1296,16 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		       completeness   = $5,
 		       author_id      = $6,
 		       author_version = $7,
-		       task_meta      = COALESCE($8, task_meta),
+		       task_meta      = CASE
+		           WHEN $10::bool THEN jsonb_set(COALESCE(task_meta, '{}'::jsonb), '{status}', '"claimed_done"')
+		           ELSE COALESCE($8, task_meta)
+		       END,
 		       artifact_meta  = COALESCE($9::jsonb, artifact_meta),
 		       updated_at     = now()
 		 WHERE id = $1
 		RETURNING slug, COALESCE(published_at, now())
 	`, artifactID, in.Title, in.BodyMarkdown, in.Tags, completeness,
-		in.AuthorID, nullIfEmpty(in.AuthorVersion), taskMetaPatch, artifactMetaPatch,
+		in.AuthorID, nullIfEmpty(in.AuthorVersion), taskMetaPatch, artifactMetaPatch, autoClaimedDone,
 	).Scan(&slug, &publishedAt)
 	if err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("update head: %w", err)
@@ -2001,7 +2069,7 @@ func defaultNextTools(code string) []string {
 	switch code {
 	case "NO_SRCH", "RECEIPT_UNKNOWN", "RECEIPT_EXPIRED", "RECEIPT_WRONG_PROJECT", "RECEIPT_SUPERSEDED":
 		return []string{"pindoc.artifact.search", "pindoc.context.for_task"}
-	case "CONFLICT_EXACT_TITLE", "POSSIBLE_DUP":
+	case "CONFLICT_EXACT_TITLE", "POSSIBLE_DUP", "TASK_SUPERSEDE_REQUIRED", "TASK_ACTIVE_CONTEXT_REQUIRED":
 		return []string{"pindoc.artifact.read", "pindoc.artifact.propose"}
 	case "VER_CONFLICT", "FIELD_VALUE_RESERVED":
 		return []string{"pindoc.artifact.revisions", "pindoc.artifact.diff"}
@@ -2071,6 +2139,12 @@ func patchFieldsFor(code string) []string {
 		return []string{"commit_msg"}
 	case "POSSIBLE_DUP":
 		return []string{"update_of", "title"}
+	case "TASK_SUPERSEDE_REQUIRED":
+		return []string{"supersede_of", "unrelated_reason"}
+	case "UNRELATED_REASON_TOO_SHORT":
+		return []string{"unrelated_reason"}
+	case "TASK_ACTIVE_CONTEXT_REQUIRED":
+		return []string{"basis.search_receipt"}
 	case "CONFLICT_EXACT_TITLE":
 		return []string{"title", "update_of"}
 	case "REL_TARGET_NOT_FOUND":
@@ -2266,6 +2340,49 @@ func hasExplicitMetadataUpdate(in artifactProposeInput) bool {
 		in.ArtifactMeta != nil ||
 		in.Tags != nil ||
 		strings.TrimSpace(in.Completeness) != ""
+}
+
+func applyCreateCommitMsgFallback(in *artifactProposeInput) []string {
+	if strings.TrimSpace(in.CommitMsg) != "" {
+		in.CommitMsg = strings.TrimSpace(in.CommitMsg)
+		return nil
+	}
+	in.CommitMsg = fallbackCreateCommitMsg(in.Title)
+	return []string{"MISSING_COMMIT_MSG_ON_CREATE"}
+}
+
+func fallbackCreateCommitMsg(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "(untitled)"
+	}
+	return fmt.Sprintf("[fallback_missing_commit_msg] create artifact: %s", title)
+}
+
+func taskStatusFromJSON(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return ""
+	}
+	if s, ok := m["status"].(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return ""
+}
+
+func shouldAutoClaimDone(artifactType string, taskMetaRaw []byte, body string) bool {
+	if artifactType != "Task" {
+		return false
+	}
+	status := taskStatusFromJSON(taskMetaRaw)
+	if status != "" && status != "open" {
+		return false
+	}
+	resolved, total := countAcceptanceResolution(body)
+	return total > 0 && resolved == total
 }
 
 // ResolvedArtifactMeta is the server-resolved epistemic metadata that
@@ -2516,6 +2633,7 @@ const semanticAdvisoryThreshold = 0.30
 // POSSIBLE_DUP response. Two is usually enough — the top hit is the main
 // suspect, the runner-up is a tiebreak. More would bloat the response.
 const semanticConflictLimit = 2
+const unrelatedReasonMinRunes = 20
 
 type semanticCandidate struct {
 	ArtifactID string
@@ -2525,14 +2643,101 @@ type semanticCandidate struct {
 	Distance   float64
 }
 
+func receiptSnapshotsContainAny(snapshots []receipts.ArtifactRef, candidates []semanticCandidate) bool {
+	if len(snapshots) == 0 || len(candidates) == 0 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(snapshots))
+	for _, s := range snapshots {
+		seen[s.ArtifactID] = struct{}{}
+	}
+	for _, c := range candidates {
+		if _, ok := seen[c.ArtifactID]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func activeTasksInArea(ctx context.Context, deps Deps, projectID, areaID, excludeArtifactID string) ([]semanticCandidate, error) {
+	rows, err := deps.DB.Query(ctx, `
+		SELECT a.id::text, a.slug, a.type, a.title, 0::float8 AS distance
+		FROM artifacts a
+		WHERE a.project_id = $1::uuid
+		  AND a.area_id = $2::uuid
+		  AND ($3::text = '' OR a.id <> $3::uuid)
+		  AND a.type = 'Task'
+		  AND a.status <> 'archived'
+		  AND a.status <> 'superseded'
+		  AND COALESCE(NULLIF(a.task_meta->>'status', ''), 'open') IN ('open', 'claimed_done')
+		ORDER BY a.updated_at DESC
+		LIMIT 20
+	`, projectID, areaID, excludeArtifactID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []semanticCandidate
+	for rows.Next() {
+		var c semanticCandidate
+		if err := rows.Scan(&c.ArtifactID, &c.Slug, &c.Type, &c.Title, &c.Distance); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func filterTaskSemanticCandidates(ctx context.Context, deps Deps, projectID, areaID string, candidates []semanticCandidate) ([]semanticCandidate, error) {
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	ids := make([]string, 0, len(candidates))
+	byID := make(map[string]semanticCandidate, len(candidates))
+	for _, c := range candidates {
+		ids = append(ids, c.ArtifactID)
+		byID[c.ArtifactID] = c
+	}
+	rows, err := deps.DB.Query(ctx, `
+		SELECT a.id::text
+		FROM artifacts a
+		WHERE a.project_id = $1::uuid
+		  AND a.area_id = $2::uuid
+		  AND a.id = ANY($3::uuid[])
+		  AND a.type = 'Task'
+		  AND a.status <> 'archived'
+		  AND a.status <> 'superseded'
+		  AND COALESCE(NULLIF(a.task_meta->>'status', ''), 'open') IN ('open', 'claimed_done')
+	`, projectID, areaID, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []semanticCandidate
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		if c, ok := byID[id]; ok {
+			out = append(out, c)
+		}
+	}
+	return out, rows.Err()
+}
+
 // createWarnings runs a best-effort advisory vector check after an accepted
 // create and returns any soft warnings. Non-blocking — failure here never
-// rejects the write, since the hard gate (findSemanticConflicts) already
-// ran before insert. We only report when a close-but-not-dupe neighbour
-// exists, to nudge "you might want to supersede this next time".
+// rejects the write. We report close neighbours, including non-Task
+// matches that would have been hard conflicts before the Task-only
+// supersede gate, to nudge "you might want to supersede this next time".
 func createWarnings(ctx context.Context, deps Deps, projectID, title, body string) []string {
 	if deps.Embedder == nil || deps.Embedder.Info().Name == "stub" {
 		return nil
+	}
+	conflicts, err := findSemanticConflicts(ctx, deps, projectID, title, body)
+	if err == nil && len(conflicts) > 0 {
+		return []string{"RECOMMEND_READ_BEFORE_CREATE"}
 	}
 	cands, err := findSemanticAdvisories(ctx, deps, projectID, title, body)
 	if err != nil || len(cands) == 0 {
@@ -2941,7 +3146,9 @@ func findSemanticAdvisories(ctx context.Context, deps Deps, projectID, title, bo
 			c.embedding <=> $1::vector AS distance
 		FROM artifact_chunks c
 		JOIN artifacts a ON a.id = c.artifact_id
-		WHERE a.project_id = $2 AND a.status <> 'archived'
+		WHERE a.project_id = $2
+		  AND a.status <> 'archived'
+		  AND a.status <> 'superseded'
 		ORDER BY c.artifact_id, distance
 	`, qVec, projectID)
 	if err != nil {
@@ -3002,7 +3209,9 @@ func findSemanticConflicts(ctx context.Context, deps Deps, projectID, title, bod
 			c.embedding <=> $1::vector AS distance
 		FROM artifact_chunks c
 		JOIN artifacts a ON a.id = c.artifact_id
-		WHERE a.project_id = $2 AND a.status <> 'archived'
+		WHERE a.project_id = $2
+		  AND a.status <> 'archived'
+		  AND a.status <> 'superseded'
 		ORDER BY c.artifact_id, distance
 	`, qVec, projectID)
 	if err != nil {

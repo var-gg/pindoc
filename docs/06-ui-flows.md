@@ -82,12 +82,12 @@ $ cd my-project
 $ pindoc init
 
 [1/7] Server 감지
-  로컬 localhost:5733 감지 → 자동 연결
+  로컬 localhost:5830 감지 → 자동 연결
   또는 "Pindoc 서버 URL" 입력
-  또는 "docker compose up 할까요?" 자동 기동
+  또는 "local daemon을 기동할까요?" 자동 안내
 
 [2/7] 인증
-  로컬: 자동 (~/.pindoc/token)
+  로컬: trusted_local (loopback, header 없음)
   도메인: GitHub OAuth 브라우저 오픈
 
 [3/7] Project 선택/생성
@@ -107,9 +107,9 @@ $ pindoc init
   ☐ ML/AI (skeleton)
   ☐ Mobile (skeleton)
 
-[5/7] Agent token 자동 발급
-  ✓ ~/.pindoc/tokens/shop-fe.token
-  ✓ 서버에 writer role 등록
+[5/7] Project scope 확인
+  ✓ PINDOC.md frontmatter에 project_slug 기록
+  ✓ MCP tool call은 project_slug per-call 전달
 
 [6/7] MCP 클라이언트 자동 설정
   ✓ Claude Code → ~/.config/claude-code/mcp.json
@@ -139,8 +139,8 @@ $ pindoc init
   {
     "mcpServers": {
       "pindoc": {
-        "url": "http://localhost:5733/mcp",
-        "headers": { "Authorization": "Bearer pindoc_xxx..." }
+        "type": "http",
+        "url": "http://127.0.0.1:5830/mcp"
       }
     }
   }

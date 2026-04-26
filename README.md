@@ -7,8 +7,10 @@
 모든 쓰기는 코딩 에이전트(Claude Code / Cursor / Cline / Codex)를 통해 일어나고,
 사람은 승인·거절·방향 제시만 합니다. 모든 문서는 코드 커밋·파일 경로에 **핀(pin)** 됩니다.
 
-`var.gg` 생태계의 첫 플래그십 제품. Self-host first — `docker compose up`
-한 번이면 Postgres + pgvector + TEI + MCP 서버가 전부 로컬에서 뜹니다.
+`var.gg` 생태계의 첫 플래그십 제품. Self-host first. 최종 로컬 부팅 목표는
+`docker compose up -d` 한 번으로 Postgres + pgvector + Pindoc HTTP daemon까지
+뜨는 흐름이다. 현재 M1 개발 경로는 Docker Compose로 DB를 띄우고,
+`pindoc-server -http 127.0.0.1:5830`를 host-native daemon으로 실행한다.
 
 Apache License 2.0. 기여 가이드와 CLA는 [CONTRIBUTING.md](CONTRIBUTING.md) 참조.
 
@@ -84,25 +86,44 @@ M1 + 3차 peer review 반영 + 1호 사용자 dogfood readiness 완료.
 
 상세: [docs/12-m1-implementation-plan.md](docs/12-m1-implementation-plan.md) · 외부 피어리뷰 판단: [docs/14-peer-review-response.md](docs/14-peer-review-response.md)
 
-## Quick start (M1 개발자)
+## Quick start (현재 M1 개발자 경로)
+
+현재 repo의 `docker-compose.yml`은 Postgres와 Pindoc HTTP daemon을 기본
+서비스로 띄운다. TEI embedder는 옵션 profile이고, 기본 embedder는 daemon
+프로세스 안의 Gemma provider다.
 
 **사전 요구사항** (Windows/macOS/Linux 공통):
-- Go **1.24+** (`winget install GoLang.Go` / `brew install go`)
 - Docker **27+** (Desktop 또는 engine)
-- Node **20.15+** & pnpm **10+**
+- Go **1.24+** / Node **20.15+** & pnpm **10+** — host-native 개발이나
+  Vite dev server를 직접 돌릴 때만 필요
 
 ```bash
-# DB 기동 (Postgres 16 + pgvector)
+# Postgres + Pindoc HTTP daemon + Reader SPA
+docker compose up -d --build
+
+# 선택: HTTP embedder를 명시적으로 쓸 때만 TEI 기동.
+# daemon 컨테이너는 host PINDOC_EMBED_PROVIDER를 읽지 않고
+# PINDOC_COMPOSE_EMBED_PROVIDER로만 opt-in한다.
+# docker compose --profile tei up -d embed
+```
+
+Windows에서 기존 NSSM 서비스가 아직 5830 포트를 점유 중이면, 관리자
+PowerShell에서 제거하기 전까지 Docker daemon을 임시 포트로 띄운다.
+
+```powershell
+$env:PINDOC_DAEMON_PORT = "5832"
+docker compose up -d --build pindoc-server-daemon
+```
+
+Host-native 개발 경로가 필요하면 아래처럼 직접 실행할 수 있다.
+
+```bash
 docker compose up -d db
-
-# Go 의존성
 go mod tidy
-
-# HTTP 데몬 빌드 + 직접 실행
 go build -o bin/pindoc-server ./cmd/pindoc-server
 ./bin/pindoc-server -http 127.0.0.1:5830
 
-# 또는 정적 웹 미리보기 (디자인 시스템 프로토타입)
+# 또는 정적 웹 미리보기 (디자인 시스템 프로토타입, daemon과 같은 포트라 동시에 실행 불가)
 cd web && pnpm install && pnpm dev   # http://localhost:5830
 ```
 
@@ -119,11 +140,15 @@ powershell -ExecutionPolicy Bypass -File scripts\install-user-mode.ps1
 powershell -ExecutionPolicy Bypass -File scripts\dev-restart.ps1
 ```
 
-**MCP 클라이언트에 등록**: 전역 또는 워크스페이스 MCP 설정에 아래 URL 하나를 넣는다. 새 세션에서 `pindoc.ping` 실행하면 handshake 성공.
+**MCP 클라이언트에 등록**: 전역 또는 워크스페이스 MCP 설정에 아래 URL 하나를 넣는다. 새 세션에서 `pindoc.ping` 실행하면 handshake 성공. 임시 포트 `5832`로 띄웠다면 URL 포트만 `5832`로 바꾼다.
 
 ```jsonc
 { "mcpServers": { "pindoc": { "type": "http", "url": "http://127.0.0.1:5830/mcp" } } }
 ```
+
+이 URL은 account-level entrypoint다. 프로젝트 scope는 URL path가 아니라 각
+MCP tool input의 `project_slug`로 결정된다. 워크스페이스의 기본 project는
+`PINDOC.md` frontmatter(`project_slug`)가 명시 source다.
 
 ### 데몬 모드 — 다수 워크스페이스에서 같은 Pindoc 인스턴스 attach
 
@@ -140,7 +165,15 @@ go build -o bin/pindoc-server ./cmd/pindoc-server
 
 `pindoc.harness.install`이 생성하는 `PINDOC.md`는 YAML frontmatter(`project_slug`, `project_id`, `locale`, `schema_version`)를 포함한다. Frontmatter는 이후 workspace detection의 명시적 source이고, Section 12는 chip/parallel work가 시작·진행·merge·중단될 때 Pindoc Task status와 acceptance checkbox를 어떻게 갱신할지 규정한다.
 
-Windows 기본 운영은 `scripts\install-user-mode.ps1` 이다. 기존 `scripts\install-service.ps1` NSSM 경로는 deprecated legacy 옵션으로만 남긴다. macOS에서는 `~/Library/LaunchAgents/dev.pindoc.server.plist`에 `RunAtLoad` + `KeepAlive`를 두고 `pindoc-server -http 127.0.0.1:5830`을 실행하면 된다. Linux에서는 `~/.config/systemd/user/pindoc-server.service`를 만들고 `systemctl --user enable --now pindoc-server`를 사용한다.
+Windows 기본 운영은 `scripts\install-user-mode.ps1` 이다. 기존
+`scripts\install-service.ps1` NSSM 경로는 deprecated legacy 옵션으로만 남긴다.
+지금 Windows에서 재시작 권한 문제가 나면 legacy NSSM 서비스가 아직 남아있는
+상태다. 관리자 PowerShell에서 `scripts\uninstall-service.ps1`을 한 번 실행한 뒤,
+일반 PowerShell에서 `scripts\install-user-mode.ps1`로 전환한다. macOS에서는
+`~/Library/LaunchAgents/dev.pindoc.server.plist`에 `RunAtLoad` + `KeepAlive`를
+두고 `pindoc-server -http 127.0.0.1:5830`을 실행하면 된다. Linux에서는
+`~/.config/systemd/user/pindoc-server.service`를 만들고
+`systemctl --user enable --now pindoc-server`를 사용한다.
 
 상세 설계: Decision `mcp-scope-account-level-industry-standard`.
 

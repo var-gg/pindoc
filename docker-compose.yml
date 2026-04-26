@@ -1,18 +1,20 @@
 # Pindoc local dev stack.
 #
-# Default: Postgres 16 + pgvector only. Embedding runs in-process via the
-# bundled Gemma Q4 ONNX provider (2026-04-22 Decision, Phase 17) so no
-# embedding sidecar is required for day-to-day dev.
+# Default: Postgres 16 + pgvector + pindoc-server HTTP daemon. Embedding
+# runs in-process via the bundled Gemma Q4 ONNX provider (2026-04-22
+# Decision, Phase 17) so no embedding sidecar is required for day-to-day dev.
 #
 # Optional: Text Embeddings Inference (TEI) behind the `tei` profile.
 # Opt in with `docker compose --profile tei up` when running with
-# PINDOC_EMBED_PROVIDER=http (see Makefile's server-run-http /
-# api-run-http targets). The HuggingFace cache volume is kept across
+# PINDOC_COMPOSE_EMBED_PROVIDER=http. The variable is intentionally
+# compose-specific so a stray host PINDOC_EMBED_PROVIDER=stub cannot leak
+# into the daemon container. The HuggingFace cache volume is kept across
 # profile toggles so re-enabling doesn't re-download ~500MB of weights.
 #
-# Upgrade path: when we want container-everything for a deploy artefact,
-# split this into docker-compose.prod.yml. For now, host-native dev +
-# Postgres-only is the lowest-friction setup.
+# PINDOC_DAEMON_PORT overrides the host port. This is useful while a legacy
+# Windows NSSM service still owns 5830:
+#
+#   PINDOC_DAEMON_PORT=5832 docker compose up -d --build pindoc-server-daemon
 
 services:
   db:
@@ -45,6 +47,50 @@ services:
       - max_connections=50
       - -c
       - work_mem=8MB
+
+  pindoc-server-daemon:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pindoc-server:local
+    container_name: pindoc-server-daemon
+    environment:
+      PINDOC_DATABASE_URL: postgres://pindoc:pindoc_dev@db:5432/pindoc?sslmode=disable
+      PINDOC_HTTP_MCP_ADDR: 0.0.0.0:5830
+      PINDOC_PROJECT: ${PINDOC_PROJECT:-pindoc}
+      PINDOC_LOG_LEVEL: ${PINDOC_LOG_LEVEL:-info}
+      PINDOC_USER_LANGUAGE: ${PINDOC_USER_LANGUAGE:-ko}
+      PINDOC_USER_NAME: ${PINDOC_USER_NAME:-}
+      PINDOC_USER_EMAIL: ${PINDOC_USER_EMAIL:-}
+      PINDOC_PUBLIC_BASE_URL: ${PINDOC_PUBLIC_BASE_URL:-http://127.0.0.1:${PINDOC_DAEMON_PORT:-5830}}
+      # Do not pass host PINDOC_EMBED_PROVIDER through here. A one-off
+      # `PINDOC_EMBED_PROVIDER=stub docker compose up` previously made the
+      # daemon silently index with hash embeddings. Compose users must opt
+      # in through the compose-specific name below.
+      PINDOC_EMBED_PROVIDER: ${PINDOC_COMPOSE_EMBED_PROVIDER:-}
+      PINDOC_EMBED_GEMMA_VARIANT: ${PINDOC_EMBED_GEMMA_VARIANT:-}
+      PINDOC_EMBED_ENDPOINT: ${PINDOC_COMPOSE_EMBED_ENDPOINT:-}
+      PINDOC_EMBED_MODEL: ${PINDOC_COMPOSE_EMBED_MODEL:-}
+      PINDOC_EMBED_DIM: ${PINDOC_COMPOSE_EMBED_DIM:-}
+      PINDOC_EMBED_MAX_TOKENS: ${PINDOC_COMPOSE_EMBED_MAX_TOKENS:-}
+      PINDOC_EMBED_PREFIX_QUERY: ${PINDOC_COMPOSE_EMBED_PREFIX_QUERY:-}
+      PINDOC_EMBED_PREFIX_DOCUMENT: ${PINDOC_COMPOSE_EMBED_PREFIX_DOCUMENT:-}
+      PINDOC_EMBED_MODEL_DIR: /var/lib/pindoc/cache/models/embeddinggemma-300m
+      PINDOC_EMBED_RUNTIME_DIR: /var/lib/pindoc/cache/runtime
+    ports:
+      - "127.0.0.1:${PINDOC_DAEMON_PORT:-5830}:5830"
+    volumes:
+      - pindoc_cache:/var/lib/pindoc/cache
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5830/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
 
   # Text Embeddings Inference — HuggingFace's Rust server that exposes any
   # sentence-transformer-compatible model as an OpenAI-style /v1/embeddings
@@ -100,5 +146,7 @@ services:
 volumes:
   pindoc_db:
     name: pindoc_db
+  pindoc_cache:
+    name: pindoc_cache
   pindoc_embed_cache:
     name: pindoc_embed_cache

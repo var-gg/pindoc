@@ -158,6 +158,7 @@ func NewServer(opts Options) *Server {
 	// task.queue is the Reader-parity read model agents should call before
 	// claiming the pending Task queue is empty.
 	tools.RegisterTaskQueue(s, deps)
+	tools.RegisterTaskAcceptanceTransition(s, deps)
 	tools.RegisterTaskAssign(s, deps)
 	tools.RegisterTaskBulkAssign(s, deps)
 

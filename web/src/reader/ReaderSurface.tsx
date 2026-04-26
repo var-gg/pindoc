@@ -156,6 +156,7 @@ export function ReaderSurface({
         <div className="art-body">
           <PindocMarkdown
             source={detail.body_markdown}
+            projectSlug={projectSlug}
             collapseStructureSections={hasLiveSidecarData}
           />
         </div>

@@ -75,7 +75,7 @@ func TestTaskStatusBucket(t *testing.T) {
 
 func TestTaskQueueNoticeSeparatesAcceptanceView(t *testing.T) {
 	notice := taskQueueNotice()
-	for _, want := range []string{"Reader", "pending", "task_meta.status", "pindoc.scope.in_flight"} {
+	for _, want := range []string{"Reader", "pending", "task_meta.status", "pindoc.ping", "claimed_done", "pindoc.scope.in_flight"} {
 		if !strings.Contains(notice, want) {
 			t.Fatalf("notice %q missing %q", notice, want)
 		}
@@ -85,7 +85,7 @@ func TestTaskQueueNoticeSeparatesAcceptanceView(t *testing.T) {
 func TestTaskQueueWarnings(t *testing.T) {
 	bodyDone := "## Acceptance\n- [x] implemented\n- [-] deferred with reason\n"
 	got := taskQueueWarnings("open", bodyDone)
-	if len(got) != 1 || got[0] != "TASK_ACCEPTANCE_DONE_STATUS_OPEN" {
+	if len(got) != 1 || got[0] != taskWarningAcceptanceReconcilePending {
 		t.Fatalf("open + resolved acceptance warnings = %v", got)
 	}
 
@@ -94,8 +94,8 @@ func TestTaskQueueWarnings(t *testing.T) {
 		t.Fatalf("missing + resolved acceptance warning count = %d, want 2 (%v)", len(got), got)
 	}
 	wantSeen := map[string]bool{
-		"TASK_STATUS_MISSING":              false,
-		"TASK_ACCEPTANCE_DONE_STATUS_OPEN": false,
+		taskWarningStatusMissing:              false,
+		taskWarningAcceptanceReconcilePending: false,
 	}
 	for _, w := range got {
 		if _, ok := wantSeen[w]; ok {

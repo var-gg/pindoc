@@ -116,7 +116,7 @@ func main() {
 		"multilingual", info.Multilingual,
 	)
 	if info.Name == "stub" {
-		logger.Warn("using stub embedder — retrieval quality is hash-based, not semantic. Set PINDOC_EMBED_PROVIDER=http + PINDOC_EMBED_ENDPOINT=... to enable real embeddings.")
+		logger.Warn(stubEmbedderWarning())
 	}
 
 	// Phase 14a: operator-editable settings, loaded from DB with one-time
@@ -315,4 +315,16 @@ func agentIDSource() string {
 		return "env"
 	}
 	return "generated"
+}
+
+func stubEmbedderWarning() string {
+	return strings.TrimSpace(`
++------------------------------------------------------------+
+| EMBEDDER WARNING                                           |
+| PINDOC_EMBED_PROVIDER=stub is active.                      |
+| Search quality is hash-based, not semantic.                |
+| For normal Docker boot, unset PINDOC_COMPOSE_EMBED_PROVIDER |
+| so the default Gemma embedder starts.                      |
+| Re-embed affected artifacts after returning to real search. |
++------------------------------------------------------------+`)
 }

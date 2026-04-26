@@ -18,6 +18,9 @@ const (
 	taskQueueSemantics = "reader_tasks_queue_v1"
 	taskStatusMissing  = "missing_status"
 	taskStatusOther    = "other"
+
+	taskWarningStatusMissing              = "TASK_STATUS_MISSING"
+	taskWarningAcceptanceReconcilePending = "TASK_ACCEPTANCE_DONE_RECONCILE_PENDING"
 )
 
 type taskQueueInput struct {
@@ -286,17 +289,17 @@ func newTaskStatusCounts() map[string]int {
 func taskQueueWarnings(statusBucket, body string) []string {
 	warnings := []string{}
 	if statusBucket == taskStatusMissing {
-		warnings = append(warnings, "TASK_STATUS_MISSING")
+		warnings = append(warnings, taskWarningStatusMissing)
 	}
 	if statusBucket == "open" || statusBucket == taskStatusMissing {
 		done, total := countAcceptanceCheckboxes(body)
 		if total > 0 && done == total {
-			warnings = append(warnings, "TASK_ACCEPTANCE_DONE_STATUS_OPEN")
+			warnings = append(warnings, taskWarningAcceptanceReconcilePending)
 		}
 	}
 	return warnings
 }
 
 func taskQueueNotice() string {
-	return "Reader parity: pending means task_meta.status is missing or open. This is not derived from acceptance checkboxes; use pindoc.scope.in_flight for unresolved [ ]/[~] checklist items."
+	return "Reader parity: pending means task_meta.status is missing or open. Acceptance-complete open Tasks are transient reconcile candidates; pindoc.ping auto-transitions them to claimed_done. Use pindoc.scope.in_flight for unresolved [ ]/[~] checklist items."
 }

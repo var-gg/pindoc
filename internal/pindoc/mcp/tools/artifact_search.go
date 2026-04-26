@@ -13,12 +13,13 @@ import (
 )
 
 type artifactSearchInput struct {
-	ProjectSlug      string   `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
-	Query            string   `json:"query" jsonschema:"user's natural-language question"`
-	TopK             int      `json:"top_k,omitempty" jsonschema:"default 5, max 20"`
-	Types            []string `json:"types,omitempty" jsonschema:"filter by artifact type (Decision, Debug, ...)"`
-	Areas            []string `json:"areas,omitempty" jsonschema:"filter by area slug"`
-	IncludeTemplates bool     `json:"include_templates,omitempty" jsonschema:"surface _template_* artifacts in hits; default false matches artifact list + context.for_task defaults"`
+	ProjectSlug       string   `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	Query             string   `json:"query" jsonschema:"user's natural-language question"`
+	TopK              int      `json:"top_k,omitempty" jsonschema:"default 5, max 20"`
+	Types             []string `json:"types,omitempty" jsonschema:"filter by artifact type (Decision, Debug, ...)"`
+	Areas             []string `json:"areas,omitempty" jsonschema:"filter by area slug"`
+	IncludeTemplates  bool     `json:"include_templates,omitempty" jsonschema:"surface _template_* artifacts in hits; default false matches artifact list + context.for_task defaults"`
+	IncludeSuperseded bool     `json:"include_superseded,omitempty" jsonschema:"surface superseded artifacts in hits; default false hides replaced artifacts"`
 }
 
 // EmbedderInfo is a compact descriptor of which embedder served a response.
@@ -127,6 +128,7 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 					JOIN areas    ar ON ar.id = a.area_id
 					WHERE p.slug = $2
 					  AND a.status <> 'archived'
+					  AND ($7::bool OR a.status <> 'superseded')
 					  AND ($3::text[] IS NULL OR a.type   = ANY($3))
 					  AND ($4::text[] IS NULL OR ar.slug  = ANY($4))
 					  AND ($6::bool OR NOT starts_with(a.slug, '_template_'))
@@ -158,7 +160,7 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 				areasArg = in.Areas
 			}
 
-			rows, err := deps.DB.Query(ctx, sql, qVec, scope.ProjectSlug, typesArg, areasArg, in.TopK, in.IncludeTemplates)
+			rows, err := deps.DB.Query(ctx, sql, qVec, scope.ProjectSlug, typesArg, areasArg, in.TopK, in.IncludeTemplates, in.IncludeSuperseded)
 			if err != nil {
 				return nil, artifactSearchOutput{}, fmt.Errorf("search query: %w", err)
 			}

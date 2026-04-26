@@ -35,6 +35,7 @@ var RegisteredTools = []string{
 	"pindoc.user.update",
 	"pindoc.scope.in_flight",
 	"pindoc.task.queue",
+	"pindoc.task.acceptance.transition",
 	"pindoc.task.assign",
 	"pindoc.task.bulk_assign",
 }

@@ -125,8 +125,8 @@ cd A:/vargg-workspace/pindoc
 mv bin/pindoc-server.exe bin/pindoc-server.exe~  # 구 바이너리 백업
 mv bin/pindoc-server.new.exe bin/pindoc-server.exe
 
-# 1. DB 기동 (embed 컨테이너는 더 이상 필요 없음 — gemma bundled)
-docker compose up -d db
+# 1. DB + daemon 기동 (embed 컨테이너는 더 이상 필요 없음 — gemma bundled)
+docker compose up -d --build
 
 # 2. pindoc-api 기동 — 환경변수 최소 세팅
 #    PINDOC_REPO_ROOT: pin path server-side 검증 활성화 (Phase 17 follow-up)
@@ -137,12 +137,14 @@ PINDOC_REPO_ROOT="$PWD" ./bin/pindoc-api.exe &
 cd web && pnpm dev
 # → http://localhost:5830/p/pindoc/wiki 접속
 
-# 4. health check — embedder.name == "embeddinggemma" 확인
-curl -s http://127.0.0.1:5831/api/health
-curl -s http://127.0.0.1:5831/api/config
+# 4. health check — daemon은 MCP + Reader API + /health를 함께 서빙
+curl -s http://127.0.0.1:5830/health
+curl -s http://127.0.0.1:5830/api/config
 ```
 
 **최초 cold start**: onnxruntime shared lib + 모델 가중치 ~500MB 자동 download, ~12초 소요. 이후 실행은 cache hit으로 즉시.
+
+**Stub fallback 사고 회복 절차**: Compose daemon은 host `PINDOC_EMBED_PROVIDER`를 전달하지 않는다. TEI를 실험할 때는 `PINDOC_COMPOSE_EMBED_PROVIDER=http`처럼 compose 전용 변수로 opt-in한다. 로그에 `EMBEDDER WARNING` 박스가 보이면 stub로 발행된 artifact가 있을 수 있으니 env를 비우고 daemon을 재기동한 뒤 `go run ./cmd/pindoc-reembed`로 affected artifact를 재임베딩한다.
 
 ### MCP 연결 확인
 

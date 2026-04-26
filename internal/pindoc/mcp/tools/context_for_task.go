@@ -24,7 +24,8 @@ type contextForTaskInput struct {
 	// before proposing, not Fast-Landing candidates. The previous default
 	// (templates always surfaced) let an empty "연관" section in a template
 	// outrank real content on short task descriptions.
-	IncludeTemplates bool `json:"include_templates,omitempty" jsonschema:"surface _template_* artifacts in landings; default false matches artifact.search/list and the Reader UI"`
+	IncludeTemplates  bool `json:"include_templates,omitempty" jsonschema:"surface _template_* artifacts in landings; default false matches artifact.search/list and the Reader UI"`
+	IncludeSuperseded bool `json:"include_superseded,omitempty" jsonschema:"surface superseded artifacts in landings; default false hides replaced artifacts"`
 }
 
 type ContextLanding struct {
@@ -185,6 +186,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 					JOIN areas    ar ON ar.id = a.area_id
 					WHERE p.slug = $2
 					  AND a.status <> 'archived'
+					  AND ($6::bool OR a.status <> 'superseded')
 					  AND ($3::text[] IS NULL OR ar.slug = ANY($3))
 					  AND ($5::bool OR NOT starts_with(a.slug, '_template_'))
 					  AND COALESCE(a.artifact_meta->>'next_context_policy', '') <> 'excluded'
@@ -204,7 +206,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			if len(in.Areas) > 0 {
 				areasArg = in.Areas
 			}
-			rows, err := deps.DB.Query(ctx, sql, qVec, scope.ProjectSlug, areasArg, in.TopK, in.IncludeTemplates)
+			rows, err := deps.DB.Query(ctx, sql, qVec, scope.ProjectSlug, areasArg, in.TopK, in.IncludeTemplates, in.IncludeSuperseded)
 			if err != nil {
 				return nil, contextForTaskOutput{}, fmt.Errorf("query: %w", err)
 			}
@@ -448,7 +450,7 @@ func areaArtifactCounts(ctx context.Context, deps Deps, projectSlug string) (map
 		SELECT ar.slug, count(a.id)::int
 		FROM areas ar
 		JOIN projects p ON p.id = ar.project_id
-		LEFT JOIN artifacts a ON a.area_id = ar.id AND a.status <> 'archived'
+		LEFT JOIN artifacts a ON a.area_id = ar.id AND a.status <> 'archived' AND a.status <> 'superseded'
 		WHERE p.slug = $1
 		GROUP BY ar.slug
 	`, projectSlug)

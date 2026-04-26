@@ -52,6 +52,7 @@ var warningSeverityCatalog = map[string]string{
 	"PIN_PATH_NONEXISTENT":           SeverityWarn,
 	"PIN_PATH_OUTSIDE_REPO":          SeverityWarn,
 	"SECTION_DUPLICATES_EDGES":       SeverityWarn,
+	"MISSING_COMMIT_MSG_ON_CREATE":   SeverityWarn,
 
 	// INFO — pointer / reminder.
 	"RECOMMEND_READ_BEFORE_CREATE": SeverityInfo,

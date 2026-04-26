@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import mermaid from "mermaid";
 import { headingsFromBody, slugifyHeading } from "./slug";
 import { useI18n } from "../i18n";
+import { pindocUrlTransform } from "./urlTransform";
 import { isStructureOverlapHeading } from "./structureSections";
 
 // Initialize mermaid once per page. Theme follows the Pindoc dark/light
@@ -32,9 +33,11 @@ function ensureMermaid(): void {
  */
 export function PindocMarkdown({
   source,
+  projectSlug,
   collapseStructureSections = false,
 }: {
   source: string;
+  projectSlug?: string;
   collapseStructureSections?: boolean;
 }) {
   const blocks = useMemo(
@@ -51,12 +54,14 @@ export function PindocMarkdown({
             title={block.title}
             slug={block.slug}
             body={block.body}
+            projectSlug={projectSlug}
           />
         ) : (
           <MarkdownBlock
             key={`md-${i}`}
             source={block.source}
             headingSlugs={block.headingSlugs}
+            projectSlug={projectSlug}
           />
         ),
       )}
@@ -67,15 +72,18 @@ export function PindocMarkdown({
 function MarkdownBlock({
   source,
   headingSlugs,
+  projectSlug,
 }: {
   source: string;
   headingSlugs: string[];
+  projectSlug?: string;
 }) {
   let headingIndex = 0;
 
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
+      urlTransform={(url) => pindocUrlTransform(url, projectSlug)}
       components={{
         code(props) {
           const { className, children } = props;
@@ -186,10 +194,12 @@ function StructureOverlapSection({
   title,
   slug,
   body,
+  projectSlug,
 }: {
   title: string;
   slug: string;
   body: string;
+  projectSlug?: string;
 }) {
   const { t } = useI18n();
   return (
@@ -204,7 +214,7 @@ function StructureOverlapSection({
       <details className="structure-overlap-section__details">
         <summary>{t("reader.structure_expand")}</summary>
         {body ? (
-          <MarkdownBlock source={body} headingSlugs={[]} />
+          <MarkdownBlock source={body} headingSlugs={[]} projectSlug={projectSlug} />
         ) : (
           <p>{t("reader.structure_empty")}</p>
         )}
