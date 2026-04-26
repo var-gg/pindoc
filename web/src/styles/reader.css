@@ -110,6 +110,10 @@
   border-radius: var(--r-2);
   background: var(--bg-0);
 }
+.nav-help__card--area {
+  --area-color: var(--accent);
+  border-color: color-mix(in oklch, var(--area-color) 28%, var(--border));
+}
 .nav-help__card .type-chip,
 .nav-help__card .chip-area {
   margin-bottom: 6px;
@@ -174,9 +178,24 @@
 .side-item:hover { background: var(--bg-2); }
 .side-item.active { background: var(--bg-2); color: var(--fg-0); border-left-color: var(--accent); }
 .side-item.active .lucide { color: var(--fg-1); }
+.side-item--area {
+  --area-color: var(--accent);
+}
+.side-item--area.active {
+  border-left-color: var(--area-color);
+}
+.side-item--area .side-item__area-icon {
+  color: var(--area-color);
+}
+.side-item--area-child .side-item__area-icon {
+  opacity: 0.68;
+}
 .side-item.empty:not(.active) { color: var(--fg-3); }
 .side-item.empty:not(.active) .lucide,
 .side-item.empty:not(.active) .side-item__count { color: var(--fg-4); }
+.side-item--area.empty:not(.active) .side-item__area-icon {
+  color: color-mix(in oklch, var(--area-color) 48%, var(--fg-4));
+}
 .side-item__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-item__taxonomy { width: 12px; height: 12px; flex: 0 0 auto; margin-left: auto; color: var(--fg-4); }
 .side-item__taxonomy--fixed { color: var(--fg-3); }
@@ -692,22 +711,23 @@
   opacity: 0.95;
 }
 .mini-graph__edge--implements {
-  stroke: var(--type-task);
+  stroke: var(--relation-implements);
   stroke-width: 1.7;
 }
 .mini-graph__edge--references {
-  stroke: var(--accent);
+  stroke: var(--relation-references);
 }
 .mini-graph__edge--blocks,
 .mini-graph__edge--blocked-by {
-  stroke: var(--prio-p0);
+  stroke: var(--relation-blocks);
   stroke-width: 1.55;
 }
 .mini-graph__edge--relates-to {
+  stroke: var(--relation-relates-to);
   stroke-dasharray: 3 4;
 }
 .mini-graph__edge--translation-of {
-  stroke: var(--type-glossary);
+  stroke: var(--relation-translation-of);
   stroke-dasharray: 5 3;
 }
 .mini-graph__edge--supersedes {
@@ -867,15 +887,16 @@
   height: 12px;
 }
 .relation-card__relation {
+  --relation-color: var(--fg-3);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 20px;
   height: 20px;
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in oklch, var(--relation-color) 34%, var(--border));
   border-radius: var(--r-1);
-  color: var(--fg-3);
-  background: transparent;
+  color: var(--relation-color);
+  background: color-mix(in oklch, var(--relation-color) 9%, transparent);
 }
 .relation-card__relation .lucide {
   width: 12px;
@@ -907,6 +928,35 @@
 .provenance__row { display: grid; grid-template-columns: 72px 1fr; gap: 10px; font-family: var(--font-mono); font-size: 12px; padding: 5px 0; color: var(--fg-2); }
 .provenance__row .k { color: var(--fg-3); }
 .provenance__row .v { color: var(--fg-1); word-break: break-all; }
+.policy-enum-chip,
+.pin-kind-chip {
+  --meta-color: var(--fg-3);
+  --pin-color: var(--fg-3);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-height: 18px;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in oklch, var(--meta-color) 30%, var(--border));
+  border-radius: var(--r-1);
+  background: color-mix(in oklch, var(--meta-color) 8%, transparent);
+  color: var(--meta-color);
+  font-size: 10px;
+  line-height: 1.2;
+}
+.pin-kind-chip {
+  border-color: color-mix(in oklch, var(--pin-color) 30%, var(--border));
+  background: color-mix(in oklch, var(--pin-color) 8%, transparent);
+  color: var(--pin-color);
+  text-transform: uppercase;
+}
+.policy-enum-chip .lucide,
+.pin-kind-chip .lucide {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+}
 .sidecar-meta-author {
   display: flex;
   align-items: center;
@@ -1725,6 +1775,7 @@
 .chip-area {
   display: inline-flex;
   align-items: center;
+  gap: 5px;
   height: 20px;
   padding: 0 8px;
   font-family: var(--font-mono);
@@ -1733,6 +1784,17 @@
   border: 1px solid var(--border);
   background: var(--bg-2);
   color: var(--fg-2);
+}
+.chip-area--visual {
+  --area-color: var(--accent);
+  border-color: color-mix(in oklch, var(--area-color) 34%, var(--border));
+  background: color-mix(in oklch, var(--area-color) 9%, var(--bg-2));
+  color: var(--area-color);
+}
+.chip-area--visual .lucide {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
 }
 
 /* Blocked banner — shown on cards whose task_meta.status=blocked.

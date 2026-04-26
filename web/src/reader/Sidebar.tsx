@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, Folder, FolderOpen, FileText, Zap, Bug, Book, BookOpen, Hash, Check, Code, LayoutTemplate, Lock } from "lucide-react";
-import type { ComponentType } from "react";
+import { Check, ChevronDown, ChevronRight, FolderOpen, LayoutTemplate, Lock } from "lucide-react";
 import type { Area } from "../api/client";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
 import { compareAreas, isFixedTaxonomyArea, localizedAreaName } from "./areaLocale";
 import type { Aggregate } from "./useReaderData";
+import { visualArea, visualDescription, visualLabel, visualType } from "./visualLanguage";
+import { visualIconComponent } from "./visualLanguageIcons";
 
 type Props = {
   areas: Area[];
@@ -27,20 +28,6 @@ type Props = {
 
 // AreaNode is the tree-enriched Area: same fields + resolved children.
 type AreaNode = Area & { children: AreaNode[] };
-
-const TYPE_ICONS: Record<string, ComponentType<{ className?: string }>> = {
-  Decision: FileText,
-  Analysis: FileText,
-  Debug: Bug,
-  Flow: Zap,
-  Task: Check,
-  TC: Check,
-  Glossary: BookOpen,
-  Feature: Zap,
-  APIEndpoint: Code,
-  Screen: Book,
-  DataModel: Hash,
-};
 
 // buildAreaTree turns a flat list into a tree by parent_slug. Areas whose
 // parent_slug is unknown (or empty) are roots. Top-level rows follow the
@@ -97,7 +84,7 @@ export function Sidebar({
   showTemplates,
   onToggleTemplates,
 }: Props) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
 
   const regular = areas.filter((a) => !a.is_cross_cutting);
   const crossCutting = areas.filter((a) => a.is_cross_cutting);
@@ -123,6 +110,7 @@ export function Sidebar({
           selectedArea={selectedArea}
           onSelectArea={onSelectArea}
           t={t}
+          lang={lang}
         />
       ))}
       {crossCuttingTree.length > 0 && (
@@ -138,6 +126,7 @@ export function Sidebar({
               selectedArea={selectedArea}
               onSelectArea={onSelectArea}
               t={t}
+              lang={lang}
             />
           ))}
         </>
@@ -165,17 +154,20 @@ export function Sidebar({
               {t("sidebar.types")}
             </div>
             {types.map(({ key, count }) => {
-              const Icon = TYPE_ICONS[key] ?? FileText;
+              const typeVisual = visualType(key);
+              const Icon = visualIconComponent(typeVisual?.icon);
+              const label = typeVisual ? visualLabel(typeVisual, lang) : key;
+              const title = typeVisual ? visualDescription(typeVisual, lang) : t("sidebar.type_fixed_hint");
               return (
                 <button
                   type="button"
                   key={key}
                   className={`side-item${selectedType === key ? " active" : ""}`}
                   onClick={() => onSelectType(selectedType === key ? null : key)}
-                  title={t("sidebar.type_fixed_hint")}
+                  title={title}
                 >
                   <Icon className="lucide" />
-                  <span className="side-item__label">{key}</span>
+                  <span className="side-item__label">{label}</span>
                   <Lock
                     className="side-item__taxonomy side-item__taxonomy--fixed"
                     aria-label={t("sidebar.type_fixed_hint")}
@@ -233,12 +225,14 @@ function AreaTreeNode({
   selectedArea,
   onSelectArea,
   t,
+  lang,
 }: {
   node: AreaNode;
   level: number;
   selectedArea: string | null;
   onSelectArea: (slug: string | null) => void;
   t: (key: string) => string;
+  lang: string;
 }) {
   const selectedInside = containsSelected(node, selectedArea);
   // Default closed keeps the eight-domain taxonomy scannable; selected
@@ -251,6 +245,15 @@ function AreaTreeNode({
   const indent = { paddingLeft: 8 + level * 14 } as React.CSSProperties;
   const fixed = isFixedTaxonomyArea(node.slug);
   const taxonomyHint = fixed ? t("sidebar.area_fixed_hint") : t("sidebar.area_user_promoted_hint");
+  const areaVisual = visualArea(node.slug);
+  const AreaIcon = visualIconComponent(areaVisual?.icon ?? (active ? "FolderOpen" : "Folder"));
+  const areaLabel = areaVisual ? visualLabel(areaVisual, lang) : localizedAreaName(t, node.slug, node.name);
+  const visualHint = areaVisual ? visualDescription(areaVisual, lang) : "";
+  const areaTitle = areaNodeTitle(node, subtreeCount, [taxonomyHint, visualHint].filter(Boolean).join("\n"));
+  const style = {
+    ...indent,
+    ...(areaVisual ? { "--area-color": `var(${areaVisual.color_token})` } : {}),
+  } as React.CSSProperties & Record<"--area-color", string | undefined>;
 
   useEffect(() => {
     if (selectedInside) setExpanded(true);
@@ -260,10 +263,10 @@ function AreaTreeNode({
     <>
       <button
         type="button"
-        className={`side-item${active ? " active" : ""}${empty ? " empty" : ""}`}
-        style={indent}
+        className={`side-item side-item--area${level > 0 ? " side-item--area-child" : ""}${active ? " active" : ""}${empty ? " empty" : ""}`}
+        style={style}
         onClick={() => onSelectArea(active ? null : node.slug)}
-        title={areaNodeTitle(node, subtreeCount, taxonomyHint)}
+        title={areaTitle}
       >
         {hasChildren ? (
           <span
@@ -289,8 +292,8 @@ function AreaTreeNode({
         ) : (
           <span style={{ width: 14, display: "inline-block" }} />
         )}
-        {active ? <FolderOpen className="lucide" /> : <Folder className="lucide" />}
-        <span className="side-item__label">{localizedAreaName(t, node.slug, node.name)}</span>
+        <AreaIcon className="lucide side-item__area-icon" />
+        <span className="side-item__label">{areaLabel}</span>
         {fixed ? (
           <Lock
             className="side-item__taxonomy side-item__taxonomy--fixed"
@@ -312,6 +315,7 @@ function AreaTreeNode({
           selectedArea={selectedArea}
           onSelectArea={onSelectArea}
           t={t}
+          lang={lang}
         />
       ))}
     </>

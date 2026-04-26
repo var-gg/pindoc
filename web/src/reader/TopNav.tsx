@@ -8,6 +8,8 @@ import type { Project } from "../api/client";
 import type { Theme } from "./theme";
 import type { ReaderWidth } from "./readerWidth";
 import { typeChipClass } from "./typeChip";
+import { topLevelVisualAreaSlugs, visualDescription, visualLabel, visualLanguage } from "./visualLanguage";
+import { visualIconComponent } from "./visualLanguageIcons";
 
 type Props = {
   project: Project;
@@ -30,32 +32,6 @@ const WIDTH_OPTIONS: Array<{ mode: ReaderWidth; icon: ComponentType<{ className?
   { mode: "narrow", icon: AlignCenter, labelKey: "nav.width_narrow" },
   { mode: "default", icon: AlignJustify, labelKey: "nav.width_default" },
   { mode: "wide", icon: Maximize2, labelKey: "nav.width_wide" },
-];
-
-const HELP_TYPES = [
-  "Decision",
-  "Analysis",
-  "Task",
-  "Debug",
-  "Glossary",
-  "Flow",
-  "TC",
-  "Feature",
-  "APIEndpoint",
-  "Screen",
-  "DataModel",
-  "VerificationReport",
-];
-
-const HELP_AREAS = [
-  "strategy",
-  "context",
-  "experience",
-  "system",
-  "operations",
-  "governance",
-  "cross-cutting",
-  "misc",
 ];
 
 export function TopNav({
@@ -174,7 +150,7 @@ export function TopNav({
 }
 
 function HelpPopover({ surface }: { surface: SurfaceId }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -218,10 +194,10 @@ function HelpPopover({ surface }: { surface: SurfaceId }) {
           <section className="nav-help__section">
             <h3>{t("help.types_title")}</h3>
             <div className="nav-help__grid nav-help__grid--types">
-              {HELP_TYPES.map((type) => (
-                <div key={type} className="nav-help__card">
-                  <span className={typeChipClass(type)}>{type}</span>
-                  <p>{t(`help.type.${type}.description`)}</p>
+              {Object.values(visualLanguage.types).map((entry) => (
+                <div key={entry.canonical} className="nav-help__card">
+                  <span className={typeChipClass(entry.canonical)}>{visualLabel(entry, lang)}</span>
+                  <p>{visualDescription(entry, lang)}</p>
                 </div>
               ))}
             </div>
@@ -230,12 +206,20 @@ function HelpPopover({ surface }: { surface: SurfaceId }) {
           <section className="nav-help__section">
             <h3>{t("help.areas_title")}</h3>
             <div className="nav-help__grid">
-              {HELP_AREAS.map((area) => (
-                <div key={area} className="nav-help__card">
-                  <span className="chip-area">{t(`area.${area}`)}</span>
-                  <p>{t(`help.area.${area}.description`)}</p>
-                </div>
-              ))}
+              {topLevelVisualAreaSlugs.map((slug) => {
+                const entry = visualLanguage.areas[slug];
+                const Icon = visualIconComponent(entry.icon);
+                const style = { "--area-color": `var(${entry.color_token})` } as React.CSSProperties & Record<"--area-color", string>;
+                return (
+                  <div key={slug} className="nav-help__card nav-help__card--area" style={style}>
+                    <span className="chip-area chip-area--visual">
+                      <Icon className="lucide" />
+                      {visualLabel(entry, lang)}
+                    </span>
+                    <p>{visualDescription(entry, lang)}</p>
+                  </div>
+                );
+              })}
             </div>
           </section>
 

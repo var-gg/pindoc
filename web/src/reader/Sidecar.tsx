@@ -2,22 +2,10 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import {
   ArrowDownLeft,
-  ArrowLeftRight,
   ArrowUpRight,
-  Ban,
-  CheckCircle2,
   ChevronDown,
   ChevronRight,
-  Clipboard,
   History as HistoryIcon,
-  Languages,
-  Layers,
-  Link2,
-  Lock,
-  Pencil,
-  Puzzle,
-  Share2,
-  type LucideIcon,
 } from "lucide-react";
 import {
   api,
@@ -39,6 +27,18 @@ import { Toc } from "./Toc";
 import { headingsFromBody } from "./slug";
 import { typeChipClass } from "./typeChip";
 import { RevisionTypeBadge } from "./RevisionTypeBadge";
+import {
+  visualDescription,
+  visualLabel,
+  visualMetaEnum,
+  visualPin,
+  visualQuickAction,
+  visualRelation,
+  visualRelationClass,
+  visualTypeVariant,
+  type VisualMetaEnumKey,
+} from "./visualLanguage";
+import { visualIconComponent } from "./visualLanguageIcons";
 
 type Props = {
   projectSlug: string;
@@ -65,6 +65,7 @@ type Props = {
 };
 
 type CollapsibleKey = "provenance" | "policy" | "timeline" | "meta";
+type QuickActionID = Parameters<typeof visualQuickAction>[0];
 
 type CollapsedState = Record<CollapsibleKey, boolean>;
 
@@ -246,57 +247,54 @@ function IdentityStrip({ detail }: { detail: Artifact }) {
 }
 
 function QuickActions({ detail, artifactHref }: { detail: Artifact; artifactHref: string }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const agentRef = `pindoc://${detail.slug}`;
   const absoluteHref = typeof window === "undefined"
     ? artifactHref
     : `${window.location.origin}${artifactHref}`;
+  const actions: Array<
+    | { id: QuickActionID; kind: "button"; onClick: () => void }
+    | { id: QuickActionID; kind: "link"; to: string }
+  > = [
+    { id: "verify_request", kind: "button", onClick: () => copyToClipboard(`Verify ${agentRef}`) },
+    { id: "update_request", kind: "button", onClick: () => copyToClipboard(`Update ${agentRef}`) },
+    { id: "copy_link", kind: "button", onClick: () => copyToClipboard(absoluteHref) },
+    { id: "copy_agent_ref", kind: "button", onClick: () => copyToClipboard(agentRef) },
+    { id: "history", kind: "link", to: `${artifactHref}/history` },
+  ];
   return (
     <div className="sidecar-actions" aria-label={t("sidecar.quick_actions")}>
-      <button
-        type="button"
-        className="sidecar-action"
-        title={t("sidecar.quick_verify_request")}
-        aria-label={t("sidecar.quick_verify_request")}
-        onClick={() => copyToClipboard(`Verify ${agentRef}`)}
-      >
-        <CheckCircle2 className="lucide" />
-      </button>
-      <button
-        type="button"
-        className="sidecar-action"
-        title={t("sidecar.quick_update_request")}
-        aria-label={t("sidecar.quick_update_request")}
-        onClick={() => copyToClipboard(`Update ${agentRef}`)}
-      >
-        <Pencil className="lucide" />
-      </button>
-      <button
-        type="button"
-        className="sidecar-action"
-        title={t("sidecar.quick_copy_link")}
-        aria-label={t("sidecar.quick_copy_link")}
-        onClick={() => copyToClipboard(absoluteHref)}
-      >
-        <Share2 className="lucide" />
-      </button>
-      <button
-        type="button"
-        className="sidecar-action"
-        title={t("sidecar.quick_copy_agent_ref")}
-        aria-label={t("sidecar.quick_copy_agent_ref")}
-        onClick={() => copyToClipboard(agentRef)}
-      >
-        <Clipboard className="lucide" />
-      </button>
-      <Link
-        className="sidecar-action"
-        title={t("sidecar.quick_history")}
-        aria-label={t("sidecar.quick_history")}
-        to={`${artifactHref}/history`}
-      >
-        <HistoryIcon className="lucide" />
-      </Link>
+      {actions.map((action) => {
+        const entry = visualQuickAction(action.id);
+        const Icon = visualIconComponent(entry.icon);
+        const label = visualLabel(entry, lang);
+        const description = visualDescription(entry, lang);
+        if (action.kind === "link") {
+          return (
+            <Link
+              key={action.id}
+              className="sidecar-action"
+              title={description}
+              aria-label={label}
+              to={action.to}
+            >
+              <Icon className="lucide" />
+            </Link>
+          );
+        }
+        return (
+          <button
+            key={action.id}
+            type="button"
+            className="sidecar-action"
+            title={description}
+            aria-label={label}
+            onClick={action.onClick}
+          >
+            <Icon className="lucide" />
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -479,7 +477,7 @@ function MiniGraph({
   detail: Artifact;
   projectSlug: string;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const allEdges: MiniGraphEdge[] = [
     ...(detail.relates_to ?? []).map((edge) => ({ edge, direction: "out" as const })),
     ...(detail.related_by ?? []).map((edge) => ({ edge, direction: "in" as const })),
@@ -528,7 +526,7 @@ function MiniGraph({
                 markerEnd="url(#mini-graph-arrow)"
               />
               <text x={labelX} y={labelY} className="mini-graph__edge-label">
-                {direction === "out" ? "→" : "←"} {edge.relation}
+                {direction === "out" ? "→" : "←"} {relationLabel(edge.relation, lang)}
               </text>
             </g>
           );
@@ -579,11 +577,17 @@ function radialPositions(count: number): Array<{ x: number; y: number }> {
 }
 
 function typeClassSuffix(type: string): string {
-  return type.toLowerCase().replace(/[^a-z0-9]+/g, "") || "default";
+  const fallback = type.toLowerCase().replace(/[^a-z0-9]+/g, "") || "default";
+  return visualTypeVariant(type) ?? fallback;
 }
 
 function relationClass(relation: string): string {
-  return relation.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "default";
+  return visualRelationClass(relation);
+}
+
+function relationLabel(relation: string, lang: string): string {
+  const entry = visualRelation(relation);
+  return entry ? visualLabel(entry, lang) : relation;
 }
 
 // ConnectedArtifacts renders typed edges (relates_to / related_by) as
@@ -663,33 +667,19 @@ function ConnectedArtifacts({
 }
 
 function RelationIcon({ relation }: { relation: string }) {
-  const Icon = relationIconFor(relation);
+  const { lang } = useI18n();
+  const entry = visualRelation(relation);
+  const Icon = visualIconComponent(entry?.icon);
+  const label = entry ? visualLabel(entry, lang) : relation;
+  const description = entry ? visualDescription(entry, lang) : relation;
+  const style = entry
+    ? { "--relation-color": `var(${entry.color_token})` } as React.CSSProperties & Record<"--relation-color", string>
+    : undefined;
   return (
-    <span className="relation-card__relation" title={relation} aria-label={relation}>
+    <span className="relation-card__relation" title={description} aria-label={label} style={style}>
       <Icon className="lucide" />
     </span>
   );
-}
-
-function relationIconFor(relation: string): LucideIcon {
-  switch (relation) {
-    case "implements":
-      return Puzzle;
-    case "references":
-      return Link2;
-    case "blocks":
-      return Ban;
-    case "blocked_by":
-      return Lock;
-    case "supersedes":
-      return Layers;
-    case "translation_of":
-      return Languages;
-    case "relates_to":
-      return ArrowLeftRight;
-    default:
-      return Link2;
-  }
 }
 
 // ProvenanceBlock renders the epistemic + evidence data the Trust Card
@@ -730,21 +720,34 @@ function PolicyBlock({ meta }: { meta?: ArtifactMeta }) {
   return (
     <div className="sidecar-stack">
       <NextContextLine meta={meta} />
-      <PolicyRow label="source" value={meta.source_type} />
-      <PolicyRow label="consent" value={meta.consent_state} />
-      <PolicyRow label="confidence" value={meta.confidence} />
-      <PolicyRow label="audience" value={meta.audience} />
-      <PolicyRow label="verification" value={meta.verification_state} />
+      <PolicyRow enumKey="source_type" label="source" value={meta.source_type} />
+      <PolicyRow enumKey="consent_state" label="consent" value={meta.consent_state} />
+      <PolicyRow enumKey="confidence" label="confidence" value={meta.confidence} />
+      <PolicyRow enumKey="audience" label="audience" value={meta.audience} />
+      <PolicyRow enumKey="verification_state" label="verification" value={meta.verification_state} />
     </div>
   );
 }
 
-function PolicyRow({ label, value }: { label: string; value?: string }) {
+function PolicyRow({ enumKey, label, value }: { enumKey: VisualMetaEnumKey; label: string; value?: string }) {
+  const { lang } = useI18n();
   if (!value) return null;
+  const entry = visualMetaEnum(enumKey, value);
+  const Icon = visualIconComponent(entry?.icon);
+  const valueLabel = entry ? visualLabel(entry, lang) : value;
+  const description = entry ? visualDescription(entry, lang) : value;
+  const style = entry
+    ? { "--meta-color": `var(${entry.color_token})` } as React.CSSProperties & Record<"--meta-color", string>
+    : undefined;
   return (
     <div className="provenance__row">
       <span className="k">{label}</span>
-      <span className="v">{value}</span>
+      <span className="v">
+        <span className="policy-enum-chip" title={description} style={style}>
+          <Icon className="lucide" />
+          {valueLabel}
+        </span>
+      </span>
     </div>
   );
 }
@@ -806,6 +809,7 @@ function MetaBlock({
 }
 
 function PinsList({ pins }: { pins: PinRef[] }) {
+  const { lang } = useI18n();
   const groups = new Map<string, PinRef[]>();
   for (const p of pins) {
     const key = p.kind || "code";
@@ -817,30 +821,40 @@ function PinsList({ pins }: { pins: PinRef[] }) {
       <div style={{ fontSize: 11, color: "var(--fg-2)" }}>Pins · {pins.length}</div>
       <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 3 }}>
         {Array.from(groups.entries()).flatMap(([kind, items]) =>
-          items.map((p, idx) => (
-            <li
-              key={`${kind}-${idx}-${p.path}`}
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 11,
-                color: "var(--fg-1)",
-                display: "flex",
-                gap: 6,
-                alignItems: "baseline",
-              }}
-              title={`${kind} pin`}
-            >
-              <span className="chip" style={{ fontSize: 9, textTransform: "uppercase", padding: "1px 5px" }}>
-                {kind}
-              </span>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {p.path}
-                {p.lines_start
-                  ? `:${p.lines_start}${p.lines_end && p.lines_end !== p.lines_start ? `-${p.lines_end}` : ""}`
-                  : ""}
-              </span>
-            </li>
-          )),
+          items.map((p, idx) => {
+            const entry = visualPin(kind);
+            const PinIcon = visualIconComponent(entry?.icon);
+            const label = entry ? visualLabel(entry, lang) : kind;
+            const description = entry ? visualDescription(entry, lang) : `${kind} pin`;
+            const style = entry
+              ? { "--pin-color": `var(${entry.color_token})` } as React.CSSProperties & Record<"--pin-color", string>
+              : undefined;
+            return (
+              <li
+                key={`${kind}-${idx}-${p.path}`}
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                  color: "var(--fg-1)",
+                  display: "flex",
+                  gap: 6,
+                  alignItems: "baseline",
+                }}
+                title={description}
+              >
+                <span className="pin-kind-chip" style={style}>
+                  <PinIcon className="lucide" />
+                  {label}
+                </span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {p.path}
+                  {p.lines_start
+                    ? `:${p.lines_start}${p.lines_end && p.lines_end !== p.lines_start ? `-${p.lines_end}` : ""}`
+                    : ""}
+                </span>
+              </li>
+            );
+          }),
         )}
       </ul>
     </div>
@@ -870,24 +884,23 @@ function SourceSessionLine({ session }: { session: SourceSessionRef }) {
 }
 
 function NextContextLine({ meta }: { meta: ArtifactMeta }) {
+  const { lang } = useI18n();
   const policy = meta.next_context_policy ?? "default";
-  const label =
-    policy === "excluded"
-      ? "Excluded from next session"
-      : policy === "opt_in"
-      ? "Next session: opt-in only"
-      : "Next session: default";
-  const why =
-    policy === "excluded"
-      ? "Agents won't see this in Fast Landing."
-      : policy === "opt_in"
-      ? "Surfaces only on direct retrieval."
-      : "Eligible for default Fast Landing bundle.";
+  const entry = visualMetaEnum("next_context_policy", policy);
+  const Icon = visualIconComponent(entry?.icon);
+  const label = entry ? visualLabel(entry, lang) : policy;
+  const why = entry ? visualDescription(entry, lang) : "";
+  const style = entry
+    ? { "--meta-color": `var(${entry.color_token})` } as React.CSSProperties & Record<"--meta-color", string>
+    : undefined;
   return (
     <div style={{ fontSize: 11, color: "var(--fg-2)" }}>
       <span style={{ color: "var(--fg-3)" }}>Context: </span>
-      {label}
-      <span style={{ color: "var(--fg-3)", marginLeft: 6 }}>· {why}</span>
+      <span className="policy-enum-chip" style={style}>
+        <Icon className="lucide" />
+        {label}
+      </span>
+      {why && <span style={{ color: "var(--fg-3)", marginLeft: 6 }}>· {why}</span>}
     </div>
   );
 }

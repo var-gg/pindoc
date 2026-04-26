@@ -9,38 +9,17 @@
 // hits), so both surfaces display the same user-visible label for the
 // same slug — Task task-area-name-i18n acceptance on Cmd+K consistency.
 import type { Area } from "../api/client";
+import { topLevelVisualAreaSlugs, visualLanguage } from "./visualLanguage";
 
 export const TOP_LEVEL_AREA_ORDER = [
-  "strategy",
-  "context",
-  "experience",
-  "system",
-  "operations",
-  "governance",
-  "cross-cutting",
-  "misc",
+  ...topLevelVisualAreaSlugs,
   "_unsorted",
 ] as const;
 
 // docs/19-area-taxonomy.md fixes the 8 concern skeleton areas plus the
 // 6 admitted cross-cutting children. Other sub-areas are project-specific
 // promotion outcomes and render as user-promoted in the Sidebar.
-export const FIXED_TAXONOMY_AREA_SLUGS = [
-  "strategy",
-  "context",
-  "experience",
-  "system",
-  "operations",
-  "governance",
-  "cross-cutting",
-  "misc",
-  "security",
-  "privacy",
-  "accessibility",
-  "reliability",
-  "observability",
-  "localization",
-] as const;
+export const FIXED_TAXONOMY_AREA_SLUGS = Object.keys(visualLanguage.areas);
 
 const topLevelRank = new Map<string, number>(
   TOP_LEVEL_AREA_ORDER.map((slug, index) => [slug, index]),
