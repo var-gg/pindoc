@@ -11,6 +11,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
+	"github.com/var-gg/pindoc/internal/pindoc/changegroup"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 )
 
@@ -24,8 +25,11 @@ type contextForTaskInput struct {
 	// before proposing, not Fast-Landing candidates. The previous default
 	// (templates always surfaced) let an empty "연관" section in a template
 	// outrank real content on short task descriptions.
-	IncludeTemplates  bool `json:"include_templates,omitempty" jsonschema:"surface _template_* artifacts in landings; default false matches artifact.search/list and the Reader UI"`
-	IncludeSuperseded bool `json:"include_superseded,omitempty" jsonschema:"surface superseded artifacts in landings; default false hides replaced artifacts"`
+	IncludeTemplates    bool  `json:"include_templates,omitempty" jsonschema:"surface _template_* artifacts in landings; default false matches artifact.search/list and the Reader UI"`
+	IncludeSuperseded   bool  `json:"include_superseded,omitempty" jsonschema:"surface superseded artifacts in landings; default false hides replaced artifacts"`
+	IncludeChangeGroups *bool `json:"include_change_groups,omitempty" jsonschema:"include compact recent Change Groups; default true"`
+	ChangeGroupLimit    int   `json:"change_group_limit,omitempty" jsonschema:"recent Change Group cap; default 5, max 20"`
+	SinceRevisionID     int   `json:"since_revision_id,omitempty" jsonschema:"only include Change Groups after this revision number when available"`
 }
 
 type ContextLanding struct {
@@ -118,7 +122,8 @@ type contextForTaskOutput struct {
 	Stale []StaleSignal `json:"stale,omitempty"`
 	// EmbedderUsed echoes which provider/model served the landings. Added
 	// Phase 17 follow-up so agents detect the silent stub-fallback case.
-	EmbedderUsed EmbedderInfo `json:"embedder_used"`
+	EmbedderUsed       EmbedderInfo               `json:"embedder_used"`
+	RecentChangeGroups []changegroup.CompactGroup `json:"recent_change_groups,omitempty"`
 }
 
 // candidateUpdateThreshold: landings under this cosine distance prompt an
@@ -154,10 +159,12 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			if in.TopK > 10 {
 				in.TopK = 10
 			}
+			recentChangeGroups := recentChangeGroupsForTask(ctx, deps, scope.ProjectSlug, in)
 			if deps.Embedder == nil {
 				return nil, contextForTaskOutput{
-					TaskDescription: in.TaskDescription,
-					Notice:          "embedder not configured on this server; context.for_task disabled",
+					TaskDescription:    in.TaskDescription,
+					Notice:             "embedder not configured on this server; context.for_task disabled",
+					RecentChangeGroups: recentChangeGroups,
 				}, nil
 			}
 
@@ -213,9 +220,10 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			defer rows.Close()
 
 			out := contextForTaskOutput{
-				TaskDescription: in.TaskDescription,
-				Landings:        []ContextLanding{},
-				SuggestedAreas:  []AreaSuggestion{},
+				TaskDescription:    in.TaskDescription,
+				Landings:           []ContextLanding{},
+				SuggestedAreas:     []AreaSuggestion{},
+				RecentChangeGroups: recentChangeGroups,
 			}
 			now := time.Now()
 			for rows.Next() {
@@ -468,6 +476,35 @@ func areaArtifactCounts(ctx context.Context, deps Deps, projectSlug string) (map
 		out[slug] = count
 	}
 	return out, rows.Err()
+}
+
+func recentChangeGroupsForTask(ctx context.Context, deps Deps, projectSlug string, in contextForTaskInput) []changegroup.CompactGroup {
+	if in.IncludeChangeGroups != nil && !*in.IncludeChangeGroups {
+		return nil
+	}
+	limit := in.ChangeGroupLimit
+	if limit <= 0 {
+		limit = 5
+	}
+	if limit > 20 {
+		limit = 20
+	}
+	area := ""
+	if len(in.Areas) == 1 {
+		area = in.Areas[0]
+	}
+	groups, err := changegroup.Query(ctx, deps.DB, projectSlug, changegroup.Options{
+		Limit:           limit,
+		AreaSlug:        area,
+		SinceRevisionID: in.SinceRevisionID,
+	})
+	if err != nil {
+		if deps.Logger != nil {
+			deps.Logger.Warn("context.for_task recent change groups failed", "err", err)
+		}
+		return nil
+	}
+	return changegroup.Compact(groups, limit)
 }
 
 func recordAreaSuggestionEvent(ctx context.Context, deps Deps, projectSlug, correlationID, taskDescription string, suggestions []AreaSuggestion) error {

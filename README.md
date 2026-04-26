@@ -81,6 +81,7 @@ Agent Session ── checkpoint ──▶ Promote ──▶ Artifact ──▶ G
 - ✅ Phase 13 — template artifact seed (`_template_{debug,decision,analysis,task}` — 포맷도 evolving artifact, Reader UI "Show templates" 토글)
 - ✅ Phase 14 — operator settings + contract hardening (server_settings 테이블 + `pindoc-admin` CLI + `human_url_abs` + `expected_version` hard + `patchable_fields[]` + candidate warning + receipt TTL 30m + auth_mode rename)
 - ✅ Phase 15 — dogfood-driven UX 완결 (Task heuristic + Area hierarchy + pin kind enum + task_meta + kanban-lite + Sidecar 연결 카드)
+- ✅ Phase 16 — Today first screen + Change Group backend + summary cache + project markdown export (`pindoc.project_export`, `/api/p/:project/export`)
 
 M1 + 3차 peer review 반영 + 1호 사용자 dogfood readiness 완료.
 
@@ -149,6 +150,12 @@ powershell -ExecutionPolicy Bypass -File scripts\dev-restart.ps1
 이 URL은 account-level entrypoint다. 프로젝트 scope는 URL path가 아니라 각
 MCP tool input의 `project_slug`로 결정된다. 워크스페이스의 기본 project는
 `PINDOC.md` frontmatter(`project_slug`)가 명시 source다.
+
+Reader 첫 화면은 `/p/{project}/today`다. `/`도 기본 프로젝트의 Today로
+redirect한다. Today는 최근 revision을 Change Group으로 묶고, deterministic
+brief 또는 `PINDOC_SUMMARY_LLM_ENDPOINT`가 설정된 local/OpenAI-compatible
+endpoint의 source-bound brief를 summary cache에 저장한다. Markdown export는
+Reader의 export 버튼 또는 MCP `pindoc.project_export`로 실행한다.
 
 ### 데몬 모드 — 다수 워크스페이스에서 같은 Pindoc 인스턴스 attach
 

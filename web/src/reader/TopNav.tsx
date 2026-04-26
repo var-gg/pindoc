@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router";
-import { Activity, AlignCenter, AlignJustify, ChevronDown, CircleHelp, FileText, Inbox, Maximize2, Menu, Moon, Search, Share2, Sun } from "lucide-react";
+import { Activity, AlignCenter, AlignJustify, CalendarDays, ChevronDown, CircleHelp, FileText, Inbox, Maximize2, Menu, Moon, Search, Share2, Sun } from "lucide-react";
 import type { ComponentType } from "react";
 import { api, type ProjectListItem } from "../api/client";
 import { useI18n, type Lang } from "../i18n";
@@ -62,6 +62,10 @@ export function TopNav({
       <ProjectSwitcher project={project} />
 
       <div className="nav__tabs">
+        <NavLink to={`${baseRoute}/today`} className="nav__tab">
+          <CalendarDays className="lucide" />
+          <span className="label">{t("nav.today")}</span>
+        </NavLink>
         <NavLink to={`${baseRoute}/wiki`} className="nav__tab">
           <FileText className="lucide" />
           <span className="label">{t("nav.wiki_reader")}</span>

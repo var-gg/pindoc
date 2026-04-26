@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/var-gg/pindoc/internal/pindoc/changegroup"
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
@@ -48,6 +49,7 @@ type Deps struct {
 	Telemetry   *telemetry.Store
 	Version     string
 	BuildCommit string
+	Summary     changegroup.SummaryConfig
 
 	// StartTime stamps when the daemon process began running. Surfaced
 	// via GET /health as uptime_sec so operators can spot-check that
@@ -66,6 +68,16 @@ type Deps struct {
 
 func New(cfg *config.Config, d Deps) http.Handler {
 	mux := http.NewServeMux()
+	if cfg != nil && d.Summary.Endpoint == "" {
+		d.Summary = changegroup.SummaryConfig{
+			Endpoint:      cfg.Summary.Endpoint,
+			APIKey:        cfg.Summary.APIKey,
+			Model:         cfg.Summary.Model,
+			Timeout:       cfg.Summary.Timeout,
+			DailyTokenCap: cfg.Summary.DailyTokenCap,
+			GroupCap:      cfg.Summary.GroupCap,
+		}
+	}
 
 	// Unscoped reads — apply to the whole instance.
 	// /health is the lightweight liveness probe (NSSM / external
@@ -103,6 +115,9 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/p/{project}/artifacts/{idOrSlug}/revisions", d.handleArtifactRevisions)
 	mux.HandleFunc("GET /api/p/{project}/artifacts/{idOrSlug}/diff", d.handleArtifactDiff)
 	mux.HandleFunc("GET /api/p/{project}/search", d.handleSearch)
+	mux.HandleFunc("GET /api/p/{project}/change-groups", d.handleChangeGroups)
+	mux.HandleFunc("POST /api/p/{project}/read-mark", d.handleReadMark)
+	mux.HandleFunc("GET /api/p/{project}/export", d.handleProjectExport)
 
 	// Operational metadata edit — the one write surface the HTTP API
 	// exposes. Scope is locked to task_meta.status / assignee / priority /
@@ -200,7 +215,7 @@ func (d Deps) handleLegacyReaderLocaleRedirect(w http.ResponseWriter, r *http.Re
 
 func isReaderSurface(view string) bool {
 	switch view {
-	case "wiki", "tasks", "graph", "inbox", "search":
+	case "wiki", "tasks", "graph", "inbox", "search", "today":
 		return true
 	default:
 		return false

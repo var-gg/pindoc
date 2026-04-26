@@ -22,6 +22,7 @@ export function App() {
 
       {/* Canonical project-scoped surfaces. Locale is project metadata, not
           route identity, after task-canonical-locale-migration. */}
+      <Route path="/p/:project/today" element={<ReaderShell view="today" />} />
       <Route path="/p/:project/wiki" element={<ReaderShell view="reader" />} />
       <Route path="/p/:project/wiki/:slug" element={<ReaderShell view="reader" />} />
       <Route path="/p/:project/wiki/:slug/history" element={<History />} />
@@ -44,6 +45,7 @@ export function App() {
           The daemon returns a real 301; this keeps Vite-dev sessions
           compatible too. */}
       <Route path="/p/:project/:locale/wiki/*" element={<LegacyLocaleRedirect base="wiki" />} />
+      <Route path="/p/:project/:locale/today" element={<LegacyLocaleRedirect base="today" />} />
       <Route path="/p/:project/:locale/tasks/*" element={<LegacyLocaleRedirect base="tasks" />} />
       <Route path="/p/:project/:locale/graph" element={<LegacyLocaleRedirect base="graph" />} />
       <Route path="/p/:project/:locale/inbox" element={<LegacyLocaleRedirect base="inbox" />} />
@@ -52,6 +54,7 @@ export function App() {
           equivalent URL. Keeps old shares, old bookmarks, and the seed
           PINDOC.md pointer working. */}
       <Route path="/wiki/*" element={<LegacyRedirect base="wiki" />} />
+      <Route path="/today" element={<LegacyRedirect base="today" />} />
       <Route path="/tasks/*" element={<LegacyRedirect base="tasks" />} />
       <Route path="/graph" element={<LegacyRedirect base="graph" />} />
       <Route path="/inbox" element={<LegacyRedirect base="inbox" />} />
@@ -62,8 +65,8 @@ export function App() {
           TopNav's overflow menu. */}
       <Route path="/ops/telemetry" element={<Telemetry />} />
 
-      {/* Bare root. / redirects to /p/:default/wiki. */}
-      <Route path="/" element={<LegacyRedirect base="wiki" />} />
+      {/* Bare root. / redirects to /p/:default/today. */}
+      <Route path="/" element={<LegacyRedirect base="today" />} />
     </Routes>
   );
 }
@@ -163,7 +166,7 @@ function Home() {
 //   - /graph, /inbox
 // Purpose: keep URL shares from the pre-multiproject era working while every
 // canonical link migrates to the /p/:project/… shape.
-function LegacyRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "inbox" }) {
+function LegacyRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "inbox" | "today" }) {
   const location = useLocation();
   const [target, setTarget] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -264,7 +267,7 @@ function DesignLegendRedirect() {
 // LegacyLocaleRedirect fires for `/p/:project/:locale/(wiki|tasks|graph|inbox)`
 // shares from the Phase 18 URL shape and rewrites them to the canonical
 // locale-free URL, keeping every path suffix and query string intact.
-function LegacyLocaleRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "inbox" }) {
+function LegacyLocaleRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "inbox" | "today" }) {
   const { project = "", locale = "" } = useParams<{ project: string; locale: string }>();
   const location = useLocation();
   const [target, setTarget] = useState<string | null>(null);

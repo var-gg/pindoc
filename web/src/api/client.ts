@@ -304,6 +304,47 @@ export type DiffResp = {
   unified_diff: string;
 };
 
+export type ChangeGroupImportance = {
+  score: number;
+  level: "low" | "medium" | "high";
+  reasons?: string[];
+};
+
+export type ChangeGroup = {
+  group_id: string;
+  group_kind: "human_trigger" | "auto_sync" | "maintenance" | "system";
+  grouping_key: { kind: string; value: string; confidence: "low" | "medium" | "high" };
+  commit_summary: string;
+  revision_count: number;
+  artifact_count: number;
+  areas: string[];
+  authors: string[];
+  time_start: string;
+  time_end: string;
+  importance: ChangeGroupImportance;
+  verification_state: string;
+};
+
+export type TodaySummary = {
+  headline: string;
+  bullets: string[];
+  source: "llm" | "rule_based";
+  ai_hint?: string;
+  created_at: string;
+};
+
+export type TodayResp = {
+  project_slug: string;
+  groups: ChangeGroup[];
+  summary: TodaySummary;
+  baseline: {
+    revision_watermark: number;
+    last_seen_at?: string;
+    defaulted_to_days?: number;
+  };
+  max_revision_id: number;
+};
+
 const base = "";
 
 async function j<T>(path: string): Promise<T> {
@@ -533,6 +574,35 @@ export const api = {
   },
   artifact: (project: string, idOrSlug: string) =>
     j<Artifact>(`${p(project)}/artifacts/${encodeURIComponent(idOrSlug)}`),
+  changeGroups: (project: string, params?: { limit?: number; area?: string; kind?: string; locale?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.area) qs.set("area", params.area);
+    if (params?.kind) qs.set("kind", params.kind);
+    if (params?.locale) qs.set("locale", params.locale);
+    const q = qs.toString();
+    return j<TodayResp>(`${p(project)}/change-groups${q ? `?${q}` : ""}`);
+  },
+  markRead: async (project: string, revisionWatermark: number) => {
+    const res = await fetch(`${p(project)}/read-mark`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision_watermark: revisionWatermark }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`${res.status} ${res.statusText}: ${body.slice(0, 200)}`);
+    }
+    return res.json() as Promise<{ project_slug: string; revision_watermark: number }>;
+  },
+  exportProjectUrl: (project: string, params?: { area?: string; includeRevisions?: boolean; format?: "zip" | "tar" }) => {
+    const qs = new URLSearchParams();
+    if (params?.area) qs.set("area", params.area);
+    if (params?.includeRevisions) qs.set("include_revisions", "true");
+    if (params?.format) qs.set("format", params.format);
+    const q = qs.toString();
+    return `${p(project)}/export${q ? `?${q}` : ""}`;
+  },
   search: (project: string, q: string) =>
     j<{ query: string; project_slug: string; hits: SearchHit[]; notice?: string }>(
       `${p(project)}/search?q=${encodeURIComponent(q)}`,

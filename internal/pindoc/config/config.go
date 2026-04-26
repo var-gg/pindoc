@@ -36,6 +36,11 @@ type Config struct {
 	// Embed controls which embedding provider is built at startup.
 	Embed embed.Config
 
+	// Summary controls the optional source-bound LLM used by the Today
+	// briefing. Empty Endpoint means the Reader always uses the deterministic
+	// rule-based template and still writes/reads the summary cache.
+	Summary SummaryConfig
+
 	// RepoRoot is the absolute filesystem path of the working tree the
 	// agent pins against. Optional; set via PINDOC_REPO_ROOT. When
 	// populated, artifact.propose statically verifies each kind="code"
@@ -54,6 +59,15 @@ type Config struct {
 	// OAuth replaces these env vars with session-resolved principals.
 	UserName  string
 	UserEmail string
+}
+
+type SummaryConfig struct {
+	Endpoint      string
+	APIKey        string
+	Model         string
+	DailyTokenCap int
+	GroupCap      int
+	Timeout       time.Duration
 }
 
 // Load builds a Config from process env vars. It never fails for Phase 1
@@ -86,6 +100,14 @@ func Load() (*Config, error) {
 			Timeout:        envDuration("PINDOC_EMBED_TIMEOUT", 0),
 			PrefixQuery:    env("PINDOC_EMBED_PREFIX_QUERY", ""),
 			PrefixDocument: env("PINDOC_EMBED_PREFIX_DOCUMENT", ""),
+		},
+		Summary: SummaryConfig{
+			Endpoint:      env("PINDOC_SUMMARY_LLM_ENDPOINT", ""),
+			APIKey:        env("PINDOC_SUMMARY_LLM_API_KEY", ""),
+			Model:         env("PINDOC_SUMMARY_LLM_MODEL", ""),
+			DailyTokenCap: envInt("PINDOC_SUMMARY_DAILY_TOKEN_CAP", 20000),
+			GroupCap:      envInt("PINDOC_SUMMARY_GROUP_CAP", 20),
+			Timeout:       envDuration("PINDOC_SUMMARY_LLM_TIMEOUT", 15*time.Second),
 		},
 	}
 	return cfg, nil

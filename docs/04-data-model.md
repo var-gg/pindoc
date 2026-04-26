@@ -610,6 +610,24 @@ Accepted-path warnings(`CANONICAL_REWRITE_WITHOUT_EVIDENCE`, `CONSENT_REQUIRED_F
 
 ---
 
+## Today / Change Group Read Model
+
+Change Group은 별도 canonical table이 아니라 `artifact_revisions` 위의 query model이다. grouping key 우선순위는 `bulk_op_id` → `source_session+turn/run` → task/agent run id → `source_session+time window` → author/time fallback이며, synthetic `group_id`는 `hash(scope + key_kind + key_value + window_start)`로 만든다.
+
+Today 화면의 상태 저장은 두 테이블만 가진다:
+
+```
+reader_watermarks(user_key, project_id, revision_watermark, seen_at)
+summary_cache(cache_key, project_id, user_key, locale, filter_hash,
+              baseline_revision_id, max_revision_id, headline, bullets,
+              source, input_hash, token_estimate, created_at, expires_at)
+summary_usage_daily(user_key, project_id, day, tokens_used)
+```
+
+`summary_cache.cache_key`는 `hash(account_id, project_slug, user_id, baseline_revision_id, max_revision_id, locale, filter_hash)`다. LLM summary input은 Change Group compact metadata만 포함하고 artifact body는 넣지 않는다. LLM endpoint 미설정, 실패, daily cap 초과 시 deterministic template로 fallback한다.
+
+---
+
 ## Continuation Context
 
 ```

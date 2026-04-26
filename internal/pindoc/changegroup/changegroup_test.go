@@ -1,0 +1,118 @@
+package changegroup
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestGroupRowsPriorityKeysAndImportance(t *testing.T) {
+	now := time.Date(2026, 4, 26, 10, 0, 0, 0, time.UTC)
+	rows := []RevisionRow{
+		row("pindoc", "a1", "ui", "codex", "update Today screen", now, `{"bulk_op_id":"bulk-1"}`, `{"verification_state":"verified"}`),
+		row("pindoc", "a2", "mcp", "codex", "update context tool", now.Add(time.Minute), `{"bulk_op_id":"bulk-1"}`, `{"verification_state":"unverified"}`),
+	}
+	groups := GroupRows(rows, Options{Limit: 10})
+	if len(groups) != 1 {
+		t.Fatalf("groups=%d want 1", len(groups))
+	}
+	g := groups[0]
+	if g.GroupingKey.Kind != "bulk_op_id" || g.GroupingKey.Confidence != "high" {
+		t.Fatalf("grouping key = %#v", g.GroupingKey)
+	}
+	if g.ArtifactCount != 2 || g.Importance.Level != "high" {
+		t.Fatalf("importance/artifacts = %#v / %d", g.Importance, g.ArtifactCount)
+	}
+	if g.VerificationState != "unverified" {
+		t.Fatalf("verification = %q", g.VerificationState)
+	}
+}
+
+func TestGroupRowsFallbackLowConfidence(t *testing.T) {
+	now := time.Date(2026, 4, 26, 10, 0, 0, 0, time.UTC)
+	groups := GroupRows([]RevisionRow{
+		row("pindoc", "a1", "ui", "codex", "standalone edit", now, `{}`, `{}`),
+	}, Options{})
+	if len(groups) != 1 {
+		t.Fatalf("groups=%d want 1", len(groups))
+	}
+	if groups[0].GroupingKey.Kind != "author_time_window" || groups[0].GroupingKey.Confidence != "low" {
+		t.Fatalf("fallback key = %#v", groups[0].GroupingKey)
+	}
+}
+
+func TestGroupRowsStandaloneExceptionKinds(t *testing.T) {
+	now := time.Date(2026, 4, 26, 10, 0, 0, 0, time.UTC)
+	msgs := []string{
+		"migration added reader_watermarks",
+		"import markdown bundle",
+		"seed starter areas",
+		"code sync from harness",
+		"agent propagation reconcile",
+		"maintenance docker daemon health",
+	}
+	rows := make([]RevisionRow, 0, len(msgs))
+	for i, msg := range msgs {
+		rows = append(rows, row("pindoc", string(rune('a'+i)), "mechanisms", "codex", msg, now.Add(time.Duration(i)*time.Hour), `{}`, `{}`))
+	}
+	groups := GroupRows(rows, Options{Limit: 20})
+	if len(groups) != len(msgs) {
+		t.Fatalf("standalone exception groups=%d want %d", len(groups), len(msgs))
+	}
+	kinds := map[string]bool{}
+	for _, g := range groups {
+		kinds[g.GroupKind] = true
+	}
+	if !kinds["maintenance"] || !kinds["auto_sync"] {
+		t.Fatalf("expected maintenance and auto_sync kinds, got %v", kinds)
+	}
+}
+
+func TestSummaryCacheKeyAndPrompt(t *testing.T) {
+	keyA := SummaryCacheKey("local", "pindoc", "u1", 1, 4, "ko", "all")
+	keyB := SummaryCacheKey("local", "pindoc", "u1", 1, 5, "ko", "all")
+	if keyA == keyB {
+		t.Fatalf("cache key should change when max revision changes")
+	}
+	prompt := SourceBoundPrompt([]Group{{GroupID: "g1", GroupKind: "human_trigger", CommitSummary: "x"}}, "ko", 5)
+	if strings.Contains(prompt, "body_markdown") || !strings.Contains(prompt, "ChangeGroups") {
+		t.Fatalf("prompt should be compact/source-bound: %s", prompt)
+	}
+}
+
+func TestCompactNoGroupsOneGroupAndCap(t *testing.T) {
+	if got := Compact(nil, 5); len(got) != 0 {
+		t.Fatalf("no groups compact len=%d", len(got))
+	}
+	groups := []Group{
+		{GroupID: "g1", GroupKind: "human_trigger", CommitSummary: "one", ArtifactCount: 1},
+		{GroupID: "g2", GroupKind: "auto_sync", CommitSummary: "two", ArtifactCount: 2},
+	}
+	one := Compact(groups[:1], 5)
+	if len(one) != 1 || one[0].GroupID != "g1" {
+		t.Fatalf("one group compact = %#v", one)
+	}
+	capped := Compact(groups, 1)
+	if len(capped) != 1 || capped[0].GroupID != "g1" {
+		t.Fatalf("capped compact = %#v", capped)
+	}
+}
+
+func row(project, artifactID, area, author, msg string, created time.Time, source, meta string) RevisionRow {
+	return RevisionRow{
+		ProjectSlug:      project,
+		RevisionID:       artifactID + "-r1",
+		ArtifactID:       artifactID,
+		ArtifactSlug:     artifactID,
+		ArtifactTitle:    artifactID,
+		ArtifactType:     "Task",
+		AreaSlug:         area,
+		RevisionNumber:   1,
+		AuthorID:         author,
+		CommitMsg:        msg,
+		SourceSessionRef: json.RawMessage(source),
+		ArtifactMeta:     json.RawMessage(meta),
+		CreatedAt:        created,
+	}
+}

@@ -132,6 +132,7 @@ func NewServer(opts Options) *Server {
 
 	tools.RegisterProjectCurrent(s, deps)
 	tools.RegisterProjectCreate(s, deps)
+	tools.RegisterProjectExport(s, deps)
 	tools.RegisterAreaList(s, deps)
 	tools.RegisterAreaCreate(s, deps)
 	tools.RegisterArtifactRead(s, deps)

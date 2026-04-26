@@ -9,6 +9,7 @@ import { ReaderSurface, type DetailScope } from "./ReaderSurface";
 import { Sidebar } from "./Sidebar";
 import { Sidecar } from "./Sidecar";
 import { ShortcutsOverlay } from "./ShortcutsOverlay";
+import { Today } from "./Today";
 import { TopNav } from "./TopNav";
 import { initTheme, setTheme, type Theme } from "./theme";
 import { useReaderData } from "./useReaderData";
@@ -28,7 +29,7 @@ import {
 } from "./badgeFilters";
 import "../styles/reader.css";
 
-export type ReaderView = "reader" | "inbox" | "graph" | "tasks";
+export type ReaderView = "reader" | "inbox" | "graph" | "tasks" | "today";
 
 // surfaceAllows decides which artifacts a Surface's natural set contains
 // (Decision `decision-reader-ia-hierarchy`). Wiki = everything except Task;
@@ -37,6 +38,7 @@ export type ReaderView = "reader" | "inbox" | "graph" | "tasks";
 // sub-graph filtering ships with the React-ification in M1.5).
 function surfaceAllows(view: ReaderView, a: ArtifactRef): boolean {
   if (view === "tasks") return a.type === "Task";
+  if (view === "today") return true;
   if (view === "reader") return a.type !== "Task";
   return true;
 }
@@ -120,7 +122,7 @@ export function ReaderShell({ view }: Props) {
     }
   }, [selectedArea, selectedType, view, searchParams, setSearchParams]);
 
-  const baseRoute = `/p/${project}/${view === "tasks" ? "tasks" : "wiki"}`;
+  const baseRoute = `/p/${project}/${view === "tasks" ? "tasks" : view === "today" ? "today" : "wiki"}`;
 
   function writeSearchParams(next: URLSearchParams, opts?: { toList?: boolean }) {
     const qs = next.toString();
@@ -411,6 +413,7 @@ export function ReaderShell({ view }: Props) {
           onClearFilters={clearFilters}
           onApplyBadgeFilter={applyBadgeFilter}
           onApplyAreaFilter={applyAreaFilterFromBadge}
+          onSelectArea={handleSelectArea}
         />
         <Sidecar
           projectSlug={project}
@@ -540,6 +543,7 @@ function Body({
   onClearFilters,
   onApplyBadgeFilter,
   onApplyAreaFilter,
+  onSelectArea,
 }: {
   view: ReaderView;
   projectSlug: string;
@@ -561,10 +565,11 @@ function Body({
   onClearFilters: () => void;
   onApplyBadgeFilter: (filter: BadgeFilter) => void;
   onApplyAreaFilter: (areaSlug: string) => void;
+  onSelectArea: (areaSlug: string) => void;
 }) {
   const { t } = useI18n();
   const navigate = useNavigate();
-  const baseRoute = `/p/${projectSlug}/${view === "tasks" ? "tasks" : "wiki"}`;
+  const baseRoute = `/p/${projectSlug}/${view === "tasks" ? "tasks" : view === "today" ? "today" : "wiki"}`;
   const detailScope = detail && view === "reader"
     ? buildDetailScope({
         detail,
@@ -619,6 +624,16 @@ function Body({
           <p>{t("wiki.stub_inbox")}</p>
         </div>
       </main>
+    );
+  }
+  if (view === "today") {
+    return (
+      <Today
+        projectSlug={projectSlug}
+        selectedArea={selectedArea}
+        areaNameBySlug={areaNameBySlug}
+        onSelectArea={onSelectArea}
+      />
     );
   }
 

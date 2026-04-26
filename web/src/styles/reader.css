@@ -1839,3 +1839,305 @@
   line-height: 1.55;
   margin: 0;
 }
+
+.today-content {
+  overflow: auto;
+}
+.today {
+  width: min(980px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 28px 0 48px;
+}
+.today-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.today-head__eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  text-transform: uppercase;
+}
+.today-head h1 {
+  margin: 2px 0 6px;
+  font-size: 28px;
+  line-height: 1.1;
+  letter-spacing: 0;
+  color: var(--fg-0);
+}
+.today-head__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fg-3);
+}
+.today-head__meta span {
+  padding: 3px 7px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-1);
+  background: var(--bg-1);
+}
+.today-head__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.today-icon-btn {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-1);
+  background: var(--bg-1);
+  cursor: pointer;
+}
+.today-icon-btn:disabled,
+.today-link-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+.today-icon-btn .lucide {
+  width: 16px;
+  height: 16px;
+}
+.today-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+.today-link-btn .lucide {
+  width: 13px;
+  height: 13px;
+}
+.today-spin {
+  animation: cp-spin 1s linear infinite;
+}
+.today-brief {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 12px;
+  padding: 16px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-2);
+  background: var(--bg-1);
+}
+.today-brief__icon {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-1);
+  color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 10%, transparent);
+}
+.today-brief__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  margin-bottom: 4px;
+}
+.today-brief h2 {
+  font-size: 16px;
+  line-height: 1.35;
+  margin: 0 0 8px;
+  color: var(--fg-0);
+  letter-spacing: 0;
+}
+.today-brief ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--fg-2);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.today-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+}
+.today-filters__icon {
+  width: 15px;
+  height: 15px;
+  color: var(--fg-3);
+  margin-right: 2px;
+}
+.today-filter {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-1);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.today-filter.is-active {
+  color: var(--fg-0);
+  border-color: color-mix(in oklch, var(--accent) 45%, var(--border-1));
+  background: color-mix(in oklch, var(--accent) 9%, transparent);
+}
+.today-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.today-empty {
+  min-height: 150px;
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  color: var(--fg-3);
+  border: 1px dashed var(--border-1);
+  border-radius: var(--r-2);
+  background: var(--bg-1);
+  font-size: 13px;
+}
+.today-empty .lucide {
+  width: 22px;
+  height: 22px;
+}
+.change-card {
+  padding: 14px 16px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-2);
+  background: var(--bg-1);
+}
+.change-card--compact {
+  padding: 12px 14px;
+}
+.change-card__top,
+.change-card__meta,
+.change-card__areas,
+.change-card__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.change-card__top,
+.change-card__meta {
+  font-size: 12px;
+  color: var(--fg-3);
+}
+.change-card h2 {
+  margin: 8px 0 8px;
+  color: var(--fg-0);
+  font-size: 15px;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+.change-card__areas {
+  margin-top: 10px;
+}
+.change-card__areas .chip-area {
+  border: 1px solid var(--border-1);
+  cursor: pointer;
+}
+.change-card__actions {
+  margin-top: 12px;
+  font-size: 12px;
+}
+.change-card__actions a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.change-kind,
+.change-importance {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--border-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.change-kind--human_trigger {
+  color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 8%, transparent);
+}
+.change-kind--auto_sync {
+  color: var(--info, #2c74d6);
+  background: color-mix(in oklch, var(--info, #2c74d6) 9%, transparent);
+}
+.change-kind--maintenance {
+  color: var(--warning, #a15c00);
+  background: color-mix(in oklch, var(--warning, #a15c00) 10%, transparent);
+}
+.change-kind--system {
+  color: var(--fg-2);
+  background: var(--bg-2);
+}
+.change-importance--high {
+  color: var(--danger, #c43);
+  background: color-mix(in oklch, var(--danger, #c43) 10%, transparent);
+}
+.change-importance--medium {
+  color: var(--warning, #a15c00);
+}
+.today-auto {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.today-auto__toggle {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-1);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font-size: 13px;
+  cursor: pointer;
+}
+.today-auto__toggle .lucide {
+  width: 15px;
+  height: 15px;
+}
+
+@media (max-width: 720px) {
+  .today {
+    width: min(100% - 20px, 680px);
+    padding-top: 16px;
+  }
+  .today-head {
+    align-items: stretch;
+  }
+  .today-head h1 {
+    font-size: 24px;
+  }
+  .today-brief {
+    position: sticky;
+    top: 8px;
+    z-index: 2;
+    grid-template-columns: 28px minmax(0, 1fr);
+    padding: 12px;
+  }
+  .today-brief__icon {
+    width: 28px;
+    height: 28px;
+  }
+  .change-card {
+    padding: 12px;
+  }
+}
