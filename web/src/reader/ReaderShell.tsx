@@ -767,6 +767,7 @@ const TASK_COLUMNS: TaskColumnSpec[] = [
   { id: "verified", labelKey: "tasks.col_verified", pill: "done" },
   { id: "blocked", labelKey: "tasks.col_blocked", pill: "blocked" },
 ];
+const TASK_COLUMN_PAGE_SIZE = 50;
 
 const PRIORITY_CLASS: Record<string, string> = {
   p0: "prio prio--p0",
@@ -807,16 +808,37 @@ function TasksKanban({
   onClearFilters: () => void;
 }) {
   const { t } = useI18n();
+  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
 
   const groups = groupTasksByStatus(list);
+  const visibleGroups = visibleTaskGroups(groups, visibleCounts);
   const allGroups = groupTasksByStatus(allList);
-  const orderedTasks = orderedTaskList(groups);
+  const orderedTasks = orderedTaskList(visibleGroups);
   const hasActiveFilters = Boolean(selectedArea || badgeFilters.length > 0);
+  const paginationResetKey = useMemo(
+    () => `${selectedArea ?? ""}|${badgeFilters.map((f) => `${f.key}:${f.value}`).sort().join("|")}`,
+    [selectedArea, badgeFilters],
+  );
   const scopeLabel = selectedArea
     ? areaNameBySlug.get(selectedArea) ?? selectedArea
     : t("wiki.area_all");
   const filteredPendingCount = countPendingTasks(list);
   const allPendingCount = countPendingTasks(allList);
+
+  useEffect(() => {
+    setVisibleCounts({});
+  }, [paginationResetKey]);
+
+  function visibleLimitFor(columnId: string): number {
+    return visibleCounts[columnId] ?? TASK_COLUMN_PAGE_SIZE;
+  }
+
+  function showMoreColumn(columnId: string) {
+    setVisibleCounts((prev) => ({
+      ...prev,
+      [columnId]: (prev[columnId] ?? TASK_COLUMN_PAGE_SIZE) + TASK_COLUMN_PAGE_SIZE,
+    }));
+  }
 
   useEffect(() => {
     if (keyboardDisabled || orderedTasks.length === 0) return;
@@ -881,12 +903,15 @@ function TasksKanban({
         {TASK_COLUMNS.map((col) => (
           <TaskColumn
             key={col.id}
+            columnId={col.id}
             label={t(col.labelKey)}
             pill={col.pill}
             items={groups.get(col.id) ?? []}
+            visibleLimit={visibleLimitFor(col.id)}
             allCount={allGroups.get(col.id)?.length ?? 0}
             hasActiveFilters={hasActiveFilters}
             onClearFilters={onClearFilters}
+            onShowMore={() => showMoreColumn(col.id)}
             projectSlug={projectSlug}
             currentSlug={currentSlug}
             selectedTaskSlug={selectedTaskSlug}
@@ -898,12 +923,15 @@ function TasksKanban({
       {(groups.get("no_status")?.length ?? 0) > 0 && (
         <div className="kanban__extra">
           <TaskColumn
+            columnId="no_status"
             label={t("tasks.col_no_status")}
             pill="todo"
             items={groups.get("no_status") ?? []}
+            visibleLimit={visibleLimitFor("no_status")}
             allCount={allGroups.get("no_status")?.length ?? 0}
             hasActiveFilters={hasActiveFilters}
             onClearFilters={onClearFilters}
+            onShowMore={() => showMoreColumn("no_status")}
             projectSlug={projectSlug}
             currentSlug={currentSlug}
             selectedTaskSlug={selectedTaskSlug}
@@ -916,12 +944,15 @@ function TasksKanban({
       {(groups.get("cancelled")?.length ?? 0) > 0 && (
         <div className="kanban__extra">
           <TaskColumn
+            columnId="cancelled"
             label={t("tasks.col_cancelled")}
             pill="archived"
             items={groups.get("cancelled") ?? []}
+            visibleLimit={visibleLimitFor("cancelled")}
             allCount={allGroups.get("cancelled")?.length ?? 0}
             hasActiveFilters={hasActiveFilters}
             onClearFilters={onClearFilters}
+            onShowMore={() => showMoreColumn("cancelled")}
             projectSlug={projectSlug}
             currentSlug={currentSlug}
             selectedTaskSlug={selectedTaskSlug}
@@ -951,6 +982,17 @@ function groupTasksByStatus(list: ArtifactRef[]): Map<string, ArtifactRef[]> {
     }
   }
   return groups;
+}
+
+function visibleTaskGroups(
+  groups: Map<string, ArtifactRef[]>,
+  visibleCounts: Record<string, number>,
+): Map<string, ArtifactRef[]> {
+  const visible = new Map<string, ArtifactRef[]>();
+  for (const [columnId, items] of groups) {
+    visible.set(columnId, items.slice(0, visibleCounts[columnId] ?? TASK_COLUMN_PAGE_SIZE));
+  }
+  return visible;
 }
 
 function countPendingTasks(list: ArtifactRef[]): number {
@@ -1121,12 +1163,15 @@ function TaskFilterEmptyState({
 }
 
 function TaskColumn({
+  columnId,
   label,
   pill,
   items,
+  visibleLimit,
   allCount,
   hasActiveFilters,
   onClearFilters,
+  onShowMore,
   projectSlug,
   currentSlug,
   selectedTaskSlug,
@@ -1134,12 +1179,15 @@ function TaskColumn({
   subtle,
   areaNameBySlug,
 }: {
+  columnId: string;
   label: string;
   pill: TaskColumnSpec["pill"];
   items: ArtifactRef[];
+  visibleLimit: number;
   allCount: number;
   hasActiveFilters: boolean;
   onClearFilters: () => void;
+  onShowMore: () => void;
   projectSlug: string;
   currentSlug: string | undefined;
   selectedTaskSlug: string | null;
@@ -1148,8 +1196,11 @@ function TaskColumn({
   areaNameBySlug: ReadonlyMap<string, string>;
 }) {
   const { t } = useI18n();
+  const visibleItems = items.slice(0, visibleLimit);
+  const hiddenCount = Math.max(0, items.length - visibleItems.length);
+  const nextCount = Math.min(TASK_COLUMN_PAGE_SIZE, hiddenCount);
   return (
-    <div className={`kanban-col${subtle ? " kanban-col--subtle" : ""}`}>
+    <div className={`kanban-col${subtle ? " kanban-col--subtle" : ""}`} data-task-column={columnId}>
       <div className="kanban-col__head">
         <span className={`status-pill status-pill--${pill}`}>
           <span className="p-dot" />
@@ -1158,7 +1209,7 @@ function TaskColumn({
         <span className="kanban-col__count">{items.length}</span>
       </div>
       <div className="kanban-col__list">
-        {items.map((a) => (
+        {visibleItems.map((a) => (
           <TaskCard
             key={a.id}
             artifact={a}
@@ -1169,6 +1220,19 @@ function TaskColumn({
             areaNameBySlug={areaNameBySlug}
           />
         ))}
+        {hiddenCount > 0 && (
+          <button
+            type="button"
+            className="task-show-more"
+            onClick={onShowMore}
+            title={t("tasks.showing_count", visibleItems.length, items.length)}
+          >
+            <span>{t("tasks.show_more", nextCount)}</span>
+            <span className="task-show-more__meta">
+              {t("tasks.showing_count", visibleItems.length, items.length)}
+            </span>
+          </button>
+        )}
         {items.length === 0 && (
           hasActiveFilters ? (
             <div className="kanban-col__empty kanban-col__empty--filtered">

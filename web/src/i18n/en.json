@@ -127,6 +127,8 @@
   "tasks.clear_filters": "Clear filters",
   "tasks.inspector_empty": "Click a card to populate the Inspector.",
   "tasks.inspector_loading": "Loading Inspector...",
+  "tasks.show_more": "Show more · %d",
+  "tasks.showing_count": "Showing %d / %d",
   "sidecar.prov_author": "author",
   "sidecar.prov_area": "area",
   "sidecar.prov_status": "status",

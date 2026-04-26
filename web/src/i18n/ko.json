@@ -127,6 +127,8 @@
   "tasks.clear_filters": "필터 해제",
   "tasks.inspector_empty": "카드를 클릭하면 Inspector가 채워집니다.",
   "tasks.inspector_loading": "Inspector를 불러오는 중...",
+  "tasks.show_more": "더 보기 · %d",
+  "tasks.showing_count": "%d / %d 표시",
   "sidecar.prov_author": "작성자",
   "sidecar.prov_area": "영역",
   "sidecar.prov_status": "상태",

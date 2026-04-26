@@ -1463,6 +1463,35 @@
   font-style: normal;
   line-height: 1.45;
 }
+.task-show-more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  margin-top: 2px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg-1);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  cursor: pointer;
+}
+.task-show-more:hover,
+.task-show-more:focus-visible {
+  background: var(--bg-3);
+  border-color: var(--border-strong);
+  outline: none;
+}
+.task-show-more__meta {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+}
 
 /* Task card */
 .task-card {
