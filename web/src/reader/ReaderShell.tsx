@@ -5,6 +5,7 @@ import type { Aggregate } from "./useReaderData";
 import { api, type Artifact, type ArtifactRef, type Area } from "../api/client";
 import { useI18n } from "../i18n";
 import { CmdK } from "./CmdK";
+import { GraphSurface } from "./Graph";
 import { ReaderSurface, type DetailScope } from "./ReaderSurface";
 import { Sidebar } from "./Sidebar";
 import { Sidecar } from "./Sidecar";
@@ -606,15 +607,15 @@ function Body({
 
   if (view === "graph") {
     return (
-      <main className="content">
-        <div className="surface-panel">
-          <SurfaceHeader name="graph" count={allList.length} />
-          <EmptyState
-            message={t("wiki.stub_graph")}
-            action={{ label: t("wiki.stub_graph_preview"), href: "/ui/reader" }}
-          />
-        </div>
-      </main>
+      <GraphSurface
+        projectSlug={projectSlug}
+        list={list}
+        allCount={allList.length}
+        selectedArea={selectedArea}
+        selectedAreaLabel={selectedArea ? areaNameBySlug.get(selectedArea) ?? selectedArea : null}
+        selectedType={selectedType}
+        badgeFilters={badgeFilters}
+      />
     );
   }
   if (view === "inbox") {

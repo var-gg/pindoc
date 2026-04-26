@@ -34,11 +34,16 @@ import {
   visualPin,
   visualQuickAction,
   visualRelation,
-  visualRelationClass,
-  visualTypeVariant,
   type VisualMetaEnumKey,
 } from "./visualLanguage";
 import { visualIconComponent } from "./visualLanguageIcons";
+import {
+  MINI_GRAPH_CENTER,
+  graphRadialPositions,
+  graphRelationClass,
+  graphRelationLabel,
+  graphTypeClassSuffix,
+} from "./graphSvg";
 
 type Props = {
   projectSlug: string;
@@ -463,7 +468,6 @@ function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: strin
 }
 
 const MINI_GRAPH_MAX_NEIGHBORS = 8;
-const MINI_GRAPH_CENTER = { x: 140, y: 100 };
 
 type MiniGraphEdge = {
   edge: EdgeRef;
@@ -484,7 +488,7 @@ function MiniGraph({
   ];
   const visible = allEdges.slice(0, MINI_GRAPH_MAX_NEIGHBORS);
   const hidden = Math.max(0, allEdges.length - visible.length);
-  const positions = radialPositions(visible.length);
+  const positions = graphRadialPositions(visible.length);
 
   if (visible.length === 0) {
     return (
@@ -522,11 +526,11 @@ function MiniGraph({
                 y1={start.y}
                 x2={end.x}
                 y2={end.y}
-                className={`mini-graph__edge mini-graph__edge--${relationClass(edge.relation)}`}
+                className={`mini-graph__edge mini-graph__edge--${graphRelationClass(edge.relation)}`}
                 markerEnd="url(#mini-graph-arrow)"
               />
               <text x={labelX} y={labelY} className="mini-graph__edge-label">
-                {direction === "out" ? "→" : "←"} {relationLabel(edge.relation, lang)}
+                {direction === "out" ? "→" : "←"} {graphRelationLabel(edge.relation, lang)}
               </text>
             </g>
           );
@@ -534,7 +538,7 @@ function MiniGraph({
       </svg>
       <Link
         to={`/p/${projectSlug}/wiki/${detail.slug}`}
-        className={`mini-graph__node mini-graph__node--center mini-graph__node--${typeClassSuffix(detail.type)}`}
+        className={`mini-graph__node mini-graph__node--center mini-graph__node--${graphTypeClassSuffix(detail.type)}`}
         style={{ left: MINI_GRAPH_CENTER.x, top: MINI_GRAPH_CENTER.y }}
         title={detail.title}
       >
@@ -545,7 +549,7 @@ function MiniGraph({
         <Link
           key={`${edge.artifact_id}-${edge.relation}-${i}`}
           to={`/p/${projectSlug}/wiki/${edge.slug}`}
-          className={`mini-graph__node mini-graph__node--${typeClassSuffix(edge.type)}`}
+          className={`mini-graph__node mini-graph__node--${graphTypeClassSuffix(edge.type)}`}
           style={{ left: positions[i].x, top: positions[i].y }}
           title={`${edge.title} (${edge.type})`}
         >
@@ -560,34 +564,6 @@ function MiniGraph({
       )}
     </div>
   );
-}
-
-function radialPositions(count: number): Array<{ x: number; y: number }> {
-  if (count <= 0) return [];
-  const radiusX = 96;
-  const radiusY = 66;
-  const start = -Math.PI / 2;
-  return Array.from({ length: count }, (_, i) => {
-    const angle = start + (i * 2 * Math.PI) / count;
-    return {
-      x: Math.round(MINI_GRAPH_CENTER.x + Math.cos(angle) * radiusX),
-      y: Math.round(MINI_GRAPH_CENTER.y + Math.sin(angle) * radiusY),
-    };
-  });
-}
-
-function typeClassSuffix(type: string): string {
-  const fallback = type.toLowerCase().replace(/[^a-z0-9]+/g, "") || "default";
-  return visualTypeVariant(type) ?? fallback;
-}
-
-function relationClass(relation: string): string {
-  return visualRelationClass(relation);
-}
-
-function relationLabel(relation: string, lang: string): string {
-  const entry = visualRelation(relation);
-  return entry ? visualLabel(entry, lang) : relation;
 }
 
 // ConnectedArtifacts renders typed edges (relates_to / related_by) as

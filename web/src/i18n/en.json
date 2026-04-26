@@ -408,6 +408,16 @@
   "wiki.stub_graph_preview": "Open preview",
   "wiki.stub_inbox": "No reviews pending.",
 
+  "graph.loading_edges": "Loading edges...",
+  "graph.edge_count": "%d edges",
+  "graph.empty": "No artifacts to graph yet.",
+  "graph.empty_filtered": "No artifacts in this graph scope.",
+  "graph.no_edges": "No edges inside this scope yet. Nodes are still shown.",
+  "graph.aria_label": "Artifact relationship graph",
+  "graph.scope_all": "All artifacts",
+  "graph.filter_area": "Area",
+  "graph.filter_type": "Type",
+
   "today.eyebrow": "Briefing",
   "today.title": "Today",
   "today.brief": "Today brief",
