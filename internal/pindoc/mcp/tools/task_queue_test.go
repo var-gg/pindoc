@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -111,4 +112,76 @@ func TestTaskQueueWarnings(t *testing.T) {
 	if got := taskQueueWarnings("claimed_done", bodyDone); len(got) != 0 {
 		t.Fatalf("claimed_done should not warn about pending status: %v", got)
 	}
+}
+
+// TestApplyTaskQueueCompact pins the omit-on-compact contract: project-
+// wide aggregate maps go to nil so json encoding skips them, while items
+// + totals + notice survive. Default (compact=false) leaves every field
+// alone — backward-compat for existing callers.
+func TestApplyTaskQueueCompact(t *testing.T) {
+	mkOut := func() taskQueueOutput {
+		return taskQueueOutput{
+			SourceSemantics: taskQueueSemantics,
+			StatusFilter:    "pending",
+			TotalCount:      10,
+			PendingCount:    7,
+			StatusCounts:    map[string]int{"open": 5, taskStatusMissing: 2, "claimed_done": 3},
+			AreaCounts:      map[string]int{"ui": 4, "mcp": 6},
+			PriorityCounts:  map[string]int{"p2": 3},
+			WarningCounts:   map[string]int{"TASK_STATUS_MISSING": 2},
+			Items: []taskQueueItem{
+				{ArtifactID: "id-1", Slug: "task-a", Title: "A"},
+			},
+			Notice: "stay calm",
+		}
+	}
+
+	t.Run("compact=false leaves aggregates intact", func(t *testing.T) {
+		out := mkOut()
+		applyTaskQueueCompact(&out, false)
+		if out.Compact {
+			t.Fatalf("compact mirror should be false")
+		}
+		if out.StatusCounts == nil || out.AreaCounts == nil || out.PriorityCounts == nil || out.WarningCounts == nil {
+			t.Fatalf("default response must keep aggregate maps populated")
+		}
+	})
+
+	t.Run("compact=true drops aggregates, keeps totals and items", func(t *testing.T) {
+		out := mkOut()
+		applyTaskQueueCompact(&out, true)
+		if !out.Compact {
+			t.Fatalf("compact mirror should be true")
+		}
+		if out.StatusCounts != nil || out.AreaCounts != nil || out.PriorityCounts != nil || out.WarningCounts != nil {
+			t.Fatalf("compact must drop status/area/priority/warning maps; got %+v", out)
+		}
+		if out.TotalCount != 10 || out.PendingCount != 7 {
+			t.Fatalf("compact must preserve totals; got total=%d pending=%d", out.TotalCount, out.PendingCount)
+		}
+		if len(out.Items) != 1 {
+			t.Fatalf("compact must preserve items; got %d", len(out.Items))
+		}
+
+		// JSON contract: aggregate keys are absent (omitempty), totals stay.
+		buf, err := json.Marshal(out)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		body := string(buf)
+		for _, omitted := range []string{`"status_counts"`, `"area_counts"`, `"priority_counts"`, `"warning_counts"`} {
+			if strings.Contains(body, omitted) {
+				t.Fatalf("compact JSON must not contain %s; got %s", omitted, body)
+			}
+		}
+		for _, kept := range []string{`"total_count":10`, `"pending_count":7`, `"compact":true`} {
+			if !strings.Contains(body, kept) {
+				t.Fatalf("compact JSON missing %s; got %s", kept, body)
+			}
+		}
+	})
+
+	t.Run("nil receiver is safe", func(t *testing.T) {
+		applyTaskQueueCompact(nil, true) // should not panic
+	})
 }

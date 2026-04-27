@@ -30,11 +30,18 @@ type taskQueueInput struct {
 
 	AreaSlug string `json:"area_slug,omitempty" jsonschema:"optional - restrict to one area slug"`
 	Priority string `json:"priority,omitempty" jsonschema:"optional - p0 | p1 | p2 | p3"`
-	Assignee string `json:"assignee,omitempty" jsonschema:"optional - exact task_meta.assignee match, e.g. agent:codex"`
+	Assignee string `json:"assignee,omitempty" jsonschema:"optional - exact task_meta.assignee match, e.g. agent:codex; pair with compact=true for an assigned-only view"`
 
 	// Limit caps returned items after status filtering. Counts are still
 	// computed across every matching Task before the item limit is applied.
 	Limit int `json:"limit,omitempty" jsonschema:"default 50, max 500"`
+
+	// Compact omits the project-wide aggregate fields (status_counts,
+	// area_counts, priority_counts, warning_counts) from the response so
+	// callers viewing "what is on my plate" do not have to scroll past
+	// project-wide noise. Items, totals, and notice are still returned.
+	// Decision mcp-dx-외부-리뷰-codex-1차-피드백-6항목 발견 5.
+	Compact bool `json:"compact,omitempty" jsonschema:"omit project-wide aggregate counts (status_counts/area_counts/priority_counts/warning_counts) — items+total preserved"`
 }
 
 type taskQueueItem struct {
@@ -71,10 +78,14 @@ type taskQueueOutput struct {
 	// 69" while asking for just one bucket of Items.
 	TotalCount     int            `json:"total_count"`
 	PendingCount   int            `json:"pending_count"`
-	StatusCounts   map[string]int `json:"status_counts"`
+	StatusCounts   map[string]int `json:"status_counts,omitempty"`
 	AreaCounts     map[string]int `json:"area_counts,omitempty"`
 	PriorityCounts map[string]int `json:"priority_counts,omitempty"`
 	WarningCounts  map[string]int `json:"warning_counts,omitempty"`
+
+	// Compact mirrors the input flag back so callers / telemetry can tell
+	// at a glance whether the omitted aggregates are intentional.
+	Compact bool `json:"compact,omitempty"`
 
 	Items     []taskQueueItem `json:"items"`
 	Truncated bool            `json:"truncated,omitempty"`
@@ -204,7 +215,7 @@ checkboxes.
 				total += n
 			}
 
-			return nil, taskQueueOutput{
+			out := taskQueueOutput{
 				SourceSemantics: taskQueueSemantics,
 				StatusFilter:    statusFilter,
 				TotalCount:      total,
@@ -216,7 +227,9 @@ checkboxes.
 				Items:           items,
 				Truncated:       truncated,
 				Notice:          taskQueueNotice(),
-			}, nil
+			}
+			applyTaskQueueCompact(&out, in.Compact)
+			return nil, out, nil
 		},
 	)
 }
@@ -299,4 +312,24 @@ func taskQueueWarnings(statusBucket, body string) []string {
 
 func taskQueueNotice() string {
 	return "Reader parity: pending means task_meta.status is missing or open. This is not derived from acceptance checkboxes; use pindoc.scope.in_flight for unresolved [ ]/[~] checklist items."
+}
+
+// applyTaskQueueCompact drops the project-wide aggregate maps when the
+// caller asked for the compact view. Totals (TotalCount / PendingCount)
+// are computed before this fires so they stay honest — the user sees
+// "12 pending of 47 total" without scrolling past per-area / per-status
+// breakdowns. The maps go to nil rather than empty {} so the json
+// encoder omits them via the omitempty contract.
+func applyTaskQueueCompact(out *taskQueueOutput, compact bool) {
+	if out == nil {
+		return
+	}
+	out.Compact = compact
+	if !compact {
+		return
+	}
+	out.StatusCounts = nil
+	out.AreaCounts = nil
+	out.PriorityCounts = nil
+	out.WarningCounts = nil
 }
