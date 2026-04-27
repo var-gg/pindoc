@@ -58,9 +58,75 @@ type harnessInstallOutput struct {
 	// Message gives the agent a plain-English summary of what to do next.
 	Message string `json:"message"`
 
+	// SessionBootstrap is the machine-readable handshake every client
+	// harness should run at session start. claude-code / codex / cursor
+	// read this so PINDOC.md text and harness behaviour stay in sync —
+	// flipping the auto-call list here is the only thing that has to
+	// change when a new bootstrap step lands. Decision mcp-dx-외부-리뷰-
+	// codex-1차-피드백-6항목 발견 3.
+	SessionBootstrap *HarnessSessionBootstrap `json:"session_bootstrap,omitempty"`
+
 	// Metadata the template was rendered from, so the agent can explain
 	// choices to the user.
 	RenderedFor RenderedFor `json:"rendered_for"`
+}
+
+// HarnessSessionBootstrap describes the auto-run handshake a client
+// harness performs once per MCP session. The tool list lives here in
+// machine-readable form so the agent does not have to parse PINDOC.md
+// prose to decide what to call. Cache lifetime is the MCP session — the
+// detected project_slug stays valid until the server restarts or the
+// user explicitly switches workspaces.
+type HarnessSessionBootstrap struct {
+	// AutoCall is the ordered list of tool names the harness invokes
+	// before yielding control to the agent. V1 is just workspace.detect
+	// but the slot is reserved so a future "fetch capabilities" step can
+	// land without a schema change.
+	AutoCall []string `json:"auto_call"`
+
+	// CacheKeyForWorkspaceDetect is the session-scope cache key the
+	// harness writes the workspace.detect result under. Every subsequent
+	// tool call reads project_slug from this cache rather than re-calling
+	// detect. Value is opaque — clients should treat it as the contract
+	// name, not the cache implementation.
+	CacheKeyForWorkspaceDetect string `json:"cache_key_for_workspace_detect"`
+
+	// SignalsFromClient lists the three local-FS / git signals the
+	// client must collect before invoking workspace.detect. The server
+	// cannot read these — they have to arrive via the tool input.
+	SignalsFromClient []string `json:"signals_from_client"`
+
+	// RerunOn names the situations where the harness should call
+	// workspace.detect again. Anything outside this list should reuse
+	// the cache without a round trip.
+	RerunOn []string `json:"rerun_on"`
+
+	// Notes is a short prose hint for human reviewers reading the
+	// harness.install response. Not consumed by the harness itself.
+	Notes string `json:"notes,omitempty"`
+}
+
+// defaultHarnessSessionBootstrap returns the canonical bootstrap
+// contract — a single workspace.detect call cached for the session,
+// with rerun reserved for explicit workspace switches and the
+// PROJECT_SLUG_REQUIRED error code path. Bumping this contract is the
+// only place a new auto-call step needs to land; PINDOC.md text mirrors
+// the values via the same constants.
+func defaultHarnessSessionBootstrap() *HarnessSessionBootstrap {
+	return &HarnessSessionBootstrap{
+		AutoCall:                   []string{"pindoc.workspace.detect"},
+		CacheKeyForWorkspaceDetect: "pindoc.session.default_project_slug",
+		SignalsFromClient: []string{
+			"pindoc_md_frontmatter",
+			"workspace_path",
+			"git_remote_url",
+		},
+		RerunOn: []string{
+			"user_switched_workspace",
+			"tool_returned_PROJECT_SLUG_REQUIRED",
+		},
+		Notes: "Run once per MCP session before yielding to the agent. Cache the resolved project_slug; do not re-call on every tool invocation.",
+	}
 }
 
 // styleSnippetVersion is bumped whenever the snippet body changes in a
@@ -137,6 +203,7 @@ func RegisterHarnessInstall(server *sdk.Server, deps Deps) {
 				StyleSnippet:        styleSnippet,
 				StyleSnippetTargets: []string{"CLAUDE.md", "AGENTS.md", ".cursorrules"},
 				StyleSnippetMarker:  styleSnippetMarkerBegin,
+				SessionBootstrap:    defaultHarnessSessionBootstrap(),
 				Message: strings.TrimSpace(fmt.Sprintf(`
 Write the returned body to PINDOC.md at the repo root. Then append this
 exact line to the end of CLAUDE.md (or AGENTS.md if you use that):
@@ -289,10 +356,48 @@ The server raises CONSENT_REQUIRED_FOR_USER_CHAT on accepted writes that
 look conversation-derived but omit consent_state — it is a warning, not a
 block. Treat it as a signal to classify explicitly on the next propose.
 
+## Session bootstrap (workspace.detect)
+
+The harness auto-runs **pindoc.workspace.detect** once at session start
+so your first artifact write does not need a hint about which project
+owns this workspace. The flow:
+
+1. Client harness collects three signals from the local environment:
+   - PINDOC.md frontmatter (project_slug when set explicitly).
+   - workspace_path (the IDE / shell working directory).
+   - git_remote_url (typically the first remote returned by
+     "git config --get remote.origin.url").
+2. Harness calls pindoc.workspace.detect with those three. The server's
+   priority chain returns the resolved project_slug plus a "via" field
+   naming which signal won.
+3. The detected slug is cached in the session under the contract key
+   "pindoc.session.default_project_slug". Every subsequent tool call
+   reads project_slug from that cache; do not re-call workspace.detect
+   on every invocation.
+
+### When to re-run
+
+- The user explicitly switches workspaces ("열려 있는 다른 프로젝트로
+  바꿔줘", "open the other workspace").
+- A tool call returns NOT_READY with PROJECT_SLUG_REQUIRED — the cache
+  was cleared (server restart) or never populated. Re-bootstrap before
+  retrying.
+
+### Fallback when bootstrap is missing
+
+Older harness builds may not auto-call workspace.detect yet. In that
+case, manually invoke it as the first tool of the session and treat the
+response the same way (cache the project_slug, reuse for the session).
+The harness.install response carries a session_bootstrap object that
+new clients should consume directly to drive this handshake.
+
 ## Pre-flight Check protocol (M0.5)
 
 Before calling pindoc.artifact.propose:
 
+0. (Auto, see "Session bootstrap" above) pindoc.workspace.detect already
+   ran and the session-cached project_slug is your default. If it is
+   missing, re-bootstrap before continuing.
 1. Call pindoc.project.current once per session to pin scope.
 2. Call pindoc.area.list and pick an existing area_slug; use 'misc' if
    nothing fits. Never invent an area_slug.
