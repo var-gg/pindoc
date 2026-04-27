@@ -1,23 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router";
+import { Link } from "react-router";
 import {
   ArrowDownLeft,
-  ArrowLeftRight,
   ArrowUpRight,
-  Ban,
-  CheckCircle2,
   ChevronDown,
   ChevronRight,
-  Clipboard,
   History as HistoryIcon,
-  Languages,
-  Layers,
-  Link2,
-  Lock,
-  Pencil,
-  Puzzle,
-  Share2,
-  type LucideIcon,
 } from "lucide-react";
 import {
   api,
@@ -37,8 +25,28 @@ import { localizedAreaName } from "./areaLocale";
 import { TaskControls } from "./TaskControls";
 import { Toc } from "./Toc";
 import { headingsFromBody } from "./slug";
+import { isStructureOverlapHeading, structureOverlapSectionsFromBody } from "./structureSections";
 import { typeChipClass } from "./typeChip";
 import { RevisionTypeBadge } from "./RevisionTypeBadge";
+import { BadgeWithExplain } from "./BadgeWithExplain";
+import { Tooltip } from "./Tooltip";
+import {
+  visualDescription,
+  visualLabel,
+  visualMetaEnum,
+  visualPin,
+  visualQuickAction,
+  visualRelation,
+  type VisualMetaEnumKey,
+} from "./visualLanguage";
+import { visualIconComponent } from "./visualLanguageIcons";
+import {
+  MINI_GRAPH_CENTER,
+  graphRadialPositions,
+  graphRelationClass,
+  graphRelationLabel,
+  graphTypeClassSuffix,
+} from "./graphSvg";
 
 type Props = {
   projectSlug: string;
@@ -62,9 +70,14 @@ type Props = {
   // the Reader refetches the detail and the revision rail / TaskControls
   // reflect the new head.
   onArtifactUpdated?: () => void;
+  // Wiki list inspector mode reuses Sidecar as a brief. In that mode the
+  // full article is one explicit action away instead of implicit card
+  // navigation.
+  showOpenDetailAction?: boolean;
 };
 
 type CollapsibleKey = "provenance" | "policy" | "timeline" | "meta";
+type QuickActionID = Parameters<typeof visualQuickAction>[0];
 
 type CollapsedState = Record<CollapsibleKey, boolean>;
 
@@ -77,16 +90,28 @@ const DEFAULT_COLLAPSED_STATE: CollapsedState = {
   meta: true,
 };
 
-export function Sidecar({ projectSlug, detail, emptyMessage, authMode, agents, users, onArtifactUpdated }: Props) {
+export function Sidecar({
+  projectSlug,
+  detail,
+  emptyMessage,
+  authMode,
+  agents,
+  users,
+  onArtifactUpdated,
+  showOpenDetailAction,
+}: Props) {
   const { t } = useI18n();
-  const { locale = "" } = useParams<{ locale?: string }>();
   const [collapsed, toggleSection] = useSidecarCollapseState();
   // TOC feeds off body_markdown; Markdown.tsx independently derives the
   // same slugs via the same uniqueSlug ledger so `<h2 id>` matches
   // `href="#..."` without a DOM round-trip. Computed here (not ReaderSurface)
   // so Sidecar owns the TOC lifecycle alongside its other metadata rails.
   const headings = useMemo(
-    () => (detail ? headingsFromBody(detail.body_markdown) : []),
+    () => (detail ? headingsFromBody(detail.body_markdown).filter((h) => !isStructureOverlapHeading(h.text)) : []),
+    [detail],
+  );
+  const bodyOverlapSections = useMemo(
+    () => (detail ? structureOverlapSectionsFromBody(detail.body_markdown).filter((section) => section.body.trim() !== "") : []),
     [detail],
   );
 
@@ -110,7 +135,7 @@ export function Sidecar({ projectSlug, detail, emptyMessage, authMode, agents, u
     ? new Date(detail.published_at).toLocaleString()
     : "—";
   const areaLabel = localizedAreaName(t, detail.area_slug, detail.area_slug);
-  const artifactHref = `/p/${projectSlug}/${locale}/wiki/${detail.slug}`;
+  const artifactHref = `/p/${projectSlug}/wiki/${detail.slug}`;
 
   // Graph edges aren't derived yet (Phase 3+ pipeline populates these via
   // artifact.superseded_by + future artifact_edges). Show placeholder
@@ -123,6 +148,12 @@ export function Sidecar({ projectSlug, detail, emptyMessage, authMode, agents, u
       <IdentityStrip detail={detail} />
 
       <QuickActions detail={detail} artifactHref={artifactHref} />
+      {showOpenDetailAction && (
+        <Link to={artifactHref} className="sidecar-open-detail">
+          <span>{t("reader.inspector_open_detail")}</span>
+          <ArrowUpRight className="lucide" aria-hidden="true" />
+        </Link>
+      )}
 
       {headings.length >= 2 && <Toc headings={headings} />}
 
@@ -140,10 +171,13 @@ export function Sidecar({ projectSlug, detail, emptyMessage, authMode, agents, u
       )}
 
       <div className="graph-wrap">
-        <MiniGraph detail={detail} projectSlug={projectSlug} locale={locale} />
+        <MiniGraph detail={detail} projectSlug={projectSlug} />
       </div>
 
-      <SidecarStaticSection title={t("sidecar.relations")}>
+      <SidecarStaticSection heading={t("sidecar.relations")}>
+        {bodyOverlapSections.length > 0 && (
+          <BodyOverlapLink count={bodyOverlapSections.length} />
+        )}
         <ConnectedArtifacts
           projectSlug={projectSlug}
           relates={detail.relates_to ?? []}
@@ -155,7 +189,7 @@ export function Sidecar({ projectSlug, detail, emptyMessage, authMode, agents, u
 
       <SidecarCollapsibleSection
         id="provenance"
-        title={t("sidecar.provenance")}
+        heading={t("sidecar.provenance")}
         collapsed={collapsed.provenance}
         onToggle={toggleSection}
       >
@@ -168,7 +202,7 @@ export function Sidecar({ projectSlug, detail, emptyMessage, authMode, agents, u
 
       <SidecarCollapsibleSection
         id="policy"
-        title={t("sidecar.policy")}
+        heading={t("sidecar.policy")}
         collapsed={collapsed.policy}
         onToggle={toggleSection}
       >
@@ -177,7 +211,7 @@ export function Sidecar({ projectSlug, detail, emptyMessage, authMode, agents, u
 
       <SidecarCollapsibleSection
         id="timeline"
-        title={t("sidecar.timeline")}
+        heading={t("sidecar.timeline")}
         collapsed={collapsed.timeline}
         onToggle={toggleSection}
       >
@@ -186,7 +220,7 @@ export function Sidecar({ projectSlug, detail, emptyMessage, authMode, agents, u
 
       <SidecarCollapsibleSection
         id="meta"
-        title={t("sidecar.meta")}
+        heading={t("sidecar.meta")}
         collapsed={collapsed.meta}
         onToggle={toggleSection}
       >
@@ -203,6 +237,16 @@ export function Sidecar({ projectSlug, detail, emptyMessage, authMode, agents, u
         />
       </SidecarCollapsibleSection>
     </aside>
+  );
+}
+
+function BodyOverlapLink({ count }: { count: number }) {
+  const { t } = useI18n();
+  return (
+    <div className="sidecar-body-overlap">
+      <span>{t("sidecar.body_overlap", count)}</span>
+      <a href="#reader-original-structure">{t("sidecar.body_overlap_open")}</a>
+    </div>
   );
 }
 
@@ -238,66 +282,65 @@ function IdentityStrip({ detail }: { detail: Artifact }) {
   return (
     <div className="sidecar-identity">
       <span className={typeChipClass(detail.type)}>{detail.type}</span>
-      <span className="sidecar-identity__slug" title={detail.slug}>
-        {detail.slug}
-      </span>
+      <Tooltip content={detail.slug}>
+        <span className="sidecar-identity__slug">
+          {detail.slug}
+        </span>
+      </Tooltip>
       <span className="sidecar-identity__status">{lifecycle}</span>
     </div>
   );
 }
 
 function QuickActions({ detail, artifactHref }: { detail: Artifact; artifactHref: string }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const agentRef = `pindoc://${detail.slug}`;
   const absoluteHref = typeof window === "undefined"
     ? artifactHref
     : `${window.location.origin}${artifactHref}`;
+  const actions: Array<
+    | { id: QuickActionID; kind: "button"; onClick: () => void }
+    | { id: QuickActionID; kind: "link"; to: string }
+  > = [
+    { id: "verify_request", kind: "button", onClick: () => copyToClipboard(`Verify ${agentRef}`) },
+    { id: "update_request", kind: "button", onClick: () => copyToClipboard(`Update ${agentRef}`) },
+    { id: "copy_link", kind: "button", onClick: () => copyToClipboard(absoluteHref) },
+    { id: "copy_agent_ref", kind: "button", onClick: () => copyToClipboard(agentRef) },
+    { id: "history", kind: "link", to: `${artifactHref}/history` },
+  ];
   return (
     <div className="sidecar-actions" aria-label={t("sidecar.quick_actions")}>
-      <button
-        type="button"
-        className="sidecar-action"
-        title={t("sidecar.quick_verify_request")}
-        aria-label={t("sidecar.quick_verify_request")}
-        onClick={() => copyToClipboard(`Verify ${agentRef}`)}
-      >
-        <CheckCircle2 className="lucide" />
-      </button>
-      <button
-        type="button"
-        className="sidecar-action"
-        title={t("sidecar.quick_update_request")}
-        aria-label={t("sidecar.quick_update_request")}
-        onClick={() => copyToClipboard(`Update ${agentRef}`)}
-      >
-        <Pencil className="lucide" />
-      </button>
-      <button
-        type="button"
-        className="sidecar-action"
-        title={t("sidecar.quick_copy_link")}
-        aria-label={t("sidecar.quick_copy_link")}
-        onClick={() => copyToClipboard(absoluteHref)}
-      >
-        <Share2 className="lucide" />
-      </button>
-      <button
-        type="button"
-        className="sidecar-action"
-        title={t("sidecar.quick_copy_agent_ref")}
-        aria-label={t("sidecar.quick_copy_agent_ref")}
-        onClick={() => copyToClipboard(agentRef)}
-      >
-        <Clipboard className="lucide" />
-      </button>
-      <Link
-        className="sidecar-action"
-        title={t("sidecar.quick_history")}
-        aria-label={t("sidecar.quick_history")}
-        to={`${artifactHref}/history`}
-      >
-        <HistoryIcon className="lucide" />
-      </Link>
+      {actions.map((action) => {
+        const entry = visualQuickAction(action.id);
+        const Icon = visualIconComponent(entry.icon);
+        const label = visualLabel(entry, lang);
+        const description = visualDescription(entry, lang);
+        if (action.kind === "link") {
+          return (
+            <Tooltip key={action.id} content={description}>
+              <Link
+                className="sidecar-action"
+                aria-label={label}
+                to={action.to}
+              >
+                <Icon className="lucide" />
+              </Link>
+            </Tooltip>
+          );
+        }
+        return (
+          <Tooltip key={action.id} content={description}>
+            <button
+              type="button"
+              className="sidecar-action"
+              aria-label={label}
+              onClick={action.onClick}
+            >
+              <Icon className="lucide" />
+            </button>
+          </Tooltip>
+        );
+      })}
     </div>
   );
 }
@@ -354,11 +397,11 @@ function copyToClipboard(text: string) {
   void navigator.clipboard.writeText(text);
 }
 
-function SidecarStaticSection({ title, children }: { title: string; children: ReactNode }) {
+function SidecarStaticSection({ heading, children }: { heading: string; children: ReactNode }) {
   return (
     <section className="sidecar-section">
       <div className="sidecar-section__head sidecar-section__head--static">
-        <span>{title}</span>
+        <span>{heading}</span>
       </div>
       <div className="sidecar-section__body">{children}</div>
     </section>
@@ -367,13 +410,13 @@ function SidecarStaticSection({ title, children }: { title: string; children: Re
 
 function SidecarCollapsibleSection({
   id,
-  title,
+  heading,
   collapsed,
   onToggle,
   children,
 }: {
   id: CollapsibleKey;
-  title: string;
+  heading: string;
   collapsed: boolean;
   onToggle: (key: CollapsibleKey) => void;
   children: ReactNode;
@@ -381,16 +424,17 @@ function SidecarCollapsibleSection({
   const { t } = useI18n();
   return (
     <section className="sidecar-section">
-      <button
-        type="button"
-        className="sidecar-section__head"
-        aria-expanded={!collapsed}
-        title={collapsed ? t("sidecar.expand_section") : t("sidecar.collapse_section")}
-        onClick={() => onToggle(id)}
-      >
-        {collapsed ? <ChevronRight className="lucide" /> : <ChevronDown className="lucide" />}
-        <span>{title}</span>
-      </button>
+      <Tooltip content={collapsed ? t("sidecar.expand_section") : t("sidecar.collapse_section")}>
+        <button
+          type="button"
+          className="sidecar-section__head"
+          aria-expanded={!collapsed}
+          onClick={() => onToggle(id)}
+        >
+          {collapsed ? <ChevronRight className="lucide" /> : <ChevronDown className="lucide" />}
+          <span>{heading}</span>
+        </button>
+      </Tooltip>
       {!collapsed && <div className="sidecar-section__body">{children}</div>}
     </section>
   );
@@ -398,7 +442,6 @@ function SidecarCollapsibleSection({
 
 function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: string }) {
   const { t } = useI18n();
-  const { locale = "" } = useParams<{ locale?: string }>();
   const [revs, setRevs] = useState<RevisionRow[] | null>(null);
 
   useEffect(() => {
@@ -425,7 +468,7 @@ function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: strin
       <div className="sidecar-timeline-head">
         <span>{t("history.recent_changes")}</span>
         <Link
-          to={`/p/${projectSlug}/${locale}/wiki/${slug}/history`}
+          to={`/p/${projectSlug}/wiki/${slug}/history`}
           className="sidecar-timeline-head__link"
         >
           <HistoryIcon className="lucide" style={{ width: 11, height: 11 }} />
@@ -456,7 +499,7 @@ function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: strin
       })}
       {remainder > 0 && (
         <Link
-          to={`/p/${projectSlug}/${locale}/wiki/${slug}/history`}
+          to={`/p/${projectSlug}/wiki/${slug}/history`}
           style={{ fontSize: 11, color: "var(--fg-3)", fontFamily: "var(--font-mono)", textDecoration: "none" }}
         >
           {t("history.more_revisions", remainder)}
@@ -467,7 +510,6 @@ function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: strin
 }
 
 const MINI_GRAPH_MAX_NEIGHBORS = 8;
-const MINI_GRAPH_CENTER = { x: 140, y: 100 };
 
 type MiniGraphEdge = {
   edge: EdgeRef;
@@ -477,20 +519,18 @@ type MiniGraphEdge = {
 function MiniGraph({
   detail,
   projectSlug,
-  locale,
 }: {
   detail: Artifact;
   projectSlug: string;
-  locale: string;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const allEdges: MiniGraphEdge[] = [
     ...(detail.relates_to ?? []).map((edge) => ({ edge, direction: "out" as const })),
     ...(detail.related_by ?? []).map((edge) => ({ edge, direction: "in" as const })),
   ];
   const visible = allEdges.slice(0, MINI_GRAPH_MAX_NEIGHBORS);
   const hidden = Math.max(0, allEdges.length - visible.length);
-  const positions = radialPositions(visible.length);
+  const positions = graphRadialPositions(visible.length);
 
   if (visible.length === 0) {
     return (
@@ -528,66 +568,45 @@ function MiniGraph({
                 y1={start.y}
                 x2={end.x}
                 y2={end.y}
-                className={`mini-graph__edge mini-graph__edge--${relationClass(edge.relation)}`}
+                className={`mini-graph__edge mini-graph__edge--${graphRelationClass(edge.relation)}`}
                 markerEnd="url(#mini-graph-arrow)"
               />
               <text x={labelX} y={labelY} className="mini-graph__edge-label">
-                {direction === "out" ? "→" : "←"} {edge.relation}
+                {direction === "out" ? "→" : "←"} {graphRelationLabel(edge.relation, lang)}
               </text>
             </g>
           );
         })}
       </svg>
-      <Link
-        to={`/p/${projectSlug}/${locale}/wiki/${detail.slug}`}
-        className={`mini-graph__node mini-graph__node--center mini-graph__node--${typeClassSuffix(detail.type)}`}
-        style={{ left: MINI_GRAPH_CENTER.x, top: MINI_GRAPH_CENTER.y }}
-        title={detail.title}
-      >
-        <span className="mini-graph__node-type">{detail.type}</span>
-        <span className="mini-graph__node-label">{detail.title}</span>
-      </Link>
-      {visible.map(({ edge }, i) => (
+      <Tooltip content={detail.title}>
         <Link
-          key={`${edge.artifact_id}-${edge.relation}-${i}`}
-          to={`/p/${projectSlug}/${locale}/wiki/${edge.slug}`}
-          className={`mini-graph__node mini-graph__node--${typeClassSuffix(edge.type)}`}
-          style={{ left: positions[i].x, top: positions[i].y }}
-          title={`${edge.title} (${edge.type})`}
+          to={`/p/${projectSlug}/wiki/${detail.slug}`}
+          className={`mini-graph__node mini-graph__node--center mini-graph__node--${graphTypeClassSuffix(detail.type)}`}
+          style={{ left: MINI_GRAPH_CENTER.x, top: MINI_GRAPH_CENTER.y }}
         >
-          <span className="mini-graph__node-type">{edge.type}</span>
-          <span className="mini-graph__node-label">{edge.title}</span>
+          <span className="mini-graph__node-type">{detail.type}</span>
+          <span className="mini-graph__node-label">{detail.title}</span>
         </Link>
+      </Tooltip>
+      {visible.map(({ edge }, i) => (
+        <Tooltip key={`${edge.artifact_id}-${edge.relation}-${i}`} content={`${edge.title} (${edge.type})`}>
+          <Link
+            to={`/p/${projectSlug}/wiki/${edge.slug}`}
+            className={`mini-graph__node mini-graph__node--${graphTypeClassSuffix(edge.type)}`}
+            style={{ left: positions[i].x, top: positions[i].y }}
+          >
+            <span className="mini-graph__node-type">{edge.type}</span>
+            <span className="mini-graph__node-label">{edge.title}</span>
+          </Link>
+        </Tooltip>
       ))}
       {hidden > 0 && (
-        <Link to={`/p/${projectSlug}/${locale}/graph`} className="mini-graph__more">
+        <Link to={`/p/${projectSlug}/graph`} className="mini-graph__more">
           {t("sidecar.more_relations", hidden)}
         </Link>
       )}
     </div>
   );
-}
-
-function radialPositions(count: number): Array<{ x: number; y: number }> {
-  if (count <= 0) return [];
-  const radiusX = 96;
-  const radiusY = 66;
-  const start = -Math.PI / 2;
-  return Array.from({ length: count }, (_, i) => {
-    const angle = start + (i * 2 * Math.PI) / count;
-    return {
-      x: Math.round(MINI_GRAPH_CENTER.x + Math.cos(angle) * radiusX),
-      y: Math.round(MINI_GRAPH_CENTER.y + Math.sin(angle) * radiusY),
-    };
-  });
-}
-
-function typeClassSuffix(type: string): string {
-  return type.toLowerCase().replace(/[^a-z0-9]+/g, "") || "default";
-}
-
-function relationClass(relation: string): string {
-  return relation.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "default";
 }
 
 // ConnectedArtifacts renders typed edges (relates_to / related_by) as
@@ -610,7 +629,6 @@ function ConnectedArtifacts({
   supersededBy: string;
 }) {
   const { t } = useI18n();
-  const { locale = "" } = useParams<{ locale?: string }>();
   const nothing = !hasSupersedes && relates.length === 0 && relatedBy.length === 0;
 
   if (nothing) {
@@ -642,24 +660,25 @@ function ConnectedArtifacts({
       <ul className="relation-list">
         {rows.map(({ edge, direction }) => (
           <li key={`${direction}-${edge.relation}-${edge.artifact_id}`}>
-            <Link
-              to={`/p/${projectSlug}/${locale}/wiki/${edge.slug}`}
-              className="relation-card"
-              title={edge.title}
-            >
-              <span className="relation-card__dir" aria-hidden="true">
-                {direction === "out" ? (
-                  <ArrowUpRight className="lucide" />
-                ) : (
-                  <ArrowDownLeft className="lucide" />
-                )}
-              </span>
-              <RelationIcon relation={edge.relation} />
-              <span className="relation-card__body">
-                <span className="relation-card__title">{edge.title}</span>
-                <span className="relation-card__type">{edge.type}</span>
-              </span>
-            </Link>
+            <Tooltip content={edge.title}>
+              <Link
+                to={`/p/${projectSlug}/wiki/${edge.slug}`}
+                className="relation-card"
+              >
+                <span className="relation-card__dir" aria-hidden="true">
+                  {direction === "out" ? (
+                    <ArrowUpRight className="lucide" />
+                  ) : (
+                    <ArrowDownLeft className="lucide" />
+                  )}
+                </span>
+                <RelationIcon relation={edge.relation} />
+                <span className="relation-card__body">
+                  <span className="relation-card__title">{edge.title}</span>
+                  <span className="relation-card__type">{edge.type}</span>
+                </span>
+              </Link>
+            </Tooltip>
           </li>
         ))}
       </ul>
@@ -668,33 +687,19 @@ function ConnectedArtifacts({
 }
 
 function RelationIcon({ relation }: { relation: string }) {
-  const Icon = relationIconFor(relation);
+  const { lang } = useI18n();
+  const entry = visualRelation(relation);
+  const Icon = visualIconComponent(entry?.icon);
+  const label = entry ? visualLabel(entry, lang) : relation;
+  const description = entry ? visualDescription(entry, lang) : relation;
+  const style = entry
+    ? { "--relation-color": `var(${entry.color_token})` } as React.CSSProperties & Record<"--relation-color", string>
+    : undefined;
   return (
-    <span className="relation-card__relation" title={relation} aria-label={relation}>
+    <BadgeWithExplain label={label} description={description} className="relation-card__relation" style={style}>
       <Icon className="lucide" />
-    </span>
+    </BadgeWithExplain>
   );
-}
-
-function relationIconFor(relation: string): LucideIcon {
-  switch (relation) {
-    case "implements":
-      return Puzzle;
-    case "references":
-      return Link2;
-    case "blocks":
-      return Ban;
-    case "blocked_by":
-      return Lock;
-    case "supersedes":
-      return Layers;
-    case "translation_of":
-      return Languages;
-    case "relates_to":
-      return ArrowLeftRight;
-    default:
-      return Link2;
-  }
 }
 
 // ProvenanceBlock renders the epistemic + evidence data the Trust Card
@@ -735,21 +740,34 @@ function PolicyBlock({ meta }: { meta?: ArtifactMeta }) {
   return (
     <div className="sidecar-stack">
       <NextContextLine meta={meta} />
-      <PolicyRow label="source" value={meta.source_type} />
-      <PolicyRow label="consent" value={meta.consent_state} />
-      <PolicyRow label="confidence" value={meta.confidence} />
-      <PolicyRow label="audience" value={meta.audience} />
-      <PolicyRow label="verification" value={meta.verification_state} />
+      <PolicyRow enumKey="source_type" label="source" value={meta.source_type} />
+      <PolicyRow enumKey="consent_state" label="consent" value={meta.consent_state} />
+      <PolicyRow enumKey="confidence" label="confidence" value={meta.confidence} />
+      <PolicyRow enumKey="audience" label="audience" value={meta.audience} />
+      <PolicyRow enumKey="verification_state" label="verification" value={meta.verification_state} />
     </div>
   );
 }
 
-function PolicyRow({ label, value }: { label: string; value?: string }) {
+function PolicyRow({ enumKey, label, value }: { enumKey: VisualMetaEnumKey; label: string; value?: string }) {
+  const { lang } = useI18n();
   if (!value) return null;
+  const entry = visualMetaEnum(enumKey, value);
+  const Icon = visualIconComponent(entry?.icon);
+  const valueLabel = entry ? visualLabel(entry, lang) : value;
+  const description = entry ? visualDescription(entry, lang) : value;
+  const style = entry
+    ? { "--meta-color": `var(${entry.color_token})` } as React.CSSProperties & Record<"--meta-color", string>
+    : undefined;
   return (
     <div className="provenance__row">
       <span className="k">{label}</span>
-      <span className="v">{value}</span>
+      <span className="v">
+        <BadgeWithExplain label={valueLabel} description={description} className="policy-enum-chip" style={style}>
+          <Icon className="lucide" />
+          {valueLabel}
+        </BadgeWithExplain>
+      </span>
     </div>
   );
 }
@@ -811,6 +829,7 @@ function MetaBlock({
 }
 
 function PinsList({ pins }: { pins: PinRef[] }) {
+  const { lang } = useI18n();
   const groups = new Map<string, PinRef[]>();
   for (const p of pins) {
     const key = p.kind || "code";
@@ -822,30 +841,39 @@ function PinsList({ pins }: { pins: PinRef[] }) {
       <div style={{ fontSize: 11, color: "var(--fg-2)" }}>Pins · {pins.length}</div>
       <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 3 }}>
         {Array.from(groups.entries()).flatMap(([kind, items]) =>
-          items.map((p, idx) => (
-            <li
-              key={`${kind}-${idx}-${p.path}`}
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 11,
-                color: "var(--fg-1)",
-                display: "flex",
-                gap: 6,
-                alignItems: "baseline",
-              }}
-              title={`${kind} pin`}
-            >
-              <span className="chip" style={{ fontSize: 9, textTransform: "uppercase", padding: "1px 5px" }}>
-                {kind}
-              </span>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {p.path}
-                {p.lines_start
-                  ? `:${p.lines_start}${p.lines_end && p.lines_end !== p.lines_start ? `-${p.lines_end}` : ""}`
-                  : ""}
-              </span>
-            </li>
-          )),
+          items.map((p, idx) => {
+            const entry = visualPin(kind);
+            const PinIcon = visualIconComponent(entry?.icon);
+            const label = entry ? visualLabel(entry, lang) : kind;
+            const description = entry ? visualDescription(entry, lang) : `${kind} pin`;
+            const style = entry
+              ? { "--pin-color": `var(${entry.color_token})` } as React.CSSProperties & Record<"--pin-color", string>
+              : undefined;
+            return (
+              <li
+                key={`${kind}-${idx}-${p.path}`}
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                  color: "var(--fg-1)",
+                  display: "flex",
+                  gap: 6,
+                  alignItems: "baseline",
+                }}
+              >
+                <BadgeWithExplain label={label} description={description} className="pin-kind-chip" style={style}>
+                  <PinIcon className="lucide" />
+                  {label}
+                </BadgeWithExplain>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {p.path}
+                  {p.lines_start
+                    ? `:${p.lines_start}${p.lines_end && p.lines_end !== p.lines_start ? `-${p.lines_end}` : ""}`
+                    : ""}
+                </span>
+              </li>
+            );
+          }),
         )}
       </ul>
     </div>
@@ -863,36 +891,36 @@ function SourceSessionLine({ session }: { session: SourceSessionRef }) {
         <span style={{ color: "var(--fg-3)" }}>ephemeral — not recorded</span>
       )}
       {session.source_session ? (
-        <span
-          style={{ color: "var(--fg-3)", fontFamily: "var(--font-mono)", marginLeft: 6 }}
-          title={session.source_session}
-        >
-          · {session.source_session.slice(0, 10)}…
-        </span>
+        <Tooltip content={session.source_session}>
+          <span
+            style={{ color: "var(--fg-3)", fontFamily: "var(--font-mono)", marginLeft: 6 }}
+          >
+            · {session.source_session.slice(0, 10)}…
+          </span>
+        </Tooltip>
       ) : null}
     </div>
   );
 }
 
 function NextContextLine({ meta }: { meta: ArtifactMeta }) {
+  const { lang } = useI18n();
   const policy = meta.next_context_policy ?? "default";
-  const label =
-    policy === "excluded"
-      ? "Excluded from next session"
-      : policy === "opt_in"
-      ? "Next session: opt-in only"
-      : "Next session: default";
-  const why =
-    policy === "excluded"
-      ? "Agents won't see this in Fast Landing."
-      : policy === "opt_in"
-      ? "Surfaces only on direct retrieval."
-      : "Eligible for default Fast Landing bundle.";
+  const entry = visualMetaEnum("next_context_policy", policy);
+  const Icon = visualIconComponent(entry?.icon);
+  const label = entry ? visualLabel(entry, lang) : policy;
+  const why = entry ? visualDescription(entry, lang) : "";
+  const style = entry
+    ? { "--meta-color": `var(${entry.color_token})` } as React.CSSProperties & Record<"--meta-color", string>
+    : undefined;
   return (
     <div style={{ fontSize: 11, color: "var(--fg-2)" }}>
       <span style={{ color: "var(--fg-3)" }}>Context: </span>
-      {label}
-      <span style={{ color: "var(--fg-3)", marginLeft: 6 }}>· {why}</span>
+      <BadgeWithExplain label={label} description={why} className="policy-enum-chip" style={style}>
+        <Icon className="lucide" />
+        {label}
+      </BadgeWithExplain>
+      {why && <span style={{ color: "var(--fg-3)", marginLeft: 6 }}>· {why}</span>}
     </div>
   );
 }

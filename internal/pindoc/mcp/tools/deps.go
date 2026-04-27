@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
+	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/receipts"
@@ -62,6 +63,12 @@ type Deps struct {
 	// buildCapabilities.
 	Transport string
 
+	// AuthMode is the env-derived PINDOC_AUTH_MODE value advertised in
+	// capabilities. The resolver chain is selected at server startup from
+	// the same enum; tool handlers should read this field only for
+	// capability/reporting surfaces, not for authorization branching.
+	AuthMode config.AuthMode
+
 	// Embedder generates vectors for chunking on write and for query-side
 	// search / context.for_task. Phase 3+.
 	Embedder embed.Provider
@@ -70,6 +77,12 @@ type Deps struct {
 	// search-before-propose (Phase 11b). Nil-safe: every call site checks
 	// before dereferencing, and nil disables the gate (useful for tests).
 	Receipts *receipts.Store
+
+	// ReceiptExemptionLimit controls the create-path bootstrap allowance:
+	// receipt-less creates in an otherwise empty same-author area are
+	// accepted until this count is reached. Default comes from
+	// PINDOC_RECEIPT_EXEMPTION_LIMIT (5); zero disables the exemption.
+	ReceiptExemptionLimit int
 
 	// Settings is the operator-editable config store (Phase 14a). Nil-
 	// safe: capability reporting falls back to defaults, and human_url_abs
@@ -93,7 +106,8 @@ type Deps struct {
 // AbsHumanURL builds an absolute share URL from the current settings. Empty
 // when PublicBaseURL isn't configured — callers should treat absence as
 // "operator hasn't set a base URL yet; fall back to human_url relative
-// path".
+// path". projectLocale is kept for call-site compatibility and ignored
+// by the canonical-only URL builder.
 func AbsHumanURL(s *settings.Store, projectSlug, projectLocale, artifactSlug string) string {
 	if s == nil {
 		return ""
@@ -108,18 +122,10 @@ func AbsHumanURL(s *settings.Store, projectSlug, projectLocale, artifactSlug str
 	return base + HumanURL(projectSlug, projectLocale, artifactSlug)
 }
 
-// HumanURL returns the canonical /p/:project/:locale/wiki/:slug relative
-// URL used in all agent-to-human share links (Task task-phase-18-project-
-// locale-implementation adds the locale segment between slug and wiki).
-// Agents paste this into chat so the user can click through to the
-// reader. Relative on purpose — the hosting origin is the user's
-// deployment (self-host first), the agent does not know the external
-// base URL. Empty `projectLocale` falls back to "en" so pre-migration
-// call sites still emit a valid-looking URL.
-func HumanURL(projectSlug, projectLocale, artifactSlug string) string {
-	locale := projectLocale
-	if locale == "" {
-		locale = "en"
-	}
-	return "/p/" + projectSlug + "/" + locale + "/wiki/" + artifactSlug
+// HumanURL returns the canonical /p/:project/wiki/:slug relative URL used
+// in all agent-to-human share links. projectLocale is kept for call-site
+// compatibility after the canonical-locale migration; it is no longer part
+// of project identity or share paths.
+func HumanURL(projectSlug, _ string, artifactSlug string) string {
+	return "/p/" + projectSlug + "/wiki/" + artifactSlug
 }

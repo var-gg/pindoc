@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -19,20 +21,63 @@ type harnessInstallInput struct {
 	// Language can override the project's primary_language for this PINDOC.md
 	// render. Optional; falls back to the project setting.
 	Language string `json:"language,omitempty" jsonschema:"en|ko|auto; default = project primary_language"`
+
+	// Locale is the user's preferred view language for this workspace. In
+	// the canonical-only model this is metadata for frontmatter/workspace
+	// detection, not a project identity override. Optional; falls back to
+	// Language, then project primary_language.
+	Locale string `json:"locale,omitempty" jsonschema:"user view language preference, e.g. en | ko | ja; default = language/project primary_language"`
+
+	// IncludeSection12 controls whether the Task lifecycle guidance for
+	// chip / parallel work is rendered. Nil defaults to true so existing
+	// installs pick it up automatically; explicit false supports legacy
+	// migrations that need a smaller harness.
+	IncludeSection12 *bool `json:"include_section_12,omitempty" jsonschema:"include Task lifecycle Section 12; default true"`
+
+	// ResponseFormat controls whether this call returns the generated
+	// PINDOC.md / style snippet bodies. Empty defaults to "full" for
+	// backward compatibility. "file_only" returns metadata/etag fields
+	// without large bodies.
+	ResponseFormat string `json:"response_format,omitempty" jsonschema:"full|file_only; default full"`
+
+	// IfContentETag lets clients present a previously returned content_etag.
+	// When it matches the freshly rendered PINDOC.md content, the body is
+	// omitted even in full mode.
+	IfContentETag string `json:"if_content_etag,omitempty" jsonschema:"previous content_etag; omit body when it still matches"`
+
+	// IfStyleSnippetETag applies the same conditional omission rule to the
+	// register-separation style snippet.
+	IfStyleSnippetETag string `json:"if_style_snippet_etag,omitempty" jsonschema:"previous style_snippet_etag; omit style_snippet when it still matches"`
 }
 
 type harnessInstallOutput struct {
+	// not_ready surface — populated for tool-level validation failures.
+	Status         string               `json:"status,omitempty"`
+	ErrorCode      string               `json:"error_code,omitempty"`
+	Failed         []string             `json:"failed,omitempty"`
+	ErrorCodes     []string             `json:"error_codes,omitempty" jsonschema:"canonical stable SCREAMING_SNAKE_CASE identifiers; branch on these"`
+	Checklist      []string             `json:"checklist,omitempty"`
+	ChecklistItems []ErrorChecklistItem `json:"checklist_items,omitempty" jsonschema:"localized checklist entries paired with stable codes"`
+	MessageLocale  string               `json:"message_locale,omitempty" jsonschema:"locale used for checklist/checklist_items.message after fallback"`
+
 	// SuggestedPath is relative to the repo root. The agent writes Body
 	// here using its own filesystem tool (Pindoc MCP does not touch the
 	// filesystem — separation of concerns).
-	SuggestedPath string `json:"suggested_path"`
+	SuggestedPath string `json:"suggested_path,omitempty"`
 
 	// Body is the full PINDOC.md content the agent should write.
-	Body string `json:"body"`
+	Body string `json:"body,omitempty"`
+
+	// PindocMdContent/PindocMdPath/Instructions are aliases for clients
+	// expecting the newer frontmatter task schema. The older Body /
+	// SuggestedPath / Message fields remain populated for compatibility.
+	PindocMdContent string `json:"pindoc_md_content,omitempty"`
+	PindocMdPath    string `json:"pindoc_md_path,omitempty"`
+	Instructions    string `json:"instructions,omitempty"`
 
 	// ClaudeMdIncludeLine is a one-line directive the agent appends to
 	// CLAUDE.md (or AGENTS.md) so every future session auto-loads PINDOC.md.
-	ClaudeMdIncludeLine string `json:"claude_md_include_line"`
+	ClaudeMdIncludeLine string `json:"claude_md_include_line,omitempty"`
 
 	// StyleSnippet is the register-separation block the agent drops into
 	// CLAUDE.md / AGENTS.md / .cursorrules (Task task-harness-claudemd-
@@ -40,23 +85,37 @@ type harnessInstallOutput struct {
 	// block can be located and replaced on version upgrades.
 	// Implements Decision `decision-artifact-format-leak-mitigation`
 	// first defence layer (agent conversation register).
-	StyleSnippet string `json:"style_snippet"`
+	StyleSnippet string `json:"style_snippet,omitempty"`
 
 	// StyleSnippetTargets lists the agent-settings files the snippet
 	// typically belongs in, ordered by preference. The agent reads its
 	// own environment to pick the right one (Claude Code → CLAUDE.md,
 	// Codex/OpenAI → AGENTS.md, Cursor → .cursorrules). If none exist
 	// the agent creates the first entry.
-	StyleSnippetTargets []string `json:"style_snippet_targets"`
+	StyleSnippetTargets []string `json:"style_snippet_targets,omitempty"`
 
 	// StyleSnippetMarker is the opening marker substring the agent looks
 	// for when deciding whether to append (none found), replace (same
 	// version found), or warn (different version / user-edited body).
 	// The matching close marker is the same string with " BEGIN " → " END ".
-	StyleSnippetMarker string `json:"style_snippet_marker"`
+	StyleSnippetMarker string `json:"style_snippet_marker,omitempty"`
 
 	// Message gives the agent a plain-English summary of what to do next.
-	Message string `json:"message"`
+	Message string `json:"message,omitempty"`
+
+	// ResponseFormat reports the resolved output mode. ContentETag is
+	// always returned so clients can avoid receiving the same body again.
+	ResponseFormat string `json:"response_format,omitempty"`
+	ContentETag    string `json:"content_etag,omitempty"`
+
+	// ContentURL is reserved for future retrievable harness payload URLs.
+	// Local MCP mode has no durable payload URL, so it is omitted today.
+	ContentURL     string `json:"content_url,omitempty"`
+	ContentOmitted bool   `json:"content_omitted,omitempty"`
+
+	// StyleSnippetETag mirrors ContentETag for the agent-settings snippet.
+	StyleSnippetETag    string `json:"style_snippet_etag,omitempty"`
+	StyleSnippetOmitted bool   `json:"style_snippet_omitted,omitempty"`
 
 	// SessionBootstrap is the machine-readable handshake every client
 	// harness should run at session start. claude-code / codex / cursor
@@ -68,7 +127,7 @@ type harnessInstallOutput struct {
 
 	// Metadata the template was rendered from, so the agent can explain
 	// choices to the user.
-	RenderedFor RenderedFor `json:"rendered_for"`
+	RenderedFor RenderedFor `json:"rendered_for,omitzero"`
 }
 
 // HarnessSessionBootstrap describes the auto-run handshake a client
@@ -129,6 +188,11 @@ func defaultHarnessSessionBootstrap() *HarnessSessionBootstrap {
 	}
 }
 
+const (
+	harnessResponseFormatFull     = "full"
+	harnessResponseFormatFileOnly = "file_only"
+)
+
 // styleSnippetVersion is bumped whenever the snippet body changes in a
 // way worth re-propagating to existing installs. Agents compare the
 // marker suffix when deciding whether to replace an existing block.
@@ -153,9 +217,12 @@ const styleSnippetBodyKO = `### Register 분리 — 사용자 대화와 Pindoc a
 Pindoc artifact 본문(Context / Decision / Rationale / Alternatives / Consequences 같은 섹션)은 구조화된 register에 속해서 표·bullet·ADR 스타일 축약이 자연스럽다. 반면 사용자 대면 응답은 추론 흐름이 연결된 산문 register에 속한다. "Alt A(...) · B(...)" 같은 축약, 괄호 안 한 단어 기각 이유, 중점(·)으로 나열한 짧은 구절이 artifact 본문에서 대화로 역류하지 않게 한다. 애매할 때는 응답을 두세 문장 산문으로 다시 쓰며 추론을 압축이 아닌 서술로 노출한다.`
 
 type RenderedFor struct {
-	ProjectSlug     string `json:"project_slug"`
-	PrimaryLanguage string `json:"primary_language"`
-	Version         string `json:"pindoc_server_version"`
+	ProjectSlug      string `json:"project_slug"`
+	ProjectID        string `json:"project_id"`
+	PrimaryLanguage  string `json:"primary_language"`
+	Locale           string `json:"locale"`
+	IncludeSection12 bool   `json:"include_section_12"`
+	Version          string `json:"pindoc_server_version"`
 }
 
 // RegisterHarnessInstall wires pindoc.harness.install. Generates a
@@ -169,6 +236,11 @@ func RegisterHarnessInstall(server *sdk.Server, deps Deps) {
 			Description: "Return the PINDOC.md body this project should adopt and the one-line CLAUDE.md include that loads it. Write the returned body to PINDOC.md at the repo root, and append the include line to CLAUDE.md (or AGENTS.md). Re-run to regenerate after upgrading the server — the spec evolves with the server version.",
 		},
 		func(ctx context.Context, p *auth.Principal, in harnessInstallInput) (*sdk.CallToolResult, harnessInstallOutput, error) {
+			responseFormat, err := normalizeHarnessResponseFormat(in.ResponseFormat)
+			if err != nil {
+				return nil, harnessInstallResponseFormatNotReady(deps.UserLanguage), nil
+			}
+
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
 			if err != nil {
 				return nil, harnessInstallOutput{}, fmt.Errorf("harness.install: %w", err)
@@ -185,8 +257,16 @@ func RegisterHarnessInstall(server *sdk.Server, deps Deps) {
 			if lang == "" || lang == "auto" {
 				lang = projLang
 			}
+			locale := strings.ToLower(strings.TrimSpace(in.Locale))
+			if locale == "" || locale == "auto" {
+				locale = lang
+			}
+			includeSection12 := true
+			if in.IncludeSection12 != nil {
+				includeSection12 = *in.IncludeSection12
+			}
 
-			body := renderPindocMD(projName, scope.ProjectSlug, lang, deps.Version)
+			body := renderPindocMD(projName, scope.ProjectID, scope.ProjectSlug, lang, locale, deps.Version, includeSection12)
 
 			var snippetBody string
 			if lang == "ko" {
@@ -196,43 +276,137 @@ func RegisterHarnessInstall(server *sdk.Server, deps Deps) {
 			}
 			styleSnippet := styleSnippetMarkerBegin + "\n" + snippetBody + "\n" + styleSnippetMarkerEnd
 
-			return nil, harnessInstallOutput{
+			message := harnessInstallMessage(styleSnippetMarkerBegin)
+
+			out := harnessInstallOutput{
 				SuggestedPath:       "PINDOC.md",
 				Body:                body,
+				PindocMdContent:     body,
+				PindocMdPath:        "PINDOC.md",
+				Instructions:        message,
 				ClaudeMdIncludeLine: "@PINDOC.md",
 				StyleSnippet:        styleSnippet,
 				StyleSnippetTargets: []string{"CLAUDE.md", "AGENTS.md", ".cursorrules"},
 				StyleSnippetMarker:  styleSnippetMarkerBegin,
 				SessionBootstrap:    defaultHarnessSessionBootstrap(),
-				Message: strings.TrimSpace(fmt.Sprintf(`
-Write the returned body to PINDOC.md at the repo root. Then append this
-exact line to the end of CLAUDE.md (or AGENTS.md if you use that):
-    @PINDOC.md
-In the same CLAUDE.md / AGENTS.md file, also ensure the register-separation
-block is present (see style_snippet). If a block with the marker
-"%s" already exists, replace the whole BEGIN…END region with the
-new body. If none exists, append it near the top of the agent-guidance
-section. Keep anything outside the markers untouched.
-Future sessions will auto-load PINDOC.md and follow the Pindoc Harness
-rules (Pre-flight Check before writes, Referenced Confirmation when
-asking the user for approval, agent-only write surface).
-`, styleSnippetMarkerBegin)),
+				Message:             message,
 				RenderedFor: RenderedFor{
-					ProjectSlug:     scope.ProjectSlug,
-					PrimaryLanguage: lang,
-					Version:         deps.Version,
+					ProjectSlug:      scope.ProjectSlug,
+					ProjectID:        scope.ProjectID,
+					PrimaryLanguage:  lang,
+					Locale:           locale,
+					IncludeSection12: includeSection12,
+					Version:          deps.Version,
 				},
-			}, nil
+			}
+			applyHarnessResponseFormat(&out, in, responseFormat, body, styleSnippet)
+			return nil, out, nil
 		},
 	)
 }
 
+func normalizeHarnessResponseFormat(raw string) (string, error) {
+	format := strings.ToLower(strings.TrimSpace(raw))
+	if format == "" {
+		return harnessResponseFormatFull, nil
+	}
+	switch format {
+	case harnessResponseFormatFull, harnessResponseFormatFileOnly:
+		return format, nil
+	default:
+		return "", fmt.Errorf("response_format must be %q or %q", harnessResponseFormatFull, harnessResponseFormatFileOnly)
+	}
+}
+
+func harnessInstallResponseFormatNotReady(lang string) harnessInstallOutput {
+	const code = "HARNESS_RESPONSE_FORMAT_INVALID"
+	out := harnessInstallOutput{
+		Status:    "not_ready",
+		ErrorCode: code,
+		Failed:    []string{code},
+		Checklist: []string{harnessInstallResponseFormatMessage(lang)},
+	}
+	return applyMCPErrorContract(out, lang)
+}
+
+func harnessInstallResponseFormatMessage(lang string) string {
+	if normalizeMessageLocale(lang) == "ko" {
+		return `response_format은 "full" 또는 "file_only"만 허용됩니다.`
+	}
+	return fmt.Sprintf("response_format must be %q or %q", harnessResponseFormatFull, harnessResponseFormatFileOnly)
+}
+
+func harnessETag(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func applyHarnessResponseFormat(out *harnessInstallOutput, in harnessInstallInput, responseFormat, body, styleSnippet string) {
+	contentETag := harnessETag(body)
+	styleSnippetETag := harnessETag(styleSnippet)
+
+	out.ResponseFormat = responseFormat
+	out.ContentETag = contentETag
+	out.StyleSnippetETag = styleSnippetETag
+
+	omitContent := responseFormat == harnessResponseFormatFileOnly ||
+		strings.TrimSpace(in.IfContentETag) == contentETag
+	if omitContent {
+		out.Body = ""
+		out.PindocMdContent = ""
+		out.ContentOmitted = true
+	}
+
+	omitStyleSnippet := responseFormat == harnessResponseFormatFileOnly ||
+		strings.TrimSpace(in.IfStyleSnippetETag) == styleSnippetETag
+	if omitStyleSnippet {
+		out.StyleSnippet = ""
+		out.StyleSnippetOmitted = true
+	}
+}
+
+func harnessInstallMessage(marker string) string {
+	return strings.TrimSpace(fmt.Sprintf(`
+Write the returned body to PINDOC.md at the repo root. Then append this
+exact line to the end of CLAUDE.md (or AGENTS.md if you use that):
+    @PINDOC.md
+If PINDOC.md already exists, compare its YAML frontmatter before replacing:
+project_slug and project_id should match this response, and Section 12
+should be present unless include_section_12=false was explicitly requested.
+Ask the user before overwriting local edits outside generated content.
+In the same CLAUDE.md / AGENTS.md file, also ensure the register-separation
+block is present (see style_snippet). If a block with the marker
+"%s" already exists, replace the whole BEGIN…END region with the
+new body. If none exists, insert it immediately after the main
+agent-guidance H2 (for example "# AGENTS.md instructions" or
+"# CLAUDE.md instructions"); keep anything outside the markers untouched.
+If body / pindoc_md_content or style_snippet is omitted because
+response_format=file_only or an etag matched, no write is needed for that omitted
+payload; re-run with response_format=full and no matching etag to receive it.
+Future sessions will auto-load PINDOC.md and follow the Pindoc Harness
+rules (Pre-flight Check before writes, Referenced Confirmation when
+asking the user for approval, agent-only write surface).
+`, marker))
+}
+
 // renderPindocMD is intentionally one string template for M1. When PINDOC.md
 // stabilises (see docs/09-pindoc-md-spec.md) we split this out to a
-// dedicated package with per-section conditionals. Today it is under 100
-// lines — a single string is simpler to review.
-func renderPindocMD(projectName, projectSlug, language, serverVersion string) string {
-	return fmt.Sprintf(`# PINDOC.md — Harness for %s
+// dedicated package with per-section conditionals. Today the sections are
+// still plain text helpers so updates stay easy to diff.
+func renderPindocMD(projectName, projectID, projectSlug, language, locale, serverVersion string, includeSection12 bool) string {
+	applicableRulesSection := renderApplicableRulesSection()
+	section12 := ""
+	if includeSection12 {
+		section12 = "\n\n" + renderTaskLifecycleSection()
+	}
+	return fmt.Sprintf(`---
+project_slug: %s
+project_id: %s
+locale: %s
+schema_version: 1
+---
+
+# PINDOC.md — Harness for %s
 
 <!-- Generated by pindoc.harness.install · server %s · language %s -->
 <!-- Do not hand-edit. Re-run pindoc.harness.install to regenerate. -->
@@ -328,6 +502,8 @@ fields such as priority or due_at unless a narrower task-specific tool
 exists. Verified state is the next stop after claimed_done and goes
 through pindoc.artifact.verify (verifier ≠ implementer invariant).
 
+%s%s
+
 ## Conversation vs Memory
 
 Conversation is ephemeral by default; project memory is canonical. Six rules
@@ -402,11 +578,14 @@ Before calling pindoc.artifact.propose:
 2. Call pindoc.area.list and pick an existing area_slug; use 'misc' if
    nothing fits. Never invent an area_slug.
 3. **Call pindoc.context.for_task (or pindoc.artifact.search) BEFORE
-   create.** The server rejects create-path propose with NO_SRCH when the
-   request has no valid basis.search_receipt. Receipts are the opaque
-   token returned by either of those tools in the SAME MCP session and
-   expire after 30 minutes. Pass it back in propose input as
-   basis.search_receipt.
+   create, unless you are using a bootstrap exemption.** The server rejects
+   create-path propose with NO_SRCH when the request has no valid
+   basis.search_receipt and no exemption applies. Receipts are the opaque
+   token returned by either of those tools in the SAME MCP session. A
+   freshly-created project also returns a one-use bootstrap_receipt /
+   search_receipt for its first propose. Empty/same-author areas may accept
+   the first few receipt-less proposes and return receipt_exempted.
+   Pass any receipt back in propose input as basis.search_receipt.
 4. **If the context/search response carries candidate_updates[], read
    the top candidate with pindoc.artifact.read before deciding
    create-vs-update.** Skipping this earns a RECOMMEND_READ_BEFORE_CREATE
@@ -556,7 +735,7 @@ to confirm primary_language explicitly; do not infer or default it from the
 conversation. Project primary_language is immutable after create. If it is
 wrong, the correction path is recreating the project; no automatic
 artifact/area migration exists. The tool returns the canonical
-/p/<new-slug>/<language>/wiki URL for the user to bookmark.
+/p/<new-slug>/wiki URL for the user to bookmark.
 
 ## Template-first propose (Phase 13)
 
@@ -667,11 +846,80 @@ the update_of value you should pass on retry — follow it.
 - Do not edit PINDOC.md itself by hand. Re-run pindoc.harness.install
   after upgrading the server.
 `,
+		projectSlug, projectID, locale,
 		projectName, serverVersion, language,
 		projectSlug, language,
+		applicableRulesSection, section12,
 		projectSlug, projectSlug, projectSlug, projectSlug, projectSlug, projectSlug, projectSlug,
 		languageLabel(language),
 	)
+}
+
+func renderApplicableRulesSection() string {
+	return `## Section X — Applicable Rules Mechanism
+
+Policy wiki artifacts can automatically apply to worker tasks through
+artifact_meta rule metadata. This is universal Pindoc mechanism; each
+project still owns its own policy content and severity choices.
+
+Wiki author:
+- Mark a policy artifact with artifact_meta.rule_severity="binding",
+  "guidance", or "reference". That field is the rule marker.
+- Optionally set artifact_meta.applies_to_areas and applies_to_types.
+  If applies_to_areas is omitted, the artifact applies to its own area
+  and sub-areas. Cross-cutting areas such as security, privacy,
+  accessibility, reliability, observability, and localization apply to
+  every task automatically.
+- Keep artifact_meta.rule_excerpt short. context.for_task surfaces this
+  excerpt; if omitted, the server derives one from the first H2 section.
+
+Task author:
+- Do not manually attach every policy as references. Let context.for_task
+  infer applicable_rules from rule metadata and area hierarchy.
+
+Task worker:
+- Before implementation, call pindoc.context.for_task and scan
+  applicable_rules[].excerpt.
+- binding means pause for explicit confirmation before knowingly
+  violating it. guidance is the default path unless local facts disagree.
+  reference is background to read when relevant.
+- If the excerpt is not enough, read the rule artifact via its agent_ref.`
+}
+
+func renderTaskLifecycleSection() string {
+	return `## Section 12 — Task lifecycle (chip / parallel work)
+
+When this project's agent spawns a worktree-based chip / parallel sub-session:
+
+### Before spawn
+- Ensure a pindoc Task artifact exists for this work. If not, create via
+  ` + "`pindoc.artifact.propose`" + ` with task_meta.status="open" and
+  assignee="agent:<implementer>" (e.g. agent:codex).
+- Task body must contain Acceptance criteria (` + "`- [ ] ...`" + ` lines).
+- Chip's spawn prompt references the Task slug, e.g.
+  ` + "`Closes pindoc://task-foo-bar`" + ` in commit / PR description.
+
+### During chip work
+- Task remains task_meta.status="open".
+- Chip may update body / assignee but does NOT transition status without
+  acceptance.
+
+### After chip merge to main
+- Orchestrating agent (or chip on exit) calls
+  ` + "`pindoc.artifact.propose(update_of=<task>, task_meta={status: \"claimed_done\"})`" + `
+  with all Acceptance checkboxes ticked.
+- Optional: separate verifier agent posts VerificationReport + calls
+  ` + "`pindoc.artifact.verify`" + ` for ` + "`verified`" + ` state.
+
+### If interrupted / abandoned
+- Task stays open. Orchestrator decides: re-spawn / reassign / cancel.
+- Cancel via task_meta.status="cancelled" + reason.
+
+### Retroactive policy
+- Ad-hoc dev work without pre-defined Task: git history acceptable for
+  solo dev.
+- Public OSS / team work: retroactive Task with status="claimed_done"
+  recommended for audit trail.`
 }
 
 func languageLabel(code string) string {

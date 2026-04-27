@@ -169,6 +169,49 @@
   --type-default-bg:      oklch(95% 0.004 80);
   --type-default-border:  oklch(88% 0.005 80);
 
+  /* Area palette — eight top-level shelves plus cross-cutting children.
+   * Top-level areas carry stronger signature colors in navigation; child
+   * cross-cutting concerns reuse quieter adjacent hues in the UI. */
+  --area-strategy:      oklch(46% 0.13 75);
+  --area-context:       oklch(46% 0.12 235);
+  --area-experience:    oklch(48% 0.13 290);
+  --area-system:        oklch(46% 0.11 260);
+  --area-operations:    oklch(48% 0.13 50);
+  --area-governance:    oklch(44% 0.13 155);
+  --area-cross-cutting: oklch(48% 0.14 310);
+  --area-misc:          oklch(50% 0.012 265);
+  --area-security:      oklch(46% 0.13 25);
+  --area-privacy:       oklch(46% 0.12 275);
+  --area-accessibility: oklch(46% 0.11 185);
+  --area-reliability:   oklch(44% 0.12 145);
+  --area-observability: oklch(46% 0.12 220);
+  --area-localization:  oklch(48% 0.12 315);
+
+  /* Relation / pin / meta / quick-action tokens share the same semantic
+   * source used by web/src/reader/visualLanguage.ts. */
+  --relation-implements:     var(--type-task);
+  --relation-references:     var(--type-analysis);
+  --relation-blocks:         var(--prio-p0);
+  --relation-relates-to:     var(--fg-3);
+  --relation-translation-of: var(--type-glossary);
+
+  --pin-code:     var(--type-apiendpoint);
+  --pin-resource: var(--type-feature);
+  --pin-url:      var(--type-analysis);
+
+  --meta-source:       var(--type-analysis);
+  --meta-consent:      var(--type-task);
+  --meta-confidence:   var(--type-decision);
+  --meta-audience:     var(--area-governance);
+  --meta-context:      var(--area-context);
+  --meta-verification: var(--type-verificationreport);
+
+  --quick-verify:     var(--type-verificationreport);
+  --quick-update:     var(--type-feature);
+  --quick-copy-link:  var(--type-analysis);
+  --quick-agent-ref:  var(--area-system);
+  --quick-history:    var(--area-governance);
+
   /* Syntax / diff */
   --diff-add-bg: oklch(95% 0.05 160);
   --diff-add-fg: oklch(42% 0.14 155);
@@ -388,6 +431,44 @@
   --type-default:         oklch(62% 0.010 265);
   --type-default-bg:      oklch(22% 0.009 265);
   --type-default-border:  oklch(30% 0.010 265);
+
+  --area-strategy:      oklch(78% 0.14 78);
+  --area-context:       oklch(78% 0.12 232);
+  --area-experience:    oklch(78% 0.13 290);
+  --area-system:        oklch(76% 0.12 260);
+  --area-operations:    oklch(78% 0.14 50);
+  --area-governance:    oklch(76% 0.14 160);
+  --area-cross-cutting: oklch(78% 0.14 310);
+  --area-misc:          oklch(62% 0.010 265);
+  --area-security:      oklch(76% 0.15 25);
+  --area-privacy:       oklch(76% 0.13 275);
+  --area-accessibility: oklch(76% 0.12 185);
+  --area-reliability:   oklch(76% 0.13 145);
+  --area-observability: oklch(76% 0.12 220);
+  --area-localization:  oklch(78% 0.13 315);
+
+  --relation-implements:     var(--type-task);
+  --relation-references:     var(--type-analysis);
+  --relation-blocks:         var(--prio-p0);
+  --relation-relates-to:     var(--fg-3);
+  --relation-translation-of: var(--type-glossary);
+
+  --pin-code:     var(--type-apiendpoint);
+  --pin-resource: var(--type-feature);
+  --pin-url:      var(--type-analysis);
+
+  --meta-source:       var(--type-analysis);
+  --meta-consent:      var(--type-task);
+  --meta-confidence:   var(--type-decision);
+  --meta-audience:     var(--area-governance);
+  --meta-context:      var(--area-context);
+  --meta-verification: var(--type-verificationreport);
+
+  --quick-verify:     var(--type-verificationreport);
+  --quick-update:     var(--type-feature);
+  --quick-copy-link:  var(--type-analysis);
+  --quick-agent-ref:  var(--area-system);
+  --quick-history:    var(--area-governance);
 
   --diff-add-bg: oklch(22% 0.05 160);
   --diff-add-fg: oklch(80% 0.14 155);

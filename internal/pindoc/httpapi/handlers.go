@@ -12,6 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	pauth "github.com/var-gg/pindoc/internal/pindoc/auth"
+	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/projects"
 )
@@ -24,15 +26,17 @@ type projectInfo struct {
 	Description     string `json:"description,omitempty"`
 	Color           string `json:"color,omitempty"`
 	PrimaryLanguage string `json:"primary_language"`
-	// Locale is the authoritative canonical-key column added by Phase 18
-	// (migration 0015, Task task-phase-18-project-locale-implementation).
-	// Reader URL embeds it between the project slug and the view verb so
-	// the same slug across locales stays uniquely addressable.
+	SensitiveOps    string `json:"sensitive_ops"`
+	CurrentRole     string `json:"current_role,omitempty"`
+	// Locale is a compatibility alias for PrimaryLanguage. Locale is no
+	// longer part of project identity or Reader URLs after task-canonical-
+	// locale-migration.
 	Locale         string        `json:"locale"`
 	AreasCount     int           `json:"areas_count"`
 	ArtifactsCount int           `json:"artifacts_count"`
 	CreatedAt      time.Time     `json:"created_at"`
 	Rendering      RenderingCaps `json:"rendering"`
+	Capabilities   ProjectCaps   `json:"capabilities"`
 }
 
 // RenderingCaps tells an agent which markdown features actually render in
@@ -44,6 +48,10 @@ type RenderingCaps struct {
 	Extensions     []string `json:"extensions"`
 	CodeLanguages  []string `json:"code_languages"`
 	Notes          string   `json:"notes,omitempty"`
+}
+
+type ProjectCaps struct {
+	ReviewQueueSupported bool `json:"review_queue_supported"`
 }
 
 var pindocRenderingCaps = RenderingCaps{
@@ -72,10 +80,8 @@ func (d Deps) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"version":                d.Version,
 		// auth_mode mirrors the Capabilities.AuthMode surfaced by
 		// pindoc.project.current. Reader's TaskControls branches off this:
-		// "trusted_local" → inline editable, anything else → read-only
-		// (Decision agent-only-write-분할). Hardcoded constant in M1 since
-		// we don't ship project_token / oauth yet.
-		"auth_mode": AuthModeTrustedLocal,
+		// "trusted_local" → inline editable, anything else → read-only.
+		"auth_mode": string(d.authMode()),
 		// onboarding_required tells the React app to redirect / → wizard.
 		// True when only the seed `pindoc` project exists (Decision
 		// project-bootstrap-canonical-flow-reader-ui-first-class). The
@@ -130,11 +136,16 @@ func (d Deps) checkOnboardingRequired(ctx context.Context) bool {
 	return count == 0
 }
 
-// AuthModeTrustedLocal is the M1 hosting model: one operator, local
-// subprocess, no token. Keeping this as a named constant so the
-// TaskControls gate and the task-meta POST handler agree on the literal.
-// When V1.5+ introduces "project_token" this becomes a field on Deps.
-const AuthModeTrustedLocal = "trusted_local"
+// AuthModeTrustedLocal is kept as a compatibility alias for older HTTP-side
+// tests and comments. Runtime auth mode now comes from Deps.AuthMode.
+const AuthModeTrustedLocal = string(config.AuthModeTrustedLocal)
+
+func (d Deps) authMode() config.AuthMode {
+	if d.AuthMode.Valid() {
+		return d.AuthMode
+	}
+	return config.AuthModeTrustedLocal
+}
 
 type projectListRow struct {
 	ID              string    `json:"id"`
@@ -167,6 +178,7 @@ func (d Deps) handleUserList(w http.ResponseWriter, r *http.Request) {
 	rows, err := d.DB.Query(r.Context(), `
 		SELECT id::text, display_name, github_handle, source
 		FROM users
+		WHERE deleted_at IS NULL
 		ORDER BY display_name
 	`)
 	if err != nil {
@@ -241,13 +253,13 @@ func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
 	err := d.DB.QueryRow(r.Context(), `
 		SELECT
 			p.id::text, p.slug, p.name, p.owner_id, p.description, p.color,
-			p.primary_language, p.locale, p.created_at,
+			p.primary_language, p.primary_language, COALESCE(NULLIF(p.sensitive_ops, ''), 'auto'), p.created_at,
 			(SELECT count(*) FROM areas     WHERE project_id = p.id),
 			(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
 		FROM projects p WHERE p.slug = $1
 	`, slug).Scan(
 		&out.ID, &out.Slug, &out.Name, &out.OwnerID, &desc, &color,
-		&out.PrimaryLanguage, &out.Locale, &out.CreatedAt,
+		&out.PrimaryLanguage, &out.Locale, &out.SensitiveOps, &out.CreatedAt,
 		&out.AreasCount, &out.ArtifactsCount,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -266,7 +278,34 @@ func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
 		out.Color = *color
 	}
 	out.Rendering = pindocRenderingCaps
+	out.Capabilities = ProjectCaps{ReviewQueueSupported: true}
+	out.CurrentRole = d.currentProjectRole(r.Context(), r, out.Slug)
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (d Deps) currentProjectRole(ctx context.Context, r *http.Request, projectSlug string) string {
+	switch d.authMode() {
+	case config.AuthModeTrustedLocal, "":
+		return pauth.RoleOwner
+	case config.AuthModeOAuthGitHub:
+		if d.DB == nil || d.OAuth == nil {
+			return ""
+		}
+		userID := d.OAuth.BrowserSessionUserID(r)
+		if strings.TrimSpace(userID) == "" {
+			return ""
+		}
+		scope, err := pauth.ResolveProject(ctx, d.DB, &pauth.Principal{
+			UserID:   userID,
+			AuthMode: pauth.AuthModeOAuthGitHub,
+		}, projectSlug)
+		if err != nil {
+			return ""
+		}
+		return scope.Role
+	default:
+		return ""
+	}
 }
 
 type areaRow struct {
@@ -345,6 +384,7 @@ type artifactRow struct {
 	Type         string    `json:"type"`
 	Title        string    `json:"title"`
 	AreaSlug     string    `json:"area_slug"`
+	BodyLocale   string    `json:"body_locale,omitempty"`
 	Completeness string    `json:"completeness"`
 	Status       string    `json:"status"`
 	ReviewState  string    `json:"review_state"`
@@ -393,6 +433,7 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 	rows, err := d.DB.Query(r.Context(), `
 		SELECT
 			a.id::text, a.slug, a.type, a.title, ar.slug,
+			COALESCE(NULLIF(a.body_locale, ''), NULLIF(p.primary_language, ''), 'en'),
 			a.completeness, a.status, a.review_state,
 			a.author_id, a.published_at, a.updated_at, a.task_meta, a.artifact_meta,
 			wr.recent_warnings,
@@ -441,6 +482,7 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 		var userID, userDisplay, userGithub *string
 		if err := rows.Scan(
 			&a.ID, &a.Slug, &a.Type, &a.Title, &a.AreaSlug,
+			&a.BodyLocale,
 			&a.Completeness, &a.Status, &a.ReviewState,
 			&a.AuthorID, &publishedAt, &a.UpdatedAt, &taskMeta, &artifactMeta,
 			&recentWarnings,
@@ -564,6 +606,7 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	err := d.DB.QueryRow(r.Context(), `
 		SELECT
 			a.id::text, a.slug, a.type, a.title, ar.slug,
+			COALESCE(NULLIF(a.body_locale, ''), NULLIF(p.primary_language, ''), 'en'),
 			a.completeness, a.status, a.review_state,
 			a.author_id, a.published_at, a.updated_at,
 			a.body_markdown, a.tags, a.author_version, a.created_at,
@@ -578,6 +621,7 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		LIMIT 1
 	`, slug, ref).Scan(
 		&a.ID, &a.Slug, &a.Type, &a.Title, &a.AreaSlug,
+		&a.BodyLocale,
 		&a.Completeness, &a.Status, &a.ReviewState,
 		&a.AuthorID, &publishedAt, &a.UpdatedAt,
 		&a.BodyMarkdown, &a.Tags, &authorVer, &a.CreatedAt,

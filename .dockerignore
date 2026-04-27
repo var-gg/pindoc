@@ -1,0 +1,17 @@
+.git
+.claude
+bin
+logs
+tools
+node_modules
+web/node_modules
+web/.vite
+web/*.tsbuildinfo
+web-vite.*.log
+*.log
+*.exe
+*.test
+*.out
+*.prof
+.env.local
+*.secret

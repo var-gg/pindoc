@@ -63,8 +63,11 @@ type taskBulkAssignOutput struct {
 	Status    string `json:"status"`
 	ErrorCode string `json:"error_code,omitempty"`
 
-	Failed    []string `json:"failed,omitempty"`
-	Checklist []string `json:"checklist,omitempty"`
+	Failed         []string             `json:"failed,omitempty"`
+	ErrorCodes     []string             `json:"error_codes,omitempty" jsonschema:"canonical stable SCREAMING_SNAKE_CASE identifiers; branch on these"`
+	Checklist      []string             `json:"checklist,omitempty"`
+	ChecklistItems []ErrorChecklistItem `json:"checklist_items,omitempty" jsonschema:"localized checklist entries paired with stable codes"`
+	MessageLocale  string               `json:"message_locale,omitempty" jsonschema:"locale used for checklist/checklist_items.message after fallback"`
 
 	// BulkOpID correlates every revision emitted by this call. Present
 	// only when the batch reached the fan-out stage — validation failures

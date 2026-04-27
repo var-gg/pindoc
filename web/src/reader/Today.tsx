@@ -1,0 +1,358 @@
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { CheckCircle2, ChevronDown, ChevronRight, Download, Filter, Loader2, PanelRightOpen, Sparkles } from "lucide-react";
+import { Link, useNavigate } from "react-router";
+import { api, type ChangeGroup, type TodayResp } from "../api/client";
+import { useI18n } from "../i18n";
+import { EmptyState } from "./SurfacePrimitives";
+import { Tooltip } from "./Tooltip";
+import { TypeCountChip, VisualAreaChip } from "./VisualChips";
+
+type Props = {
+  projectSlug: string;
+  selectedArea: string | null;
+  areaNameBySlug: ReadonlyMap<string, string>;
+  onSelectArea: (areaSlug: string) => void;
+  selectedArtifactSlug: string | null;
+  onSelectArtifact: (slug: string) => void;
+};
+
+type KindFilter =
+  | "all"
+  | "human_trigger"
+  | "auto_sync"
+  | "maintenance"
+  | "system"
+  | "verification";
+
+const KIND_LABEL: Record<Exclude<KindFilter, "all" | "verification">, string> = {
+  human_trigger: "Human",
+  auto_sync: "Auto",
+  maintenance: "Maintenance",
+  system: "System",
+};
+
+export function Today({
+  projectSlug,
+  selectedArea,
+  areaNameBySlug,
+  onSelectArea,
+  selectedArtifactSlug,
+  onSelectArtifact,
+}: Props) {
+  const { t, lang } = useI18n();
+  const [data, setData] = useState<TodayResp | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<KindFilter>("all");
+  const [autoOpen, setAutoOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    setData(null);
+    api.changeGroups(projectSlug, { limit: 40, area: selectedArea ?? undefined, locale: lang })
+      .then((resp) => {
+        if (!cancelled) setData(resp);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectSlug, selectedArea, lang]);
+
+  const groups = data?.groups ?? [];
+  const visibleGroups = useMemo(
+    () => groups.filter((group) => {
+      if (filter === "all") return true;
+      if (filter === "verification") {
+        return group.verification_state === "unverified" || group.verification_state === "partially_verified";
+      }
+      return group.group_kind === filter;
+    }),
+    [groups, filter],
+  );
+  const autoGroups = visibleGroups.filter((g) => g.group_kind === "auto_sync" || g.group_kind === "maintenance");
+  const primaryGroups = visibleGroups.filter((g) => g.group_kind !== "auto_sync" && g.group_kind !== "maintenance");
+  const collapsedAuto = autoGroups.length > 0 && !autoOpen;
+  const scopeName = selectedArea
+    ? areaNameBySlug.get(selectedArea) ?? selectedArea
+    : t("today.scope_all");
+  const scopeMeta = selectedArea
+    ? t("today.scope_area", scopeName)
+    : t("today.scope_all");
+  const emptyMessage = selectedArea
+    ? t("today.empty_area", scopeName)
+    : t("today.empty_all");
+  const emptyFilteredMessage = selectedArea
+    ? t("today.empty_filtered_area", scopeName)
+    : t("today.empty_filtered_all");
+  const baselineLabel = data?.baseline.last_seen_at
+    ? new Date(data.baseline.last_seen_at).toLocaleString()
+    : data?.baseline.defaulted_to_days
+      ? `last ${data.baseline.defaulted_to_days}d`
+      : "current";
+
+  if (error) {
+    return (
+      <main className="content today-content">
+        <div className="reader-state reader-state--error">
+          <strong>{t("wiki.error_title")}</strong>
+          <p>{error}</p>
+        </div>
+      </main>
+    );
+  }
+  if (!data) {
+    return <main className="content today-content"><div className="reader-state">{t("wiki.loading")}</div></main>;
+  }
+
+  return (
+    <main className="content today-content">
+      <div className="today">
+        <header className="today-head">
+          <div>
+            <div className="today-head__eyebrow">{t("today.eyebrow")}</div>
+            <h1>{t("today.title")}</h1>
+            <div className="today-head__meta">
+              <span>{scopeMeta}</span>
+              <span>{t("today.baseline_meta", baselineLabel)}</span>
+              <span>{t("today.rev_meta", data.max_revision_id)}</span>
+            </div>
+          </div>
+          <div className="today-head__actions">
+            <ExportButton
+              url={api.exportProjectUrl(projectSlug)}
+              label={t("today.export_project")}
+              iconOnly
+            />
+          </div>
+        </header>
+
+        <section className="today-brief" aria-label={t("today.brief")}>
+          <div className="today-brief__icon">
+            {data.summary.source === "llm" ? <Sparkles className="lucide" /> : <CheckCircle2 className="lucide" />}
+          </div>
+          <div className="today-brief__body">
+            <div className="today-brief__label">{data.summary.ai_hint ?? data.summary.source}</div>
+            <h2>{data.summary.headline}</h2>
+            <ul>
+              {data.summary.bullets.slice(0, 3).map((bullet) => (
+                <li key={bullet}>{bullet}</li>
+              ))}
+            </ul>
+          </div>
+        </section>
+
+        <div className="today-filters" role="group" aria-label={t("today.filters")}>
+          <Filter className="lucide today-filters__icon" />
+          {(["all", "human_trigger", "verification", "auto_sync", "maintenance", "system"] as KindFilter[]).map((id) => (
+            <button
+              key={id}
+              type="button"
+              className={`today-filter${filter === id ? " is-active" : ""}`}
+              onClick={() => setFilter(id)}
+            >
+              {filterLabel(id, t)}
+            </button>
+          ))}
+        </div>
+
+        <div className="today-stream">
+          {groups.length === 0 && (
+            <EmptyState message={emptyMessage} />
+          )}
+          {primaryGroups.map((group) => (
+            <ChangeGroupCard
+              key={group.group_id}
+              group={group}
+              projectSlug={projectSlug}
+              areaNameBySlug={areaNameBySlug}
+              onSelectArea={onSelectArea}
+              selectedArtifactSlug={selectedArtifactSlug}
+              onSelectArtifact={onSelectArtifact}
+            />
+          ))}
+          {autoGroups.length > 0 && (
+            <section className="today-auto">
+              <button type="button" className="today-auto__toggle" onClick={() => setAutoOpen((v) => !v)}>
+                {collapsedAuto ? <ChevronRight className="lucide" /> : <ChevronDown className="lucide" />}
+                <span>{t("today.auto_group", autoGroups.length)}</span>
+              </button>
+              {!collapsedAuto && autoGroups.map((group) => (
+                <ChangeGroupCard
+                  key={group.group_id}
+                  group={group}
+                  projectSlug={projectSlug}
+                  areaNameBySlug={areaNameBySlug}
+                  onSelectArea={onSelectArea}
+                  selectedArtifactSlug={selectedArtifactSlug}
+                  onSelectArtifact={onSelectArtifact}
+                  compact
+                />
+              ))}
+            </section>
+          )}
+          {groups.length > 0 && visibleGroups.length === 0 && (
+            <EmptyState message={emptyFilteredMessage} />
+          )}
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function ChangeGroupCard({
+  group,
+  projectSlug,
+  areaNameBySlug,
+  onSelectArea,
+  selectedArtifactSlug,
+  onSelectArtifact,
+  compact,
+}: {
+  group: ChangeGroup;
+  projectSlug: string;
+  areaNameBySlug: ReadonlyMap<string, string>;
+  onSelectArea: (areaSlug: string) => void;
+  selectedArtifactSlug: string | null;
+  onSelectArtifact: (slug: string) => void;
+  compact?: boolean;
+}) {
+  const { t } = useI18n();
+  const navigate = useNavigate();
+  const firstArea = group.areas[0];
+  const firstArtifact = group.first_artifact;
+  const detailHref = firstArtifact ? `/p/${projectSlug}/wiki/${firstArtifact.slug}` : null;
+  const isActive = Boolean(firstArtifact && selectedArtifactSlug === firstArtifact.slug);
+  const isInteractive = Boolean(firstArtifact);
+  function openDetail() {
+    if (detailHref) navigate(detailHref);
+  }
+  function selectArtifact() {
+    if (firstArtifact) onSelectArtifact(firstArtifact.slug);
+  }
+  function onKeyDown(e: KeyboardEvent<HTMLElement>) {
+    if (!isInteractive) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest("a, button, input, textarea, select, [contenteditable='true']")) return;
+    const openKey = e.key.toLowerCase() === "o" || (e.key === "Enter" && e.shiftKey);
+    if (openKey) {
+      e.preventDefault();
+      openDetail();
+      return;
+    }
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      selectArtifact();
+    }
+  }
+  return (
+    <article
+      className={`change-card${compact ? " change-card--compact" : ""}${isInteractive ? " change-card--interactive" : ""}${isActive ? " is-active" : ""}`}
+      tabIndex={isInteractive ? 0 : undefined}
+      role={isInteractive ? "button" : undefined}
+      aria-selected={isInteractive ? isActive : undefined}
+      onClick={selectArtifact}
+      onDoubleClick={openDetail}
+      onKeyDown={onKeyDown}
+    >
+      <div className="change-card__top">
+        <span className={`change-kind change-kind--${group.group_kind}`}>{KIND_LABEL[group.group_kind] ?? group.group_kind}</span>
+        <span className={`change-importance change-importance--${group.importance.level}`}>{group.importance.level}</span>
+        <span>{t("today.revision_count", group.revision_count)}</span>
+        <span>{t("today.artifact_count", group.artifact_count)}</span>
+        {group.type_counts && group.type_counts.length > 0 && (
+          <span className="change-card__types" aria-label={t("today.type_distribution")}>
+            {group.type_counts.slice(0, 5).map((row) => (
+              <TypeCountChip key={row.type} type={row.type} count={row.count} />
+            ))}
+          </span>
+        )}
+        {firstArtifact && (
+          <span className="change-card__inspect" aria-label={t("today.card_select_hint")}>
+            <PanelRightOpen className="lucide" aria-hidden="true" />
+          </span>
+        )}
+      </div>
+      <h2>{group.commit_summary}</h2>
+      <div className="change-card__meta">
+        <span>{new Date(group.time_end).toLocaleString()}</span>
+        <span>{group.grouping_key.kind} · {group.grouping_key.confidence}</span>
+        <span>{group.verification_state}</span>
+      </div>
+      <div className="change-card__areas" onClick={(e) => e.stopPropagation()}>
+        {group.areas.map((area) => (
+          <VisualAreaChip
+            key={area}
+            areaSlug={area}
+            label={areaNameBySlug.get(area) ?? area}
+            onClick={() => onSelectArea(area)}
+          />
+        ))}
+      </div>
+      <div className="change-card__actions" onClick={(e) => e.stopPropagation()}>
+        {firstArea && <Link to={`/p/${projectSlug}/wiki?area=${encodeURIComponent(firstArea)}`}>{t("today.open_area")}</Link>}
+        {firstArea && <ExportButton url={api.exportProjectUrl(projectSlug, { area: firstArea })} label={t("today.export_area")} />}
+      </div>
+    </article>
+  );
+}
+
+function ExportButton({ url, label, iconOnly }: { url: string; label: string; iconOnly?: boolean }) {
+  const [loading, setLoading] = useState(false);
+  async function onClick() {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
+      const blob = await resp.blob();
+      const disposition = resp.headers.get("Content-Disposition") ?? "";
+      const match = /filename="?([^";]+)"?/i.exec(disposition);
+      const filename = match?.[1] ?? "pindoc-export.zip";
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } finally {
+      setLoading(false);
+    }
+  }
+  if (iconOnly) {
+    return (
+      <Tooltip content={label}>
+        <button type="button" className="today-icon-btn" onClick={onClick} aria-label={label} disabled={loading}>
+          {loading ? <Loader2 className="lucide today-spin" /> : <Download className="lucide" />}
+        </button>
+      </Tooltip>
+    );
+  }
+  return (
+    <button type="button" className="today-link-btn" onClick={onClick} disabled={loading}>
+      {loading ? <Loader2 className="lucide today-spin" /> : <Download className="lucide" />}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function filterLabel(id: KindFilter, t: (key: string, ...args: Array<string | number>) => string): string {
+  switch (id) {
+    case "all":
+      return t("today.filter_all");
+    case "verification":
+      return t("today.filter_verification");
+    case "human_trigger":
+      return "Human";
+    case "auto_sync":
+      return "Auto";
+    case "maintenance":
+      return "Maintenance";
+    case "system":
+      return "System";
+  }
+}

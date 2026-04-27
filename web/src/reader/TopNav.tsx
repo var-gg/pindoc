@@ -1,24 +1,31 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router";
-import { Activity, AlignCenter, AlignJustify, ChevronDown, CircleHelp, FileText, Inbox, Maximize2, Menu, Moon, Search, Share2, Sun } from "lucide-react";
+import { Activity, AlignCenter, AlignJustify, CalendarDays, ChevronDown, CircleHelp, ExternalLink, FileText, Inbox, Maximize2, Menu, Moon, Search, Share2, Sun } from "lucide-react";
 import type { ComponentType } from "react";
 import { api, type ProjectListItem } from "../api/client";
 import { useI18n, type Lang } from "../i18n";
 import type { Project } from "../api/client";
+import { InviteButton } from "../project/InviteButton";
 import type { Theme } from "./theme";
 import type { ReaderWidth } from "./readerWidth";
+import { typeChipClass } from "./typeChip";
+import { topLevelVisualAreaSlugs, visualDescription, visualLabel, visualLanguage } from "./visualLanguage";
+import { visualIconComponent } from "./visualLanguageIcons";
+import { Tooltip } from "./Tooltip";
 
 type Props = {
   project: Project;
+  surface: SurfaceId;
   theme: Theme;
   onToggleTheme: () => void;
   onOpenPalette: () => void;
-  onOpenShortcuts: () => void;
   onToggleMenu: () => void;
   inboxCount: number;
   readerWidth: ReaderWidth;
   onChangeReaderWidth: (next: ReaderWidth) => void;
+  onOpenInvite?: () => void;
 };
+type SurfaceId = "today" | "reader" | "inbox" | "graph" | "tasks";
 
 // Width toggle ordering + icons. AlignCenter = narrow (tight column),
 // AlignJustify = default (balanced), Maximize2 = wide (full-bleed).
@@ -32,18 +39,20 @@ const WIDTH_OPTIONS: Array<{ mode: ReaderWidth; icon: ComponentType<{ className?
 
 export function TopNav({
   project,
+  surface,
   theme,
   onToggleTheme,
   onOpenPalette,
-  onOpenShortcuts,
   onToggleMenu,
   inboxCount,
   readerWidth,
   onChangeReaderWidth,
+  onOpenInvite,
 }: Props) {
   const { t, lang, setLang } = useI18n();
   const nextLang: Lang = lang === "ko" ? "en" : "ko";
-  const baseRoute = `/p/${project.slug}/${project.locale ?? project.primary_language ?? "en"}`;
+  const baseRoute = `/p/${project.slug}`;
+  const canInvite = project.current_role === "owner" && Boolean(onOpenInvite);
 
   return (
     <div className="nav">
@@ -62,6 +71,10 @@ export function TopNav({
       <ProjectSwitcher project={project} />
 
       <div className="nav__tabs">
+        <NavLink to={`${baseRoute}/today`} className="nav__tab">
+          <CalendarDays className="lucide" />
+          <span className="label">{t("nav.today")}</span>
+        </NavLink>
         <NavLink to={`${baseRoute}/wiki`} className="nav__tab">
           <FileText className="lucide" />
           <span className="label">{t("nav.wiki_reader")}</span>
@@ -89,30 +102,29 @@ export function TopNav({
         <span className="kbd">⌘K</span>
       </button>
 
-      <button
-        className="nav__theme"
-        onClick={onOpenShortcuts}
-        aria-label={t("shortcuts.open")}
-        title={t("shortcuts.open")}
-      >
-        <CircleHelp className="lucide" />
-      </button>
+      {canInvite && (
+        <Tooltip content={t("invite.nav.tooltip")}>
+          <InviteButton label={t("invite.nav.tooltip")} onClick={onOpenInvite!} />
+        </Tooltip>
+      )}
+
+      <HelpPopover surface={surface} />
 
       <div className="nav__width" role="group" aria-label={t("nav.width_toggle")}>
         {WIDTH_OPTIONS.map(({ mode, icon: Icon, labelKey }) => {
           const active = readerWidth === mode;
           return (
-            <button
-              key={mode}
-              type="button"
-              className={`nav__width-btn${active ? " is-active" : ""}`}
-              onClick={() => onChangeReaderWidth(mode)}
-              aria-pressed={active}
-              aria-label={t(labelKey)}
-              title={t(labelKey)}
-            >
-              <Icon className="lucide" />
-            </button>
+            <Tooltip key={mode} content={t(labelKey)}>
+              <button
+                type="button"
+                className={`nav__width-btn${active ? " is-active" : ""}`}
+                onClick={() => onChangeReaderWidth(mode)}
+                aria-pressed={active}
+                aria-label={t(labelKey)}
+              >
+                <Icon className="lucide" />
+              </button>
+            </Tooltip>
           );
         })}
       </div>
@@ -121,14 +133,15 @@ export function TopNav({
         {lang === "ko" ? "KO" : "EN"}
       </button>
 
-      <NavLink
-        to="/ops/telemetry"
-        className="nav__theme"
-        aria-label={t("nav.telemetry")}
-        title={t("nav.telemetry")}
-      >
-        <Activity className="lucide" />
-      </NavLink>
+      <Tooltip content={t("nav.telemetry")}>
+        <NavLink
+          to="/ops/telemetry"
+          className="nav__theme"
+          aria-label={t("nav.telemetry")}
+        >
+          <Activity className="lucide" />
+        </NavLink>
+      </Tooltip>
 
       <button className="nav__theme" onClick={onToggleTheme} aria-label={t("nav.theme_toggle")}>
         {theme === "dark" ? <Moon className="lucide" /> : <Sun className="lucide" />}
@@ -137,13 +150,105 @@ export function TopNav({
       {/* Avatar placeholder — V1 self-host binds it to the GitHub OAuth
           user; M1 has no auth yet, so the tooltip spells that out rather
           than putting random project initials here. */}
-      <div
-        className="nav__user"
-        title={t("nav.user_placeholder")}
-        style={{ opacity: 0.55 }}
-      >
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 10 }}>—</span>
-      </div>
+      <Tooltip content={t("nav.user_placeholder")}>
+        <div
+          className="nav__user"
+          style={{ opacity: 0.55 }}
+        >
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10 }}>—</span>
+        </div>
+      </Tooltip>
+    </div>
+  );
+}
+
+function HelpPopover({ surface }: { surface: SurfaceId }) {
+  const { t, lang } = useI18n();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClickAway(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    window.addEventListener("mousedown", onClickAway);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onClickAway);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className="nav-help" ref={ref}>
+      <Tooltip content={t("help.open")}>
+        <button
+          type="button"
+          className="nav__theme nav-help__trigger"
+          onClick={() => setOpen((v) => !v)}
+          aria-label={t("help.open")}
+          aria-expanded={open}
+          aria-haspopup="dialog"
+        >
+          <CircleHelp className="lucide" />
+        </button>
+      </Tooltip>
+      {open && (
+        <div className="nav-help__popover" role="dialog" aria-label={t("help.title")}>
+          <div className="nav-help__surface">
+            <div className="nav-help__eyebrow">{t("help.surface_label")}</div>
+            <h2>{t(`help.surface.${surface}.title`)}</h2>
+            <p>{t(`help.surface.${surface}.description`)}</p>
+          </div>
+
+          <section className="nav-help__section">
+            <h3>{t("help.types_title")}</h3>
+            <div className="nav-help__grid nav-help__grid--types">
+              {Object.values(visualLanguage.types).map((entry) => (
+                <div key={entry.canonical} className="nav-help__card">
+                  <span className={typeChipClass(entry.canonical)}>{visualLabel(entry, lang)}</span>
+                  <p>{visualDescription(entry, lang)}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="nav-help__section">
+            <h3>{t("help.areas_title")}</h3>
+            <div className="nav-help__grid">
+              {topLevelVisualAreaSlugs.map((slug) => {
+                const entry = visualLanguage.areas[slug];
+                const Icon = visualIconComponent(entry.icon);
+                const style = { "--area-color": `var(${entry.color_token})` } as React.CSSProperties & Record<"--area-color", string>;
+                return (
+                  <div key={slug} className="nav-help__card nav-help__card--area" style={style}>
+                    <span className="chip-area chip-area--visual">
+                      <Icon className="lucide" />
+                      {visualLabel(entry, lang)}
+                    </span>
+                    <p>{visualDescription(entry, lang)}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <div className="nav-help__links" aria-label={t("help.docs_title")}>
+            <a href="https://github.com/var-gg/pindoc/blob/main/docs/19-area-taxonomy.md" target="_blank" rel="noreferrer">
+              <span>{t("help.docs_area_taxonomy")}</span>
+              <ExternalLink className="lucide" aria-hidden="true" />
+            </a>
+            <a href="https://github.com/var-gg/pindoc/blob/main/docs/glossary.md" target="_blank" rel="noreferrer">
+              <span>{t("help.docs_glossary")}</span>
+              <ExternalLink className="lucide" aria-hidden="true" />
+            </a>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

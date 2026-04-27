@@ -39,54 +39,78 @@ const (
 // row originated (harness_install / pindoc_admin / github_oauth) so V1.5
 // OAuth can migrate rows in place.
 type UserRow struct {
-	ID            string    `json:"id"`
-	DisplayName   string    `json:"display_name"`
-	Email         string    `json:"email,omitempty"`
-	GithubHandle  string    `json:"github_handle,omitempty"`
-	Source        string    `json:"source"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID           string    `json:"id"`
+	DisplayName  string    `json:"display_name"`
+	Email        string    `json:"email,omitempty"`
+	GithubHandle string    `json:"github_handle,omitempty"`
+	Source       string    `json:"source"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type userCurrentOutput struct {
-	Status    string   `json:"status"`
-	ErrorCode string   `json:"error_code,omitempty"`
-	Failed    []string `json:"failed,omitempty"`
-	Checklist []string `json:"checklist,omitempty"`
-	User      *UserRow `json:"user,omitempty"`
+	Status         string               `json:"status"`
+	Code           string               `json:"code,omitempty"`
+	ErrorCode      string               `json:"error_code,omitempty"`
+	Failed         []string             `json:"failed,omitempty"`
+	ErrorCodes     []string             `json:"error_codes,omitempty" jsonschema:"canonical stable SCREAMING_SNAKE_CASE identifiers; branch on these"`
+	Checklist      []string             `json:"checklist,omitempty"`
+	ChecklistItems []ErrorChecklistItem `json:"checklist_items,omitempty" jsonschema:"localized checklist entries paired with stable codes"`
+	MessageLocale  string               `json:"message_locale,omitempty" jsonschema:"locale used for checklist/checklist_items.message after fallback"`
+	Hints          []string             `json:"hints,omitempty"`
+	User           *UserRow             `json:"user,omitempty"`
 }
 
-// RegisterUserCurrent wires pindoc.user.current. Fails open with a
-// stable NOT_READY code when the session was launched without
-// PINDOC_USER_NAME so the agent can surface "identity not configured"
-// rather than a silent null.
+// RegisterUserCurrent wires pindoc.user.current. Missing user identity is
+// informational: artifact.propose can still use the server-issued agent
+// identity and client-reported author_id. Only missing agent identity is a
+// real not_ready blocker.
 func RegisterUserCurrent(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.user.current",
-			Description: "Return the user (display_name / email / github_handle / source) bound to this MCP session. Populated at server startup from PINDOC_USER_NAME / PINDOC_USER_EMAIL; returns USER_NOT_SET when the operator hasn't configured identity yet.",
+			Description: "Return the user (display_name / email / github_handle / source) bound to this MCP session. Populated at server startup from PINDOC_USER_NAME / PINDOC_USER_EMAIL. Missing user identity returns status=informational with USER_NOT_SET hints; artifact.propose can still use agent author_id.",
 		},
 		func(ctx context.Context, p *auth.Principal, _ struct{}) (*sdk.CallToolResult, userCurrentOutput, error) {
-			if p.UserID == "" {
-				return nil, userCurrentOutput{
-					Status:    "not_ready",
-					ErrorCode: "USER_NOT_SET",
-					Failed:    []string{"USER_NOT_SET"},
-					Checklist: []string{
-						"Server was launched without PINDOC_USER_NAME. Set the env var (and optional PINDOC_USER_EMAIL) and restart the MCP server, or call pindoc.user.update to create a user row from this session.",
-					},
-				}, nil
+			if out, handled := classifyUserCurrentIdentity(p); handled {
+				return nil, out, nil
 			}
 			row, err := loadUserByID(ctx, deps, p.UserID)
 			if err != nil {
 				return nil, userCurrentOutput{}, fmt.Errorf("load user: %w", err)
 			}
 			return nil, userCurrentOutput{
-				Status: "accepted",
+				Status: "ok",
 				User:   row,
 			}, nil
 		},
 	)
+}
+
+func classifyUserCurrentIdentity(p *auth.Principal) (userCurrentOutput, bool) {
+	if p == nil || strings.TrimSpace(p.AgentID) == "" {
+		return userCurrentOutput{
+			Status:    "not_ready",
+			ErrorCode: "AGENT_NOT_SET",
+			Failed:    []string{"AGENT_NOT_SET"},
+			Checklist: []string{
+				"MCP session has no server-issued agent identity. Restart the MCP server so trusted_local can mint an agent identity before using user.current.",
+			},
+		}, true
+	}
+	if strings.TrimSpace(p.UserID) == "" {
+		agent := strings.TrimSpace(p.AgentID)
+		return userCurrentOutput{
+			Status: "informational",
+			Code:   "USER_NOT_SET",
+			Hints: []string{
+				"Server was launched without PINDOC_USER_NAME. Set PINDOC_USER_NAME (and optional PINDOC_USER_EMAIL) and restart to enable user attribution.",
+				fmt.Sprintf("Agent identity %q is still available; artifact.propose can proceed with author_id and will leave author_user unset until a user is configured.", agent),
+				"pindoc.user.update requires a bound user row, so configure PINDOC_USER_NAME first.",
+			},
+		}, true
+	}
+	return userCurrentOutput{}, false
 }
 
 type userUpdateInput struct {
@@ -112,13 +136,16 @@ type userUpdateInput struct {
 }
 
 type userUpdateOutput struct {
-	Status        string              `json:"status"`
-	ErrorCode     string              `json:"error_code,omitempty"`
-	Failed        []string            `json:"failed,omitempty"`
-	Checklist     []string            `json:"checklist,omitempty"`
-	User          *UserRow            `json:"user,omitempty"`
-	ChangedFields []string            `json:"changed_fields,omitempty"`
-	Previous      map[string]string   `json:"previous,omitempty"`
+	Status         string               `json:"status"`
+	ErrorCode      string               `json:"error_code,omitempty"`
+	Failed         []string             `json:"failed,omitempty"`
+	ErrorCodes     []string             `json:"error_codes,omitempty" jsonschema:"canonical stable SCREAMING_SNAKE_CASE identifiers; branch on these"`
+	Checklist      []string             `json:"checklist,omitempty"`
+	ChecklistItems []ErrorChecklistItem `json:"checklist_items,omitempty" jsonschema:"localized checklist entries paired with stable codes"`
+	MessageLocale  string               `json:"message_locale,omitempty" jsonschema:"locale used for checklist/checklist_items.message after fallback"`
+	User           *UserRow             `json:"user,omitempty"`
+	ChangedFields  []string             `json:"changed_fields,omitempty"`
+	Previous       map[string]string    `json:"previous,omitempty"`
 }
 
 // RegisterUserUpdate wires pindoc.user.update. Validates inputs, mutates
@@ -176,7 +203,7 @@ func RegisterUserUpdate(server *sdk.Server, deps Deps) {
 			// strings on the wire so explicit clearing needs a sentinel.
 			// V1 accepts only set/override; clearing is an Open question.
 			if in.Email != "" {
-				e := strings.TrimSpace(in.Email)
+				e := canonicalUserEmail(in.Email)
 				if !strings.Contains(e, "@") {
 					failed = append(failed, "EMAIL_INVALID")
 					checklist = append(checklist, "email must contain '@'. Full RFC 5322 validation is intentionally relaxed for V1.")
@@ -260,7 +287,7 @@ func RegisterUserUpdate(server *sdk.Server, deps Deps) {
 				// Uniqueness (email / github_handle) shows up as a Postgres
 				// error here. Surface as stable code instead of 500.
 				errStr := err.Error()
-				if strings.Contains(errStr, "idx_users_email_unique") {
+				if strings.Contains(errStr, "idx_users_email_unique") || strings.Contains(errStr, "users_email_lower_idx") {
 					return nil, userUpdateOutput{
 						Status:    "not_ready",
 						ErrorCode: "EMAIL_TAKEN",
@@ -352,7 +379,7 @@ func UpsertUserFromEnv(ctx context.Context, deps Deps, userName, userEmail strin
 		return "", nil
 	}
 	name := strings.TrimSpace(userName)
-	email := strings.TrimSpace(userEmail)
+	email := canonicalUserEmail(userEmail)
 
 	// Prefer email as the uniqueness anchor when both are set — otherwise
 	// the same user running with two different display_names would mint a
@@ -361,7 +388,7 @@ func UpsertUserFromEnv(ctx context.Context, deps Deps, userName, userEmail strin
 	var existingID string
 	if email != "" {
 		err := deps.DB.QueryRow(ctx,
-			`SELECT id::text FROM users WHERE email = $1 LIMIT 1`, email,
+			`SELECT id::text FROM users WHERE lower(email) = $1 AND deleted_at IS NULL LIMIT 1`, email,
 		).Scan(&existingID)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return "", fmt.Errorf("lookup user by email: %w", err)
@@ -369,7 +396,7 @@ func UpsertUserFromEnv(ctx context.Context, deps Deps, userName, userEmail strin
 	}
 	if existingID == "" {
 		err := deps.DB.QueryRow(ctx,
-			`SELECT id::text FROM users WHERE display_name = $1 AND email IS NOT DISTINCT FROM NULLIF($2, '') LIMIT 1`,
+			`SELECT id::text FROM users WHERE display_name = $1 AND email IS NOT DISTINCT FROM NULLIF($2, '') AND deleted_at IS NULL LIMIT 1`,
 			name, email,
 		).Scan(&existingID)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -398,4 +425,8 @@ func UpsertUserFromEnv(ctx context.Context, deps Deps, userName, userEmail strin
 		return "", fmt.Errorf("insert user: %w", err)
 	}
 	return newID, nil
+}
+
+func canonicalUserEmail(raw string) string {
+	return strings.ToLower(strings.TrimSpace(raw))
 }

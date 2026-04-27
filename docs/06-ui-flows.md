@@ -59,15 +59,16 @@
 └─────┴────────────────────────────────────────────────┘
 ```
 
-**7개 화면** (Sessions 화면 삭제됨 — Pindoc이 raw 세션을 저장하지 않음):
+**8개 화면** (Sessions 화면 삭제됨 — Pindoc이 raw 세션을 저장하지 않음):
 
-1. **Wiki Reader** (★ 1차) — 트리·본문·Related Resources·Graph·Status 사이드
-2. **Review Queue** — 엣지 케이스, `sensitive_ops: confirm` 모드에서만
-3. **Stale Dashboard** — 낡은·전파 대기
-4. **Graph Explorer** — 관계 시각화
-5. **Dashboard** — Stats + Custom Slot (운영자 구성)
-6. **Project Switcher** — Topbar
-7. **Settings**
+1. **Today** (★ 첫 화면) — Brief card + Change Group stream
+2. **Wiki Reader** — 트리·본문·Related Resources·Graph·Status 사이드
+3. **Review Queue** — 엣지 케이스, `sensitive_ops: confirm` 모드에서만
+4. **Stale Dashboard** — 낡은·전파 대기
+5. **Graph Explorer** — 관계 시각화
+6. **Dashboard** — Stats + Custom Slot (운영자 구성)
+7. **Project Switcher** — Topbar
+8. **Settings**
 
 추가로 UI 없는 **Agent-side UX (MCP 응답)** 이 1급 설계 대상.
 
@@ -82,12 +83,12 @@ $ cd my-project
 $ pindoc init
 
 [1/7] Server 감지
-  로컬 localhost:5733 감지 → 자동 연결
+  로컬 localhost:5830 감지 → 자동 연결
   또는 "Pindoc 서버 URL" 입력
-  또는 "docker compose up 할까요?" 자동 기동
+  또는 "local daemon을 기동할까요?" 자동 안내
 
 [2/7] 인증
-  로컬: 자동 (~/.pindoc/token)
+  로컬: trusted_local (loopback, header 없음)
   도메인: GitHub OAuth 브라우저 오픈
 
 [3/7] Project 선택/생성
@@ -107,9 +108,9 @@ $ pindoc init
   ☐ ML/AI (skeleton)
   ☐ Mobile (skeleton)
 
-[5/7] Agent token 자동 발급
-  ✓ ~/.pindoc/tokens/shop-fe.token
-  ✓ 서버에 writer role 등록
+[5/7] Project scope 확인
+  ✓ PINDOC.md frontmatter에 project_slug 기록
+  ✓ MCP tool call은 project_slug per-call 전달
 
 [6/7] MCP 클라이언트 자동 설정
   ✓ Claude Code → ~/.config/claude-code/mcp.json
@@ -139,8 +140,8 @@ $ pindoc init
   {
     "mcpServers": {
       "pindoc": {
-        "url": "http://localhost:5733/mcp",
-        "headers": { "Authorization": "Bearer pindoc_xxx..." }
+        "type": "http",
+        "url": "http://127.0.0.1:5830/mcp"
       }
     }
   }
@@ -259,6 +260,29 @@ Reader는 `?` 또는 `Shift+/` 전역 키로 shortcut + symbol overlay를 연다
 1. "이 문서로 대화 이어가기" → URL 복사
 2. 에이전트 채팅에 붙여넣기: `https://pindoc.myproject.dev/a/doc_xxx 에 대해 이어서 논의`
 3. 에이전트가 `pindoc.artifact.read(url)` → Continuation Context → 대화 재개
+
+---
+
+## Flow 1a: Today First Screen
+
+`/`는 기본 프로젝트의 `/p/:project/today`로 redirect한다. Today는 사용자가 마지막으로 본 revision watermark 이후의 변경을 우선 보여 주고, 없으면 최근 7일, 그래도 없으면 importance 상위 Change Group으로 fallback한다.
+
+구성:
+- Header: 현재 baseline, revision watermark, export action
+- Brief card: deterministic template 또는 source-bound LLM summary. LLM 미설정/실패/예산 초과 시 rule-based로 fallback하며 UI에 `AI-generated` 또는 `rule-based` hint를 표시한다.
+- Filter chips: 전체, human trigger, 검증 필요, auto sync, maintenance, system
+- Stream: Change Group card. subtype badge, revision/artifact count, areas, importance, verification state, area open/export action을 포함한다.
+- Auto/maintenance 묶음: 기본 collapsed aggregate로 노이즈를 낮춘다.
+- Read mark: stream이 viewport에 노출되면 user+project read watermark를 자동 갱신한다.
+
+Change Group V0 grouping 우선순위:
+1. `bulk_op_id`
+2. `source_session` + turn/run id
+3. task id 또는 agent run id
+4. `source_session` + time window
+5. `(author_id, project_slug, timestamp proximity)` fallback
+
+Importance V0는 human-trigger, multi-artifact(`artifact_count >= 2`), verification attention 세 신호만 쓴다. 이 값은 Reader ordering과 MCP `context.for_task.recent_change_groups`의 compact context에 같이 쓰인다.
 
 ---
 

@@ -5,9 +5,10 @@
 // artifacts outside the MCP flow.
 //
 // Usage:
-//   go run ./cmd/pindoc-seed
-//   go run ./cmd/pindoc-seed -docs=path/to/docs
-//   go run ./cmd/pindoc-seed -dry-run
+//
+//	go run ./cmd/pindoc-seed
+//	go run ./cmd/pindoc-seed -docs=path/to/docs
+//	go run ./cmd/pindoc-seed -dry-run
 package main
 
 import (
@@ -31,29 +32,29 @@ import (
 // Kept explicit (no convention-over-config) because this is a one-time
 // bootstrap — the mapping is easier to audit in a table than to infer.
 type seedPlan struct {
-	File     string // relative to -docs
-	Slug     string
-	Type     string
-	Area     string
-	Title    string
+	File  string // relative to -docs
+	Slug  string
+	Type  string
+	Area  string
+	Title string
 }
 
 var plans = []seedPlan{
-	{File: "00-vision.md",                 Slug: "vision",                   Type: "Analysis", Area: "vision",       Title: "Pindoc vision"},
-	{File: "01-problem.md",                Slug: "problem-space",            Type: "Analysis", Area: "vision",       Title: "Problem space and failure modes F1–F6"},
-	{File: "02-concepts.md",               Slug: "core-concepts",            Type: "Analysis", Area: "architecture", Title: "Core concepts — five primitives"},
-	{File: "03-architecture.md",           Slug: "architecture",             Type: "Analysis", Area: "architecture", Title: "System architecture"},
-	{File: "04-data-model.md",             Slug: "data-model",               Type: "Analysis", Area: "data-model",   Title: "Data model — Tier A/B, Area, Pin, state"},
-	{File: "05-mechanisms.md",             Slug: "mechanisms",               Type: "Analysis", Area: "mechanisms",   Title: "Mechanisms M0–M7"},
-	{File: "06-ui-flows.md",               Slug: "ui-flows",                 Type: "Analysis", Area: "ui",           Title: "UI flows and surfaces"},
-	{File: "07-roadmap.md",                Slug: "roadmap",                  Type: "Analysis", Area: "roadmap",      Title: "Roadmap V1/V1.x/V2"},
-	{File: "08-non-goals.md",              Slug: "non-goals",                Type: "Analysis", Area: "vision",       Title: "Non-goals — what Pindoc is not"},
-	{File: "09-pindoc-md-spec.md",         Slug: "pindoc-md-spec",           Type: "Analysis", Area: "architecture", Title: "PINDOC.md spec"},
-	{File: "10-mcp-tools-spec.md",         Slug: "mcp-tools-spec",           Type: "Analysis", Area: "architecture", Title: "MCP tools spec"},
-	{File: "11-design-system-handoff.md",  Slug: "design-system-handoff",    Type: "Analysis", Area: "ui",           Title: "Design system handoff v0"},
-	{File: "12-m1-implementation-plan.md", Slug: "m1-implementation-plan",   Type: "Analysis", Area: "roadmap",      Title: "M1 implementation plan"},
-	{File: "glossary.md",                  Slug: "glossary",                 Type: "Glossary", Area: "misc",         Title: "Glossary"},
-	{File: "decisions.md",                 Slug: "decisions-log",            Type: "Analysis", Area: "decisions",    Title: "Decisions log and open questions"},
+	{File: "00-vision.md", Slug: "vision", Type: "Analysis", Area: "vision", Title: "Pindoc vision"},
+	{File: "01-problem.md", Slug: "problem-space", Type: "Analysis", Area: "vision", Title: "Problem space and failure modes F1–F6"},
+	{File: "02-concepts.md", Slug: "core-concepts", Type: "Analysis", Area: "architecture", Title: "Core concepts — five primitives"},
+	{File: "03-architecture.md", Slug: "architecture", Type: "Analysis", Area: "architecture", Title: "System architecture"},
+	{File: "04-data-model.md", Slug: "data-model", Type: "Analysis", Area: "data-model", Title: "Data model — Tier A/B, Area, Pin, state"},
+	{File: "05-mechanisms.md", Slug: "mechanisms", Type: "Analysis", Area: "mechanisms", Title: "Mechanisms M0–M7"},
+	{File: "06-ui-flows.md", Slug: "ui-flows", Type: "Analysis", Area: "ui", Title: "UI flows and surfaces"},
+	{File: "07-roadmap.md", Slug: "roadmap", Type: "Analysis", Area: "roadmap", Title: "Roadmap V1/V1.x/V2"},
+	{File: "08-non-goals.md", Slug: "non-goals", Type: "Analysis", Area: "vision", Title: "Non-goals — what Pindoc is not"},
+	{File: "09-pindoc-md-spec.md", Slug: "pindoc-md-spec", Type: "Analysis", Area: "architecture", Title: "PINDOC.md spec"},
+	{File: "10-mcp-tools-spec.md", Slug: "mcp-tools-spec", Type: "Analysis", Area: "architecture", Title: "MCP tools spec"},
+	{File: "11-design-system-handoff.md", Slug: "design-system-handoff", Type: "Analysis", Area: "ui", Title: "Design system handoff v0"},
+	{File: "12-m1-implementation-plan.md", Slug: "m1-implementation-plan", Type: "Analysis", Area: "roadmap", Title: "M1 implementation plan"},
+	{File: "glossary.md", Slug: "glossary", Type: "Glossary", Area: "misc", Title: "Glossary"},
+	{File: "decisions.md", Slug: "decisions-log", Type: "Analysis", Area: "decisions", Title: "Decisions log and open questions"},
 }
 
 func main() {
@@ -88,10 +89,10 @@ func main() {
 	}
 
 	// Resolve project + area IDs up front.
-	var projectID string
+	var projectID, projectLanguage string
 	if err := pool.QueryRow(ctx,
-		`SELECT id::text FROM projects WHERE slug = $1`, cfg.ProjectSlug,
-	).Scan(&projectID); err != nil {
+		`SELECT id::text, COALESCE(NULLIF(primary_language, ''), 'en') FROM projects WHERE slug = $1`, cfg.ProjectSlug,
+	).Scan(&projectID, &projectLanguage); err != nil {
 		logger.Error("project lookup — have you run pindoc-server once to apply migrations+seed?", "slug", cfg.ProjectSlug, "err", err)
 		os.Exit(1)
 	}
@@ -156,7 +157,7 @@ func main() {
 			continue
 		}
 
-		if err := insertOne(ctx, pool, embedder, projectID, areaID, p, string(body)); err != nil {
+		if err := insertOne(ctx, pool, embedder, projectID, areaID, projectLanguage, p, string(body)); err != nil {
 			logger.Error("insert failed", "file", p.File, "err", err)
 			os.Exit(1)
 		}
@@ -168,7 +169,7 @@ func main() {
 }
 
 func insertOne(ctx context.Context, pool *db.Pool, provider embed.Provider,
-	projectID, areaID string, p seedPlan, body string) error {
+	projectID, areaID, bodyLocale string, p seedPlan, body string) error {
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -180,13 +181,14 @@ func insertOne(ctx context.Context, pool *db.Pool, provider embed.Provider,
 	err = tx.QueryRow(ctx, `
 		INSERT INTO artifacts (
 			project_id, area_id, slug, type, title, body_markdown, tags,
+			body_locale,
 			completeness, status, review_state,
 			author_kind, author_id, author_version,
 			published_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'settled', 'published', 'auto_published',
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'settled', 'published', 'auto_published',
 			'system', 'pindoc-seed', 'M1', now())
 		RETURNING id::text
-	`, projectID, areaID, p.Slug, p.Type, p.Title, body, []string{"seed", "m1"},
+	`, projectID, areaID, p.Slug, p.Type, p.Title, body, []string{"seed", "m1"}, bodyLocale,
 	).Scan(&newID)
 	if err != nil {
 		return fmt.Errorf("insert artifact: %w", err)

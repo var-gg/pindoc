@@ -46,9 +46,11 @@ func AddInstrumentedTool[I, O any](
 			return nil, zero, fmt.Errorf("auth: resolve principal for %q: %w", name, err)
 		}
 		if store == nil {
-			return handler(ctx, p, input)
+			result, output, err := handler(ctx, p, input)
+			output = applyMCPErrorContract(output, deps.UserLanguage)
+			return result, output, err
 		}
-		return instrumentCall(name, store, p, input, func() (*sdk.CallToolResult, O, error) {
+		return instrumentCall(name, store, deps.UserLanguage, p, input, func() (*sdk.CallToolResult, O, error) {
 			return handler(ctx, p, input)
 		})
 	}
@@ -67,6 +69,7 @@ func AddInstrumentedTool[I, O any](
 func instrumentCall[I, O any](
 	name string,
 	store *telemetry.Store,
+	lang string,
 	p *auth.Principal,
 	input I,
 	invoke func() (*sdk.CallToolResult, O, error),
@@ -75,6 +78,7 @@ func instrumentCall[I, O any](
 
 	inputJSON, _ := json.Marshal(input)
 	result, output, err := invoke()
+	output = applyMCPErrorContract(output, lang)
 	outputJSON, _ := json.Marshal(output)
 
 	errorCode := ""
@@ -212,28 +216,28 @@ func extractToolMetadata(toolName string, input any, outputJSON []byte) json.Raw
 		}
 
 	case "pindoc.area.list":
-		if v, ok := boolField(input, "IncludeTemplates"); ok {
+		if v, ok := metaBoolField(input, "IncludeTemplates"); ok {
 			md["include_templates"] = v
 		}
 
 	case "pindoc.artifact.propose":
-		if v := stringField(input, "Shape"); v != "" {
+		if v := metaStringField(input, "Shape"); v != "" {
 			md["shape"] = v
 		}
-		if v := stringField(input, "Type"); v != "" {
+		if v := metaStringField(input, "Type"); v != "" {
 			// Avoid clashing with the column name "tool_name" if a
 			// future query joins both — store under artifact_type.
 			md["artifact_type"] = v
 		}
-		if v := stringField(input, "AreaSlug"); v != "" {
+		if v := metaStringField(input, "AreaSlug"); v != "" {
 			md["area_slug"] = v
 		}
 
 	case "pindoc.artifact.search":
-		if v := intField(input, "TopK"); v > 0 {
+		if v := metaIntField(input, "TopK"); v > 0 {
 			md["top_k"] = v
 		}
-		if v, ok := boolField(input, "IncludeTemplates"); ok {
+		if v, ok := metaBoolField(input, "IncludeTemplates"); ok {
 			md["include_templates"] = v
 		}
 		var out struct {
@@ -253,11 +257,13 @@ func extractToolMetadata(toolName string, input any, outputJSON []byte) json.Raw
 	return buf
 }
 
-// stringField reads a string-valued struct field by name, traversing a
-// single pointer level. Returns "" when the field is missing, of the
-// wrong kind, or empty.
-func stringField(v any, name string) string {
-	rv := reflectStruct(v)
+// metaStringField reads a string-valued struct field by name, traversing
+// a single pointer level. Returns "" when the field is missing, of the
+// wrong kind, or empty. Renamed from stringField to avoid colliding
+// with the same-name helper in error_contract.go (which takes a
+// reflect.Value directly rather than any).
+func metaStringField(v any, name string) string {
+	rv := metaReflectStruct(v)
 	if !rv.IsValid() {
 		return ""
 	}
@@ -268,11 +274,11 @@ func stringField(v any, name string) string {
 	return f.String()
 }
 
-// boolField reads a bool field by name. Second return distinguishes
+// metaBoolField reads a bool field by name. Second return distinguishes
 // "field is present and false" (true, false) from "field missing"
 // (false, false) so callers can decide whether to record the value.
-func boolField(v any, name string) (bool, bool) {
-	rv := reflectStruct(v)
+func metaBoolField(v any, name string) (bool, bool) {
+	rv := metaReflectStruct(v)
 	if !rv.IsValid() {
 		return false, false
 	}
@@ -283,11 +289,11 @@ func boolField(v any, name string) (bool, bool) {
 	return f.Bool(), true
 }
 
-// intField reads an int / int64 / int32 field by name. Returns 0 when
-// missing or not a signed integer kind. The caller decides whether 0 is
-// meaningful.
-func intField(v any, name string) int {
-	rv := reflectStruct(v)
+// metaIntField reads an int / int64 / int32 field by name. Returns 0
+// when missing or not a signed integer kind. The caller decides
+// whether 0 is meaningful.
+func metaIntField(v any, name string) int {
+	rv := metaReflectStruct(v)
 	if !rv.IsValid() {
 		return 0
 	}
@@ -302,9 +308,10 @@ func intField(v any, name string) int {
 	return 0
 }
 
-// reflectStruct dereferences a single pointer and returns the underlying
-// struct value (or invalid Value when the input isn't a struct).
-func reflectStruct(v any) reflect.Value {
+// metaReflectStruct dereferences a single pointer and returns the
+// underlying struct value (or invalid Value when the input isn't a
+// struct).
+func metaReflectStruct(v any) reflect.Value {
 	rv := reflect.ValueOf(v)
 	for rv.Kind() == reflect.Ptr {
 		if rv.IsNil() {

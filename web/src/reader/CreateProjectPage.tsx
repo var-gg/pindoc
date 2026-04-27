@@ -86,7 +86,7 @@ export function CreateProjectPage() {
         result={created}
         copied={copied}
         onCopy={async () => {
-          await navigator.clipboard.writeText(buildSnippet(created.slug));
+          await navigator.clipboard.writeText(buildSnippet());
           setCopied(true);
           setTimeout(() => setCopied(false), 2000);
         }}
@@ -214,7 +214,7 @@ function CreateProjectSuccess({
   onCreateAnother: () => void;
   t: (k: string, ...args: Array<string | number>) => string;
 }) {
-  const snippet = buildSnippet(result.slug);
+  const snippet = buildSnippet();
   return (
     <div className="cp-page cp-page--success">
       <header className="cp-header">
@@ -267,12 +267,13 @@ function CreateProjectSuccess({
 
 // buildSnippet keeps the JSON formatting consistent with the README
 // example so a user comparing docs and the form sees the same shape.
-function buildSnippet(slug: string): string {
+function buildSnippet(): string {
   return [
     "{",
     `  "mcpServers": {`,
     `    "pindoc": {`,
-    `      "url": "${DAEMON_BASE_FALLBACK}/mcp/p/${slug}"`,
+    `      "type": "http",`,
+    `      "url": "${DAEMON_BASE_FALLBACK}/mcp"`,
     `    }`,
     `  }`,
     `}`,

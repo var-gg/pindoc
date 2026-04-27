@@ -16,8 +16,8 @@ import (
 
 // areaSlugRe enforces the same URL-safe shape used by project slugs
 // (lowercase letter + kebab tail, 2-40 chars). Areas live under
-// /p/{project}/{locale}/wiki/{slug} alongside artifacts so the same cap
-// keeps the URL bar readable.
+// /p/{project}/wiki/{slug} alongside artifacts so the same cap keeps the
+// URL bar readable.
 var areaSlugRe = regexp.MustCompile(`^[a-z][a-z0-9-]{1,39}$`)
 
 type areaCreateInput struct {
@@ -30,11 +30,14 @@ type areaCreateInput struct {
 }
 
 type areaCreateOutput struct {
-	Status          string   `json:"status"` // accepted | not_ready
-	ErrorCode       string   `json:"error_code,omitempty"`
-	Failed          []string `json:"failed,omitempty"`
-	Checklist       []string `json:"checklist,omitempty"`
-	PatchableFields []string `json:"patchable_fields,omitempty"`
+	Status          string               `json:"status"` // accepted | not_ready
+	ErrorCode       string               `json:"error_code,omitempty"`
+	Failed          []string             `json:"failed,omitempty"`
+	Checklist       []string             `json:"checklist,omitempty"`
+	ErrorCodes      []string             `json:"error_codes,omitempty" jsonschema:"canonical stable SCREAMING_SNAKE_CASE identifiers; branch on these"`
+	ChecklistItems  []ErrorChecklistItem `json:"checklist_items,omitempty" jsonschema:"localized checklist entries paired with stable codes"`
+	MessageLocale   string               `json:"message_locale,omitempty" jsonschema:"locale used for checklist/checklist_items.message after fallback"`
+	PatchableFields []string             `json:"patchable_fields,omitempty"`
 
 	ID             string    `json:"id,omitempty"`
 	ProjectSlug    string    `json:"project_slug,omitempty"`

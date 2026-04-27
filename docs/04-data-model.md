@@ -47,16 +47,23 @@ DomainPack {
 
 ```
 ProjectMembership {
-  id, project_id, principal: AgentRef | UserRef,
-  role: "admin" | "writer" | "approver" | "reader",
-  granted_at, granted_by, revoked_at?
+  project_id: ProjectRef
+  user_id: UserRef
+  role: "owner" | "editor" | "viewer"
+  invited_by?: UserRef
+  joined_at: timestamp
 }
 ```
 
-- `admin`: 설정, 멤버, Domain Pack, agent token 발급
-- `writer` (주로 Agent): Artifact write
-- `approver` (사람): Review Queue 처리
-- `reader`: 읽기
+- `owner`: 프로젝트 admin. 멤버 초대/제거, role 변경, 프로젝트 삭제
+- `editor`: artifact/task write 권한. V1.5 invite flow의 기본 역할
+- `viewer`: 읽기 전용
+
+V1 `trusted_local`에서는 권한 체크가 아직 project_members를 사용하지 않고
+기존처럼 모든 project를 owner로 해석한다. 다만 schema는 미리 생성되어
+server boot 시 env-derived default user가 `pindoc` project owner row를
+idempotent하게 받고, `pindoc.project.create`는 caller `Principal.UserID`가
+있으면 같은 transaction 안에서 owner row를 생성한다.
 
 ---
 
@@ -142,7 +149,7 @@ sensitive_ops 판정
 
 ## Epistemic Axes (`artifact_meta`)
 
-3축 상태(completeness / status / review_state)는 artifact의 **생애주기**를 말하지만, "이 기록을 얼마나 믿어도 되는가 / 왜 여기에 있나 / 다음 세션 context로 들어가나"에는 답하지 못한다. 외부 리뷰(2026-04-23) 흡수 결과로 등장한 **네 번째 축군**이 `artifact_meta` JSONB다. 단일 JSONB 안에 6개의 선택 축이 들어간다.
+3축 상태(completeness / status / review_state)는 artifact의 **생애주기**를 말하지만, "이 기록을 얼마나 믿어도 되는가 / 왜 여기에 있나 / 다음 세션 context로 들어가나"에는 답하지 못한다. 외부 리뷰(2026-04-23) 흡수 결과로 등장한 **네 번째 축군**이 `artifact_meta` JSONB다. 단일 JSONB 안에 6개의 선택 축이 들어가고, Applicable Rules Mechanism을 위한 선택 rule scope 필드가 같은 JSONB에 붙는다.
 
 Migration: `0012_artifact_meta.sql` — `artifacts.artifact_meta JSONB NOT NULL DEFAULT '{}'` + partial GIN index (`jsonb_path_ops`, skip empty rows).
 
@@ -154,6 +161,23 @@ Migration: `0012_artifact_meta.sql` — `artifacts.artifact_meta JSONB NOT NULL 
 | `audience` | `owner_only` / `approvers` / `project_readers` | private/shared 분리. `source_type=user_chat` + PII pattern 감지 시 `owner_only`로 강등. |
 | `next_context_policy` | `default` / `opt_in` / `excluded` | 다음 session retrieval에서 `context.for_task`가 `excluded`를 스킵. `opt_in`은 호출 시 surface. |
 | `verification_state` | `verified` / `partially_verified` / `unverified` | 검증 전 추론과 코드-grounded 확인 분리. `source_type=code` 기본 `partially_verified`. |
+
+### Applicable Rules fields
+
+정책 wiki(design contract, coding convention, security rule 등)는 `artifact_meta.rule_severity`를 설정하면 `context.for_task`의 `applicable_rules[]`로 자동 surface된다. DB 스키마 변경은 없다. 기존 `artifact_meta` JSONB의 새 optional key다.
+
+| 필드 | 값 | 의미 |
+|---|---|---|
+| `applies_to_areas` | area_slug 배열, `*`, `ui/*` 같은 wildcard scope | 이 rule이 자동 적용될 area 범위. 생략하면 rule artifact의 own area + sub-area에 적용된다. |
+| `applies_to_types` | artifact type 배열 | 적용 type. 생략/빈 배열이면 모든 type에 적용된다. `context.for_task`의 default target type은 `Task`. |
+| `rule_severity` | `binding` / `guidance` / `reference` | 존재하면 정책/rule artifact로 marking된다. 정렬은 binding → guidance → reference. |
+| `rule_excerpt` | string | `applicable_rules[]`에 들어가는 짧은 요약. 생략 시 서버가 첫 H2 section 본문에서 200자 내외로 추출한다. |
+
+Area inference:
+
+- `applies_to_areas`가 있으면 target area 또는 parent chain에 매칭되는 rule만 적용된다. `experience/*` 같은 wildcard는 해당 parent chain 아래의 sub-area에 매칭된다.
+- `applies_to_areas`가 없으면 rule artifact의 own area + sub-area에 적용된다.
+- `cross-cutting` 및 그 child area(`security`, `privacy`, `accessibility`, `reliability`, `observability`, `localization`)에 놓인 rule은 area scope를 명시하지 않아도 모든 task에 적용된다.
 
 Default 결정(서버 resolver, `resolveArtifactMeta`):
 
@@ -169,6 +193,7 @@ API 노출:
 - `artifact.propose` 응답 `artifact_meta` — 실제로 persist된 resolved meta. 요청 payload와 다를 수 있음(resolver가 덮어쓴 경우).
 - `artifact.read(view=full|brief|continuation)` 응답 `artifact_meta` — 저장된 JSONB 그대로.
 - `context.for_task` landings · `artifact.search` hits — 3필드 `trust_summary` (`source_type` · `confidence` · `next_context_policy`)만 동반. Reader Trust Card에서 full meta가 필요하면 `artifact.read`로.
+- `context.for_task` 응답 `applicable_rules[]` — `rule_severity`로 marking된 정책 wiki 중 target area/type에 적용되는 rule의 compact projection (`slug`, `title`, `severity`, `excerpt`, `agent_ref`, URL fields).
 
 `SOURCE_TYPE_UNCLASSIFIED` warning: `source_type` 미지정 + pins 없음 + body에 인용부호 + chat marker("said", "사용자는" 등) 감지되면 accepted 응답에 포함. Block 아님 — agent에게 classify를 유도하는 advisory.
 
@@ -607,6 +632,24 @@ Accepted-path warnings(`CANONICAL_REWRITE_WITHOUT_EVIDENCE`, `CONSENT_REQUIRED_F
 ```
 
 삽입은 create / update accepted 반환 직전 best-effort(실패 시 warn log + artifact 저장은 유지). Reader는 `/api/p/:project/artifacts/:slug` 응답의 `recent_warnings[]` (최근 5 row) 중 **최신 revision** 값만 Trust Card 뱃지로 렌더하고 이전 revision warning은 revision history에서 열람.
+
+---
+
+## Today / Change Group Read Model
+
+Change Group은 별도 canonical table이 아니라 `artifact_revisions` 위의 query model이다. grouping key 우선순위는 `bulk_op_id` → `source_session+turn/run` → task/agent run id → `source_session+time window` → author/time fallback이며, synthetic `group_id`는 `hash(scope + key_kind + key_value + window_start)`로 만든다.
+
+Today 화면의 상태 저장은 두 테이블만 가진다:
+
+```
+reader_watermarks(user_key, project_id, revision_watermark, seen_at)
+summary_cache(cache_key, project_id, user_key, locale, filter_hash,
+              baseline_revision_id, max_revision_id, headline, bullets,
+              source, input_hash, token_estimate, created_at, expires_at)
+summary_usage_daily(user_key, project_id, day, tokens_used)
+```
+
+`summary_cache.cache_key`는 `hash(account_id, project_slug, user_id, baseline_revision_id, max_revision_id, locale, filter_hash)`다. LLM summary input은 Change Group compact metadata만 포함하고 artifact body는 넣지 않는다. LLM endpoint 미설정, 실패, daily cap 초과 시 deterministic template로 fallback한다.
 
 ---
 

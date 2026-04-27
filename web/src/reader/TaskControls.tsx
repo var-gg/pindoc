@@ -28,6 +28,7 @@ import {
 } from "../api/client";
 import type { Aggregate } from "./useReaderData";
 import { useI18n } from "../i18n";
+import { Tooltip } from "./Tooltip";
 
 type Props = {
   projectSlug: string;
@@ -272,34 +273,35 @@ export function TaskControls({ projectSlug, detail, authMode, agents, users, onU
         <span style={{ fontSize: 11, color: "var(--fg-3)", minWidth: 58 }}>
           {t("task_controls.status")}
         </span>
-        <select
-          value={status}
-          disabled={readOnly || saving || status === "verified"}
-          onChange={(e) => {
-            const v = e.target.value as EditableStatus;
-            setStatus(v);
-            if (!readOnly) void saveOne("status", v);
-          }}
-          title={status === "verified" ? t("task_controls.status_verified_readonly") : undefined}
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            padding: "3px 6px",
-            borderRadius: "var(--r-1)",
-            border: "1px solid var(--border-1)",
-            background: "var(--bg-2)",
-            color: "var(--fg-1)",
-            minWidth: 160,
-          }}
-        >
-          {status === "" && <option value="">{t("tasks.col_no_status")}</option>}
-          {status === "verified" && <option value="verified">{t("tasks.col_verified")}</option>}
-          {EDITABLE_STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {taskStatusLabel(s, t)}
-            </option>
-          ))}
-        </select>
+        <Tooltip content={status === "verified" ? t("task_controls.status_verified_readonly") : undefined}>
+          <select
+            value={status}
+            disabled={readOnly || saving || status === "verified"}
+            onChange={(e) => {
+              const v = e.target.value as EditableStatus;
+              setStatus(v);
+              if (!readOnly) void saveOne("status", v);
+            }}
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              padding: "3px 6px",
+              borderRadius: "var(--r-1)",
+              border: "1px solid var(--border-1)",
+              background: "var(--bg-2)",
+              color: "var(--fg-1)",
+              minWidth: 160,
+            }}
+          >
+            {status === "" && <option value="">{t("tasks.col_no_status")}</option>}
+            {status === "verified" && <option value="verified">{t("tasks.col_verified")}</option>}
+            {EDITABLE_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {taskStatusLabel(s, t)}
+              </option>
+            ))}
+          </select>
+        </Tooltip>
       </div>
 
       {/* Priority — inline pill group, commits on click */}

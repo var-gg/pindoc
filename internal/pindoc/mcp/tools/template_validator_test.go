@@ -1,7 +1,9 @@
 package tools
 
 import (
+	"context"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -84,6 +86,94 @@ func TestRequiredH2WarningsSlashMixed(t *testing.T) {
 			t.Fatalf("slash-mixed heading should satisfy slot, got %v", warns)
 		}
 	}
+}
+
+func TestRequiredH2WarningsParentheticalBilingual(t *testing.T) {
+	body := "## 증상 (Symptom)\n\n## 재현 (Reproduction)\n\n## 원인 (Root cause)\n\n## 해결 (Resolution)\n"
+	if warns := requiredH2Warnings(body, "Debug"); len(warns) != 0 {
+		t.Fatalf("parenthetical bilingual headings should satisfy Debug slots, got %v", warns)
+	}
+}
+
+func TestTemplateSelfHealHintsForStructureFailures(t *testing.T) {
+	cases := []struct {
+		typ      string
+		body     string
+		wantSlug string
+	}{
+		{
+			typ:      "Decision",
+			body:     "decision context keywords only",
+			wantSlug: "_template_decision",
+		},
+		{
+			typ:      "Task",
+			body:     "- [ ] acceptance criterion",
+			wantSlug: "_template_task",
+		},
+		{
+			typ:      "Analysis",
+			body:     "plain analysis without the summary heading",
+			wantSlug: "_template_analysis",
+		},
+		{
+			typ:      "Debug",
+			body:     "reproduction symptom resolution root cause keywords only",
+			wantSlug: "_template_debug",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.typ, func(t *testing.T) {
+			in := artifactProposeInput{
+				Type:         tc.typ,
+				Title:        "structure test",
+				BodyMarkdown: tc.body,
+				AreaSlug:     "mcp",
+				AuthorID:     "test-agent",
+			}
+			_, failed, code := preflight(context.Background(), Deps{}, "", &in, "en")
+			if !hasCodePrefix(failed, "MISSING_H2:") {
+				t.Fatalf("expected MISSING_H2 code, got %v", failed)
+			}
+			tools := nextToolsForNotReady(code, in.Type, failed)
+			if len(tools) == 0 {
+				t.Fatalf("expected next_tools hint")
+			}
+			if tools[0].Tool != "pindoc.artifact.read" {
+				t.Fatalf("first next tool = %q, want pindoc.artifact.read", tools[0].Tool)
+			}
+			if got := tools[0].Args["id_or_slug"]; got != tc.wantSlug {
+				t.Fatalf("template slug arg = %v, want %s", got, tc.wantSlug)
+			}
+			expected := expectedForNotReady(context.Background(), Deps{}, "", in.Type, failed)
+			if expected == nil || expected.TemplateSlug != tc.wantSlug || len(expected.RequiredH2) == 0 {
+				t.Fatalf("expected schema missing template/required_h2: %+v", expected)
+			}
+			actions := suggestedActionsForNotReady("en", in.Type, failed, nil)
+			if !containsSubstring(actions, "self-heal") {
+				t.Fatalf("expected self-heal suggested action, got %v", actions)
+			}
+		})
+	}
+}
+
+func hasCodePrefix(codes []string, prefix string) bool {
+	for _, code := range codes {
+		if strings.HasPrefix(code, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsSubstring(values []string, needle string) bool {
+	for _, value := range values {
+		if strings.Contains(value, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // TestBodyContainsAnyKeywordCaseInsensitive guards the template-driven

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate } from "react-router";
 import { FileText, Search } from "lucide-react";
 import { api, type SearchHit } from "../api/client";
 import { useI18n } from "../i18n";
@@ -13,7 +13,6 @@ type Props = {
 
 export function CmdK({ projectSlug, open, onClose }: Props) {
   const { t } = useI18n();
-  const { locale = "" } = useParams<{ locale?: string }>();
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [notice, setNotice] = useState<string | undefined>();
@@ -75,7 +74,7 @@ export function CmdK({ projectSlug, open, onClose }: Props) {
         e.preventDefault();
         const hit = hits[selected];
         if (hit) {
-          navigate(`/p/${projectSlug}/${locale}/wiki/${hit.slug}`);
+          navigate(`/p/${projectSlug}/wiki/${hit.slug}`);
           onClose();
         }
       }
@@ -111,7 +110,7 @@ export function CmdK({ projectSlug, open, onClose }: Props) {
               key={hit.artifact_id}
               className={`palette__item${i === selected ? " selected" : ""}`}
               onClick={() => {
-                navigate(`/p/${projectSlug}/${locale}/wiki/${hit.slug}`);
+                navigate(`/p/${projectSlug}/wiki/${hit.slug}`);
                 onClose();
               }}
               onMouseEnter={() => setSelected(i)}

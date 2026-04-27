@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -45,22 +46,39 @@ type artifactVerifyInput struct {
 	// audit / changelog. Required so the Reader's verification history
 	// has a human-readable pointer.
 	CommitMsg string `json:"commit_msg" jsonschema:"one-line rationale for this verification step"`
+
+	// AcknowledgeMoreRecent is the explicit escape hatch for the outdated
+	// target guard. When false, verifying an older Task is blocked if the
+	// same area contains a newer active Task that could supersede it.
+	AcknowledgeMoreRecent bool `json:"acknowledge_more_recent,omitempty" jsonschema:"explicitly verify this Task even though newer active Tasks exist in the same area"`
 }
 
 type artifactVerifyOutput struct {
-	Status           string   `json:"status"` // "accepted" | "not_ready"
-	ErrorCode        string   `json:"error_code,omitempty"`
-	Failed           []string `json:"failed,omitempty"`
-	Checklist        []string `json:"checklist,omitempty"`
-	SuggestedActions []string `json:"suggested_actions,omitempty"`
+	Status           string               `json:"status"` // "accepted" | "not_ready"
+	ErrorCode        string               `json:"error_code,omitempty"`
+	Failed           []string             `json:"failed,omitempty"`
+	ErrorCodes       []string             `json:"error_codes,omitempty" jsonschema:"canonical stable SCREAMING_SNAKE_CASE identifiers; branch on these"`
+	Checklist        []string             `json:"checklist,omitempty"`
+	ChecklistItems   []ErrorChecklistItem `json:"checklist_items,omitempty" jsonschema:"localized checklist entries paired with stable codes"`
+	MessageLocale    string               `json:"message_locale,omitempty" jsonschema:"locale used for checklist/checklist_items.message after fallback"`
+	SuggestedActions []string             `json:"suggested_actions,omitempty"`
 
 	// Populated on accepted paths.
-	TaskID      string `json:"task_id,omitempty"`
-	TaskSlug    string `json:"task_slug,omitempty"`
-	ReportID    string `json:"report_id,omitempty"`
-	ReportSlug  string `json:"report_slug,omitempty"`
-	NewStatus   string `json:"new_status,omitempty"` // "verified"
-	HumanURL    string `json:"human_url,omitempty"`  // Task Reader link
+	TaskID      string                    `json:"task_id,omitempty"`
+	TaskSlug    string                    `json:"task_slug,omitempty"`
+	ReportID    string                    `json:"report_id,omitempty"`
+	ReportSlug  string                    `json:"report_slug,omitempty"`
+	NewStatus   string                    `json:"new_status,omitempty"` // "verified"
+	HumanURL    string                    `json:"human_url,omitempty"`  // Task Reader link
+	HumanURLAbs string                    `json:"human_url_abs,omitempty"`
+	Candidates  []VerifyOutdatedCandidate `json:"candidates,omitempty"`
+}
+
+type VerifyOutdatedCandidate struct {
+	Slug        string `json:"slug"`
+	Title       string `json:"title"`
+	Status      string `json:"status"`
+	HumanURL    string `json:"human_url,omitempty"`
 	HumanURLAbs string `json:"human_url_abs,omitempty"`
 }
 
@@ -113,15 +131,16 @@ func RegisterArtifactVerify(server *sdk.Server, deps Deps) {
 			}
 
 			// --- Resolve Task ---
-			var taskID, taskSlug, taskType string
+			var taskID, taskSlug, taskType, taskAreaID string
+			var taskCreatedAt time.Time
 			var taskMetaRaw []byte
 			err = deps.DB.QueryRow(ctx, `
-				SELECT a.id::text, a.slug, a.type, a.task_meta
+				SELECT a.id::text, a.slug, a.type, a.area_id::text, a.created_at, a.task_meta
 				FROM artifacts a
 				JOIN projects p ON p.id = a.project_id
 				WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 				LIMIT 1
-			`, scope.ProjectSlug, taskRef).Scan(&taskID, &taskSlug, &taskType, &taskMetaRaw)
+			`, scope.ProjectSlug, taskRef).Scan(&taskID, &taskSlug, &taskType, &taskAreaID, &taskCreatedAt, &taskMetaRaw)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, artifactVerifyOutput{
 					Status:    "not_ready",
@@ -162,6 +181,28 @@ func RegisterArtifactVerify(server *sdk.Server, deps Deps) {
 						"Ask the implementer agent to flip status to claimed_done (acceptance checkboxes 100%) first.",
 					},
 				}, nil
+			}
+
+			if !in.AcknowledgeMoreRecent {
+				candidates, err := newerActiveTaskCandidates(ctx, deps, scope, taskID, taskAreaID, taskCreatedAt)
+				if err != nil {
+					return nil, artifactVerifyOutput{}, fmt.Errorf("outdated target check: %w", err)
+				}
+				if len(candidates) > 0 {
+					return nil, artifactVerifyOutput{
+						Status:    "not_ready",
+						ErrorCode: "VERIFY_OUTDATED_TARGET",
+						Failed:    []string{"VERIFY_OUTDATED_TARGET"},
+						Checklist: []string{
+							fmt.Sprintf("Task %q is older than newer active Task(s) in the same area; verify the newer work or pass acknowledge_more_recent=true if this older Task is intentionally still valid.", taskSlug),
+						},
+						SuggestedActions: []string{
+							"Read the candidate Task(s) and decide whether the target should be superseded before verification.",
+							"Pass acknowledge_more_recent=true only when the newer Task is unrelated or already accounted for.",
+						},
+						Candidates: candidates,
+					}, nil
+				}
 			}
 
 			// --- Resolve VerificationReport ---
@@ -311,4 +352,37 @@ func agentAuthoredTaskRevision(ctx context.Context, deps Deps, taskID, agentID s
 		return false, err
 	}
 	return exists, nil
+}
+
+func newerActiveTaskCandidates(ctx context.Context, deps Deps, scope *auth.ProjectScope, taskID, areaID string, createdAt time.Time) ([]VerifyOutdatedCandidate, error) {
+	rows, err := deps.DB.Query(ctx, `
+		SELECT a.slug, a.title, COALESCE(NULLIF(a.task_meta->>'status', ''), 'open') AS task_status
+		FROM artifacts a
+		WHERE a.project_id = $1::uuid
+		  AND a.area_id = $2::uuid
+		  AND a.id <> $3::uuid
+		  AND a.type = 'Task'
+		  AND a.status <> 'archived'
+		  AND a.status <> 'superseded'
+		  AND a.created_at > $4
+		  AND COALESCE(NULLIF(a.task_meta->>'status', ''), 'open') IN ('open', 'claimed_done')
+		ORDER BY a.created_at DESC
+		LIMIT 5
+	`, scope.ProjectID, areaID, taskID, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []VerifyOutdatedCandidate
+	for rows.Next() {
+		var c VerifyOutdatedCandidate
+		if err := rows.Scan(&c.Slug, &c.Title, &c.Status); err != nil {
+			return nil, err
+		}
+		c.HumanURL = HumanURL(scope.ProjectSlug, scope.ProjectLocale, c.Slug)
+		c.HumanURLAbs = AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, c.Slug)
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }

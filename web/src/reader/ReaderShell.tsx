@@ -1,18 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
-import { X } from "lucide-react";
+import { PanelRightOpen, X } from "lucide-react";
 import type { Aggregate } from "./useReaderData";
 import { api, type Artifact, type ArtifactRef, type Area } from "../api/client";
 import { useI18n } from "../i18n";
+import { InviteModal } from "../project/InviteModal";
 import { CmdK } from "./CmdK";
+import { GraphSurface } from "./Graph";
+import { Inbox } from "./Inbox";
+import { ArtifactByline } from "./ArtifactByline";
 import { ReaderSurface, type DetailScope } from "./ReaderSurface";
 import { Sidebar } from "./Sidebar";
 import { Sidecar } from "./Sidecar";
 import { ShortcutsOverlay } from "./ShortcutsOverlay";
+import { EmptyState, SurfaceHeader } from "./SurfacePrimitives";
+import { Tooltip } from "./Tooltip";
+import { Today } from "./Today";
 import { TopNav } from "./TopNav";
+import { ArtifactTypeChip, VisualAreaChip } from "./VisualChips";
 import { initTheme, setTheme, type Theme } from "./theme";
 import { useReaderData } from "./useReaderData";
-import { typeChipClass } from "./typeChip";
 import { initReaderWidth, setReaderWidth as applyReaderWidth, type ReaderWidth } from "./readerWidth";
 import { localizedAreaName } from "./areaLocale";
 import {
@@ -28,33 +35,17 @@ import {
 } from "./badgeFilters";
 import "../styles/reader.css";
 
-export type ReaderView = "reader" | "inbox" | "graph" | "tasks";
+export type ReaderView = "reader" | "inbox" | "graph" | "tasks" | "today";
 
 // surfaceAllows decides which artifacts a Surface's natural set contains
 // (Decision `decision-reader-ia-hierarchy`). Wiki = everything except Task;
-// Tasks = only Task; Inbox/Graph are stubs and currently pass through the
-// full list (real Inbox queue lands with the Review/Risk split; Graph's
-// sub-graph filtering ships with the React-ification in M1.5).
+// Tasks = only Task; Inbox owns its review queue data; Graph currently
+// passes through the full list until sub-graph filtering lands.
 function surfaceAllows(view: ReaderView, a: ArtifactRef): boolean {
   if (view === "tasks") return a.type === "Task";
+  if (view === "today") return true;
   if (view === "reader") return a.type !== "Task";
   return true;
-}
-
-// inboxStubCount returns 0 (the Inbox surface is a stub) and logs once so
-// engineers diffing the nav badge realise the zero is structural, not a
-// load bug. Replace with a real count when the Review/Risk surfaces ship
-// (Task `reader-trust-card-...` Open issue — split from this component).
-let inboxStubWarned = false;
-function inboxStubCount(): number {
-  if (!inboxStubWarned) {
-    inboxStubWarned = true;
-    // eslint-disable-next-line no-console
-    console.warn(
-      "[pindoc] ReaderShell inboxCount is hard-coded to 0 — Inbox surface is a stub. See Task reader-trust-card-*.",
-    );
-  }
-  return 0;
 }
 
 type Props = {
@@ -62,7 +53,7 @@ type Props = {
 };
 
 export function ReaderShell({ view }: Props) {
-  const { project = "", locale = "", slug } = useParams<{ project: string; locale?: string; slug?: string }>();
+  const { project = "", slug } = useParams<{ project: string; slug?: string }>();
   const { t } = useI18n();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -72,11 +63,19 @@ export function ReaderShell({ view }: Props) {
   const [readerWidth, setReaderWidthState] = useState<ReaderWidth>(() => initReaderWidth());
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [wikiInspectorSlug, setWikiInspectorSlug] = useState<string | null>(null);
+  const [wikiInspectorDetail, setWikiInspectorDetail] = useState<Artifact | null>(null);
+  const [wikiInspectorLoading, setWikiInspectorLoading] = useState(false);
+  const [todayInspectorSlug, setTodayInspectorSlug] = useState<string | null>(null);
+  const [todayInspectorDetail, setTodayInspectorDetail] = useState<Artifact | null>(null);
+  const [todayInspectorLoading, setTodayInspectorLoading] = useState(false);
   const [taskInspectorSlug, setTaskInspectorSlug] = useState<string | null>(null);
   const [taskInspectorDetail, setTaskInspectorDetail] = useState<Artifact | null>(null);
   const [taskInspectorLoading, setTaskInspectorLoading] = useState(false);
   const [taskInspectorReloadNonce, setTaskInspectorReloadNonce] = useState(0);
+  const [inboxCount, setInboxCount] = useState(0);
   // Surface·Type·Area 3축: Surface is owned by the URL segment (wiki|tasks|
   // graph|inbox — already carried in `view` prop). Area and Type are the
   // secondary filters layered on top and survive round-trips through the
@@ -105,6 +104,24 @@ export function ReaderShell({ view }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
+  useEffect(() => {
+    if (!project) {
+      setInboxCount(0);
+      return;
+    }
+    let cancelled = false;
+    api.inbox(project)
+      .then((resp) => {
+        if (!cancelled) setInboxCount(resp.count);
+      })
+      .catch(() => {
+        if (!cancelled) setInboxCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project]);
+
   // URL search param sync (acceptance #10). Keep `?area=` / `?type=` in
   // lockstep with state so bookmarking or sharing a URL restores the exact
   // filter set. We use replace so filter toggles don't pollute browser
@@ -120,7 +137,7 @@ export function ReaderShell({ view }: Props) {
     }
   }, [selectedArea, selectedType, view, searchParams, setSearchParams]);
 
-  const baseRoute = `/p/${project}/${locale}/${view === "tasks" ? "tasks" : "wiki"}`;
+  const baseRoute = `/p/${project}/${view === "tasks" ? "tasks" : view === "today" ? "today" : "wiki"}`;
 
   function writeSearchParams(next: URLSearchParams, opts?: { toList?: boolean }) {
     const qs = next.toString();
@@ -245,6 +262,52 @@ export function ReaderShell({ view }: Props) {
   };
 
   useEffect(() => {
+    if (view !== "reader" || slug || !wikiInspectorSlug) {
+      setWikiInspectorDetail(null);
+      setWikiInspectorLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setWikiInspectorLoading(true);
+    api.artifact(project, wikiInspectorSlug)
+      .then((artifact) => {
+        if (!cancelled) setWikiInspectorDetail(artifact);
+      })
+      .catch(() => {
+        if (!cancelled) setWikiInspectorDetail(null);
+      })
+      .finally(() => {
+        if (!cancelled) setWikiInspectorLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, slug, project, wikiInspectorSlug]);
+
+  useEffect(() => {
+    if (view !== "today" || slug || !todayInspectorSlug) {
+      setTodayInspectorDetail(null);
+      setTodayInspectorLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setTodayInspectorLoading(true);
+    api.artifact(project, todayInspectorSlug)
+      .then((artifact) => {
+        if (!cancelled) setTodayInspectorDetail(artifact);
+      })
+      .catch(() => {
+        if (!cancelled) setTodayInspectorDetail(null);
+      })
+      .finally(() => {
+        if (!cancelled) setTodayInspectorLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, slug, project, todayInspectorSlug]);
+
+  useEffect(() => {
     if (view !== "tasks" || slug || !taskInspectorSlug) {
       setTaskInspectorDetail(null);
       setTaskInspectorLoading(false);
@@ -314,6 +377,22 @@ export function ReaderShell({ view }: Props) {
     );
   }, [surfaceList, selectedArea, badgeFilters]);
 
+  useEffect(() => {
+    if (paletteOpen || shortcutsOpen || view !== "reader" || slug || !wikiInspectorSlug) return;
+    const inspectedSlug = wikiInspectorSlug;
+    function onKey(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const openKey = e.key.toLowerCase() === "o" || (e.key === "Enter" && e.shiftKey);
+      if (!openKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, button, a, [contenteditable='true']")) return;
+      e.preventDefault();
+      navigate(filteredReaderHref(baseRoute, inspectedSlug, selectedArea, selectedType, badgeFilters));
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [paletteOpen, shortcutsOpen, view, slug, wikiInspectorSlug, navigate, baseRoute, selectedArea, selectedType, badgeFilters]);
+
   if (state.kind === "loading") {
     return <div className="reader-state">{t("wiki.loading")}</div>;
   }
@@ -334,12 +413,22 @@ export function ReaderShell({ view }: Props) {
   const reload = state.reload;
   const sidecarDetail =
     view === "reader"
-      ? detail
+      ? detail ?? wikiInspectorDetail
+      : view === "today"
+        ? todayInspectorDetail
       : view === "tasks"
         ? detail ?? taskInspectorDetail
         : null;
   const sidecarEmptyMessage =
-    view === "tasks" && !detail
+    view === "reader" && !detail
+      ? wikiInspectorLoading
+        ? t("reader.inspector_loading")
+        : t("reader.inspector_empty")
+      : view === "today"
+      ? todayInspectorLoading
+        ? t("today.inspector_loading")
+        : t("today.inspector_empty")
+      : view === "tasks" && !detail
       ? taskInspectorLoading
         ? t("tasks.inspector_loading")
         : t("tasks.inspector_empty")
@@ -367,14 +456,15 @@ export function ReaderShell({ view }: Props) {
     <div className="app-shell">
       <TopNav
         project={projectData}
+        surface={view}
         theme={theme}
         onToggleTheme={toggleTheme}
         onOpenPalette={() => setPaletteOpen(true)}
-        onOpenShortcuts={() => setShortcutsOpen(true)}
         onToggleMenu={() => setMenuOpen((v) => !v)}
-        inboxCount={inboxStubCount()}
+        inboxCount={inboxCount}
         readerWidth={readerWidth}
         onChangeReaderWidth={changeReaderWidth}
+        onOpenInvite={() => setInviteOpen(true)}
       />
       <div className="main">
         <Sidebar
@@ -393,7 +483,6 @@ export function ReaderShell({ view }: Props) {
         <Body
           view={view}
           projectSlug={project}
-          projectLocale={locale}
           detail={detail}
           list={filteredArtifacts}
           allList={surfaceList}
@@ -401,6 +490,8 @@ export function ReaderShell({ view }: Props) {
           selectedArea={selectedArea}
           selectedType={selectedType}
           badgeFilters={badgeFilters}
+          selectedInspectorSlug={view === "today" ? todayInspectorSlug : wikiInspectorSlug}
+          onSelectInspectorArtifact={view === "today" ? setTodayInspectorSlug : setWikiInspectorSlug}
           areaNameBySlug={areaNameBySlug}
           areaPathBySlug={areaPathBySlug}
           keyboardDisabled={paletteOpen || shortcutsOpen}
@@ -412,6 +503,8 @@ export function ReaderShell({ view }: Props) {
           onClearFilters={clearFilters}
           onApplyBadgeFilter={applyBadgeFilter}
           onApplyAreaFilter={applyAreaFilterFromBadge}
+          onSelectArea={handleSelectArea}
+          onInboxCountChange={setInboxCount}
         />
         <Sidecar
           projectSlug={project}
@@ -420,15 +513,16 @@ export function ReaderShell({ view }: Props) {
           authMode={authMode}
           agents={agents}
           users={users}
+          showOpenDetailAction={(view === "reader" && !detail && Boolean(wikiInspectorDetail)) || (view === "today" && Boolean(todayInspectorDetail))}
           onArtifactUpdated={view === "tasks" ? handleTaskInspectorUpdated : reload}
         />
       </div>
       <CmdK projectSlug={project} open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <InviteModal project={projectData} open={inviteOpen} onClose={() => setInviteOpen(false)} />
       <ShortcutsOverlay
         open={shortcutsOpen}
         view={view}
         projectSlug={project}
-        projectLocale={locale}
         detail={sidecarDetail}
         selectedArea={selectedArea}
         selectedType={selectedType}
@@ -524,7 +618,6 @@ function filteredReaderHref(
 function Body({
   view,
   projectSlug,
-  projectLocale,
   detail,
   list,
   allList,
@@ -532,6 +625,8 @@ function Body({
   selectedArea,
   selectedType,
   badgeFilters,
+  selectedInspectorSlug,
+  onSelectInspectorArtifact,
   areaNameBySlug,
   areaPathBySlug,
   keyboardDisabled,
@@ -543,10 +638,11 @@ function Body({
   onClearFilters,
   onApplyBadgeFilter,
   onApplyAreaFilter,
+  onSelectArea,
+  onInboxCountChange,
 }: {
   view: ReaderView;
   projectSlug: string;
-  projectLocale: string;
   detail: Artifact | null;
   list: ArtifactRef[];
   allList: ArtifactRef[];
@@ -554,6 +650,8 @@ function Body({
   selectedArea: string | null;
   selectedType: string | null;
   badgeFilters: BadgeFilter[];
+  selectedInspectorSlug: string | null;
+  onSelectInspectorArtifact: (slug: string) => void;
   areaNameBySlug: ReadonlyMap<string, string>;
   areaPathBySlug: ReadonlyMap<string, string[]>;
   keyboardDisabled: boolean;
@@ -565,10 +663,12 @@ function Body({
   onClearFilters: () => void;
   onApplyBadgeFilter: (filter: BadgeFilter) => void;
   onApplyAreaFilter: (areaSlug: string) => void;
+  onSelectArea: (areaSlug: string) => void;
+  onInboxCountChange: (count: number) => void;
 }) {
   const { t } = useI18n();
   const navigate = useNavigate();
-  const baseRoute = `/p/${projectSlug}/${projectLocale}/${view === "tasks" ? "tasks" : "wiki"}`;
+  const baseRoute = `/p/${projectSlug}/${view === "tasks" ? "tasks" : view === "today" ? "today" : "wiki"}`;
   const detailScope = detail && view === "reader"
     ? buildDetailScope({
         detail,
@@ -581,6 +681,7 @@ function Body({
         baseRoute,
       })
     : null;
+  const hasActiveFilters = Boolean(selectedArea || selectedType || badgeFilters.length > 0);
 
   useEffect(() => {
     if (keyboardDisabled || view !== "reader" || !detailScope || detailScope.mismatch) return;
@@ -604,25 +705,28 @@ function Body({
 
   if (view === "graph") {
     return (
-      <main className="content">
-        <div className="surface-stub">
-          <h1>{t("nav.graph")}</h1>
-          <p>{t("wiki.stub_graph")}</p>
-          <p>
-            <Link to="/ui/reader">{t("wiki.stub_graph_preview")}</Link>
-          </p>
-        </div>
-      </main>
+      <GraphSurface
+        projectSlug={projectSlug}
+        list={list}
+        allCount={allList.length}
+        selectedArea={selectedArea}
+        selectedAreaLabel={selectedArea ? areaNameBySlug.get(selectedArea) ?? selectedArea : null}
+        selectedType={selectedType}
+        badgeFilters={badgeFilters}
+      />
     );
   }
-  if (view === "inbox") {
+  if (view === "inbox") return <Inbox projectSlug={projectSlug} onCountChange={onInboxCountChange} />;
+  if (view === "today") {
     return (
-      <main className="content">
-        <div className="surface-stub">
-          <h1>{t("nav.inbox")}</h1>
-          <p>{t("wiki.stub_inbox")}</p>
-        </div>
-      </main>
+      <Today
+        projectSlug={projectSlug}
+        selectedArea={selectedArea}
+        areaNameBySlug={areaNameBySlug}
+        onSelectArea={onSelectArea}
+        selectedArtifactSlug={selectedInspectorSlug}
+        onSelectArtifact={onSelectInspectorArtifact}
+      />
     );
   }
 
@@ -638,7 +742,6 @@ function Body({
         emptyMessage={view === "tasks" ? t("wiki.empty_tasks_detail") : t("wiki.empty_detail")}
         scope={detailScope}
         projectSlug={projectSlug}
-        projectLocale={projectLocale}
         onApplyBadgeFilter={onApplyBadgeFilter}
         onApplyAreaFilter={onApplyAreaFilter}
       />
@@ -656,7 +759,6 @@ function Body({
     return (
       <TasksKanban
         projectSlug={projectSlug}
-        projectLocale={projectLocale}
         list={list}
         allList={allList}
         currentSlug={currentSlug}
@@ -677,10 +779,12 @@ function Body({
   return (
     <main className="content">
       <div className="reader-article">
-        <div className="side-section" style={{ padding: "0 0 12px" }}>
-          {t("wiki.section_artifacts")} · {list.length}
-        </div>
-        {(selectedArea || selectedType || badgeFilters.length > 0) && (
+        <SurfaceHeader
+          name="artifact"
+          count={list.length}
+          secondary={hasActiveFilters ? { label: t("surface.all"), count: allList.length } : undefined}
+        />
+        {hasActiveFilters && (
           <AppliedFilterBar
             selectedArea={selectedArea}
             selectedAreaLabel={selectedArea ? areaNameBySlug.get(selectedArea) ?? selectedArea : null}
@@ -692,30 +796,59 @@ function Body({
           />
         )}
         {list.length === 0 ? (
-          <div style={{ color: "var(--fg-3)", fontSize: 13 }}>{empty}</div>
+          <EmptyState message={empty} />
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div className="artifact-list">
             {list.map((a) => {
-              const linkBase = `/p/${projectSlug}/${projectLocale}/wiki`;
-              const isActive = currentSlug === a.slug;
+              const linkBase = `/p/${projectSlug}/wiki`;
+              const href = filteredReaderHref(linkBase, a.slug, selectedArea, selectedType, badgeFilters);
+              const isActive = currentSlug === a.slug || selectedInspectorSlug === a.slug;
               return (
-                <Link
+                <article
                   key={a.id}
-                  to={filteredReaderHref(linkBase, a.slug, selectedArea, selectedType, badgeFilters)}
                   className={`backlink${isActive ? " is-active" : ""}`}
-                  style={isActive ? {
-                    borderColor: "var(--accent)",
-                    background: "color-mix(in oklch, var(--accent) 10%, transparent)",
-                  } : undefined}
+                  tabIndex={0}
+                  role="button"
+                  aria-selected={isActive}
+                  onClick={() => onSelectInspectorArtifact(a.slug)}
+                  onDoubleClick={() => navigate(href)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && e.shiftKey) {
+                      e.preventDefault();
+                      navigate(href);
+                      return;
+                    }
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onSelectInspectorArtifact(a.slug);
+                      return;
+                    }
+                    if (e.key.toLowerCase() === "o") {
+                      e.preventDefault();
+                      navigate(href);
+                    }
+                  }}
                 >
                   <div className="backlink__head">
-                    <span className={typeChipClass(a.type)}>{a.type}</span>
-                    <span>{a.title}</span>
+                    <span className="backlink__title">{a.title}</span>
+                    <Tooltip content={t("reader.card_select_hint")}>
+                      <span className="backlink__inspect" aria-label={t("reader.card_select_hint")}>
+                        <PanelRightOpen className="lucide" aria-hidden="true" />
+                      </span>
+                    </Tooltip>
                   </div>
                   <div className="backlink__excerpt">
-                    {(areaNameBySlug.get(a.area_slug) ?? a.area_slug)} · {a.author_id} · {new Date(a.updated_at).toLocaleDateString()}
+                    <span className="backlink__badges">
+                      <ArtifactTypeChip type={a.type} />
+                      <VisualAreaChip
+                        areaSlug={a.area_slug}
+                        label={areaNameBySlug.get(a.area_slug) ?? a.area_slug}
+                      />
+                    </span>
+                    <ArtifactByline artifact={a} variant="list" />
+                    <time dateTime={a.updated_at}>{new Date(a.updated_at).toLocaleDateString()}</time>
                   </div>
-                </Link>
+                </article>
               );
             })}
           </div>
@@ -751,6 +884,7 @@ const TASK_COLUMNS: TaskColumnSpec[] = [
   { id: "verified", labelKey: "tasks.col_verified", pill: "done" },
   { id: "blocked", labelKey: "tasks.col_blocked", pill: "blocked" },
 ];
+const TASK_COLUMN_PAGE_SIZE = 50;
 
 const PRIORITY_CLASS: Record<string, string> = {
   p0: "prio prio--p0",
@@ -761,7 +895,6 @@ const PRIORITY_CLASS: Record<string, string> = {
 
 function TasksKanban({
   projectSlug,
-  projectLocale,
   list,
   allList,
   currentSlug,
@@ -777,7 +910,6 @@ function TasksKanban({
   onClearFilters,
 }: {
   projectSlug: string;
-  projectLocale: string;
   list: ArtifactRef[];
   allList: ArtifactRef[];
   currentSlug: string | undefined;
@@ -793,16 +925,37 @@ function TasksKanban({
   onClearFilters: () => void;
 }) {
   const { t } = useI18n();
+  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
 
   const groups = groupTasksByStatus(list);
+  const visibleGroups = visibleTaskGroups(groups, visibleCounts);
   const allGroups = groupTasksByStatus(allList);
-  const orderedTasks = orderedTaskList(groups);
+  const orderedTasks = orderedTaskList(visibleGroups);
   const hasActiveFilters = Boolean(selectedArea || badgeFilters.length > 0);
+  const paginationResetKey = useMemo(
+    () => `${selectedArea ?? ""}|${badgeFilters.map((f) => `${f.key}:${f.value}`).sort().join("|")}`,
+    [selectedArea, badgeFilters],
+  );
   const scopeLabel = selectedArea
     ? areaNameBySlug.get(selectedArea) ?? selectedArea
     : t("wiki.area_all");
   const filteredPendingCount = countPendingTasks(list);
   const allPendingCount = countPendingTasks(allList);
+
+  useEffect(() => {
+    setVisibleCounts({});
+  }, [paginationResetKey]);
+
+  function visibleLimitFor(columnId: string): number {
+    return visibleCounts[columnId] ?? TASK_COLUMN_PAGE_SIZE;
+  }
+
+  function showMoreColumn(columnId: string) {
+    setVisibleCounts((prev) => ({
+      ...prev,
+      [columnId]: (prev[columnId] ?? TASK_COLUMN_PAGE_SIZE) + TASK_COLUMN_PAGE_SIZE,
+    }));
+  }
 
   useEffect(() => {
     if (keyboardDisabled || orderedTasks.length === 0) return;
@@ -840,9 +993,7 @@ function TasksKanban({
             onClearAreaFilter={onClearAreaFilter}
             onClearBadgeFilter={onClearBadgeFilter}
           />
-          <div className="task-empty-state">
-            <div className="task-empty-state__title">{empty}</div>
-          </div>
+          <EmptyState message={empty} />
         </div>
       </main>
     );
@@ -869,14 +1020,16 @@ function TasksKanban({
         {TASK_COLUMNS.map((col) => (
           <TaskColumn
             key={col.id}
+            columnId={col.id}
             label={t(col.labelKey)}
             pill={col.pill}
             items={groups.get(col.id) ?? []}
+            visibleLimit={visibleLimitFor(col.id)}
             allCount={allGroups.get(col.id)?.length ?? 0}
             hasActiveFilters={hasActiveFilters}
             onClearFilters={onClearFilters}
+            onShowMore={() => showMoreColumn(col.id)}
             projectSlug={projectSlug}
-            projectLocale={projectLocale}
             currentSlug={currentSlug}
             selectedTaskSlug={selectedTaskSlug}
             onSelectTask={onSelectTask}
@@ -887,14 +1040,16 @@ function TasksKanban({
       {(groups.get("no_status")?.length ?? 0) > 0 && (
         <div className="kanban__extra">
           <TaskColumn
+            columnId="no_status"
             label={t("tasks.col_no_status")}
             pill="todo"
             items={groups.get("no_status") ?? []}
+            visibleLimit={visibleLimitFor("no_status")}
             allCount={allGroups.get("no_status")?.length ?? 0}
             hasActiveFilters={hasActiveFilters}
             onClearFilters={onClearFilters}
+            onShowMore={() => showMoreColumn("no_status")}
             projectSlug={projectSlug}
-            projectLocale={projectLocale}
             currentSlug={currentSlug}
             selectedTaskSlug={selectedTaskSlug}
             onSelectTask={onSelectTask}
@@ -906,14 +1061,16 @@ function TasksKanban({
       {(groups.get("cancelled")?.length ?? 0) > 0 && (
         <div className="kanban__extra">
           <TaskColumn
+            columnId="cancelled"
             label={t("tasks.col_cancelled")}
             pill="archived"
             items={groups.get("cancelled") ?? []}
+            visibleLimit={visibleLimitFor("cancelled")}
             allCount={allGroups.get("cancelled")?.length ?? 0}
             hasActiveFilters={hasActiveFilters}
             onClearFilters={onClearFilters}
+            onShowMore={() => showMoreColumn("cancelled")}
             projectSlug={projectSlug}
-            projectLocale={projectLocale}
             currentSlug={currentSlug}
             selectedTaskSlug={selectedTaskSlug}
             onSelectTask={onSelectTask}
@@ -942,6 +1099,17 @@ function groupTasksByStatus(list: ArtifactRef[]): Map<string, ArtifactRef[]> {
     }
   }
   return groups;
+}
+
+function visibleTaskGroups(
+  groups: Map<string, ArtifactRef[]>,
+  visibleCounts: Record<string, number>,
+): Map<string, ArtifactRef[]> {
+  const visible = new Map<string, ArtifactRef[]>();
+  for (const [columnId, items] of groups) {
+    visible.set(columnId, items.slice(0, visibleCounts[columnId] ?? TASK_COLUMN_PAGE_SIZE));
+  }
+  return visible;
 }
 
 function countPendingTasks(list: ArtifactRef[]): number {
@@ -977,15 +1145,13 @@ function TaskBoardHeader({
   onClearBadgeFilter: (key: BadgeFilterKey) => void;
 }) {
   const { t } = useI18n();
-  const title = selectedArea
-    ? t("tasks.scope_title_filtered", scopeLabel, filteredPendingCount, totalCount)
-    : t("tasks.scope_title_all", totalCount);
   return (
     <div className="task-board-head">
-      <div>
-        <div className="task-board-head__eyebrow">{t("nav.tasks")}</div>
-        <h1 className="task-board-head__title">{title}</h1>
-      </div>
+      <SurfaceHeader
+        name="task"
+        count={selectedArea || badgeFilters.length > 0 ? filteredPendingCount : totalCount}
+        secondary={selectedArea || badgeFilters.length > 0 ? { label: t("surface.all"), count: totalCount } : undefined}
+      />
       <div className="task-filter-bar" aria-label={t("tasks.filter_bar_label")}>
         <span className="task-filter-chip task-filter-chip--locked">
           <span className="task-filter-chip__key">Type</span>
@@ -995,15 +1161,16 @@ function TaskBoardHeader({
           <span className="task-filter-chip">
             <span className="task-filter-chip__key">Area</span>
             <span>{scopeLabel}</span>
-            <button
-              type="button"
-              className="task-filter-chip__remove"
-              onClick={onClearAreaFilter}
-              aria-label={t("tasks.filter_remove_area", scopeLabel)}
-              title={t("tasks.filter_remove_area", scopeLabel)}
-            >
-              <X className="lucide" />
-            </button>
+            <Tooltip content={t("tasks.filter_remove_area", scopeLabel)}>
+              <button
+                type="button"
+                className="task-filter-chip__remove"
+                onClick={onClearAreaFilter}
+                aria-label={t("tasks.filter_remove_area", scopeLabel)}
+              >
+                <X className="lucide" />
+              </button>
+            </Tooltip>
           </span>
         )}
         {badgeFilters.map((filter) => (
@@ -1084,15 +1251,16 @@ function FilterChip({
     <span className="task-filter-chip">
       <span className="task-filter-chip__key">{keyLabel}</span>
       <span>{label}</span>
-      <button
-        type="button"
-        className="task-filter-chip__remove"
-        onClick={onRemove}
-        aria-label={removeLabel}
-        title={removeLabel}
-      >
-        <X className="lucide" />
-      </button>
+      <Tooltip content={removeLabel}>
+        <button
+          type="button"
+          className="task-filter-chip__remove"
+          onClick={onRemove}
+          aria-label={removeLabel}
+        >
+          <X className="lucide" />
+        </button>
+      </Tooltip>
     </span>
   );
 }
@@ -1106,40 +1274,40 @@ function TaskFilterEmptyState({
 }) {
   const { t } = useI18n();
   return (
-    <div className="task-empty-state task-empty-state--filtered">
-      <div className="task-empty-state__title">{t("tasks.empty_filtered_head")}</div>
-      <div>{t("tasks.empty_filtered_total_pending", allPendingCount)}</div>
-      <button type="button" className="task-clear-filter" onClick={onClearFilters}>
-        {t("tasks.clear_filters")}
-        <span className="kbd">esc</span>
-      </button>
-    </div>
+    <EmptyState
+      message={`${t("tasks.empty_filtered_head")} ${t("tasks.empty_filtered_total_pending", allPendingCount)}`}
+      action={{ label: t("tasks.clear_filters"), onClick: onClearFilters }}
+    />
   );
 }
 
 function TaskColumn({
+  columnId,
   label,
   pill,
   items,
+  visibleLimit,
   allCount,
   hasActiveFilters,
   onClearFilters,
+  onShowMore,
   projectSlug,
-  projectLocale,
   currentSlug,
   selectedTaskSlug,
   onSelectTask,
   subtle,
   areaNameBySlug,
 }: {
+  columnId: string;
   label: string;
   pill: TaskColumnSpec["pill"];
   items: ArtifactRef[];
+  visibleLimit: number;
   allCount: number;
   hasActiveFilters: boolean;
   onClearFilters: () => void;
+  onShowMore: () => void;
   projectSlug: string;
-  projectLocale: string;
   currentSlug: string | undefined;
   selectedTaskSlug: string | null;
   onSelectTask: (slug: string) => void;
@@ -1147,8 +1315,11 @@ function TaskColumn({
   areaNameBySlug: ReadonlyMap<string, string>;
 }) {
   const { t } = useI18n();
+  const visibleItems = items.slice(0, visibleLimit);
+  const hiddenCount = Math.max(0, items.length - visibleItems.length);
+  const nextCount = Math.min(TASK_COLUMN_PAGE_SIZE, hiddenCount);
   return (
-    <div className={`kanban-col${subtle ? " kanban-col--subtle" : ""}`}>
+    <div className={`kanban-col${subtle ? " kanban-col--subtle" : ""}`} data-task-column={columnId}>
       <div className="kanban-col__head">
         <span className={`status-pill status-pill--${pill}`}>
           <span className="p-dot" />
@@ -1157,18 +1328,31 @@ function TaskColumn({
         <span className="kanban-col__count">{items.length}</span>
       </div>
       <div className="kanban-col__list">
-        {items.map((a) => (
+        {visibleItems.map((a) => (
           <TaskCard
             key={a.id}
             artifact={a}
             projectSlug={projectSlug}
-            projectLocale={projectLocale}
             isActive={currentSlug === a.slug}
             isSelected={selectedTaskSlug === a.slug}
             onSelect={onSelectTask}
             areaNameBySlug={areaNameBySlug}
           />
         ))}
+        {hiddenCount > 0 && (
+          <Tooltip content={t("tasks.showing_count", visibleItems.length, items.length)}>
+            <button
+              type="button"
+              className="task-show-more"
+              onClick={onShowMore}
+            >
+              <span>{t("tasks.show_more", nextCount)}</span>
+              <span className="task-show-more__meta">
+                {t("tasks.showing_count", visibleItems.length, items.length)}
+              </span>
+            </button>
+          </Tooltip>
+        )}
         {items.length === 0 && (
           hasActiveFilters ? (
             <div className="kanban-col__empty kanban-col__empty--filtered">
@@ -1196,7 +1380,6 @@ function TaskColumn({
 function TaskCard({
   artifact: a,
   projectSlug,
-  projectLocale,
   isActive,
   isSelected,
   onSelect,
@@ -1204,7 +1387,6 @@ function TaskCard({
 }: {
   artifact: ArtifactRef;
   projectSlug: string;
-  projectLocale: string;
   isActive: boolean;
   isSelected: boolean;
   onSelect: (slug: string) => void;
@@ -1216,7 +1398,7 @@ function TaskCard({
   const prioClass = priority ? PRIORITY_CLASS[priority] : undefined;
   const blocked = a.task_meta?.status === "blocked";
   const areaLabel = areaNameBySlug.get(a.area_slug) ?? localizedAreaName(t, a.area_slug, a.area_slug);
-  const detailHref = `/p/${projectSlug}/${projectLocale}/wiki/${a.slug}`;
+  const detailHref = `/p/${projectSlug}/wiki/${a.slug}`;
   const selected = isActive || isSelected;
   return (
     <article
@@ -1252,20 +1434,29 @@ function TaskCard({
       )}
       <div className="task-card__meta">
         {prioClass && (
-          <span className={prioClass} title={`priority ${priority}`}>
-            <span className="dot" />
-            {priority?.toUpperCase()}
-          </span>
+          <Tooltip content={t("tasks.priority_hint", priority?.toUpperCase() ?? "")}>
+            <span className={prioClass}>
+              <span className="dot" />
+              {priority?.toUpperCase()}
+            </span>
+          </Tooltip>
         )}
         <span className="chip-area">{areaLabel}</span>
+        <Tooltip content={t("tasks.card_select_hint")}>
+          <span className="task-card__inspect">
+            <PanelRightOpen className="lucide" aria-hidden="true" />
+          </span>
+        </Tooltip>
       </div>
-      <Link
-        to={detailHref}
-        className="task-card__title task-card__title-link"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {a.title}
-      </Link>
+      <Tooltip content={t("tasks.card_open_detail_hint")}>
+        <Link
+          to={detailHref}
+          className="task-card__title task-card__title-link"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {a.title}
+        </Link>
+      </Tooltip>
       <div className="task-card__foot">
         {a.task_meta?.assignee && <span>{a.task_meta.assignee}</span>}
         {a.task_meta?.due_at && (

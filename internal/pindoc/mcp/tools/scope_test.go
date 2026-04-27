@@ -25,7 +25,7 @@ func TestPatchFieldsForScopeDefer(t *testing.T) {
 	// confirm the intended destination exists.
 	hasSearch := false
 	for _, tl := range got {
-		if tl == "pindoc.artifact.search" {
+		if tl.Tool == "pindoc.artifact.search" {
 			hasSearch = true
 		}
 	}

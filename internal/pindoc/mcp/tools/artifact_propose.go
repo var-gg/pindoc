@@ -20,6 +20,8 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/i18n"
+	"github.com/var-gg/pindoc/internal/pindoc/policy"
+	"github.com/var-gg/pindoc/internal/pindoc/receipts"
 )
 
 // ValidArtifactTypes are the types Phase 2 accepts. Tier A (7) + Tier B
@@ -50,6 +52,7 @@ type artifactProposeInput struct {
 	AreaSlug      string   `json:"area_slug" jsonschema:"slug from pindoc.area.list; use 'misc' or '_unsorted' if unsure"`
 	Title         string   `json:"title"`
 	BodyMarkdown  string   `json:"body_markdown" jsonschema:"main content in markdown"`
+	BodyLocale    string   `json:"body_locale,omitempty" jsonschema:"BCP 47 body language tag; default = project primary_language"`
 	Slug          string   `json:"slug,omitempty" jsonschema:"optional; auto-generated from title if absent"`
 	Tags          []string `json:"tags,omitempty"`
 	Completeness  string   `json:"completeness,omitempty" jsonschema:"draft|partial|settled; default partial"`
@@ -93,6 +96,12 @@ type artifactProposeInput struct {
 	// artifact; supersede creates a replacement and archives the old one.
 	SupersedeOf string `json:"supersede_of,omitempty" jsonschema:"id, slug, or pindoc:// URL of the artifact being replaced"`
 
+	// UnrelatedReason is the Task-only escape hatch for the supersede
+	// safety gate. When a new Task semantically overlaps active Tasks in
+	// the same area, the caller must either set supersede_of or explain why
+	// the new Task is intentionally unrelated.
+	UnrelatedReason string `json:"unrelated_reason,omitempty" jsonschema:"Task-only escape hatch when semantic conflict candidates are active but not superseded; minimum 20 characters when used"`
+
 	// Pins attach code references to the artifact. All optional — the
 	// server stores whatever is provided. path is the only required field
 	// in each pin (enforced by DB check). Phase 11a stores them; stale
@@ -100,7 +109,8 @@ type artifactProposeInput struct {
 	Pins []ArtifactPinInput `json:"pins,omitempty" jsonschema:"code references tying this artifact to files/commits"`
 
 	// RelatesTo records typed edges to other artifacts in the same project.
-	// Valid relations: implements | references | blocks | relates_to.
+	// Valid relations: implements | references | blocks | relates_to |
+	// translation_of.
 	// Target may be id, slug, or pindoc:// URL — resolved server-side.
 	// Unknown targets fail the whole call with RELATES_TARGET_NOT_FOUND.
 	RelatesTo []ArtifactRelationInput `json:"relates_to,omitempty" jsonschema:"typed edges to other artifacts"`
@@ -126,9 +136,11 @@ type artifactProposeInput struct {
 	ScopeDefer *ScopeDeferInput `json:"scope_defer,omitempty" jsonschema:"payload for shape=scope_defer — checkbox locator + to_artifact + reason"`
 
 	// ArtifactMeta carries epistemic axes that classify the artifact's
-	// trustworthiness and memory scope. All fields optional — server
-	// resolves defaults via resolveArtifactMeta based on pins, update path,
-	// and body heuristics. See docs/04-data-model.md for axis definitions.
+	// trustworthiness and memory scope, plus optional rule-scoping fields
+	// used by context.for_task's Applicable Rules mechanism. All fields
+	// optional — server resolves defaults via resolveArtifactMeta based on
+	// pins, update path, and body heuristics. See docs/04-data-model.md for
+	// field definitions.
 	//
 	// Axes:
 	//   source_type         — code | artifact | user_chat | external | mixed
@@ -137,18 +149,21 @@ type artifactProposeInput struct {
 	//   audience            — owner_only | approvers | project_readers
 	//   next_context_policy — default | opt_in | excluded
 	//   verification_state  — verified | partially_verified | unverified
+	//   applies_to_areas    — area slugs or wildcard scopes such as ui/*
+	//   applies_to_types    — artifact types; empty means all types
+	//   rule_severity       — binding | guidance | reference
+	//   rule_excerpt        — short excerpt surfaced in applicable_rules
 	//
-	// On update_of the supplied meta MERGES with existing meta (unset keys
-	// keep previous values). Fully replacing requires explicit empty strings
-	// which resolveArtifactMeta treats as "caller cleared this axis".
-	ArtifactMeta *ArtifactMetaInput `json:"artifact_meta,omitempty" jsonschema:"epistemic axes — source_type, consent_state, confidence, audience, next_context_policy, verification_state (all optional)"`
+	// On update_of the supplied meta replaces the existing artifact_meta
+	// JSONB. Omit artifact_meta to preserve the previous value.
+	ArtifactMeta *ArtifactMetaInput `json:"artifact_meta,omitempty" jsonschema:"epistemic axes and optional applicable-rule metadata (all fields optional)"`
 
 	// TaskMeta carries typed tracker dimensions for type=Task artifacts
 	// (Phase 15b). Ignored for any other type. All fields optional:
 	//
 	//   status      — todo | in_progress | blocked | done | cancelled
 	//   priority    — p0 | p1 | p2 | p3
-	//   assignee    — free-form string; e.g. "@alice", "agent:claude-code"
+	//   assignee    — agent:<id> | user:<id> | @<handle>
 	//   due_at      — RFC3339 timestamp
 	//   parent_slug — another Task artifact's slug (for epic→task→subtask)
 	//
@@ -236,12 +251,16 @@ var validTaskPriorities = map[string]struct{}{
 // field is optional; resolveArtifactMeta fills defaults based on pins,
 // update path, and body heuristics.
 type ArtifactMetaInput struct {
-	SourceType        string `json:"source_type,omitempty" jsonschema:"code | artifact | user_chat | external | mixed"`
-	ConsentState      string `json:"consent_state,omitempty" jsonschema:"not_needed | requested | granted | denied"`
-	Confidence        string `json:"confidence,omitempty" jsonschema:"low | medium | high"`
-	Audience          string `json:"audience,omitempty" jsonschema:"owner_only | approvers | project_readers"`
-	NextContextPolicy string `json:"next_context_policy,omitempty" jsonschema:"default | opt_in | excluded"`
-	VerificationState string `json:"verification_state,omitempty" jsonschema:"verified | partially_verified | unverified"`
+	SourceType        string   `json:"source_type,omitempty" jsonschema:"code | artifact | user_chat | external | mixed"`
+	ConsentState      string   `json:"consent_state,omitempty" jsonschema:"not_needed | requested | granted | denied"`
+	Confidence        string   `json:"confidence,omitempty" jsonschema:"low | medium | high"`
+	Audience          string   `json:"audience,omitempty" jsonschema:"owner_only | approvers | project_readers"`
+	NextContextPolicy string   `json:"next_context_policy,omitempty" jsonschema:"default | opt_in | excluded"`
+	VerificationState string   `json:"verification_state,omitempty" jsonschema:"verified | partially_verified | unverified"`
+	AppliesToAreas    []string `json:"applies_to_areas,omitempty" jsonschema:"area_slug list; wildcard scopes like ui/* supported"`
+	AppliesToTypes    []string `json:"applies_to_types,omitempty" jsonschema:"artifact type list; omitted or empty means all types"`
+	RuleSeverity      string   `json:"rule_severity,omitempty" jsonschema:"binding | guidance | reference; presence marks this artifact as an applicable rule"`
+	RuleExcerpt       string   `json:"rule_excerpt,omitempty" jsonschema:"short excerpt returned by context.for_task applicable_rules; default derives from the first H2 section"`
 }
 
 var validSourceTypes = map[string]struct{}{
@@ -261,6 +280,27 @@ var validNextContextPolicies = map[string]struct{}{
 }
 var validVerificationStates = map[string]struct{}{
 	"verified": {}, "partially_verified": {}, "unverified": {},
+}
+var validRuleSeverities = map[string]struct{}{
+	"binding": {}, "guidance": {}, "reference": {},
+}
+
+func validRuleAreaScope(scope string) bool {
+	s := strings.TrimSpace(scope)
+	if s == "" {
+		return false
+	}
+	if s == "*" {
+		return true
+	}
+	if strings.ContainsAny(s, " \t\r\n") || strings.Contains(s, "//") {
+		return false
+	}
+	if strings.HasSuffix(s, "/*") {
+		base := strings.TrimSuffix(s, "/*")
+		return base != "" && !strings.Contains(base, "*")
+	}
+	return !strings.Contains(s, "*")
 }
 
 // ArtifactRelationInput is the agent-facing shape for one edge.
@@ -282,9 +322,12 @@ type artifactProposeOutput struct {
 	// Failed is the Phase 12-style stable code list. Populated alongside
 	// the legacy natural-language Checklist during Phase 11a so agents can
 	// start branching on codes now; Checklist becomes optional in Phase 12.
-	Failed           []string `json:"failed,omitempty"`
-	Checklist        []string `json:"checklist,omitempty"`
-	SuggestedActions []string `json:"suggested_actions,omitempty"`
+	Failed           []string             `json:"failed,omitempty"`
+	ErrorCodes       []string             `json:"error_codes,omitempty" jsonschema:"canonical stable SCREAMING_SNAKE_CASE identifiers; branch on these"`
+	Checklist        []string             `json:"checklist,omitempty"`
+	ChecklistItems   []ErrorChecklistItem `json:"checklist_items,omitempty" jsonschema:"localized checklist entries paired with stable codes"`
+	MessageLocale    string               `json:"message_locale,omitempty" jsonschema:"locale used for checklist/checklist_items.message after fallback"`
+	SuggestedActions []string             `json:"suggested_actions,omitempty"`
 
 	// Only set on Status == "accepted".
 	ArtifactID string `json:"artifact_id,omitempty"`
@@ -318,8 +361,9 @@ type artifactProposeOutput struct {
 	// why the gate fired. Populated alongside the legacy Checklist/
 	// SuggestedActions pair so agents can branch on codes without parsing
 	// natural language.
-	NextTools []string     `json:"next_tools,omitempty"`
-	Related   []RelatedRef `json:"related,omitempty"`
+	NextTools []NextToolHint `json:"next_tools,omitempty"`
+	Related   []RelatedRef   `json:"related,omitempty"`
+	Expected  *ExpectedShape `json:"expected,omitempty"`
 	// PatchableFields (Phase 14b) tells the agent which input fields to
 	// change for the retry. Empty = full input needs rework. Maps stable
 	// fail codes to the minimum patch surface so agents don't resend
@@ -353,6 +397,9 @@ type artifactProposeOutput struct {
 	// agent-supplied values when a stronger signal was present (e.g. code
 	// pins upgrading source_type). Absent on not_ready responses.
 	ArtifactMeta *ResolvedArtifactMeta `json:"artifact_meta,omitempty"`
+	// ReceiptExempted is populated when create-path search_receipt gating
+	// was intentionally skipped by the empty/same-author bootstrap policy.
+	ReceiptExempted *ReceiptExemptionSignal `json:"receipt_exempted,omitempty"`
 	// CanonicalRewriteWithoutEvidence is true when the update path rewrote
 	// a type-specific canonical claim section (Debug.Root cause,
 	// Decision.Decision, Analysis.Conclusion) without fresh evidence (new
@@ -360,6 +407,35 @@ type artifactProposeOutput struct {
 	// evidence keyword). Reader revision badges consume this flag for an
 	// "uncertain rewrite" marker. Always false on create paths.
 	CanonicalRewriteWithoutEvidence bool `json:"canonical_rewrite_without_evidence,omitempty"`
+}
+
+type ReceiptExemptionSignal struct {
+	Reason     string `json:"reason"`
+	NRemaining int    `json:"n_remaining"`
+	Limit      int    `json:"limit,omitempty"`
+}
+
+// NextToolHint is a structured continuation hint. It keeps the tool name
+// machine-readable and, when useful, carries the exact arguments for the
+// next MCP call.
+type NextToolHint struct {
+	Tool   string         `json:"tool"`
+	Args   map[string]any `json:"args,omitempty"`
+	Reason string         `json:"reason,omitempty"`
+}
+
+// ExpectedShape describes the shape the failed propose attempt should
+// converge to. For template-backed structure gates this includes the
+// exact template slug and H2 slots the agent can copy into its retry.
+type ExpectedShape struct {
+	ArtifactType string           `json:"artifact_type,omitempty"`
+	TemplateSlug string           `json:"template_slug,omitempty"`
+	RequiredH2   []ExpectedH2Slot `json:"required_h2,omitempty"`
+}
+
+type ExpectedH2Slot struct {
+	Label   string   `json:"label"`
+	Aliases []string `json:"aliases,omitempty"`
 }
 
 // RelatedRef is a compact pointer to another artifact the caller should
@@ -406,18 +482,20 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			lang := deps.UserLanguage
 			checklist, failed, code := preflight(ctx, deps, scope.ProjectSlug, &in, lang)
 			if len(checklist) > 0 {
+				expected := expectedForNotReady(ctx, deps, scope.ProjectSlug, in.Type, failed)
 				return nil, artifactProposeOutput{
 					Status:    "not_ready",
 					ErrorCode: code,
 					Failed:    failed,
 					Checklist: checklist,
-					SuggestedActions: []string{
+					SuggestedActions: suggestedActionsForNotReady(lang, in.Type, failed, []string{
 						i18n.T(lang, "suggested.fix_all"),
 						i18n.T(lang, "suggested.confirm_types"),
 						i18n.T(lang, "suggested.use_misc"),
-					},
-					NextTools:       defaultNextTools(code),
+					}),
+					NextTools:       nextToolsForNotReady(code, in.Type, failed),
 					PatchableFields: patchFieldsFor(code),
+					Expected:        expected,
 				}, nil
 			}
 
@@ -447,13 +525,13 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			// the supersede bookkeeping just before commit.
 
 			// --- Resolve area + project ----------------------------------
-			var projectID, areaID string
+			var projectID, areaID, sensitiveOps string
 			err = deps.DB.QueryRow(ctx, `
-				SELECT proj.id::text, area.id::text
+				SELECT proj.id::text, area.id::text, COALESCE(NULLIF(proj.sensitive_ops, ''), 'auto')
 				FROM projects proj
 				JOIN areas area ON area.project_id = proj.id
 				WHERE proj.slug = $1 AND area.slug = $2
-			`, scope.ProjectSlug, in.AreaSlug).Scan(&projectID, &areaID)
+			`, scope.ProjectSlug, in.AreaSlug).Scan(&projectID, &areaID, &sensitiveOps)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, artifactProposeOutput{
 					Status:    "not_ready",
@@ -478,74 +556,117 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			// (read/target proves context). Unset receipts store disables
 			// the gate entirely (test fixtures).
 			isCreatePath := strings.TrimSpace(in.UpdateOf) == "" && strings.TrimSpace(in.SupersedeOf) == ""
+			var receiptExempted *ReceiptExemptionSignal
 			if isCreatePath && deps.Receipts != nil {
 				receipt := ""
 				if in.Basis != nil {
 					receipt = strings.TrimSpace(in.Basis.SearchReceipt)
 				}
+				var receiptSnapshots []receipts.ArtifactRef
 				if receipt == "" {
-					return nil, artifactProposeOutput{
-						Status:           "not_ready",
-						ErrorCode:        "NO_SRCH",
-						Failed:           []string{"NO_SRCH"},
-						Checklist:        []string{i18n.T(lang, "preflight.no_search_receipt")},
-						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
-						NextTools:        defaultNextTools("NO_SRCH"),
-						PatchableFields:  patchFieldsFor("NO_SRCH"),
-					}, nil
-				}
-				res := deps.Receipts.Verify(receipt, scope.ProjectSlug)
-				switch {
-				case res.Unknown:
-					return nil, artifactProposeOutput{
-						Status:           "not_ready",
-						ErrorCode:        "RECEIPT_UNKNOWN",
-						Failed:           []string{"RECEIPT_UNKNOWN"},
-						Checklist:        []string{i18n.T(lang, "preflight.receipt_unknown")},
-						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
-						NextTools:        defaultNextTools("RECEIPT_UNKNOWN"),
-						PatchableFields:  patchFieldsFor("RECEIPT_UNKNOWN"),
-					}, nil
-				case res.Expired:
-					return nil, artifactProposeOutput{
-						Status:           "not_ready",
-						ErrorCode:        "RECEIPT_EXPIRED",
-						Failed:           []string{"RECEIPT_EXPIRED"},
-						Checklist:        []string{i18n.T(lang, "preflight.receipt_expired")},
-						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
-						NextTools:        defaultNextTools("RECEIPT_EXPIRED"),
-						PatchableFields:  patchFieldsFor("RECEIPT_EXPIRED"),
-					}, nil
-				case res.WrongProject:
-					return nil, artifactProposeOutput{
-						Status:           "not_ready",
-						ErrorCode:        "RECEIPT_WRONG_PROJECT",
-						Failed:           []string{"RECEIPT_WRONG_PROJECT"},
-						Checklist:        []string{i18n.T(lang, "preflight.receipt_wrong_project")},
-						SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
-						NextTools:        defaultNextTools("RECEIPT_WRONG_PROJECT"),
-						PatchableFields:  patchFieldsFor("RECEIPT_WRONG_PROJECT"),
-					}, nil
-				}
-				// Phase E — corpus-drift staleness. If the receipt was issued
-				// with snapshots (artifact_id, revision_number at search time)
-				// and ALL of those artifacts have since moved past their
-				// snapshotted revision, the receipt is stale in the one sense
-				// that matters: the agent searched a corpus that no longer
-				// exists. Partial drift is just a warning (see checkReceiptSupersedes).
-				if len(res.Snapshots) > 0 {
-					superseded, err := checkReceiptSupersedes(ctx, deps, res.Snapshots)
+					exemption, ok, err := maybeExemptMissingReceipt(ctx, deps, projectID, areaID, in.AuthorID)
 					if err != nil {
-						deps.Logger.Warn("receipt supersede check failed — allowing write", "err", err)
-					} else if len(superseded) == len(res.Snapshots) {
+						return nil, artifactProposeOutput{}, fmt.Errorf("receipt exemption check: %w", err)
+					}
+					if !ok {
 						return nil, artifactProposeOutput{
 							Status:           "not_ready",
-							ErrorCode:        "RECEIPT_SUPERSEDED",
-							Failed:           []string{"RECEIPT_SUPERSEDED"},
-							Checklist:        []string{i18n.T(lang, "preflight.receipt_superseded")},
+							ErrorCode:        "NO_SRCH",
+							Failed:           []string{"NO_SRCH"},
+							Checklist:        []string{i18n.T(lang, "preflight.no_search_receipt")},
 							SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
-							NextTools:        defaultNextTools("RECEIPT_SUPERSEDED"),
-							PatchableFields:  patchFieldsFor("RECEIPT_SUPERSEDED"),
+							NextTools:        defaultNextTools("NO_SRCH"),
+							PatchableFields:  patchFieldsFor("NO_SRCH"),
+						}, nil
+					}
+					receiptExempted = exemption
+				} else {
+					res := deps.Receipts.Verify(receipt, scope.ProjectSlug)
+					switch {
+					case res.Unknown:
+						return nil, artifactProposeOutput{
+							Status:           "not_ready",
+							ErrorCode:        "RECEIPT_UNKNOWN",
+							Failed:           []string{"RECEIPT_UNKNOWN"},
+							Checklist:        []string{i18n.T(lang, "preflight.receipt_unknown")},
+							SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
+							NextTools:        defaultNextTools("RECEIPT_UNKNOWN"),
+							PatchableFields:  patchFieldsFor("RECEIPT_UNKNOWN"),
+						}, nil
+					case res.Expired:
+						return nil, artifactProposeOutput{
+							Status:           "not_ready",
+							ErrorCode:        "RECEIPT_EXPIRED",
+							Failed:           []string{"RECEIPT_EXPIRED"},
+							Checklist:        []string{i18n.T(lang, "preflight.receipt_expired")},
+							SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
+							NextTools:        defaultNextTools("RECEIPT_EXPIRED"),
+							PatchableFields:  patchFieldsFor("RECEIPT_EXPIRED"),
+						}, nil
+					case res.WrongProject:
+						return nil, artifactProposeOutput{
+							Status:           "not_ready",
+							ErrorCode:        "RECEIPT_WRONG_PROJECT",
+							Failed:           []string{"RECEIPT_WRONG_PROJECT"},
+							Checklist:        []string{i18n.T(lang, "preflight.receipt_wrong_project")},
+							SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
+							NextTools:        defaultNextTools("RECEIPT_WRONG_PROJECT"),
+							PatchableFields:  patchFieldsFor("RECEIPT_WRONG_PROJECT"),
+						}, nil
+					}
+					receiptSnapshots = res.Snapshots
+					// Phase E — corpus-drift staleness. If the receipt was issued
+					// with snapshots (artifact_id, revision_number at search time)
+					// and ALL of those artifacts have since moved past their
+					// snapshotted revision, the receipt is stale in the one sense
+					// that matters: the agent searched a corpus that no longer
+					// exists. Partial drift is just a warning (see checkReceiptSupersedes).
+					if len(receiptSnapshots) > 0 {
+						superseded, err := checkReceiptSupersedes(ctx, deps, receiptSnapshots)
+						if err != nil {
+							deps.Logger.Warn("receipt supersede check failed — allowing write", "err", err)
+						} else if len(superseded) == len(receiptSnapshots) {
+							return nil, artifactProposeOutput{
+								Status:           "not_ready",
+								ErrorCode:        "RECEIPT_SUPERSEDED",
+								Failed:           []string{"RECEIPT_SUPERSEDED"},
+								Checklist:        []string{i18n.T(lang, "preflight.receipt_superseded")},
+								SuggestedActions: []string{i18n.T(lang, "suggested.call_search_first")},
+								NextTools:        defaultNextTools("RECEIPT_SUPERSEDED"),
+								PatchableFields:  patchFieldsFor("RECEIPT_SUPERSEDED"),
+							}, nil
+						}
+					}
+				}
+				if in.Type == "Task" {
+					activeTasks, err := activeTasksInArea(ctx, deps, projectID, areaID, "")
+					if err != nil {
+						return nil, artifactProposeOutput{}, fmt.Errorf("active task exposure check: %w", err)
+					}
+					if len(activeTasks) > 0 && !receiptSnapshotsContainAny(receiptSnapshots, activeTasks) {
+						related := make([]RelatedRef, 0, len(activeTasks))
+						for _, c := range activeTasks {
+							related = append(related, makeRelated(
+								deps, scope, c.Slug, c.ArtifactID, "Task", c.Title,
+								"active Task in same area; read acceptance before creating a new Task",
+							))
+							if len(related) >= semanticConflictLimit {
+								break
+							}
+						}
+						return nil, artifactProposeOutput{
+							Status:    "not_ready",
+							ErrorCode: "TASK_ACTIVE_CONTEXT_REQUIRED",
+							Failed:    []string{"TASK_ACTIVE_CONTEXT_REQUIRED"},
+							Checklist: []string{
+								"New Task create path must expose active same-area Task acceptance through the search_receipt snapshot.",
+							},
+							SuggestedActions: []string{
+								"Call pindoc.artifact.search with type=Task and the same area, or read the related Task(s), then retry with a fresh receipt.",
+							},
+							NextTools:       toolHints("pindoc.artifact.search", "pindoc.artifact.read"),
+							PatchableFields: []string{"basis.search_receipt"},
+							Related:         related,
 						}, nil
 					}
 				}
@@ -594,6 +715,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 					WHERE project_id = $1
 					  AND lower(title) = lower($2)
 					  AND status <> 'archived'
+					  AND status <> 'superseded'
 					LIMIT 1
 				`, projectID, in.Title).Scan(&existingID, &existingSlug)
 				if err == nil {
@@ -631,31 +753,51 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 					candidates, err := findSemanticConflicts(ctx, deps, projectID, in.Title, in.BodyMarkdown)
 					if err != nil {
 						deps.Logger.Warn("semantic conflict check failed — skipping gate", "err", err)
-					} else if len(candidates) > 0 {
-						rel := make([]string, 0, len(candidates))
-						related := make([]RelatedRef, 0, len(candidates))
-						for _, c := range candidates {
-							rel = append(rel, fmt.Sprintf("[%s] %s — /p/%s/wiki/%s (distance %.3f)", c.Type, c.Title, scope.ProjectSlug, c.Slug, c.Distance))
-							related = append(related, makeRelated(
-								deps, scope, c.Slug, c.ArtifactID, c.Type, c.Title,
-								fmt.Sprintf("cosine distance %.3f", c.Distance),
-							))
+					} else if in.Type == "Task" && len(candidates) > 0 {
+						taskCandidates, err := filterTaskSemanticCandidates(ctx, deps, projectID, areaID, candidates)
+						if err != nil {
+							return nil, artifactProposeOutput{}, fmt.Errorf("filter task semantic conflicts: %w", err)
 						}
-						return nil, artifactProposeOutput{
-							Status:    "not_ready",
-							ErrorCode: "POSSIBLE_DUP",
-							Failed:    []string{"POSSIBLE_DUP"},
-							Checklist: []string{
-								fmt.Sprintf(i18n.T(lang, "preflight.possible_dup"), candidates[0].Slug, candidates[0].Distance),
-							},
-							SuggestedActions: append(
-								[]string{i18n.T(lang, "suggested.read_similar")},
-								rel...,
-							),
-							NextTools:       defaultNextTools("POSSIBLE_DUP"),
-							PatchableFields: patchFieldsFor("POSSIBLE_DUP"),
-							Related:         related,
-						}, nil
+						if len(taskCandidates) > 0 {
+							unrelatedReason := strings.TrimSpace(in.UnrelatedReason)
+							if unrelatedReason != "" && utf8.RuneCountInString(unrelatedReason) < unrelatedReasonMinRunes {
+								return nil, artifactProposeOutput{
+									Status:    "not_ready",
+									ErrorCode: "UNRELATED_REASON_TOO_SHORT",
+									Failed:    []string{"UNRELATED_REASON_TOO_SHORT"},
+									Checklist: []string{
+										fmt.Sprintf("unrelated_reason must be at least %d characters when bypassing active Task semantic conflicts.", unrelatedReasonMinRunes),
+									},
+									PatchableFields: []string{"unrelated_reason"},
+								}, nil
+							}
+							if unrelatedReason == "" {
+								rel := make([]string, 0, len(candidates))
+								related := make([]RelatedRef, 0, len(taskCandidates))
+								for _, c := range taskCandidates {
+									rel = append(rel, fmt.Sprintf("[%s] %s — /p/%s/wiki/%s (distance %.3f)", c.Type, c.Title, scope.ProjectSlug, c.Slug, c.Distance))
+									related = append(related, makeRelated(
+										deps, scope, c.Slug, c.ArtifactID, c.Type, c.Title,
+										fmt.Sprintf("cosine distance %.3f", c.Distance),
+									))
+								}
+								return nil, artifactProposeOutput{
+									Status:    "not_ready",
+									ErrorCode: "TASK_SUPERSEDE_REQUIRED",
+									Failed:    []string{"TASK_SUPERSEDE_REQUIRED"},
+									Checklist: []string{
+										fmt.Sprintf("New Task semantically overlaps active Task %q (distance %.3f). Use supersede_of or provide unrelated_reason.", taskCandidates[0].Slug, taskCandidates[0].Distance),
+									},
+									SuggestedActions: append(
+										[]string{"Read the candidate Task acceptance, then retry with supersede_of=<old-task-slug> or unrelated_reason=<why it does not overlap>."},
+										rel...,
+									),
+									NextTools:       toolHints("pindoc.artifact.read", "pindoc.artifact.propose"),
+									PatchableFields: []string{"supersede_of", "unrelated_reason"},
+									Related:         related,
+								}, nil
+							}
+						}
 					}
 				}
 			}
@@ -683,6 +825,14 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			if in.Tags == nil {
 				in.Tags = []string{}
 			}
+			bodyLocale := normalizeBodyLocale(in.BodyLocale)
+			if bodyLocale == "" {
+				bodyLocale = normalizeBodyLocale(scope.ProjectLocale)
+			}
+			if bodyLocale == "" {
+				bodyLocale = "en"
+			}
+			commitMsgWarnings := applyCreateCommitMsgFallback(&in)
 
 			// --- INSERT + event in one tx --------------------------------
 			tx, err := deps.DB.Begin(ctx)
@@ -696,17 +846,25 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			var publishedAt time.Time
 			taskMetaJSON := taskMetaToJSON(in.Type, in.TaskMeta)
 			artifactMetaJSON := artifactMetaToJSON(resolvedMeta)
+			reviewOp := policy.OpCompletenessWrite
+			if supersedeTargetID != "" {
+				reviewOp = policy.OpSupersede
+			}
+			reviewState := policy.ReviewStateFor(sensitiveOps, reviewOp, policy.SensitiveContext{
+				ToCompleteness: completeness,
+			})
 			for attempt := 0; attempt < 10; attempt++ {
 				err = tx.QueryRow(ctx, `
 					INSERT INTO artifacts (
 						project_id, area_id, slug, type, title, body_markdown, tags,
+						body_locale,
 						completeness, status, review_state,
 						author_kind, author_id, author_version, author_user_id,
 						task_meta, artifact_meta, published_at
-					) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'published', 'auto_published', 'agent', $9, $10, NULLIF($11, '')::uuid, $12, $13::jsonb, now())
+					) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'published', $15, 'agent', $10, $11, NULLIF($12, '')::uuid, $13, $14::jsonb, now())
 					RETURNING id::text, published_at
 				`, projectID, areaID, finalSlug, in.Type, in.Title, in.BodyMarkdown, in.Tags,
-					completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), p.UserID, taskMetaJSON, artifactMetaJSON).Scan(&newID, &publishedAt)
+					bodyLocale, completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), p.UserID, taskMetaJSON, artifactMetaJSON, reviewState).Scan(&newID, &publishedAt)
 				if err == nil {
 					break
 				}
@@ -720,16 +878,22 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				return nil, artifactProposeOutput{}, errors.New("could not allocate a unique slug after 10 attempts")
 			}
 
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO events (project_id, kind, subject_id, payload)
-				VALUES ($1, 'artifact.published', $2, jsonb_build_object(
-					'area_slug', $3::text,
-					'type', $4::text,
-					'slug', $5::text,
-					'author_id', $6::text
-				))
-			`, projectID, newID, in.AreaSlug, in.Type, finalSlug, in.AuthorID); err != nil {
-				return nil, artifactProposeOutput{}, fmt.Errorf("event insert: %w", err)
+			if reviewState == policy.ReviewStatePending {
+				if err := recordReviewRequiredEvent(ctx, tx, projectID, newID, string(reviewOp), in.AuthorID); err != nil {
+					return nil, artifactProposeOutput{}, fmt.Errorf("review required event: %w", err)
+				}
+			} else {
+				if _, err := tx.Exec(ctx, `
+					INSERT INTO events (project_id, kind, subject_id, payload)
+					VALUES ($1, 'artifact.published', $2, jsonb_build_object(
+						'area_slug', $3::text,
+						'type', $4::text,
+						'slug', $5::text,
+						'author_id', $6::text
+					))
+				`, projectID, newID, in.AreaSlug, in.Type, finalSlug, in.AuthorID); err != nil {
+					return nil, artifactProposeOutput{}, fmt.Errorf("event insert: %w", err)
+				}
 			}
 			if err := recordAreaSuggestionResolvedEvent(ctx, tx, projectID, newID, areaSuggestionCorrelation(in), in.AreaSlug, finalSlug, in.AuthorID); err != nil {
 				return nil, artifactProposeOutput{}, fmt.Errorf("area suggestion resolve event: %w", err)
@@ -796,9 +960,10 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 					artifact_id, revision_number, title, body_markdown, body_hash, tags,
 					completeness, author_kind, author_id, author_version, commit_msg,
 					source_session_ref, revision_shape
-				) VALUES ($1, 1, $2, $3, $4, $5, $6, 'agent', $7, $8, 'initial', $9, 'body_patch')
+				) VALUES ($1, 1, $2, $3, $4, $5, $6, 'agent', $7, $8, $9, $10, 'body_patch')
 			`, newID, in.Title, in.BodyMarkdown, bodyHash(in.BodyMarkdown), in.Tags,
 				completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion),
+				in.CommitMsg,
 				buildSourceSessionRef(p, in),
 			); err != nil {
 				return nil, artifactProposeOutput{}, fmt.Errorf("initial revision insert: %w", err)
@@ -809,10 +974,11 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			}
 
 			warnings := createWarnings(ctx, deps, projectID, in.Title, in.BodyMarkdown)
+			warnings = append(warnings, commitMsgWarnings...)
 			warnings = append(warnings, pinPathWarnings(deps, in.Pins)...)
 			warnings = append(warnings, titleLengthWarnings(in.Title)...)
 			warnings = append(warnings, bodyH1Warnings(in.BodyMarkdown)...)
-			warnings = append(warnings, requiredH2Warnings(in.BodyMarkdown, in.Type)...)
+			warnings = append(warnings, requiredH2WarningsFor(ctx, deps, scope.ProjectSlug, in.BodyMarkdown, in.Type)...)
 			warnings = append(warnings, sectionDuplicatesEdgesWarnings(in.BodyMarkdown)...)
 			warnings = append(warnings, decisionSubjectAreaWarnings(in)...)
 			slugWarnings, slugSuggestedActions := slugBrevityAdvisory(in, finalSlug)
@@ -861,6 +1027,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				WarningSeverities: severities,
 				EmbedderUsed:      embedderInfo(deps),
 				ArtifactMeta:      &metaOut,
+				ReceiptExempted:   receiptExempted,
 				ToolsetVersion:    ToolsetVersion(),
 			}, nil
 		},
@@ -909,14 +1076,15 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 
 	ref := normalizeRef(in.UpdateOf)
 
-	var artifactID, projectID, currentBody, currentTitle, currentType, currentSlug string
+	var artifactID, projectID, currentBody, currentTitle, currentType, currentSlug, sensitiveOps string
 	var currentTags []string
 	var currentCompleteness string
-	var currentMetaRaw []byte
+	var currentMetaRaw, currentTaskMetaRaw []byte
 	var lastRev int
 	err := deps.DB.QueryRow(ctx, `
 		SELECT a.id::text, a.project_id::text, a.body_markdown, a.title, a.type, a.slug,
-		       a.tags, a.completeness, a.artifact_meta,
+		       a.tags, a.completeness, a.artifact_meta, a.task_meta,
+		       COALESCE(NULLIF(p.sensitive_ops, ''), 'auto'),
 		       COALESCE((SELECT max(revision_number) FROM artifact_revisions WHERE artifact_id = a.id), 0)
 		FROM artifacts a
 		JOIN projects p ON p.id = a.project_id
@@ -924,7 +1092,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		LIMIT 1
 	`, scope.ProjectSlug, ref).Scan(
 		&artifactID, &projectID, &currentBody, &currentTitle, &currentType, &currentSlug,
-		&currentTags, &currentCompleteness, &currentMetaRaw, &lastRev,
+		&currentTags, &currentCompleteness, &currentMetaRaw, &currentTaskMetaRaw, &sensitiveOps, &lastRev,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, artifactProposeOutput{
@@ -1103,6 +1271,8 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		patchWarnings = append(patchWarnings, w...)
 	}
 
+	autoClaimedDone := shouldAutoClaimDone(currentType, currentTaskMetaRaw, in.BodyMarkdown)
+
 	// Optimistic lock: version provided but stale → VER_CONFLICT.
 	if *in.ExpectedVersion != lastRev {
 		return nil, artifactProposeOutput{
@@ -1168,6 +1338,10 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 			completeness = "partial"
 		}
 	}
+	reviewState := policy.ReviewStateFor(sensitiveOps, policy.OpCompletenessWrite, policy.SensitiveContext{
+		FromCompleteness: currentCompleteness,
+		ToCompleteness:   completeness,
+	})
 
 	tx, err := deps.DB.Begin(ctx)
 	if err != nil {
@@ -1221,13 +1395,21 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		       completeness   = $5,
 		       author_id      = $6,
 		       author_version = $7,
-		       task_meta      = COALESCE($8, task_meta),
+		       task_meta      = CASE
+		           WHEN $10::bool THEN jsonb_set(COALESCE(task_meta, '{}'::jsonb), '{status}', '"claimed_done"')
+		           ELSE COALESCE($8, task_meta)
+		       END,
 		       artifact_meta  = COALESCE($9::jsonb, artifact_meta),
+		       review_state   = CASE
+		           WHEN $11::text = 'pending_review' THEN 'pending_review'
+		           ELSE review_state
+		       END,
 		       updated_at     = now()
 		 WHERE id = $1
 		RETURNING slug, COALESCE(published_at, now())
 	`, artifactID, in.Title, in.BodyMarkdown, in.Tags, completeness,
-		in.AuthorID, nullIfEmpty(in.AuthorVersion), taskMetaPatch, artifactMetaPatch,
+		in.AuthorID, nullIfEmpty(in.AuthorVersion), taskMetaPatch, artifactMetaPatch, autoClaimedDone,
+		reviewState,
 	).Scan(&slug, &publishedAt)
 	if err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("update head: %w", err)
@@ -1257,6 +1439,11 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	}
 	if err := recordAreaSuggestionResolvedEvent(ctx, tx, projectID, artifactID, areaSuggestionCorrelation(in), in.AreaSlug, slug, in.AuthorID); err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("area suggestion resolve event: %w", err)
+	}
+	if reviewState == policy.ReviewStatePending {
+		if err := recordReviewRequiredEvent(ctx, tx, projectID, artifactID, string(policy.OpCompletenessWrite), in.AuthorID); err != nil {
+			return nil, artifactProposeOutput{}, fmt.Errorf("review required event: %w", err)
+		}
 	}
 
 	// Phase F scope-defer edge write. Runs inside the same tx so the
@@ -1313,7 +1500,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	// Canonical-claim rewrite guard — compare prev/new H2 sections for
 	// types that carry a canonical truth claim (Debug, Decision, Analysis)
 	// and require fresh evidence when that section's content shifts.
-	warnings := updatePathWarnings(deps, in)
+	warnings := updatePathWarnings(ctx, deps, scope.ProjectSlug, in)
 	warnings = append(warnings, decisionSubjectAreaWarnings(in)...)
 	// Body-patch warnings bubble up here so PATCH_NOOP etc. sit alongside
 	// canonical-rewrite / source-type advisories instead of a separate
@@ -1380,12 +1567,12 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 // place can't produce a duplicate — but runs the structural/pin gates so
 // the agent learns about title length / heading / pin-path issues on
 // revised artifacts too.
-func updatePathWarnings(deps Deps, in artifactProposeInput) []string {
+func updatePathWarnings(ctx context.Context, deps Deps, projectSlug string, in artifactProposeInput) []string {
 	var out []string
 	out = append(out, pinPathWarnings(deps, in.Pins)...)
 	out = append(out, titleLengthWarnings(in.Title)...)
 	out = append(out, bodyH1Warnings(in.BodyMarkdown)...)
-	out = append(out, requiredH2Warnings(in.BodyMarkdown, in.Type)...)
+	out = append(out, requiredH2WarningsFor(ctx, deps, projectSlug, in.BodyMarkdown, in.Type)...)
 	out = append(out, sectionDuplicatesEdgesWarnings(in.BodyMarkdown)...)
 	return out
 }
@@ -1467,6 +1654,17 @@ func recordAreaSuggestionResolvedEvent(ctx context.Context, tx pgx.Tx, projectID
 			'author_id',       $6::text
 		))
 	`, projectID, artifactID, correlationID, finalAreaSlug, slug, authorID)
+	return err
+}
+
+func recordReviewRequiredEvent(ctx context.Context, tx pgx.Tx, projectID, artifactID, op, authorID string) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO events (project_id, kind, subject_id, payload)
+		VALUES ($1, 'review.required', $2, jsonb_build_object(
+			'op',        $3::text,
+			'author_id', $4::text
+		))
+	`, projectID, artifactID, op, authorID)
 	return err
 }
 
@@ -1565,6 +1763,24 @@ func preflight(ctx context.Context, deps Deps, projectSlug string, in *artifactP
 				push(fmt.Sprintf("artifact_meta.verification_state %q is not one of verified|partially_verified|unverified", v), "META_VERIFICATION_INVALID")
 			}
 		}
+		for _, area := range m.AppliesToAreas {
+			if !validRuleAreaScope(area) {
+				push(fmt.Sprintf("artifact_meta.applies_to_areas contains invalid scope %q; use area_slug, *, or wildcard scope like ui/*", area), "META_APPLIES_AREA_INVALID")
+				break
+			}
+		}
+		for _, artifactType := range m.AppliesToTypes {
+			t := strings.TrimSpace(artifactType)
+			if _, ok := validArtifactTypes[t]; !ok {
+				push(fmt.Sprintf("artifact_meta.applies_to_types contains invalid type %q", artifactType), "META_APPLIES_TYPE_INVALID")
+				break
+			}
+		}
+		if v := strings.TrimSpace(m.RuleSeverity); v != "" {
+			if _, ok := validRuleSeverities[v]; !ok {
+				push(fmt.Sprintf("artifact_meta.rule_severity %q is not one of binding|guidance|reference", v), "META_RULE_SEVERITY_INVALID")
+			}
+		}
 	}
 
 	// Type-specific guardrails. The previous code hard-coded keywords
@@ -1575,6 +1791,9 @@ func preflight(ctx context.Context, deps Deps, projectSlug string, in *artifactP
 	// validator meta comment. A nil hint set (no template, no comment,
 	// DB unreachable) falls back to the hard-coded defaults below.
 	hints := getValidatorHints(ctx, deps, projectSlug, in.Type)
+	for _, slot := range missingRequiredH2Slots(in.BodyMarkdown, requiredH2SlotsFromHints(in.Type, hints)) {
+		push(fmt.Sprintf(i18n.T(lang, "preflight.h2_missing"), in.Type, slot.Label), "MISSING_H2:"+slot.Label)
+	}
 	switch in.Type {
 	case "Task":
 		needed := []string{"acceptance"}
@@ -1741,6 +1960,11 @@ func preflight(ctx context.Context, deps Deps, projectSlug string, in *artifactP
 		if p := strings.TrimSpace(tm.Priority); p != "" {
 			if _, ok := validTaskPriorities[p]; !ok {
 				push(fmt.Sprintf(i18n.T(lang, "preflight.task_priority_invalid"), tm.Priority), "TASK_PRIORITY_INVALID")
+			}
+		}
+		if a := strings.TrimSpace(tm.Assignee); a != "" {
+			if _, ok := validateAssignee(a); !ok {
+				push(i18n.T(lang, "preflight.task_assignee_invalid"), "ASSIGNEE_INVALID")
 			}
 		}
 		if d := strings.TrimSpace(tm.DueAt); d != "" {
@@ -1982,24 +2206,159 @@ func areaUnknownChecklist(ctx context.Context, deps Deps, scope *auth.ProjectSco
 // should call next to unblock itself. Returning nil means "no suggestion;
 // agent should re-read the checklist" — schema-level failures mostly fall
 // into that bucket because the fix is "fill in the missing field".
-func defaultNextTools(code string) []string {
+func defaultNextTools(code string) []NextToolHint {
+	if isMissingH2Code(code) {
+		return toolHints("pindoc.artifact.read", "pindoc.artifact.propose")
+	}
 	switch code {
 	case "NO_SRCH", "RECEIPT_UNKNOWN", "RECEIPT_EXPIRED", "RECEIPT_WRONG_PROJECT", "RECEIPT_SUPERSEDED":
-		return []string{"pindoc.artifact.search", "pindoc.context.for_task"}
-	case "CONFLICT_EXACT_TITLE", "POSSIBLE_DUP":
-		return []string{"pindoc.artifact.read", "pindoc.artifact.propose"}
+		return toolHints("pindoc.artifact.search", "pindoc.context.for_task")
+	case "CONFLICT_EXACT_TITLE", "POSSIBLE_DUP", "TASK_SUPERSEDE_REQUIRED", "TASK_ACTIVE_CONTEXT_REQUIRED":
+		return toolHints("pindoc.artifact.read", "pindoc.artifact.propose")
 	case "VER_CONFLICT", "FIELD_VALUE_RESERVED":
-		return []string{"pindoc.artifact.revisions", "pindoc.artifact.diff"}
+		return toolHints("pindoc.artifact.revisions", "pindoc.artifact.diff")
 	case "UPDATE_TARGET_NOT_FOUND", "SUPERSEDE_TARGET_NOT_FOUND", "REL_TARGET_NOT_FOUND", "SCOPE_DEFER_TARGET_NOT_FOUND":
-		return []string{"pindoc.artifact.search", "pindoc.area.list"}
+		return toolHints("pindoc.artifact.search", "pindoc.area.list")
 	case "AREA_UNKNOWN", "AREA_NOT_FOUND", "AREA_EMPTY", "DECISION_AREA_DEPRECATED":
-		return []string{"pindoc.area.list"}
+		return toolHints("pindoc.area.list")
 	case "TASK_NO_ACCEPTANCE", "DEC_NO_SECTIONS", "DBG_NO_REPRO", "DBG_NO_RESOLUTION":
-		return []string{"pindoc.harness.install"}
+		return toolHints("pindoc.harness.install")
 	case "UPDATE_SUPERSEDE_EXCLUSIVE":
-		return []string{"pindoc.artifact.read"}
+		return toolHints("pindoc.artifact.read")
 	default:
 		return nil
+	}
+}
+
+func toolHints(names ...string) []NextToolHint {
+	out := make([]NextToolHint, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		out = append(out, NextToolHint{Tool: name})
+	}
+	return out
+}
+
+func nextToolsForNotReady(code, artifactType string, failed []string) []NextToolHint {
+	tools := defaultNextTools(code)
+	if !needsTemplateSelfHealHint(failed) {
+		return tools
+	}
+	slug := templateSlugForType(artifactType)
+	if slug == "" {
+		return tools
+	}
+	read := NextToolHint{
+		Tool: "pindoc.artifact.read",
+		Args: map[string]any{
+			"id_or_slug": slug,
+		},
+		Reason: "Read the matching template before retrying artifact.propose.",
+	}
+	return prependToolHint(read, tools)
+}
+
+func prependToolHint(first NextToolHint, rest []NextToolHint) []NextToolHint {
+	out := make([]NextToolHint, 0, len(rest)+1)
+	out = append(out, first)
+	for _, hint := range rest {
+		if hint.Tool == first.Tool {
+			if sameIDOrSlug(hint.Args, first.Args) || len(hint.Args) == 0 {
+				continue
+			}
+		}
+		out = append(out, hint)
+	}
+	return out
+}
+
+func sameIDOrSlug(a, b map[string]any) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	return fmt.Sprint(a["id_or_slug"]) == fmt.Sprint(b["id_or_slug"])
+}
+
+func suggestedActionsForNotReady(lang, artifactType string, failed []string, base []string) []string {
+	out := append([]string{}, base...)
+	if !needsTemplateSelfHealHint(failed) {
+		return out
+	}
+	if slug := templateSlugForType(artifactType); slug != "" {
+		out = append(out, fmt.Sprintf(i18n.T(lang, "suggested.read_template_self_heal"), slug))
+	}
+	return out
+}
+
+func expectedForNotReady(ctx context.Context, deps Deps, projectSlug, artifactType string, failed []string) *ExpectedShape {
+	if !needsTemplateSelfHealHint(failed) {
+		return nil
+	}
+	slots := requiredH2SlotsFor(ctx, deps, projectSlug, artifactType)
+	if len(slots) == 0 {
+		return nil
+	}
+	out := &ExpectedShape{
+		ArtifactType: artifactType,
+		TemplateSlug: templateSlugForType(artifactType),
+		RequiredH2:   make([]ExpectedH2Slot, 0, len(slots)),
+	}
+	for _, slot := range slots {
+		out.RequiredH2 = append(out.RequiredH2, ExpectedH2Slot{
+			Label:   slot.Label,
+			Aliases: aliasesWithoutLabel(slot.Label, slot.Aliases),
+		})
+	}
+	return out
+}
+
+func aliasesWithoutLabel(label string, aliases []string) []string {
+	var out []string
+	seen := map[string]struct{}{strings.ToLower(strings.TrimSpace(label)): {}}
+	for _, alias := range aliases {
+		key := strings.ToLower(strings.TrimSpace(alias))
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, alias)
+	}
+	return out
+}
+
+func needsTemplateSelfHealHint(failed []string) bool {
+	for _, code := range failed {
+		if isMissingH2Code(code) {
+			return true
+		}
+		switch code {
+		case "TASK_NO_ACCEPTANCE", "DEC_NO_SECTIONS", "DBG_NO_REPRO", "DBG_NO_RESOLUTION":
+			return true
+		}
+	}
+	return false
+}
+
+func isMissingH2Code(code string) bool {
+	return strings.HasPrefix(code, "MISSING_H2:")
+}
+
+func templateSlugForType(artifactType string) string {
+	t := strings.ToLower(strings.TrimSpace(artifactType))
+	if t == "" {
+		return ""
+	}
+	switch artifactType {
+	case "Decision", "Task", "Analysis", "Debug":
+		return "_template_" + t
+	default:
+		return ""
 	}
 }
 
@@ -2037,7 +2396,7 @@ func patchFieldsFor(code string) []string {
 		return []string{"body_markdown", "body_patch", "shape"}
 	case "META_PATCH_EMPTY":
 		return []string{"tags", "completeness", "task_meta", "artifact_meta"}
-	case "TASK_STATUS_VIA_TRANSITION_TOOL":
+	case "TASK_STATUS_VIA_TRANSITION_TOOL", "VER_VIA_VERIFY_TOOL_ONLY":
 		return []string{"task_meta.status"}
 	case "ACCEPT_TRANSITION_REQUIRED",
 		"ACCEPT_TRANSITION_INDEX_REQUIRED",
@@ -2056,6 +2415,12 @@ func patchFieldsFor(code string) []string {
 		return []string{"commit_msg"}
 	case "POSSIBLE_DUP":
 		return []string{"update_of", "title"}
+	case "TASK_SUPERSEDE_REQUIRED":
+		return []string{"supersede_of", "unrelated_reason"}
+	case "UNRELATED_REASON_TOO_SHORT":
+		return []string{"unrelated_reason"}
+	case "TASK_ACTIVE_CONTEXT_REQUIRED":
+		return []string{"basis.search_receipt"}
 	case "CONFLICT_EXACT_TITLE":
 		return []string{"title", "update_of"}
 	case "REL_TARGET_NOT_FOUND":
@@ -2080,8 +2445,22 @@ func patchFieldsFor(code string) []string {
 		return []string{"type"}
 	case "PIN_PATH_EMPTY", "PIN_LINES_INVALID", "PIN_KIND_INVALID", "PIN_URL_INVALID":
 		return []string{"pins"}
-	case "TASK_META_WRONG_TYPE", "TASK_STATUS_INVALID", "TASK_PRIORITY_INVALID", "TASK_DUE_AT_INVALID":
+	case "TASK_META_WRONG_TYPE":
 		return []string{"task_meta"}
+	case "META_APPLIES_AREA_INVALID":
+		return []string{"artifact_meta.applies_to_areas"}
+	case "META_APPLIES_TYPE_INVALID":
+		return []string{"artifact_meta.applies_to_types"}
+	case "META_RULE_SEVERITY_INVALID":
+		return []string{"artifact_meta.rule_severity"}
+	case "TASK_STATUS_INVALID":
+		return []string{"task_meta.status"}
+	case "TASK_PRIORITY_INVALID":
+		return []string{"task_meta.priority"}
+	case "ASSIGNEE_INVALID":
+		return []string{"task_meta.assignee"}
+	case "TASK_DUE_AT_INVALID":
+		return []string{"task_meta.due_at"}
 	case "REL_TARGET_EMPTY", "REL_INVALID":
 		return []string{"relates_to"}
 	default:
@@ -2245,6 +2624,49 @@ func hasExplicitMetadataUpdate(in artifactProposeInput) bool {
 		strings.TrimSpace(in.Completeness) != ""
 }
 
+func applyCreateCommitMsgFallback(in *artifactProposeInput) []string {
+	if strings.TrimSpace(in.CommitMsg) != "" {
+		in.CommitMsg = strings.TrimSpace(in.CommitMsg)
+		return nil
+	}
+	in.CommitMsg = fallbackCreateCommitMsg(in.Title)
+	return []string{"MISSING_COMMIT_MSG_ON_CREATE"}
+}
+
+func fallbackCreateCommitMsg(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "(untitled)"
+	}
+	return fmt.Sprintf("[fallback_missing_commit_msg] create artifact: %s", title)
+}
+
+func taskStatusFromJSON(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return ""
+	}
+	if s, ok := m["status"].(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return ""
+}
+
+func shouldAutoClaimDone(artifactType string, taskMetaRaw []byte, body string) bool {
+	if artifactType != "Task" {
+		return false
+	}
+	status := taskStatusFromJSON(taskMetaRaw)
+	if status != "" && status != "open" {
+		return false
+	}
+	resolved, total := countAcceptanceResolution(body)
+	return total > 0 && resolved == total
+}
+
 // ResolvedArtifactMeta is the server-resolved epistemic metadata that
 // actually lands on the artifact row. Mirrors ArtifactMetaInput plus a
 // warnings slice describing heuristic decisions so agents can see why a
@@ -2256,6 +2678,10 @@ type ResolvedArtifactMeta struct {
 	Audience          string   `json:"audience,omitempty"`
 	NextContextPolicy string   `json:"next_context_policy,omitempty"`
 	VerificationState string   `json:"verification_state,omitempty"`
+	AppliesToAreas    []string `json:"applies_to_areas,omitempty"`
+	AppliesToTypes    []string `json:"applies_to_types,omitempty"`
+	RuleSeverity      string   `json:"rule_severity,omitempty"`
+	RuleExcerpt       string   `json:"rule_excerpt,omitempty"`
 	Warnings          []string `json:"-"`
 }
 
@@ -2294,6 +2720,10 @@ func resolveArtifactMeta(in *ArtifactMetaInput, pins []ArtifactPinInput, body st
 		out.Audience = strings.TrimSpace(in.Audience)
 		out.NextContextPolicy = strings.TrimSpace(in.NextContextPolicy)
 		out.VerificationState = strings.TrimSpace(in.VerificationState)
+		out.AppliesToAreas = normalizeStringSlice(in.AppliesToAreas)
+		out.AppliesToTypes = normalizeStringSlice(in.AppliesToTypes)
+		out.RuleSeverity = strings.TrimSpace(in.RuleSeverity)
+		out.RuleExcerpt = strings.TrimSpace(in.RuleExcerpt)
 	}
 
 	hasCodePin := false
@@ -2375,11 +2805,46 @@ func artifactMetaToJSON(r ResolvedArtifactMeta) string {
 	if r.VerificationState != "" {
 		payload["verification_state"] = r.VerificationState
 	}
+	if len(r.AppliesToAreas) > 0 {
+		payload["applies_to_areas"] = r.AppliesToAreas
+	}
+	if len(r.AppliesToTypes) > 0 {
+		payload["applies_to_types"] = r.AppliesToTypes
+	}
+	if r.RuleSeverity != "" {
+		payload["rule_severity"] = r.RuleSeverity
+	}
+	if r.RuleExcerpt != "" {
+		payload["rule_excerpt"] = r.RuleExcerpt
+	}
 	buf, err := json.Marshal(payload)
 	if err != nil {
 		return "{}"
 	}
 	return string(buf)
+}
+
+func normalizeStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		v := strings.TrimSpace(value)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // classifyConversationDerived returns true when the agent has explicitly
@@ -2493,6 +2958,7 @@ const semanticAdvisoryThreshold = 0.30
 // POSSIBLE_DUP response. Two is usually enough — the top hit is the main
 // suspect, the runner-up is a tiebreak. More would bloat the response.
 const semanticConflictLimit = 2
+const unrelatedReasonMinRunes = 20
 
 type semanticCandidate struct {
 	ArtifactID string
@@ -2502,14 +2968,148 @@ type semanticCandidate struct {
 	Distance   float64
 }
 
+func receiptSnapshotsContainAny(snapshots []receipts.ArtifactRef, candidates []semanticCandidate) bool {
+	if len(snapshots) == 0 || len(candidates) == 0 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(snapshots))
+	for _, s := range snapshots {
+		seen[s.ArtifactID] = struct{}{}
+	}
+	for _, c := range candidates {
+		if _, ok := seen[c.ArtifactID]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func receiptExemptionLimit(deps Deps) int {
+	if deps.ReceiptExemptionLimit < 0 {
+		return 0
+	}
+	return deps.ReceiptExemptionLimit
+}
+
+func maybeExemptMissingReceipt(ctx context.Context, deps Deps, projectID, areaID, authorID string) (*ReceiptExemptionSignal, bool, error) {
+	limit := receiptExemptionLimit(deps)
+	if limit <= 0 {
+		return nil, false, nil
+	}
+	var total, otherAuthors int
+	if err := deps.DB.QueryRow(ctx, `
+		SELECT
+			count(*)::int,
+			count(*) FILTER (WHERE author_id IS DISTINCT FROM $3)::int
+		FROM artifacts
+		WHERE project_id = $1::uuid
+		  AND area_id = $2::uuid
+		  AND status <> 'archived'
+		  AND NOT starts_with(slug, '_template_')
+	`, projectID, areaID, authorID).Scan(&total, &otherAuthors); err != nil {
+		return nil, false, err
+	}
+	signal, ok := receiptExemptionFromStats(total, otherAuthors, limit)
+	return signal, ok, nil
+}
+
+func receiptExemptionFromStats(totalArtifacts, otherAuthorArtifacts, limit int) (*ReceiptExemptionSignal, bool) {
+	if limit <= 0 || totalArtifacts < 0 || otherAuthorArtifacts < 0 {
+		return nil, false
+	}
+	if otherAuthorArtifacts > 0 || totalArtifacts >= limit {
+		return nil, false
+	}
+	remaining := limit - totalArtifacts - 1
+	if remaining < 0 {
+		remaining = 0
+	}
+	return &ReceiptExemptionSignal{
+		Reason:     "empty_area_first_proposes",
+		NRemaining: remaining,
+		Limit:      limit,
+	}, true
+}
+
+func activeTasksInArea(ctx context.Context, deps Deps, projectID, areaID, excludeArtifactID string) ([]semanticCandidate, error) {
+	rows, err := deps.DB.Query(ctx, `
+		SELECT a.id::text, a.slug, a.type, a.title, 0::float8 AS distance
+		FROM artifacts a
+		WHERE a.project_id = $1::uuid
+		  AND a.area_id = $2::uuid
+		  AND ($3::text = '' OR a.id <> $3::uuid)
+		  AND a.type = 'Task'
+		  AND a.status <> 'archived'
+		  AND a.status <> 'superseded'
+		  AND COALESCE(NULLIF(a.task_meta->>'status', ''), 'open') IN ('open', 'claimed_done')
+		ORDER BY a.updated_at DESC
+		LIMIT 20
+	`, projectID, areaID, excludeArtifactID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []semanticCandidate
+	for rows.Next() {
+		var c semanticCandidate
+		if err := rows.Scan(&c.ArtifactID, &c.Slug, &c.Type, &c.Title, &c.Distance); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func filterTaskSemanticCandidates(ctx context.Context, deps Deps, projectID, areaID string, candidates []semanticCandidate) ([]semanticCandidate, error) {
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	ids := make([]string, 0, len(candidates))
+	byID := make(map[string]semanticCandidate, len(candidates))
+	for _, c := range candidates {
+		ids = append(ids, c.ArtifactID)
+		byID[c.ArtifactID] = c
+	}
+	rows, err := deps.DB.Query(ctx, `
+		SELECT a.id::text
+		FROM artifacts a
+		WHERE a.project_id = $1::uuid
+		  AND a.area_id = $2::uuid
+		  AND a.id = ANY($3::uuid[])
+		  AND a.type = 'Task'
+		  AND a.status <> 'archived'
+		  AND a.status <> 'superseded'
+		  AND COALESCE(NULLIF(a.task_meta->>'status', ''), 'open') IN ('open', 'claimed_done')
+	`, projectID, areaID, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []semanticCandidate
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		if c, ok := byID[id]; ok {
+			out = append(out, c)
+		}
+	}
+	return out, rows.Err()
+}
+
 // createWarnings runs a best-effort advisory vector check after an accepted
 // create and returns any soft warnings. Non-blocking — failure here never
-// rejects the write, since the hard gate (findSemanticConflicts) already
-// ran before insert. We only report when a close-but-not-dupe neighbour
-// exists, to nudge "you might want to supersede this next time".
+// rejects the write. We report close neighbours, including non-Task
+// matches that would have been hard conflicts before the Task-only
+// supersede gate, to nudge "you might want to supersede this next time".
 func createWarnings(ctx context.Context, deps Deps, projectID, title, body string) []string {
 	if deps.Embedder == nil || deps.Embedder.Info().Name == "stub" {
 		return nil
+	}
+	conflicts, err := findSemanticConflicts(ctx, deps, projectID, title, body)
+	if err == nil && len(conflicts) > 0 {
+		return []string{"RECOMMEND_READ_BEFORE_CREATE"}
 	}
 	cands, err := findSemanticAdvisories(ctx, deps, projectID, title, body)
 	if err != nil || len(cands) == 0 {
@@ -2809,12 +3409,52 @@ func hasEvidenceDelta(prevMeta ResolvedArtifactMeta, in *artifactProposeInput) b
 	return false
 }
 
+type requiredH2Slot struct {
+	Label   string
+	Aliases []string
+}
+
 // requiredH2Warnings flags missing mandatory H2 sections per Type. Fuzzy
-// match: a slot is satisfied if any of its synonyms appear as an H2
-// (case-insensitive). en/ko synonyms tolerate the current bilingual
+// match: a slot is satisfied if any of its aliases appear as an H2
+// (case-insensitive). en/ko aliases tolerate the current bilingual
 // template corpus; Phase 18 template locale-split will normalise them.
 func requiredH2Warnings(body, artifactType string) []string {
-	slots := requiredH2ByType(artifactType)
+	return requiredH2WarningsForSlots(body, defaultRequiredH2Slots(artifactType))
+}
+
+func requiredH2WarningsFor(ctx context.Context, deps Deps, projectSlug, body, artifactType string) []string {
+	return requiredH2WarningsForSlots(body, requiredH2SlotsFor(ctx, deps, projectSlug, artifactType))
+}
+
+func requiredH2WarningsForSlots(body string, slots []requiredH2Slot) []string {
+	missing := missingRequiredH2Slots(body, slots)
+	out := make([]string, 0, len(missing))
+	for _, slot := range missing {
+		out = append(out, "MISSING_H2:"+slot.Label)
+	}
+	return out
+}
+
+func requiredH2SlotsFor(ctx context.Context, deps Deps, projectSlug, artifactType string) []requiredH2Slot {
+	return requiredH2SlotsFromHints(artifactType, getValidatorHints(ctx, deps, projectSlug, artifactType))
+}
+
+func requiredH2SlotsFromHints(artifactType string, hints *validatorHints) []requiredH2Slot {
+	if hints != nil && len(hints.RequiredH2) > 0 {
+		out := make([]requiredH2Slot, 0, len(hints.RequiredH2))
+		for _, label := range hints.RequiredH2 {
+			label = strings.TrimSpace(label)
+			if label == "" {
+				continue
+			}
+			out = append(out, requiredH2SlotForLabel(artifactType, label))
+		}
+		return out
+	}
+	return defaultRequiredH2Slots(artifactType)
+}
+
+func missingRequiredH2Slots(body string, slots []requiredH2Slot) []requiredH2Slot {
 	if len(slots) == 0 {
 		return nil
 	}
@@ -2824,69 +3464,124 @@ func requiredH2Warnings(body, artifactType string) []string {
 		if !ok {
 			continue
 		}
-		heading := strings.ToLower(strings.TrimSpace(strings.TrimRight(after, "#")))
-		seen[heading] = true
-		// Slash-mixed bilingual headings like "## 목적 / Purpose" used to
-		// miss synonym slots because only the full joined string landed
-		// in `seen`. Index each slash- / middle-dot- / em-dash-separated
-		// token so a Purpose slot matches either side of a mixed heading
-		// and a "## TODO — Acceptance criteria" subtitle still satisfies
-		// an Acceptance criteria slot (Task preflight-template-drift-통합
-		// §requiredH2Warnings).
-		for _, sep := range []string{"/", "·", "—", "–", "-"} {
-			if strings.Contains(heading, sep) {
-				for _, part := range strings.Split(heading, sep) {
-					trimmed := strings.TrimSpace(part)
-					if trimmed != "" {
-						seen[trimmed] = true
-					}
-				}
-			}
+		for _, key := range h2HeadingKeys(after) {
+			seen[key] = true
 		}
 	}
-	var out []string
-	for _, syn := range slots {
+	var out []requiredH2Slot
+	for _, slot := range slots {
 		matched := false
-		for _, alt := range syn {
-			if seen[strings.ToLower(alt)] {
+		for _, alt := range slot.Aliases {
+			if seen[normalizeH2Label(alt)] {
 				matched = true
 				break
 			}
 		}
 		if !matched {
-			out = append(out, "MISSING_H2:"+syn[0])
+			out = append(out, slot)
 		}
 	}
 	return out
 }
 
-// requiredH2ByType returns canonical H2 slots per Type plus accepted
-// synonyms (first entry = canonical English used for the warning label).
-// Debug keeps its existing keyword-based pre-flight check (debug_no_repro /
-// debug_no_resolution) — unification deferred to Phase 18.
-func requiredH2ByType(t string) [][]string {
+func h2HeadingKeys(heading string) []string {
+	heading = strings.TrimSpace(strings.TrimRight(heading, "#"))
+	parts := []string{heading}
+	for _, sep := range []string{"/", "·", "—", "–", "-"} {
+		if strings.Contains(heading, sep) {
+			parts = append(parts, strings.Split(heading, sep)...)
+		}
+	}
+	if before, rest, ok := strings.Cut(heading, "("); ok {
+		parts = append(parts, before)
+		if inside, _, ok := strings.Cut(rest, ")"); ok {
+			parts = append(parts, inside)
+		}
+	}
+	out := make([]string, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, part := range parts {
+		key := normalizeH2Label(part)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	return out
+}
+
+func normalizeH2Label(s string) string {
+	return strings.ToLower(strings.TrimSpace(strings.TrimRight(s, "#")))
+}
+
+func requiredH2SlotForLabel(artifactType, label string) requiredH2Slot {
+	slot := requiredH2Slot{Label: label, Aliases: []string{label}}
+	for _, candidate := range defaultRequiredH2Slots(artifactType) {
+		for _, alias := range candidate.Aliases {
+			if normalizeH2Label(alias) == normalizeH2Label(label) {
+				slot.Aliases = uniqueStrings(append(slot.Aliases, candidate.Aliases...))
+				return slot
+			}
+		}
+	}
+	return slot
+}
+
+// defaultRequiredH2Slots returns canonical H2 slots per Type plus accepted
+// aliases. The first label is what legacy warning codes surface when no
+// project template supplies a more specific label.
+func defaultRequiredH2Slots(t string) []requiredH2Slot {
 	switch t {
 	case "Decision":
-		return [][]string{
-			{"Context", "맥락", "컨텍스트"},
-			{"Decision", "결정"},
-			{"Rationale", "근거"},
-			{"Alternatives considered", "Alternatives", "대안"},
-			{"Consequences", "영향", "결과"},
+		return []requiredH2Slot{
+			{Label: "Context", Aliases: []string{"Context", "맥락", "컨텍스트"}},
+			{Label: "Decision", Aliases: []string{"Decision", "결정"}},
+			{Label: "Rationale", Aliases: []string{"Rationale", "근거"}},
+			{Label: "Alternatives considered", Aliases: []string{"Alternatives considered", "Alternatives", "대안"}},
+			{Label: "Consequences", Aliases: []string{"Consequences", "영향", "결과"}},
 		}
 	case "Analysis":
-		return [][]string{
-			{"TL;DR", "요약"},
+		return []requiredH2Slot{
+			{Label: "TL;DR", Aliases: []string{"TL;DR", "TL", "요약"}},
 		}
 	case "Task":
-		return [][]string{
-			{"Purpose", "목적"},
-			{"Scope", "범위"},
-			{"Acceptance criteria", "Acceptance", "완료 기준", "완료기준"},
+		return []requiredH2Slot{
+			{Label: "Purpose", Aliases: []string{"Purpose", "목적"}},
+			{Label: "Scope", Aliases: []string{"Scope", "범위"}},
+			{Label: "TODO", Aliases: []string{"TODO", "Acceptance criteria", "Acceptance", "완료 기준", "완료기준"}},
+		}
+	case "Debug":
+		return []requiredH2Slot{
+			{Label: "Symptom", Aliases: []string{"Symptom", "Symptoms", "증상"}},
+			{Label: "Reproduction", Aliases: []string{"Reproduction", "Repro", "재현"}},
+			{Label: "Root cause", Aliases: []string{"Root cause", "Cause", "원인"}},
+			{Label: "Resolution", Aliases: []string{"Resolution", "해결"}},
 		}
 	default:
 		return nil
 	}
+}
+
+func uniqueStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 // findSemanticAdvisories is findSemanticConflicts' soft cousin: returns
@@ -2918,7 +3613,9 @@ func findSemanticAdvisories(ctx context.Context, deps Deps, projectID, title, bo
 			c.embedding <=> $1::vector AS distance
 		FROM artifact_chunks c
 		JOIN artifacts a ON a.id = c.artifact_id
-		WHERE a.project_id = $2 AND a.status <> 'archived'
+		WHERE a.project_id = $2
+		  AND a.status <> 'archived'
+		  AND a.status <> 'superseded'
 		ORDER BY c.artifact_id, distance
 	`, qVec, projectID)
 	if err != nil {
@@ -2979,7 +3676,9 @@ func findSemanticConflicts(ctx context.Context, deps Deps, projectID, title, bod
 			c.embedding <=> $1::vector AS distance
 		FROM artifact_chunks c
 		JOIN artifacts a ON a.id = c.artifact_id
-		WHERE a.project_id = $2 AND a.status <> 'archived'
+		WHERE a.project_id = $2
+		  AND a.status <> 'archived'
+		  AND a.status <> 'superseded'
 		ORDER BY c.artifact_id, distance
 	`, qVec, projectID)
 	if err != nil {

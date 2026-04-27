@@ -12,12 +12,12 @@ import (
 // mode without parsing the resolver type at runtime.
 const AuthModeTrustedLocal = "trusted_local"
 
-// RoleOwner is the V1 default role assigned to every trusted_local
-// caller by ResolveProject. Single-user self-host deployments don't
-// yet have a meaningful distinction between owner / editor / viewer —
-// all writes come from "the operator". V1.5 ACL Task introduces
-// actual role tiers via the project_members table.
-const RoleOwner = "owner"
+// Role values mirror project_members.role.
+const (
+	RoleOwner  = "owner"
+	RoleEditor = "editor"
+	RoleViewer = "viewer"
+)
 
 // TrustedLocalResolver produces a Principal from process-level state
 // (env-derived user). Always matches every request — it never returns

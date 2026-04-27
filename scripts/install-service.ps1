@@ -1,4 +1,8 @@
-# Install the pindoc-server Windows service via NSSM.
+# DEPRECATED: install the pindoc-server Windows service via NSSM.
+#
+# New local/dev installs should use scripts\install-user-mode.ps1 instead.
+# NSSM is retained only for legacy environments that intentionally want a
+# machine-level Windows service and are comfortable with admin-only restarts.
 #
 # Run from an elevated PowerShell:
 #   powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1
@@ -135,7 +139,7 @@ function Install-Service {
     & $NssmExe install $ServiceName $BinaryPath "-http" $ListenAddr | Out-Null
     & $NssmExe set $ServiceName AppDirectory $RepoRoot | Out-Null
     & $NssmExe set $ServiceName DisplayName "Pindoc MCP+Reader Daemon" | Out-Null
-    & $NssmExe set $ServiceName Description "pindoc-server -http $ListenAddr — serves /mcp/p/{project} (MCP streamable-HTTP), /api/... (Reader read-only API), /health (liveness)." | Out-Null
+    & $NssmExe set $ServiceName Description "pindoc-server -http $ListenAddr — serves /mcp (MCP streamable-HTTP), /api/... (Reader read-only API), /health (liveness)." | Out-Null
     & $NssmExe set $ServiceName Start SERVICE_AUTO_START | Out-Null
 
     # Env. NSSM accepts repeated K=V pairs on a single set call.

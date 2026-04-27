@@ -45,7 +45,7 @@ func TestDefaultHarnessSessionBootstrapContract(t *testing.T) {
 // values. If a future edit drops one without the other, this test
 // catches the divergence.
 func TestRenderPindocMDSessionBootstrapSection(t *testing.T) {
-	body := renderPindocMD("Pindoc", "pindoc", "en", "test")
+	body := renderPindocMD("Pindoc", "00000000-0000-0000-0000-000000000000", "pindoc", "en", "en", "test", true)
 
 	for _, want := range []string{
 		"## Session bootstrap (workspace.detect)",

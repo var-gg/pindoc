@@ -7,7 +7,9 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"strings"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/mcp/tools"
+	"github.com/var-gg/pindoc/internal/pindoc/projects"
 	"github.com/var-gg/pindoc/internal/pindoc/receipts"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
 	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
@@ -81,7 +84,7 @@ type Server struct {
 	telemetry *telemetry.Store
 }
 
-func NewServer(opts Options) *Server {
+func NewServer(opts Options) (*Server, error) {
 	impl := &sdk.Implementation{
 		Name:    opts.Name,
 		Version: opts.Version,
@@ -102,29 +105,39 @@ func NewServer(opts Options) *Server {
 	// use it for the env-anchored user upsert, then layer the chain on
 	// top once we know UserID.
 	deps := tools.Deps{
-		DB:                 opts.DB,
-		Logger:             opts.Logger,
-		Version:            opts.Version,
-		UserLanguage:       opts.Config.UserLanguage,
-		Embedder:           opts.Embedder,
-		Receipts:           receipts.New(0), // DefaultTTL applies
-		Settings:           opts.Settings,
-		RepoRoot:           opts.Config.RepoRoot,
-		Telemetry:          opts.Telemetry,
-		DefaultProjectSlug: opts.Config.ProjectSlug,
-		Transport:          transport,
+		DB:                    opts.DB,
+		Logger:                opts.Logger,
+		Version:               opts.Version,
+		UserLanguage:          opts.Config.UserLanguage,
+		ReceiptExemptionLimit: opts.Config.ReceiptExemptionLimit,
+		Embedder:              opts.Embedder,
+		Receipts:              receipts.New(0), // DefaultTTL applies
+		Settings:              opts.Settings,
+		RepoRoot:              opts.Config.RepoRoot,
+		Telemetry:             opts.Telemetry,
+		DefaultProjectSlug:    opts.Config.ProjectSlug,
+		Transport:             transport,
+		AuthMode:              opts.Config.AuthMode,
 	}
 	userID := upsertStartupUserID(context.Background(), opts.Logger, deps, opts.Config)
+	if err := projects.EnsureDefaultProjectOwnerMembership(context.Background(), opts.DB, opts.Config.ProjectSlug, userID); err != nil {
+		opts.Logger.Warn("default project owner membership bootstrap failed",
+			"project_slug", opts.Config.ProjectSlug,
+			"user_id", userID,
+			"error", err,
+		)
+	} else if strings.TrimSpace(userID) != "" {
+		opts.Logger.Info("default project owner membership bootstrap complete",
+			"project_slug", opts.Config.ProjectSlug,
+			"user_id", userID,
+		)
+	}
 
-	// V1 chain holds a single TrustedLocalResolver built from the
-	// env-derived account user. V1.5 adds BearerTokenResolver /
-	// OAuthSessionResolver in front of trusted_local — the prepended
-	// resolvers either match (and we short-circuit) or pass through to
-	// trusted_local for OSS self-host fallback. Handlers downstream are
-	// mode-blind.
-	deps.AuthChain = auth.NewChain(
-		auth.NewTrustedLocalResolver(userID, opts.AgentID),
-	)
+	authChain, err := authChainForMode(opts.Config.AuthMode, userID, opts.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	deps.AuthChain = authChain
 
 	// Phase 1 handshake — same registration path as every other tool so
 	// the auth chain runs and telemetry records the call.
@@ -133,9 +146,12 @@ func NewServer(opts Options) *Server {
 
 	tools.RegisterProjectCurrent(s, deps)
 	tools.RegisterProjectCreate(s, deps)
+	tools.RegisterProjectExport(s, deps)
+	tools.RegisterWorkspaceDetect(s, deps)
 	tools.RegisterAreaList(s, deps)
 	tools.RegisterAreaCreate(s, deps)
 	tools.RegisterArtifactRead(s, deps)
+	tools.RegisterArtifactTranslate(s, deps)
 
 	// Phase 2.3 write-side + Phase 3 retrieval.
 	tools.RegisterArtifactPropose(s, deps)
@@ -158,6 +174,7 @@ func NewServer(opts Options) *Server {
 	// task.queue is the Reader-parity read model agents should call before
 	// claiming the pending Task queue is empty.
 	tools.RegisterTaskQueue(s, deps)
+	tools.RegisterTaskAcceptanceTransition(s, deps)
 	tools.RegisterTaskAssign(s, deps)
 	tools.RegisterTaskBulkAssign(s, deps)
 	tools.RegisterTaskClaimDone(s, deps)
@@ -173,6 +190,22 @@ func NewServer(opts Options) *Server {
 		sdk:       s,
 		logger:    opts.Logger,
 		telemetry: opts.Telemetry,
+	}, nil
+}
+
+func authChainForMode(mode config.AuthMode, userID, agentID string) (*auth.Chain, error) {
+	if mode == "" {
+		mode = config.AuthModeTrustedLocal
+	}
+	switch mode {
+	case config.AuthModeTrustedLocal:
+		return auth.NewChain(auth.NewTrustedLocalResolver(userID, agentID)), nil
+	case config.AuthModeOAuthGitHub:
+		return auth.NewChain(auth.NewBearerTokenResolver(agentID)), nil
+	case config.AuthModePublicReadonly, config.AuthModeSingleUser:
+		return nil, fmt.Errorf("PINDOC_AUTH_MODE=%s is not supported yet in V1; use trusted_local", mode)
+	default:
+		return nil, fmt.Errorf("invalid PINDOC_AUTH_MODE: '%s'. valid: %s", mode, config.ValidAuthModesString())
 	}
 }
 

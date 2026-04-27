@@ -25,6 +25,31 @@ func TestIssueVerifyRoundtrip(t *testing.T) {
 	}
 }
 
+func TestIssueOneUseConsumesAfterSuccessfulVerify(t *testing.T) {
+	s := New(time.Hour)
+	id := s.IssueOneUse("pindoc", "project.create bootstrap", nil)
+	if id == "" {
+		t.Fatalf("IssueOneUse returned empty id")
+	}
+	if res := s.Verify(id, "pindoc"); !res.Valid {
+		t.Fatalf("first Verify should succeed, got %+v", res)
+	}
+	if res := s.Verify(id, "pindoc"); !res.Unknown {
+		t.Fatalf("second Verify should be consumed/unknown, got %+v", res)
+	}
+}
+
+func TestIssueOneUseWrongProjectDoesNotConsume(t *testing.T) {
+	s := New(time.Hour)
+	id := s.IssueOneUse("proj-a", "project.create bootstrap", nil)
+	if res := s.Verify(id, "proj-b"); !res.WrongProject {
+		t.Fatalf("wrong-project Verify should report WrongProject, got %+v", res)
+	}
+	if res := s.Verify(id, "proj-a"); !res.Valid {
+		t.Fatalf("correct project should still consume after wrong-project attempt, got %+v", res)
+	}
+}
+
 // TestVerifyWrongProject proves project-scope isolation — a receipt
 // issued for project A cannot be used to write into project B.
 func TestVerifyWrongProject(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/i18n"
+	"github.com/var-gg/pindoc/internal/pindoc/policy"
 )
 
 // handleUpdateMetaPatch writes a meta-only revision: tags / completeness /
@@ -88,6 +89,7 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 
 	var (
 		artifactID, projectID, currentBody, currentTitle, currentType, currentSlug string
+		sensitiveOps                                                               string
 		currentTags                                                                []string
 		currentCompleteness                                                        string
 		lastRev                                                                    int
@@ -95,6 +97,7 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 	err := deps.DB.QueryRow(ctx, `
 		SELECT a.id::text, a.project_id::text, a.body_markdown, a.title, a.type, a.slug,
 		       a.tags, a.completeness,
+		       COALESCE(NULLIF(p.sensitive_ops, ''), 'auto'),
 		       COALESCE((SELECT max(revision_number) FROM artifact_revisions WHERE artifact_id = a.id), 0)
 		FROM artifacts a
 		JOIN projects p ON p.id = a.project_id
@@ -102,7 +105,7 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 		LIMIT 1
 	`, scope.ProjectSlug, ref).Scan(
 		&artifactID, &projectID, &currentBody, &currentTitle, &currentType, &currentSlug,
-		&currentTags, &currentCompleteness, &lastRev,
+		&currentTags, &currentCompleteness, &sensitiveOps, &lastRev,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, artifactProposeOutput{
@@ -171,6 +174,10 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 	if hasCompleteness {
 		effectiveCompleteness = in.Completeness
 	}
+	reviewState := policy.ReviewStateFor(sensitiveOps, policy.OpCompletenessWrite, policy.SensitiveContext{
+		FromCompleteness: currentCompleteness,
+		ToCompleteness:   effectiveCompleteness,
+	})
 
 	var taskMetaPatch any
 	if hasTaskMeta {
@@ -243,6 +250,10 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 		           ELSE COALESCE(task_meta, '{}'::jsonb) || $4::jsonb
 		       END,
 		       artifact_meta  = COALESCE($5::jsonb, artifact_meta),
+		       review_state   = CASE
+		           WHEN $8::text = 'pending_review' THEN 'pending_review'
+		           ELSE review_state
+		       END,
 		       author_id      = $6,
 		       author_version = $7,
 		       updated_at     = now()
@@ -250,6 +261,7 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 	`, artifactID, effectiveTags, effectiveCompleteness,
 		taskMetaPatch, artifactMetaPatch,
 		in.AuthorID, nullIfEmpty(in.AuthorVersion),
+		reviewState,
 	); err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("update artifact head meta: %w", err)
 	}
@@ -267,6 +279,11 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 		string(fieldsChangedJSON),
 	); err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("event: %w", err)
+	}
+	if reviewState == policy.ReviewStatePending {
+		if err := recordReviewRequiredEvent(ctx, tx, projectID, artifactID, string(policy.OpCompletenessWrite), in.AuthorID); err != nil {
+			return nil, artifactProposeOutput{}, fmt.Errorf("review required event: %w", err)
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -312,4 +329,3 @@ func metaFieldsChangedList(shapePayload map[string]any) []string {
 	}
 	return out
 }
-

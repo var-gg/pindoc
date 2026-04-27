@@ -1,13 +1,18 @@
-import { Link } from "react-router";
-import { ChevronLeft, ChevronRight, ListFilter } from "lucide-react";
-import type { Artifact, ArtifactRef } from "../api/client";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation } from "react-router";
+import { ChevronLeft, ChevronRight, Languages, ListFilter } from "lucide-react";
+import { api, type Artifact, type ArtifactRef } from "../api/client";
 import { useI18n } from "../i18n";
+import { estimateReadingTime } from "../utils/readingTime";
 import { ArtifactByline } from "./ArtifactByline";
 import { BadgePopoverChip } from "./BadgePopoverChip";
 import { PindocMarkdown } from "./Markdown";
 import { TrustCard } from "./TrustCard";
+import { Tooltip } from "./Tooltip";
 import { localizedAreaName } from "./areaLocale";
 import type { BadgeFilter } from "./badgeFilters";
+import { createReadTracker, type ReadTrackerFlushReason, type ReadTrackerSnapshot } from "./readTracker";
+import { EmptyState } from "./SurfacePrimitives";
 import { typeChipClass } from "./typeChip";
 
 type Props = {
@@ -15,7 +20,6 @@ type Props = {
   emptyMessage: string;
   scope?: DetailScope | null;
   projectSlug?: string;
-  projectLocale?: string;
   onApplyBadgeFilter?: (filter: BadgeFilter) => void;
   onApplyAreaFilter?: (areaSlug: string) => void;
 };
@@ -35,17 +39,47 @@ export function ReaderSurface({
   emptyMessage,
   scope,
   projectSlug,
-  projectLocale,
   onApplyBadgeFilter,
   onApplyAreaFilter,
 }: Props) {
   const { t } = useI18n();
+  const location = useLocation();
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [readSnapshot, setReadSnapshot] = useState<ReadTrackerSnapshot>(emptyReadSnapshot);
+  const activeTranslateLocale = new URLSearchParams(location.search).get("translate") ?? "";
+  const highlightedLocale = activeTranslateLocale || detail?.body_locale || "";
+  const readingEstimate = useMemo(
+    () => estimateReadingTime(detail?.body_markdown ?? "", highlightedLocale || detail?.body_locale),
+    [detail?.body_markdown, detail?.body_locale, highlightedLocale],
+  );
+  const completionPct = Math.min(100, Math.round(readSnapshot.scrollMaxPct * 100));
+  const readMinutes = formatReadMinutes(readSnapshot.activeSeconds);
+
+  useEffect(() => {
+    setReadSnapshot(emptyReadSnapshot());
+    const bodyElement = bodyRef.current;
+    if (!detail?.id || !projectSlug || !bodyElement) return;
+    const tracker = createReadTracker({
+      artifactId: detail.id,
+      locale: highlightedLocale || detail.body_locale,
+      bodyElement,
+      onUpdate: setReadSnapshot,
+      flush: async (payload, reason: ReadTrackerFlushReason) => {
+        await api.readEvent(projectSlug, payload, {
+          keepalive: reason === "hidden" || reason === "beforeunload",
+        }).catch(() => undefined);
+      },
+    });
+    return () => {
+      tracker.stop("route");
+    };
+  }, [detail?.id, detail?.body_locale, highlightedLocale, projectSlug]);
 
   if (!detail) {
     return (
       <div className="content">
-        <div className="surface-stub">
-          <p>{emptyMessage}</p>
+        <div className="surface-panel">
+          <EmptyState message={emptyMessage} />
         </div>
       </div>
     );
@@ -56,14 +90,24 @@ export function ReaderSurface({
     : "—";
   const areaLabel = localizedAreaName(t, detail.area_slug, detail.area_slug);
   const legendHref =
-    projectSlug && projectLocale
-      ? `/p/${projectSlug}/${projectLocale}/wiki/visual-language-reference`
+    projectSlug
+      ? `/p/${projectSlug}/wiki/visual-language-reference`
       : undefined;
-  const hasLiveSidecarData =
-    Boolean(detail.superseded_by) ||
-    (detail.relates_to?.length ?? 0) > 0 ||
-    (detail.related_by?.length ?? 0) > 0 ||
-    (detail.pins?.length ?? 0) > 0;
+  const translationEdges = [
+    ...(detail.relates_to ?? []),
+    ...(detail.related_by ?? []),
+  ].filter((edge) => edge.relation === "translation_of");
+  const translateLocales = ["en", "ko", "ja", "hi"];
+  const translateHref = (locale: string) => {
+    const params = new URLSearchParams(location.search);
+    if (locale === detail.body_locale) {
+      params.delete("translate");
+    } else {
+      params.set("translate", locale);
+    }
+    const query = params.toString();
+    return `${location.pathname}${query ? `?${query}` : ""}`;
+  };
 
   return (
     <main className="content">
@@ -90,35 +134,92 @@ export function ReaderSurface({
         />
 
         <div className="art-meta">
-          <span className={`chip chip--${detail.status}`}>
-            <span className={`p-dot p-dot--${detail.status}`} />
-            {detail.status}
-          </span>
-          <span className={typeChipClass(detail.type)}>{detail.type}</span>
+          {detail.type === "Task" && (
+            <>
+              <span className={`chip chip--${detail.status}`}>
+                <span className={`p-dot p-dot--${detail.status}`} />
+                {detail.status}
+              </span>
+              <span className={typeChipClass(detail.type)}>{detail.type}</span>
+            </>
+          )}
           <BadgePopoverChip
             label={areaLabel}
-            title={t("reader.badge_area_tip", areaLabel)}
+            description={t("reader.badge_area_tip", areaLabel)}
             className="chip chip--area"
             onApply={onApplyAreaFilter ? () => onApplyAreaFilter(detail.area_slug) : undefined}
             legendHref={legendHref}
           />
+          {detail.body_locale ? (
+            <Tooltip content={t("reader.body_language")}>
+              <span className="chip chip--area">
+                lang: {detail.body_locale}
+              </span>
+            </Tooltip>
+          ) : null}
+          <span className="translate-toggle" aria-label="Translation target">
+            <Languages className="lucide" aria-hidden="true" />
+            {translateLocales.map((locale) => (
+              <Link
+                key={locale}
+                to={translateHref(locale)}
+                className={`translate-toggle__option${highlightedLocale === locale ? " is-active" : ""}`}
+                aria-current={highlightedLocale === locale ? "true" : undefined}
+                aria-label={t("reader.translate_to", locale.toUpperCase())}
+              >
+                {locale.toUpperCase()}
+              </Link>
+            ))}
+          </span>
+          {projectSlug && translationEdges.map((edge) => (
+            <Tooltip key={`translation-${edge.artifact_id}`} content={edge.title}>
+              <Link
+                to={`/p/${projectSlug}/wiki/${edge.slug}`}
+                className="chip chip--area"
+              >
+                translation
+              </Link>
+            </Tooltip>
+          ))}
           <span className="art-meta__sep">·</span>
           <ArtifactByline artifact={detail} />
           <span className="art-meta__sep">·</span>
           <span className="prov">{t("reader.published", publishedAt)}</span>
+          <span className="art-meta__sep">·</span>
+          <span className="prov art-reading-metrics">
+            {t("reader.reading_metrics", readingEstimate.estimatedMinutes, readMinutes, completionPct)}
+          </span>
         </div>
 
-        <div className="art-body">
+        <div className="art-body" ref={bodyRef}>
           <PindocMarkdown
             source={detail.body_markdown}
-            collapseStructureSections={hasLiveSidecarData}
+            projectSlug={projectSlug}
+            collapseStructureSections
           />
         </div>
-
-        <RelatedHint detail={detail} />
       </article>
     </main>
   );
+}
+
+function emptyReadSnapshot(): ReadTrackerSnapshot {
+  return {
+    startedAtMs: 0,
+    endedAtMs: 0,
+    activeSeconds: 0,
+    idleSeconds: 0,
+    scrollMaxPct: 0,
+    visible: true,
+    intersecting: false,
+    idle: false,
+  };
+}
+
+function formatReadMinutes(seconds: number): string {
+  if (seconds <= 0) return "0";
+  if (seconds < 60) return "<1";
+  return String(Math.floor(seconds / 60));
 }
 
 function DetailScopeBar({ scope }: { scope: DetailScope | null }) {
@@ -146,10 +247,12 @@ function DetailScopeBar({ scope }: { scope: DetailScope | null }) {
       ) : (
         <div className="detail-scope-bar__nav" aria-label={t("reader.scope_sibling_nav")}>
           {scope.prev && scope.prevHref ? (
-            <Link to={scope.prevHref} className="detail-scope-bar__button" title={scope.prev.title}>
-              <ChevronLeft className="lucide" />
-              {t("reader.scope_prev")}
-            </Link>
+            <Tooltip content={scope.prev.title}>
+              <Link to={scope.prevHref} className="detail-scope-bar__button">
+                <ChevronLeft className="lucide" />
+                {t("reader.scope_prev")}
+              </Link>
+            </Tooltip>
           ) : (
             <span className="detail-scope-bar__button is-disabled">
               <ChevronLeft className="lucide" />
@@ -157,10 +260,12 @@ function DetailScopeBar({ scope }: { scope: DetailScope | null }) {
             </span>
           )}
           {scope.next && scope.nextHref ? (
-            <Link to={scope.nextHref} className="detail-scope-bar__button" title={scope.next.title}>
-              {t("reader.scope_next")}
-              <ChevronRight className="lucide" />
-            </Link>
+            <Tooltip content={scope.next.title}>
+              <Link to={scope.nextHref} className="detail-scope-bar__button">
+                {t("reader.scope_next")}
+                <ChevronRight className="lucide" />
+              </Link>
+            </Tooltip>
           ) : (
             <span className="detail-scope-bar__button is-disabled">
               {t("reader.scope_next")}
@@ -169,21 +274,6 @@ function DetailScopeBar({ scope }: { scope: DetailScope | null }) {
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-function RelatedHint({ detail }: { detail: Artifact }) {
-  const { t } = useI18n();
-  // Real backlinks need artifact_edges table (Phase 3+). For M1 we show
-  // a truthful placeholder so the visual treatment stays and the data
-  // gap is obvious to the reader.
-  return (
-    <div className="backlinks">
-      <h4>{t("reader.backlinks_empty_head")}</h4>
-      <div style={{ fontSize: 13, color: "var(--fg-3)" }}>
-        {t("reader.backlinks_empty", detail.slug)}
-      </div>
     </div>
   );
 }
@@ -200,7 +290,6 @@ export function ArtifactListRow({
   // Kept exported because both Reader and Tasks surfaces render lists.
   return (
     <a href={to} className={`wiki__list-row${isActive ? " is-active" : ""}`}>
-      <span className="wiki__chip">{artifact.type}</span>
       <span className="wiki__title">{artifact.title}</span>
     </a>
   );

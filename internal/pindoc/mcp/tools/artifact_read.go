@@ -23,10 +23,10 @@ type artifactReadInput struct {
 
 	// One of IDOrSlug (UUID or project-scoped slug) must be set.
 	// URLs coming from Wiki Reader share links (pindoc://... or
-	// /p/{project}/{locale}/wiki/{slug}) are accepted here too and
-	// normalized server-side — agents shouldn't have to parse Pindoc's URL
-	// shape.
-	IDOrSlug string `json:"id_or_slug" jsonschema:"artifact UUID, slug, or share URL (pindoc://... or /p/{project}/{locale}/wiki/{slug})"`
+	// /p/{project}/wiki/{slug}) are accepted here too and normalized
+	// server-side — agents shouldn't have to parse Pindoc's URL shape.
+	// Legacy /p/{project}/{locale}/wiki/{slug} links are also accepted.
+	IDOrSlug string `json:"id_or_slug" jsonschema:"artifact UUID, slug, or share URL (pindoc://... or /p/{project}/wiki/{slug}; legacy /p/{project}/{locale}/wiki/{slug} also accepted)"`
 
 	// View controls how much the server returns. Default "full" matches
 	// Phase 1–11 behaviour for backward compat. "brief" omits
@@ -45,6 +45,7 @@ type artifactReadOutput struct {
 	Type          string    `json:"type"`
 	Title         string    `json:"title"`
 	BodyMarkdown  string    `json:"body_markdown,omitempty"` // omitted on view=brief
+	BodyLocale    string    `json:"body_locale,omitempty"`
 	Tags          []string  `json:"tags"`
 	Completeness  string    `json:"completeness"`
 	Status        string    `json:"status"`
@@ -119,14 +120,14 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.read",
-			Description: "Fetch an artifact by UUID, slug, or share URL, including /p/{project}/{locale}/wiki/{slug} paths and their absolute URLs. view=brief returns title/summary/pins/stale without the full body; view=continuation adds recent revisions and typed edges; view=full (default) returns everything.",
+			Description: "Fetch an artifact by UUID, slug, or share URL, including /p/{project}/wiki/{slug} paths and their absolute URLs. Legacy /p/{project}/{locale}/wiki/{slug} paths are accepted. view=brief returns title/summary/pins/stale without the full body; view=continuation adds recent revisions and typed edges; view=full (default) returns everything.",
 		},
 		func(ctx context.Context, p *auth.Principal, in artifactReadInput) (*sdk.CallToolResult, artifactReadOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
 			if err != nil {
 				return nil, artifactReadOutput{}, fmt.Errorf("artifact.read: %w", err)
 			}
-			ref := normalizeArtifactReadRef(in.IDOrSlug, scope.ProjectSlug, scope.ProjectLocale)
+			ref := normalizeArtifactReadRef(in.IDOrSlug, scope.ProjectSlug)
 			idOrSlug := ref.Value
 			if idOrSlug == "" {
 				return nil, artifactReadOutput{}, errors.New("id_or_slug is required")
@@ -155,6 +156,7 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 					a.type,
 					a.title,
 					a.body_markdown,
+					COALESCE(NULLIF(a.body_locale, ''), NULLIF(proj.primary_language, ''), 'en'),
 					a.tags,
 					a.completeness,
 					a.status,
@@ -171,12 +173,11 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 				JOIN projects proj ON proj.id = a.project_id
 				JOIN areas    area ON area.id = a.area_id
 				WHERE proj.slug = $1
-				  AND ($2 = '' OR proj.locale = $2)
-				  AND (a.id::text = $3 OR a.slug = $3)
+				  AND (a.id::text = $2 OR a.slug = $2)
 				LIMIT 1
-			`, scope.ProjectSlug, scope.ProjectLocale, idOrSlug).Scan(
+			`, scope.ProjectSlug, idOrSlug).Scan(
 				&out.ID, &out.ProjectSlug, &out.AreaSlug, &out.Slug,
-				&out.Type, &out.Title, &out.BodyMarkdown, &out.Tags,
+				&out.Type, &out.Title, &out.BodyMarkdown, &out.BodyLocale, &out.Tags,
 				&out.Completeness, &out.Status, &out.ReviewState,
 				&out.AuthorKind, &out.AuthorID, &authorVer, &superseded,
 				&out.CreatedAt, &out.UpdatedAt, &publishedAt, &metaRaw,
@@ -436,10 +437,10 @@ type artifactReadRef struct {
 }
 
 // normalizeArtifactReadRef handles the Reader-facing share URL shape. It is
-// intentionally stricter than normalizeRef: a /p/<project>/<locale>/wiki/...
+// intentionally stricter than normalizeRef: a /p/<project>/wiki/...
 // URL from another fixed-session project scope must not be allowed to
 // collapse to a bare slug that could accidentally match the active project.
-func normalizeArtifactReadRef(raw, projectSlug, projectLocale string) artifactReadRef {
+func normalizeArtifactReadRef(raw, projectSlug string) artifactReadRef {
 	s := strings.TrimSpace(raw)
 	if s == "" {
 		return artifactReadRef{}
@@ -450,7 +451,7 @@ func normalizeArtifactReadRef(raw, projectSlug, projectLocale string) artifactRe
 
 	if strings.HasPrefix(s, "/") || strings.Contains(s, "://") {
 		if parsed, err := url.Parse(s); err == nil {
-			if ref, ok := normalizeArtifactReadPath(parsed.Path, projectSlug, projectLocale); ok {
+			if ref, ok := normalizeArtifactReadPath(parsed.Path, projectSlug); ok {
 				return ref
 			}
 		}
@@ -459,7 +460,7 @@ func normalizeArtifactReadRef(raw, projectSlug, projectLocale string) artifactRe
 	return artifactReadRef{Value: s}
 }
 
-func normalizeArtifactReadPath(path, projectSlug, projectLocale string) (artifactReadRef, bool) {
+func normalizeArtifactReadPath(path, projectSlug string) (artifactReadRef, bool) {
 	segments := splitPathSegments(path)
 	if len(segments) == 0 {
 		return artifactReadRef{}, false
@@ -472,18 +473,25 @@ func normalizeArtifactReadPath(path, projectSlug, projectLocale string) (artifac
 		}, true
 	}
 
-	if len(segments) >= 4 && segments[0] == "p" && segments[3] == "wiki" {
+	if len(segments) >= 4 && segments[0] == "p" && segments[2] == "wiki" {
+		ref := artifactReadRef{LooksLikeShareURL: true}
+		if len(segments) < 4 || segments[3] == "" {
+			ref.Value = strings.TrimSpace(path)
+			return ref, true
+		}
+		ref.Value = segments[3]
+		ref.ScopeMismatch = segments[1] != projectSlug
+		return ref, true
+	}
+
+	if len(segments) >= 5 && segments[0] == "p" && segments[3] == "wiki" {
 		ref := artifactReadRef{LooksLikeShareURL: true}
 		if len(segments) < 5 || segments[4] == "" {
 			ref.Value = strings.TrimSpace(path)
 			return ref, true
 		}
 		ref.Value = segments[4]
-		expectedLocale := projectLocale
-		if expectedLocale == "" {
-			expectedLocale = "en"
-		}
-		ref.ScopeMismatch = segments[1] != projectSlug || segments[2] != expectedLocale
+		ref.ScopeMismatch = segments[1] != projectSlug
 		return ref, true
 	}
 
@@ -511,9 +519,6 @@ func artifactReadNotFoundError(raw string, scope *auth.ProjectScope, ref artifac
 	projectScope := ""
 	if scope != nil {
 		projectScope = scope.ProjectSlug
-		if scope.ProjectLocale != "" {
-			projectScope += "/" + scope.ProjectLocale
-		}
 	}
 	msg := fmt.Sprintf("artifact %q not found in project %q", raw, projectScope)
 	if ref.LooksLikeShareURL {

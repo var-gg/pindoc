@@ -11,6 +11,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
+	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/projects"
 )
 
@@ -27,30 +28,31 @@ type projectCurrentInput struct {
 type projectCurrentOutput struct {
 	// not_ready surface — populated when the server can't pick a project
 	// (no input slug, no PINDOC_PROJECT env, no projects table row).
-	Status           string   `json:"status,omitempty"`
-	ErrorCode        string   `json:"error_code,omitempty"`
-	Failed           []string `json:"failed,omitempty"`
-	Checklist        []string `json:"checklist,omitempty"`
-	SuggestedActions []string `json:"suggested_actions,omitempty"`
+	Status           string               `json:"status,omitempty"`
+	ErrorCode        string               `json:"error_code,omitempty"`
+	Failed           []string             `json:"failed,omitempty"`
+	Checklist        []string             `json:"checklist,omitempty"`
+	ErrorCodes       []string             `json:"error_codes,omitempty" jsonschema:"canonical stable SCREAMING_SNAKE_CASE identifiers; branch on these"`
+	ChecklistItems   []ErrorChecklistItem `json:"checklist_items,omitempty" jsonschema:"localized checklist entries paired with stable codes"`
+	MessageLocale    string               `json:"message_locale,omitempty" jsonschema:"locale used for checklist/checklist_items.message after fallback"`
+	SuggestedActions []string             `json:"suggested_actions,omitempty"`
 
-	ID          string `json:"id,omitempty"`
-	Slug        string `json:"slug,omitempty"`
-	Name        string `json:"name,omitempty"`
-	OwnerID     string `json:"owner_id,omitempty"`
-	Description string `json:"description,omitempty"`
-	Color       string `json:"color,omitempty"`
+	ID              string `json:"id,omitempty"`
+	Slug            string `json:"slug,omitempty"`
+	Name            string `json:"name,omitempty"`
+	OwnerID         string `json:"owner_id,omitempty"`
+	Description     string `json:"description,omitempty"`
+	Color           string `json:"color,omitempty"`
 	PrimaryLanguage string `json:"primary_language,omitempty"`
-	// Locale is the authoritative canonical-key field (Task task-phase-
-	// 18-project-locale-implementation, migration 0015). primary_language
-	// is retained as a soft back-compat column; new code should branch
-	// on locale. Same slug may exist across locales —
-	// `(owner_id, slug, locale)` is the unique key.
-	Locale          string        `json:"locale,omitempty"`
-	AreasCount      int           `json:"areas_count,omitempty"`
-	ArtifactsCount  int           `json:"artifacts_count,omitempty"`
-	CreatedAt       time.Time     `json:"created_at,omitzero"`
-	Rendering       RenderingCaps `json:"rendering,omitzero"`
-	Capabilities    Capabilities  `json:"capabilities,omitzero"`
+	// Locale is a compatibility alias for PrimaryLanguage. Locale is no
+	// longer part of project identity after task-canonical-locale-
+	// migration; clients should treat project_slug as the canonical key.
+	Locale         string        `json:"locale,omitempty"`
+	AreasCount     int           `json:"areas_count,omitempty"`
+	ArtifactsCount int           `json:"artifacts_count,omitempty"`
+	CreatedAt      time.Time     `json:"created_at,omitzero"`
+	Rendering      RenderingCaps `json:"rendering,omitzero"`
+	Capabilities   Capabilities  `json:"capabilities,omitzero"`
 }
 
 // Capabilities tells the agent which optional features the server
@@ -79,11 +81,9 @@ type Capabilities struct {
 	// RetrievalQuality: "stub" → hash-based (dev only), "http" → real
 	// embedder backing pindoc.artifact.search / context.for_task.
 	RetrievalQuality string `json:"retrieval_quality"`
-	// AuthMode: "trusted_local" (M1 self-host local subprocess, no token),
-	// "project_token" (V1.5+ per-project agent tokens),
-	// "oauth" (V2+ hosted). Renamed from "none" — "none" implied "no
-	// security at all" but the actual model is "trust the local
-	// subprocess".
+	// AuthMode mirrors PINDOC_AUTH_MODE. V1 supports "trusted_local" at
+	// runtime and advertises the configured enum so future modes can fail
+	// loudly before a server accidentally reports the wrong security model.
 	AuthMode string `json:"auth_mode"`
 	// Transport identifies how the agent reached this server. "stdio" =
 	// classic subprocess-per-session model where Claude Code launches
@@ -107,6 +107,10 @@ type Capabilities struct {
 	// ReceiptTTLSec is the search_receipt TTL (seconds). Agents can use
 	// this to decide whether to renew mid-loop.
 	ReceiptTTLSec int `json:"receipt_ttl_sec"`
+	// ReceiptExemptionLimit is the configured first-N create allowance for
+	// receipt-less bootstrap writes in empty/same-author areas. Zero means
+	// disabled.
+	ReceiptExemptionLimit int `json:"receipt_exemption_limit"`
 	// PublicBaseURL comes from server_settings.public_base_url. Empty
 	// when the operator hasn't configured one — agents should fall back
 	// to the relative human_url in that case. When present, tool
@@ -193,7 +197,7 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 					p.description,
 					p.color,
 					p.primary_language,
-					p.locale,
+					p.primary_language,
 					p.created_at,
 					(SELECT count(*) FROM areas     WHERE project_id = p.id),
 					(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
@@ -272,9 +276,12 @@ func buildCapabilities(deps Deps, p *auth.Principal, multiProject bool) Capabili
 	if deps.Settings != nil {
 		publicBase = deps.Settings.Get().PublicBaseURL
 	}
-	authMode := auth.AuthModeTrustedLocal
-	if p != nil && p.AuthMode != "" {
-		authMode = p.AuthMode
+	authMode := deps.AuthMode
+	if authMode == "" && p != nil && p.AuthMode != "" {
+		authMode = config.AuthMode(p.AuthMode)
+	}
+	if authMode == "" {
+		authMode = config.AuthModeTrustedLocal
 	}
 	transport := strings.TrimSpace(deps.Transport)
 	if transport == "" {
@@ -285,12 +292,13 @@ func buildCapabilities(deps Deps, p *auth.Principal, multiProject bool) Capabili
 		ScopeMode:                   "per_call",
 		NewProjectRequiresReconnect: false,
 		RetrievalQuality:            quality,
-		AuthMode:                    authMode,
+		AuthMode:                    string(authMode),
 		Transport:                   transport,
 		UpdateVia:                   "update_of",
 		RequiresExpectedVersion:     true,
-		ReviewQueueSupported:        false,
+		ReviewQueueSupported:        true,
 		ReceiptTTLSec:               int(receiptTTLSeconds),
+		ReceiptExemptionLimit:       receiptExemptionLimit(deps),
 		PublicBaseURL:               publicBase,
 	}
 }

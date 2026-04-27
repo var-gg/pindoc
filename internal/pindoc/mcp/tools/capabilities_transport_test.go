@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
+	"github.com/var-gg/pindoc/internal/pindoc/config"
 )
 
 // TestBuildCapabilities_AlwaysPerCall locks the post-pivot contract:
@@ -82,5 +83,27 @@ func TestBuildCapabilities_MultiProjectPassThrough(t *testing.T) {
 				t.Errorf("MultiProject = %v, want %v", caps.MultiProject, c.multiProject)
 			}
 		})
+	}
+}
+
+func TestBuildCapabilities_ReceiptExemptionLimit(t *testing.T) {
+	caps := buildCapabilities(
+		Deps{ReceiptExemptionLimit: 5},
+		&auth.Principal{AuthMode: auth.AuthModeTrustedLocal},
+		false,
+	)
+	if caps.ReceiptExemptionLimit != 5 {
+		t.Fatalf("ReceiptExemptionLimit = %d, want 5", caps.ReceiptExemptionLimit)
+	}
+}
+
+func TestBuildCapabilities_AuthModeComesFromConfig(t *testing.T) {
+	caps := buildCapabilities(
+		Deps{AuthMode: config.AuthModeOAuthGitHub},
+		&auth.Principal{AuthMode: auth.AuthModeTrustedLocal},
+		false,
+	)
+	if caps.AuthMode != string(config.AuthModeOAuthGitHub) {
+		t.Fatalf("AuthMode = %q, want %q", caps.AuthMode, config.AuthModeOAuthGitHub)
 	}
 }

@@ -43,7 +43,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "  get <key>            — print current value")
 		fmt.Fprintln(os.Stderr, "  set <key> <value>    — update a setting (hot, no restart)")
 		fmt.Fprintln(os.Stderr, "  relabel-artifacts    — batch move artifact area_slug from a TSV mapping")
-		fmt.Fprintln(os.Stderr, "  project create <slug> --name \"...\" --language ko [--description \"...\"] [--color \"#...\"]")
+		fmt.Fprintln(os.Stderr, "  project create <slug> --name \"...\" --language ko [--description \"...\"] [--color \"#...\"] [--git-remote-url \"...\"]")
 		fmt.Fprintln(os.Stderr, "                       — create a new project (no MCP session needed)")
 	}
 	flag.Parse()
@@ -345,6 +345,7 @@ func runProjectCreate(ctx context.Context, pool *db.Pool, args []string) error {
 	language := fs.String("language", "", "primary_language: en | ko | ja (required, immutable after create)")
 	description := fs.String("description", "", "optional one-line description")
 	color := fs.String("color", "", "optional sidebar accent color (hex / oklch / css color)")
+	gitRemoteURL := fs.String("git-remote-url", "", "optional git remote URL to store in project_repos")
 	owner := fs.String("owner", "", "optional owner identifier; defaults to 'default'")
 
 	// Slug is the first positional arg. Push everything before the
@@ -378,6 +379,7 @@ func runProjectCreate(ctx context.Context, pool *db.Pool, args []string) error {
 		Description:     *description,
 		Color:           *color,
 		PrimaryLanguage: *language,
+		GitRemoteURL:    *gitRemoteURL,
 		OwnerID:         *owner,
 	})
 	if err != nil {
@@ -389,7 +391,8 @@ func runProjectCreate(ctx context.Context, pool *db.Pool, args []string) error {
 			errors.Is(err, projects.ErrSlugTaken),
 			errors.Is(err, projects.ErrNameRequired),
 			errors.Is(err, projects.ErrLangRequired),
-			errors.Is(err, projects.ErrLangInvalid):
+			errors.Is(err, projects.ErrLangInvalid),
+			errors.Is(err, projects.ErrGitRemoteURLInvalid):
 			return fmt.Errorf("%w: %s", errProjectValidation, err)
 		default:
 			return fmt.Errorf("project create: %w", err)
@@ -403,7 +406,7 @@ func runProjectCreate(ctx context.Context, pool *db.Pool, args []string) error {
 	fmt.Printf("created project: %s (id=%s)\n", out.Slug, out.ID)
 	fmt.Printf("  name:      %s\n", out.Name)
 	fmt.Printf("  language:  %s\n", out.PrimaryLanguage)
-	fmt.Printf("  url:       /p/%s/%s/wiki\n", out.Slug, out.PrimaryLanguage)
+	fmt.Printf("  url:       /p/%s/wiki\n", out.Slug)
 	fmt.Printf("  areas:     %d\n", out.AreasCreated)
 	fmt.Printf("  templates: %d\n", out.TemplatesCreated)
 	return nil

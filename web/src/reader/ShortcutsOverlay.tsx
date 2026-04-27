@@ -21,7 +21,7 @@ import { useI18n } from "../i18n";
 import type { BadgeFilter } from "./badgeFilters";
 import { typeChipClass } from "./typeChip";
 
-type ReaderView = "reader" | "inbox" | "graph" | "tasks";
+type ReaderView = "reader" | "inbox" | "graph" | "tasks" | "today";
 type Icon = ComponentType<{ className?: string }>;
 type TFn = (key: string, ...args: Array<string | number>) => string;
 
@@ -48,7 +48,6 @@ type Props = {
   open: boolean;
   view: ReaderView;
   projectSlug: string;
-  projectLocale: string;
   detail: Artifact | null;
   selectedArea: string | null;
   selectedType: string | null;
@@ -61,7 +60,6 @@ export function ShortcutsOverlay({
   open,
   view,
   projectSlug,
-  projectLocale,
   detail,
   selectedArea,
   selectedType,
@@ -83,7 +81,7 @@ export function ShortcutsOverlay({
     areaNameBySlug,
     t,
   });
-  const legendHref = `/p/${projectSlug}/${projectLocale || "ko"}/wiki/visual-language-reference`;
+  const legendHref = `/p/${projectSlug}/wiki/visual-language-reference`;
 
   return (
     <div
@@ -281,7 +279,7 @@ function buildShortcutGroups(
         },
       ],
     });
-  } else {
+  } else if (view === "inbox") {
     groups.push({
       title: t("shortcuts.group_inbox"),
       rows: [
@@ -289,6 +287,18 @@ function buildShortcutGroups(
           keys: ["⌘K"],
           label: t("shortcuts.inbox_search.label"),
           hint: t("shortcuts.inbox_search.hint"),
+          icon: Search,
+        },
+      ],
+    });
+  } else {
+    groups.push({
+      title: t("shortcuts.group_today"),
+      rows: [
+        {
+          keys: ["⌘K"],
+          label: t("shortcuts.today_search.label"),
+          hint: t("shortcuts.today_search.hint"),
           icon: Search,
         },
       ],
@@ -394,5 +404,7 @@ function surfaceLabel(view: ReaderView, t: TFn): string {
       return t("nav.graph");
     case "inbox":
       return t("nav.inbox");
+    case "today":
+      return t("nav.today");
   }
 }

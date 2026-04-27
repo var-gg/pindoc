@@ -70,7 +70,10 @@ UI mirror. 프로젝트 스코프 = URL 접두사.
 
 ### 원칙 3. Single Service by Default
 
-V1 모놀리식. `git clone && docker compose up` 1분 기동.
+V1 모놀리식. 현재 M1 개발 스택은 `git clone && docker compose up -d --build`
+로 Postgres + Pindoc HTTP daemon + Reader SPA를 띄운다. 같은 daemon이 MCP,
+Reader API, `/health`를 함께 서빙한다. Host-native `pindoc-server -http
+127.0.0.1:5830` 경로는 코드 수정 중 빠른 로컬 디버깅을 위한 보조 경로다.
 
 ### 원칙 4. Self-Host First
 
@@ -84,17 +87,17 @@ MCP = write (write-only), Wiki UI = read + (엣지) approve. REST API = 3차.
 
 Tier A core 강제 + Tier B Domain Pack + Tier C Custom(V2+).
 
-### 원칙 7. Multi-project by Design (transport에 따라 두 운영 모델)
+### 원칙 7. Multi-project by Design (account-level MCP scope)
 
 한 Pindoc 인스턴스는 복수 Project를 호스팅하도록 **설계**됐다 (schema, URL, Web UI 모두 `/p/:project/…` 스코프). Solo 사이드 프로젝트 / FE·BE 분리 / 영세 2~3명 복수 프로젝트가 1급 시민.
 
-`pindoc-server`는 두 transport를 지원하며 모델이 다르다:
+`pindoc-server`는 두 transport를 지원하지만 scope 모델은 동일하다:
 
-**stdio (기본, subprocess-per-session)** — `pindoc-server` 단독 실행. Claude Code가 `.mcp.json`의 `command` entry로 launch. `PINDOC_PROJECT` env가 그 subprocess의 active project로 고정되며 세션 중 switch 불가. 워크스페이스마다 별도 entry로 별도 subprocess가 떠야 멀티프로젝트가 된다. `capabilities`: `scope_mode="fixed_session"`, `new_project_requires_reconnect=true`, `transport="stdio"`.
+**stdio (기본, subprocess-per-session)** — `pindoc-server` 단독 실행. Claude Code가 `.mcp.json`의 `command` entry로 launch. `PINDOC_PROJECT` env는 `pindoc.project.current`의 fallback일 뿐이고, project-scoped tool은 `project_slug` input으로 scope를 고른다. `capabilities`: `scope_mode="per_call"`, `new_project_requires_reconnect=false`, `transport="stdio"`.
 
-**streamable_http (데몬, V1 멀티프로젝트 운영 모델)** — `pindoc-server -http 127.0.0.1:5830` 단일 데몬을 띄우면 다수 Claude Code 세션이 attach. `.mcp.json`의 `url` entry가 `http://127.0.0.1:5830/mcp/p/{project}` — URL 경로가 connection의 active project를 결정한다. 데몬 내부 `getServer(req)` 콜백이 매 연결마다 project slug를 path에서 추출 + DB 검증 후 project-scoped Server를 빌드해 SDK에 반환. 한 데몬에서 RAM·embedder·telemetry가 공유되고, 새 프로젝트 = 새 url(.mcp.json 추가)이지 데몬 재기동 아님. 같은 데몬이 같은 포트에서 Reader read-only HTTP API(`/api/...`)와 liveness probe(`/health`)도 함께 서빙하므로 V1 운영에서는 별도 `pindoc-api` 프로세스가 필요 없다. `capabilities`: `scope_mode="per_connection"`, `new_project_requires_reconnect=false`, `transport="streamable_http"`. Decision `pindoc-mcp-transport-streamable-http-per-connection-scope`.
+**streamable_http (데몬, V1 멀티프로젝트 운영 모델)** — `pindoc-server -http 127.0.0.1:5830` 단일 데몬을 띄우면 다수 Claude Code/Codex 세션이 같은 `.mcp.json` URL `http://127.0.0.1:5830/mcp`에 attach한다. 연결 URL은 account-level이고, 매 tool call의 `project_slug`가 project scope를 결정한다. 한 데몬에서 RAM·embedder·telemetry가 공유되고, 새 프로젝트는 다음 tool call부터 바로 addressable하다. 같은 데몬이 같은 포트에서 Reader read-only HTTP API(`/api/...`)와 liveness probe(`/health`)도 함께 서빙하므로 V1 운영에서는 별도 `pindoc-api` 프로세스가 필요 없다. `capabilities`: `scope_mode="per_call"`, `new_project_requires_reconnect=false`, `transport="streamable_http"`, `auth_mode=$PINDOC_AUTH_MODE`. Decision `mcp-scope-account-level-industry-standard`.
 
-두 모드 다 `auth_mode="trusted_local"` — V1은 단일 사용자/loopback 신뢰 모델. 자기-호스팅 공개(타 사용자가 데몬에 직접 attach) 시 `project_token` / OAuth 도입은 별 Decision으로 이어진다.
+기본값은 `auth_mode="trusted_local"` — V1은 단일 사용자/loopback 신뢰 모델. `PINDOC_AUTH_MODE` enum은 `trusted_local|public_readonly|single_user|oauth_github`를 받지만, 현재 런타임은 `trusted_local` 외 값을 startup error로 거절한다. 자기-호스팅 공개(타 사용자가 데몬에 직접 attach) 시 OAuth / agent token 도입은 별 Task로 이어진다.
 
 Web UI(`pindoc-api`)는 두 transport와 무관하게 멀티프로젝트 switcher를 지원 (`/p/:project/…` canonical URL).
 
@@ -116,7 +119,7 @@ Web UI(`pindoc-api`)는 두 transport와 무관하게 멀티프로젝트 switche
 │ │                MCP Layer (write 1차)                      │ │
 │ │  Harness Injector · Pre-flight Check · Referenced Confirm │ │
 │ │  Write-Intent Router · Schema Validator · Context Provider │ │
-│ │  Project-scoped (agent token per project)                  │ │
+│ │  Account-level transport · per-call project_slug scope      │ │
 │ └──────────────────────────────────────────────────────────┘ │
 │                                                                │
 │ ┌──────────────────────────────────────────────────────────┐ │
@@ -153,14 +156,16 @@ Web UI(`pindoc-api`)는 두 transport와 무관하게 멀티프로젝트 switche
 
 ### MCP Layer
 
-Project-scoped. Agent token이 특정 Project의 write 권한을 가짐.
+Account-level MCP connection. Project-scoped tool은 `project_slug` input으로
+scope를 고른다. V1 local mode는 `trusted_local`이고, agent token은 공개
+self-host / SaaS 인증 도입 시점의 별도 관심사다.
 
 **V1 MCP Tools**:
 
 | Tool | 역할 |
 |------|------|
 | `pindoc.harness.install` | PINDOC.md 생성 + CLAUDE.md/AGENTS.md/.cursorrules 주입 |
-| `pindoc.project.list` / `.switch` | 접근 가능 project 목록·전환 |
+| `pindoc.project.current` / `.create` | 프로젝트 메타 조회·생성 |
 | `pindoc.artifact.search` | 기존 artifact 검색 (intent pre-check, F6 해결) |
 | `pindoc.artifact.propose` | Promotion 제출 → Pre-flight Check → auto-publish or Review Queue |
 | `pindoc.artifact.read` | URL/ID → artifact + Continuation Context |
@@ -258,7 +263,7 @@ embedding:
 
 설치 시 모델 선택 화면 없음 — default (gemma) 자동. [06 Flow 0 §onboarding](06-ui-flows.md).
 
-**Silent fallback 금지** (Phase 17): `PINDOC_EMBED_PROVIDER`가 알 수 없는 값이면 기동 실패. 과거 stub으로 조용히 떨어지던 동작은 제거 — 임베딩은 product의 **필수 기능**이고 누락을 warn으로 처리하지 않는다. stub은 `PINDOC_EMBED_PROVIDER=stub`으로 명시한 unit test 환경에서만 허용.
+**Silent fallback 금지** (Phase 17): `PINDOC_EMBED_PROVIDER`가 알 수 없는 값이면 기동 실패. 과거 stub으로 조용히 떨어지던 동작은 제거 — 임베딩은 product의 **필수 기능**이고 누락을 warn으로 처리하지 않는다. stub은 `PINDOC_EMBED_PROVIDER=stub`으로 명시한 unit test 환경에서만 허용. Docker Compose daemon은 host의 `PINDOC_EMBED_PROVIDER`를 전달하지 않고 `PINDOC_COMPOSE_EMBED_PROVIDER`만 읽는다. 한 번의 shell session에 남은 `PINDOC_EMBED_PROVIDER=stub`이 컨테이너에 새어 들어가 hash embedding을 만드는 사고를 막기 위한 hardening이다. 실제 stub가 켜지면 server startup log에 multi-line warning box를 남긴다. 사고 후 회복은 정상 provider로 재기동한 뒤 `go run ./cmd/pindoc-reembed`로 affected artifact를 재임베딩한다.
 
 **3. Automatic Chunking (V1 필수)**
 
@@ -328,12 +333,16 @@ dashboard_slots:
 솔로 / 개인 프로젝트.
 
 ```
-localhost:5733 — Pindoc + PostgreSQL (Docker)
+localhost:5830 — Pindoc HTTP daemon + PostgreSQL
 ```
 
-- 인증: 없음 (단일 사용자). 로컬 파일 agent token (`~/.pindoc/token`)
+- 현재 M1 dev: `docker compose up -d --build`
+- legacy Windows NSSM 서비스가 5830을 점유하면 `PINDOC_DAEMON_PORT=5832`
+  같은 host port override로 side-by-side 기동 후 NSSM을 관리자 권한으로 제거
+- 인증: `PINDOC_AUTH_MODE=trusted_local` loopback 신뢰 모델 (default)
 - OAuth: 불필요
-- MCP 설정: `pindoc init` 시 자동 주입
+- MCP 설정: account-level URL `http://127.0.0.1:5830/mcp`, project scope는
+  tool input의 `project_slug`
 
 ### B. Self-host Domain (V1 기본 팀 배포)
 
@@ -371,11 +380,11 @@ $ pindoc init
 플로우 (7단계):
 
 ```
-[1/7] Server 감지 (localhost 자동 또는 URL 입력 또는 docker compose up 제안)
-[2/7] 인증 (Local: auto token / Self-host: GitHub OAuth 브라우저)
+[1/7] Server 감지 (localhost:5830 자동 또는 URL 입력 또는 local daemon 기동 제안)
+[2/7] 인증 (Local: trusted_local / Self-host: GitHub OAuth 브라우저)
 [3/7] Project 선택/생성 (repo 자동 감지)
 [4/7] Domain Pack 선택 (신규 Project만)
-[5/7] Agent token 자동 발급 (~/.pindoc/tokens/<project-slug>.token)
+[5/7] Project scope 기록 (PINDOC.md frontmatter project_slug)
 [6/7] MCP 클라이언트 자동 설정
        - Claude Code → ~/.config/claude-code/mcp.json
        - Cursor      → ~/.cursor/mcp.json
@@ -398,13 +407,20 @@ $ pindoc init
 
 | 시나리오 | 사용자 인증 | Agent Token |
 |---|---|---|
-| Local | 없음 | 자동 생성 로컬 파일 |
-| Self-host 도메인 | **GitHub OAuth** | User가 Settings에서 발급, per-agent, per-project |
+| Local | 없음 (`trusted_local`) | 없음 |
+| Self-host 도메인 | **GitHub OAuth** | User가 Settings에서 발급, per-agent |
 | Hosted (V2+) | GitHub + Google | auto-provision |
+
+`PINDOC_AUTH_MODE`는 config enum으로 `trusted_local`, `public_readonly`,
+`single_user`, `oauth_github`를 허용한다. V1 서버는 `trusted_local`만
+resolver chain을 구성하고, 나머지 값은 해당 resolver 구현이 들어오기 전까지
+startup error로 실패한다.
 
 ### Agent Token
 
-- per-project scope
+- Local V1에서는 미사용. MCP daemon은 loopback `trusted_local`로 동작.
+- 공개 self-host / SaaS에서 도입.
+- account-level token + per-call `project_slug` 권한 확인.
 - 90일 rotation (기본)
 - `pindoc token revoke <id>` 즉시 비활성
 - Server: hash + last_used_at
@@ -417,7 +433,7 @@ $ pindoc init
 
 ### 기타
 
-- MCP 인증: Agent token
+- MCP 인증: Local V1은 `trusted_local`; 공개 self-host / SaaS는 OAuth + Agent token 예정
 - 데이터 암호화: 호스팅 인프라 위임
 - Git credentials: 사용자 제공, read-only
 - LLM 호출: Pindoc 서버 직접 호출 없음

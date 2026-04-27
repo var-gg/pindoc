@@ -4,7 +4,8 @@ import remarkGfm from "remark-gfm";
 import mermaid from "mermaid";
 import { headingsFromBody, slugifyHeading } from "./slug";
 import { useI18n } from "../i18n";
-import { isStructureOverlapHeading } from "./structureSections";
+import { pindocUrlTransform } from "./urlTransform";
+import { isStructureOverlapHeading, type StructureOverlapSection } from "./structureSections";
 
 // Initialize mermaid once per page. Theme follows the Pindoc dark/light
 // class on <html>. We invert the theme selection at render time so fresh
@@ -32,33 +33,33 @@ function ensureMermaid(): void {
  */
 export function PindocMarkdown({
   source,
+  projectSlug,
   collapseStructureSections = false,
 }: {
   source: string;
+  projectSlug?: string;
   collapseStructureSections?: boolean;
 }) {
-  const blocks = useMemo(
+  const { blocks, hiddenSections } = useMemo(
     () => markdownBlocks(source, collapseStructureSections),
     [source, collapseStructureSections],
   );
 
   return (
     <>
-      {blocks.map((block, i) =>
-        block.kind === "structure" ? (
-          <StructureOverlapSection
-            key={`${block.slug}-${i}`}
-            title={block.title}
-            slug={block.slug}
-            body={block.body}
-          />
-        ) : (
-          <MarkdownBlock
-            key={`md-${i}`}
-            source={block.source}
-            headingSlugs={block.headingSlugs}
-          />
-        ),
+      {blocks.map((block, i) => (
+        <MarkdownBlock
+          key={`md-${i}`}
+          source={block.source}
+          headingSlugs={block.headingSlugs}
+          projectSlug={projectSlug}
+        />
+      ))}
+      {hiddenSections.length > 0 && (
+        <OriginalStructureSections
+          sections={hiddenSections}
+          projectSlug={projectSlug}
+        />
       )}
     </>
   );
@@ -67,15 +68,18 @@ export function PindocMarkdown({
 function MarkdownBlock({
   source,
   headingSlugs,
+  projectSlug,
 }: {
   source: string;
   headingSlugs: string[];
+  projectSlug?: string;
 }) {
   let headingIndex = 0;
 
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
+      urlTransform={(url) => pindocUrlTransform(url, projectSlug)}
       components={{
         code(props) {
           const { className, children } = props;
@@ -102,17 +106,23 @@ function MarkdownBlock({
 }
 
 type MarkdownRenderBlock =
-  | { kind: "markdown"; source: string; headingSlugs: string[] }
-  | { kind: "structure"; title: string; slug: string; body: string };
+  | { kind: "markdown"; source: string; headingSlugs: string[] };
 
-function markdownBlocks(source: string, collapseStructureSections: boolean): MarkdownRenderBlock[] {
+function markdownBlocks(
+  source: string,
+  collapseStructureSections: boolean,
+): { blocks: MarkdownRenderBlock[]; hiddenSections: StructureOverlapSection[] } {
   const headings = headingsFromBody(source);
   if (!collapseStructureSections || headings.length === 0) {
-    return [{ kind: "markdown", source, headingSlugs: headings.map((h) => h.slug) }];
+    return {
+      blocks: [{ kind: "markdown", source, headingSlugs: headings.map((h) => h.slug) }],
+      hiddenSections: [],
+    };
   }
 
   const lines = source.split(/\r?\n/);
   const blocks: MarkdownRenderBlock[] = [];
+  const hiddenSections: StructureOverlapSection[] = [];
   const pending: string[] = [];
   const pendingSlugs: string[] = [];
   let headingIndex = 0;
@@ -166,8 +176,7 @@ function markdownBlocks(source: string, collapseStructureSections: boolean): Mar
 
     if (isStructureOverlapHeading(title)) {
       flushPending();
-      blocks.push({
-        kind: "structure",
+      hiddenSections.push({
         title,
         slug,
         body: lines.slice(i + 1, end).join("\n").trim(),
@@ -179,37 +188,33 @@ function markdownBlocks(source: string, collapseStructureSections: boolean): Mar
     i = end;
   }
   flushPending();
-  return blocks;
+  return { blocks, hiddenSections };
 }
 
-function StructureOverlapSection({
-  title,
-  slug,
-  body,
+function OriginalStructureSections({
+  sections,
+  projectSlug,
 }: {
-  title: string;
-  slug: string;
-  body: string;
+  sections: StructureOverlapSection[];
+  projectSlug?: string;
 }) {
   const { t } = useI18n();
   return (
-    <section id={slug} className="structure-overlap-section">
-      <div className="structure-overlap-section__head">
-        <h2>{title}</h2>
-        <a href="#sidecar-live-data" className="structure-overlap-section__chip">
-          {t("reader.structure_sidecar_hint")}
-          <span>{t("reader.structure_sidecar_link")}</span>
-        </a>
+    <details id="reader-original-structure" className="reader-original-structure">
+      <summary>{t("reader.structure_original_toggle", sections.length)}</summary>
+      <div className="reader-original-structure__body">
+        {sections.map((section) => (
+          <section key={section.slug} id={section.slug} className="reader-original-structure__section">
+            <h2>{section.title}</h2>
+            {section.body ? (
+              <MarkdownBlock source={section.body} headingSlugs={[]} projectSlug={projectSlug} />
+            ) : (
+              <p>{t("reader.structure_empty")}</p>
+            )}
+          </section>
+        ))}
       </div>
-      <details className="structure-overlap-section__details">
-        <summary>{t("reader.structure_expand")}</summary>
-        {body ? (
-          <MarkdownBlock source={body} headingSlugs={[]} />
-        ) : (
-          <p>{t("reader.structure_empty")}</p>
-        )}
-      </details>
-    </section>
+    </details>
   );
 }
 

@@ -26,6 +26,10 @@ var ErrProjectSlugRequired = errors.New("auth: project_slug is required for this
 // the former because every project is visible.
 var ErrProjectNotFound = errors.New("auth: project not found for the given slug")
 
+// ErrProjectAccessDenied is returned when the project exists but the
+// authenticated OAuth principal has no project_members row for it.
+var ErrProjectAccessDenied = errors.New("auth: project access denied")
+
 // ProjectScope is the per-call answer to "which project, with what
 // role". Returned by ResolveProject after the handler reads the
 // project_slug input field. Handlers downstream pull ProjectID /
@@ -43,10 +47,12 @@ type ProjectScope struct {
 	// to re-query the row they just resolved.
 	ProjectSlug string
 
-	// ProjectLocale is projects.locale (Task task-phase-18-project-
-	// locale-implementation, migration 0015). HumanURL / AbsHumanURL
-	// embed it in /p/{slug}/{locale}/wiki/ share paths. Empty falls
-	// back to "en" inside HumanURL.
+	// ProjectLocale is the project's canonical language metadata. It is
+	// loaded from projects.primary_language; the old projects.locale
+	// identity column was dropped by task-canonical-locale-migration.
+	// Kept as a compatibility field for handlers that still need to show
+	// the canonical language in responses. HumanURL ignores it because
+	// share paths are now /p/{slug}/wiki/...
 	ProjectLocale string
 
 	// Role is the caller's permission tier within this project. V1
@@ -103,11 +109,8 @@ func (s *ProjectScope) Can(action string) bool {
 //   - slug not in projects table → ErrProjectNotFound (caller mistyped)
 //   - DB error → wrapped with %w
 //
-// V1 trusted_local: every Principal sees every project as owner — the
-// project_members table doesn't ship until V1.5 OAuth lands, so we
-// short-circuit the membership lookup and just stamp owner. V1.5+
-// (oauth_github mode) replaces the body with a project_members JOIN
-// keyed on Principal.UserID.
+// trusted_local: every Principal sees every project as owner. oauth_github:
+// project_members decides owner/editor/viewer and no row is a denial.
 func ResolveProject(ctx context.Context, pool *db.Pool, p *Principal, slug string) (*ProjectScope, error) {
 	slug = strings.TrimSpace(slug)
 	if slug == "" {
@@ -118,13 +121,13 @@ func ResolveProject(ctx context.Context, pool *db.Pool, p *Principal, slug strin
 	}
 
 	var (
-		projectID string
-		locale    string
+		projectID       string
+		primaryLanguage string
 	)
 	err := pool.QueryRow(ctx,
-		`SELECT id::text, locale FROM projects WHERE slug = $1 LIMIT 1`,
+		`SELECT id::text, primary_language FROM projects WHERE slug = $1 LIMIT 1`,
 		slug,
-	).Scan(&projectID, &locale)
+	).Scan(&projectID, &primaryLanguage)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("%w: %q", ErrProjectNotFound, slug)
 	}
@@ -133,24 +136,52 @@ func ResolveProject(ctx context.Context, pool *db.Pool, p *Principal, slug strin
 	}
 
 	role := resolveRole(p)
+	if p != nil && p.AuthMode == AuthModeOAuthGitHub {
+		var err error
+		role, err = resolveProjectMemberRole(ctx, pool, p.UserID, projectID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("%w: %q", ErrProjectAccessDenied, slug)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("auth: lookup project membership %q: %w", slug, err)
+		}
+	}
+	if role == "" {
+		return nil, fmt.Errorf("%w: %q", ErrProjectAccessDenied, slug)
+	}
 	return &ProjectScope{
 		ProjectID:     projectID,
 		ProjectSlug:   slug,
-		ProjectLocale: locale,
+		ProjectLocale: primaryLanguage,
 		Role:          role,
 	}, nil
 }
 
 // resolveRole picks the Role for the (Principal, project) pair. V1
-// trusted_local stamps owner unconditionally — single-user self-host
-// has no meaningful role distinction yet. V1.5+ branches on
-// p.AuthMode: oauth_github queries project_members(user_id, role) and
-// returns the looked-up tier; trusted_local stays owner so OSS
-// self-host upgrades don't change behaviour.
+// trusted_local stamps owner unconditionally. OAuth returns empty here
+// because ResolveProject must query project_members.
 func resolveRole(p *Principal) string {
 	if p == nil {
 		return ""
 	}
-	// Future: switch on p.AuthMode once project_members lands.
+	if p.AuthMode == AuthModeOAuthGitHub {
+		return ""
+	}
 	return RoleOwner
+}
+
+func resolveProjectMemberRole(ctx context.Context, pool *db.Pool, userID, projectID string) (string, error) {
+	userID = strings.TrimSpace(userID)
+	projectID = strings.TrimSpace(projectID)
+	if userID == "" || projectID == "" {
+		return "", pgx.ErrNoRows
+	}
+	var role string
+	err := pool.QueryRow(ctx, `
+		SELECT role
+		  FROM project_members
+		 WHERE project_id = $1::uuid AND user_id = $2::uuid
+		 LIMIT 1
+	`, projectID, userID).Scan(&role)
+	return role, err
 }

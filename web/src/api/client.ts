@@ -9,10 +9,8 @@
 
 export type ServerConfig = {
   default_project_slug: string;
-  // Phase 18 — default project's locale segment. Reader's LegacyRedirect
-  // inserts it into /p/:slug/... URLs so bare /wiki/... shares still
-  // resolve to a canonical /p/:slug/:locale/wiki/... URL. Empty falls
-  // back to "en" in the UI helper.
+  // Compatibility alias for the default project's primary_language.
+  // Canonical Reader URLs no longer carry locale.
   default_project_locale?: string;
   multi_project: boolean;
   version: string;
@@ -37,12 +35,17 @@ export type Project = {
   description?: string;
   color?: string;
   primary_language: string;
-  // Phase 18 — canonical locale of this project row. Same slug may
-  // live in multiple locales; (slug, locale) is the unique key.
+  sensitive_ops?: "auto" | "confirm";
+  current_role?: "owner" | "editor" | "viewer";
+  // Compatibility alias for primary_language. Locale is metadata, not a
+  // route or identity key.
   locale?: string;
   areas_count: number;
   artifacts_count: number;
   created_at: string;
+  capabilities?: {
+    review_queue_supported?: boolean;
+  };
 };
 
 export type ProjectListItem = {
@@ -97,6 +100,10 @@ export type ArtifactMeta = {
   audience?: "owner_only" | "approvers" | "project_readers";
   next_context_policy?: "default" | "opt_in" | "excluded";
   verification_state?: "verified" | "partially_verified" | "unverified";
+  applies_to_areas?: string[];
+  applies_to_types?: string[];
+  rule_severity?: "binding" | "guidance" | "reference";
+  rule_excerpt?: string;
 };
 
 // SourceSessionRef is the pass-through of the JSONB column by the same name.
@@ -156,6 +163,7 @@ export type ArtifactRef = {
   type: string;
   title: string;
   area_slug: string;
+  body_locale?: string;
   completeness: string;
   status: string;
   review_state: string;
@@ -305,6 +313,94 @@ export type DiffResp = {
   unified_diff: string;
 };
 
+export type ChangeGroupImportance = {
+  score: number;
+  level: "low" | "medium" | "high";
+  reasons?: string[];
+};
+
+export type ChangeGroupTypeCount = {
+  type: string;
+  count: number;
+};
+
+export type ChangeGroupArtifactRef = {
+  id: string;
+  slug: string;
+  title: string;
+  type: string;
+  area_slug: string;
+};
+
+export type ChangeGroup = {
+  group_id: string;
+  group_kind: "human_trigger" | "auto_sync" | "maintenance" | "system";
+  grouping_key: { kind: string; value: string; confidence: "low" | "medium" | "high" };
+  commit_summary: string;
+  revision_count: number;
+  artifact_count: number;
+  type_counts?: ChangeGroupTypeCount[];
+  first_artifact?: ChangeGroupArtifactRef;
+  areas: string[];
+  authors: string[];
+  time_start: string;
+  time_end: string;
+  importance: ChangeGroupImportance;
+  verification_state: string;
+};
+
+export type TodaySummary = {
+  headline: string;
+  bullets: string[];
+  source: "llm" | "rule_based";
+  ai_hint?: string;
+  created_at: string;
+};
+
+export type TodayResp = {
+  project_slug: string;
+  groups: ChangeGroup[];
+  summary: TodaySummary;
+  baseline: {
+    revision_watermark: number;
+    last_seen_at?: string;
+    defaulted_to_days?: number;
+  };
+  max_revision_id: number;
+};
+
+export type InboxResp = {
+  project_slug: string;
+  count: number;
+  items: ArtifactRef[];
+};
+
+export type InboxReviewResp = {
+  status: "accepted";
+  artifact_id: string;
+  slug: string;
+  review_state: "approved" | "rejected";
+  row_status: "published" | "archived";
+};
+
+export type ReadEventInput = {
+  artifact_id: string;
+  artifact_slug?: string;
+  started_at: string;
+  ended_at: string;
+  active_seconds: number;
+  scroll_max_pct: number;
+  idle_seconds: number;
+  locale?: string;
+};
+
+export type ReadEventResp = {
+  id: string;
+  artifact_id: string;
+  active_seconds: number;
+  scroll_max_pct: number;
+};
+
 const base = "";
 
 async function j<T>(path: string): Promise<T> {
@@ -377,6 +473,7 @@ export type CreateProjectInput = {
   primary_language: "en" | "ko" | "ja";
   description?: string;
   color?: string;
+  git_remote_url?: string;
   owner_id?: string;
 };
 
@@ -389,6 +486,30 @@ export type CreateProjectResp = {
   default_area: string;
   areas_created: number;
   templates_created: number;
+};
+
+export type InviteRole = "editor" | "viewer";
+
+export type InviteIssueInput = {
+  role: InviteRole;
+  expires_in_hours: number;
+};
+
+export type InviteIssueResp = {
+  invite_url: string;
+  expires_at: string;
+};
+
+export type InviteJoinInfo = {
+  project_slug: string;
+  project_name: string;
+  role: InviteRole;
+  expires_at: string;
+};
+
+export type InviteError = {
+  error_code: string;
+  message: string;
 };
 
 // ProjectCreateError mirrors the REST envelope from
@@ -514,6 +635,55 @@ export const api = {
 
   // Project-scoped
   project: (project: string) => j<Project>(p(project)),
+  issueInvite: async (
+    project: string,
+    input: InviteIssueInput,
+  ): Promise<InviteIssueResp> => {
+    const res = await fetch(`${p(project)}/invite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      let parsed: InviteError | null = null;
+      try {
+        parsed = (await res.json()) as InviteError;
+      } catch {
+        // fall through to generic
+      }
+      const err = new Error(
+        parsed?.message ?? `${res.status} ${res.statusText}`,
+      ) as Error & Partial<InviteError>;
+      if (parsed) {
+        err.error_code = parsed.error_code;
+        err.message = parsed.message;
+      }
+      throw err;
+    }
+    return (await res.json()) as InviteIssueResp;
+  },
+  inviteInfo: async (invite: string): Promise<InviteJoinInfo> => {
+    const res = await fetch(`/join?invite=${encodeURIComponent(invite)}`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      let parsed: InviteError | null = null;
+      try {
+        parsed = (await res.json()) as InviteError;
+      } catch {
+        // fall through to generic
+      }
+      const err = new Error(
+        parsed?.message ?? `${res.status} ${res.statusText}`,
+      ) as Error & Partial<InviteError>;
+      if (parsed) {
+        err.error_code = parsed.error_code;
+        err.message = parsed.message;
+      }
+      throw err;
+    }
+    return (await res.json()) as InviteJoinInfo;
+  },
   areas: (project: string, params?: { includeTemplates?: boolean }) => {
     const qs = new URLSearchParams();
     if (params?.includeTemplates) qs.set("include_templates", "true");
@@ -534,6 +704,64 @@ export const api = {
   },
   artifact: (project: string, idOrSlug: string) =>
     j<Artifact>(`${p(project)}/artifacts/${encodeURIComponent(idOrSlug)}`),
+  inbox: (project: string) => j<InboxResp>(`${p(project)}/inbox`),
+  inboxReview: async (
+    project: string,
+    idOrSlug: string,
+    decision: "approve" | "reject",
+  ): Promise<InboxReviewResp> => {
+    const res = await fetch(
+      `${p(project)}/inbox/${encodeURIComponent(idOrSlug)}/review`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          decision,
+          reviewer_id: "reader",
+          commit_msg: `Reader Inbox ${decision}`,
+        }),
+      },
+    );
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`${res.status} ${res.statusText}: ${body.slice(0, 200)}`);
+    }
+    return (await res.json()) as InboxReviewResp;
+  },
+  changeGroups: (project: string, params?: { limit?: number; area?: string; kind?: string; locale?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.area) qs.set("area", params.area);
+    if (params?.kind) qs.set("kind", params.kind);
+    if (params?.locale) qs.set("locale", params.locale);
+    const q = qs.toString();
+    return j<TodayResp>(`${p(project)}/change-groups${q ? `?${q}` : ""}`);
+  },
+  readEvent: async (
+    project: string,
+    input: ReadEventInput,
+    opts?: { keepalive?: boolean },
+  ) => {
+    const res = await fetch(`${p(project)}/read-events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+      keepalive: opts?.keepalive,
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`${res.status} ${res.statusText}: ${body.slice(0, 200)}`);
+    }
+    return res.json() as Promise<ReadEventResp>;
+  },
+  exportProjectUrl: (project: string, params?: { area?: string; includeRevisions?: boolean; format?: "zip" | "tar" }) => {
+    const qs = new URLSearchParams();
+    if (params?.area) qs.set("area", params.area);
+    if (params?.includeRevisions) qs.set("include_revisions", "true");
+    if (params?.format) qs.set("format", params.format);
+    const q = qs.toString();
+    return `${p(project)}/export${q ? `?${q}` : ""}`;
+  },
   search: (project: string, q: string) =>
     j<{ query: string; project_slug: string; hits: SearchHit[]; notice?: string }>(
       `${p(project)}/search?q=${encodeURIComponent(q)}`,

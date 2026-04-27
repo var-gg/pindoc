@@ -8,9 +8,7 @@
 // `-http <addr>` (or PINDOC_HTTP_MCP_ADDR env) flips the binary into
 // long-running daemon mode. A single daemon serves multiple agent
 // sessions over streamable-HTTP at one account-level URL: /mcp.
-// Connections are no longer scoped to a project (Decision
-// mcp-scope-account-level-industry-standard supersedes the per-
-// connection /mcp/p/{project} pattern); each tool input carries
+// Connections are not scoped to a project; each tool input carries
 // project_slug and the handler resolves it per call. See
 // docs/03-architecture.md.
 package main
@@ -21,8 +19,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -31,13 +31,16 @@ import (
 	"syscall"
 	"time"
 
+	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	pauth "github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/httpapi"
 	pmcp "github.com/var-gg/pindoc/internal/pindoc/mcp"
+	"github.com/var-gg/pindoc/internal/pindoc/projects"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
 	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
 )
@@ -78,11 +81,16 @@ func main() {
 		logger.Error("config load failed", "err", err)
 		os.Exit(1)
 	}
+	if err := validateServerConfig(cfg); err != nil {
+		logger.Error("auth mode unsupported", "err", err)
+		os.Exit(1)
+	}
 
 	logger.Info("pindoc-server starting",
 		"version", version,
 		"commit", commit,
 		"transport", transportName,
+		"auth_mode", cfg.AuthMode,
 		"db_configured", cfg.DatabaseURL != "",
 	)
 
@@ -105,6 +113,11 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("db ready", "migrations", "applied")
+	if normalized, err := projects.BootstrapDefaultProjectRepoFromWorkdir(ctx, pool, cfg.ProjectSlug, ""); err != nil {
+		logger.Info("default project repo bootstrap skipped", "project_slug", cfg.ProjectSlug, "err", err)
+	} else if normalized != "" {
+		logger.Info("default project repo bootstrap checked", "project_slug", cfg.ProjectSlug, "git_remote_url", normalized)
+	}
 
 	embedder, err := embed.Build(cfg.Embed)
 	if err != nil {
@@ -118,7 +131,7 @@ func main() {
 		"multilingual", info.Multilingual,
 	)
 	if info.Name == "stub" {
-		logger.Warn("using stub embedder — retrieval quality is hash-based, not semantic. Set PINDOC_EMBED_PROVIDER=http + PINDOC_EMBED_ENDPOINT=... to enable real embeddings.")
+		logger.Warn(stubEmbedderWarning())
 	}
 
 	// Phase 14a: operator-editable settings, loaded from DB with one-time
@@ -160,18 +173,14 @@ func main() {
 	defer tele.Close()
 
 	if httpAddr != "" {
-		// Resolve the default project's locale once so the Reader can
-		// rebuild legacy /wiki/... URLs into /p/<slug>/<locale>/...
-		// without an extra round-trip — kept on the Reader API side
-		// because share-link rendering remains "default project of the
-		// instance" even though MCP scope is now per-call (Decision
-		// mcp-scope-account-level-industry-standard). Task task-phase-
-		// 18-project-locale-implementation.
+		// Resolve the default project's canonical language once for the
+		// compatibility `default_project_locale` API field. Reader URLs no
+		// longer carry locale after task-canonical-locale-migration.
 		var defaultLocale string
 		if err := pool.QueryRow(ctx,
-			`SELECT locale FROM projects WHERE slug = $1 LIMIT 1`, cfg.ProjectSlug,
+			`SELECT primary_language FROM projects WHERE slug = $1 LIMIT 1`, cfg.ProjectSlug,
 		).Scan(&defaultLocale); err != nil {
-			logger.Info("default project locale lookup skipped",
+			logger.Info("default project language lookup skipped",
 				"project_slug", cfg.ProjectSlug, "err", err)
 		}
 
@@ -195,6 +204,42 @@ func main() {
 			logger.Info("Reader SPA disabled — set PINDOC_SPA_DIST or `pnpm --dir web build` to enable")
 		}
 
+		var oauthSvc *pauth.OAuthService
+		if cfg.AuthMode == config.AuthModeOAuthGitHub {
+			oauthUserID, err := pauth.EnsureBootstrapUser(ctx, pool, cfg.UserName, cfg.UserEmail)
+			if err != nil {
+				logger.Error("oauth bootstrap user failed", "err", err)
+				os.Exit(1)
+			}
+			if err := projects.EnsureDefaultProjectOwnerMembership(ctx, pool, cfg.ProjectSlug, oauthUserID); err != nil {
+				logger.Error("oauth default project membership bootstrap failed", "err", err)
+				os.Exit(1)
+			}
+			publicBaseURL := daemonPublicBaseURL(ssStore.Get().PublicBaseURL, httpAddr)
+			redirectBaseURL := daemonPublicBaseURL(firstNonEmpty(cfg.OAuthRedirectBaseURL, ssStore.Get().PublicBaseURL), httpAddr)
+			oauthSvc, err = pauth.NewOAuthService(ctx, pool, pauth.OAuthConfig{
+				Issuer:             publicBaseURL,
+				PublicBaseURL:      publicBaseURL,
+				RedirectBaseURL:    redirectBaseURL,
+				SigningKeyPath:     cfg.OAuthSigningKeyPath,
+				ClientID:           cfg.OAuthClientID,
+				ClientSecret:       cfg.OAuthClientSecret,
+				RedirectURIs:       cfg.OAuthRedirectURIs,
+				BootstrapUserID:    oauthUserID,
+				GitHubClientID:     cfg.GitHubClientID,
+				GitHubClientSecret: cfg.GitHubClientSecret,
+			})
+			if err != nil {
+				logger.Error("oauth service init failed", "err", err)
+				os.Exit(1)
+			}
+			logger.Info("oauth service ready",
+				"issuer", publicBaseURL,
+				"client_id", cfg.OAuthClientID,
+				"bootstrap_user_id", oauthUserID,
+			)
+		}
+
 		apiHandler := httpapi.New(cfg, httpapi.Deps{
 			DB:                   pool,
 			Logger:               logger,
@@ -203,6 +248,7 @@ func main() {
 			Embedder:             embedder,
 			Settings:             ssStore,
 			Telemetry:            tele,
+			OAuth:                oauthSvc,
 			Version:              version,
 			BuildCommit:          commit,
 			StartTime:            startTime,
@@ -220,11 +266,11 @@ func main() {
 			Settings:  ssStore,
 			Telemetry: tele,
 			Transport: "streamable_http",
-		}, apiHandler)
+		}, apiHandler, oauthSvc)
 		return
 	}
 
-	server := pmcp.NewServer(pmcp.Options{
+	server, err := pmcp.NewServer(pmcp.Options{
 		Name:      "pindoc",
 		Version:   version,
 		Logger:    logger,
@@ -236,6 +282,10 @@ func main() {
 		Telemetry: tele,
 		Transport: "stdio",
 	})
+	if err != nil {
+		logger.Error("mcp server init failed", "err", err)
+		os.Exit(1)
+	}
 
 	err = server.Run(ctx, &sdk.StdioTransport{})
 	switch {
@@ -266,15 +316,31 @@ func main() {
 // dependencies; apiHandler carries the Reader API mux (httpapi.New) —
 // Go 1.22's ServeMux picks /mcp over the catch-all `/` so the routing
 // is unambiguous.
-func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOpts pmcp.Options, apiHandler http.Handler) {
-	mcpServer := pmcp.NewServer(baseOpts).SDK()
+func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOpts pmcp.Options, apiHandler http.Handler, oauthSvc *pauth.OAuthService) {
+	mcp, err := pmcp.NewServer(baseOpts)
+	if err != nil {
+		logger.Error("mcp server init failed", "err", err)
+		os.Exit(1)
+	}
+	mcpServer := mcp.SDK()
 	getServer := func(_ *http.Request) *sdk.Server {
 		return mcpServer
 	}
 	streamHandler := sdk.NewStreamableHTTPHandler(getServer, nil)
+	var mcpHandler http.Handler = streamHandler
+	if baseOpts.Config != nil && baseOpts.Config.AuthMode == config.AuthModeOAuthGitHub {
+		if oauthSvc == nil {
+			logger.Error("oauth_github mode requires oauth service")
+			os.Exit(1)
+		}
+		mcpHandler = mcpauth.RequireBearerToken(oauthSvc.TokenVerifier, &mcpauth.RequireBearerTokenOptions{
+			ResourceMetadataURL: oauthSvc.ResourceMetadataURL(),
+			Scopes:              []string{pauth.ScopePindoc},
+		})(mcpHandler)
+	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", streamHandler)
+	mux.Handle("/mcp", mcpHandler)
 	// Catch-all delegates everything else (/, /health, /api/...) to the
 	// Reader API mux. ServeMux picks /mcp over `/` because it is the
 	// more specific pattern.
@@ -321,4 +387,81 @@ func agentIDSource() string {
 		return "env"
 	}
 	return "generated"
+}
+
+func validateServerAuthMode(mode config.AuthMode) error {
+	if mode == "" || mode == config.AuthModeTrustedLocal {
+		return nil
+	}
+	switch mode {
+	case config.AuthModeOAuthGitHub:
+		return nil
+	case config.AuthModePublicReadonly, config.AuthModeSingleUser:
+		return fmt.Errorf("PINDOC_AUTH_MODE=%s is not supported yet in V1; use trusted_local", mode)
+	default:
+		return fmt.Errorf("invalid PINDOC_AUTH_MODE: '%s'. valid: %s", mode, config.ValidAuthModesString())
+	}
+}
+
+func validateServerConfig(cfg *config.Config) error {
+	if cfg == nil {
+		return fmt.Errorf("config is required")
+	}
+	if err := validateServerAuthMode(cfg.AuthMode); err != nil {
+		return err
+	}
+	if cfg.AuthMode == config.AuthModeOAuthGitHub {
+		missing := []string{}
+		if strings.TrimSpace(cfg.GitHubClientID) == "" {
+			missing = append(missing, "PINDOC_GITHUB_CLIENT_ID")
+		}
+		if strings.TrimSpace(cfg.GitHubClientSecret) == "" {
+			missing = append(missing, "PINDOC_GITHUB_CLIENT_SECRET")
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("PINDOC_AUTH_MODE=oauth_github requires %s", strings.Join(missing, " and "))
+		}
+	}
+	return nil
+}
+
+func daemonPublicBaseURL(publicBaseURL, addr string) string {
+	publicBaseURL = strings.TrimRight(strings.TrimSpace(publicBaseURL), "/")
+	if publicBaseURL != "" {
+		if strings.HasPrefix(publicBaseURL, "http://") || strings.HasPrefix(publicBaseURL, "https://") {
+			return publicBaseURL
+		}
+		return "http://" + publicBaseURL
+	}
+	host := strings.TrimSpace(addr)
+	if h, p, err := net.SplitHostPort(addr); err == nil {
+		h = strings.Trim(h, "[]")
+		switch h {
+		case "", "0.0.0.0", "::":
+			h = "127.0.0.1"
+		}
+		host = net.JoinHostPort(h, p)
+	}
+	return "http://" + host
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func stubEmbedderWarning() string {
+	return strings.TrimSpace(`
++------------------------------------------------------------+
+| EMBEDDER WARNING                                           |
+| PINDOC_EMBED_PROVIDER=stub is active.                      |
+| Search quality is hash-based, not semantic.                |
+| For normal Docker boot, unset PINDOC_COMPOSE_EMBED_PROVIDER |
+| so the default Gemma embedder starts.                      |
+| Re-embed affected artifacts after returning to real search. |
++------------------------------------------------------------+`)
 }

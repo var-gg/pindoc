@@ -4,6 +4,7 @@ import { ChevronRight } from "lucide-react";
 import { api, type AcceptanceChecklist, type DiffResp, type MetaDeltaEntry } from "../api/client";
 import { useI18n } from "../i18n";
 import { RevisionTypeBadge } from "./RevisionTypeBadge";
+import { SurfaceHeader } from "./SurfacePrimitives";
 
 type Load =
   | { kind: "loading" }
@@ -11,7 +12,7 @@ type Load =
   | { kind: "ready"; data: DiffResp };
 
 export function Diff() {
-  const { project = "", locale = "", slug = "" } = useParams<{ project: string; locale: string; slug: string }>();
+  const { project = "", slug = "" } = useParams<{ project: string; slug: string }>();
   const [search] = useSearchParams();
   const fromRev = Number(search.get("from")) || undefined;
   const toRev = Number(search.get("to")) || undefined;
@@ -56,15 +57,15 @@ export function Diff() {
     <main className="content">
       <article className="reader-article" style={{ maxWidth: 980 }}>
         <div className="crumbs">
-          <Link to={`/p/${project}/${locale}/wiki/${slug}`}>{data.to.title}</Link>
+          <Link to={`/p/${project}/wiki/${slug}`}>{data.to.title}</Link>
           <ChevronRight className="lucide" />
-          <Link to={`/p/${project}/${locale}/wiki/${slug}/history`}>{t("history.title")}</Link>
+          <Link to={`/p/${project}/wiki/${slug}/history`}>{t("history.title")}</Link>
           <ChevronRight className="lucide" />
           <span className="current">
             rev {data.from.revision_number} → rev {data.to.revision_number}
           </span>
         </div>
-        <h1 className="art-title">{t("diff.title", data.from.revision_number, data.to.revision_number)}</h1>
+        <SurfaceHeader name="diff" count={data.stats.lines_added + data.stats.lines_removed} />
 
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", color: "var(--fg-3)", fontFamily: "var(--font-mono)", fontSize: 12, marginBottom: 32, paddingBottom: 20, borderBottom: "1px solid var(--border)" }}>
           <span>{data.from.author_id} → {data.to.author_id}</span>

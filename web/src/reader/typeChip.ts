@@ -7,24 +7,11 @@
 // "APIEndpoint" → "apiendpoint", matching the class names declared in
 // web/src/styles/reader.css (Task task-type-palette-binding).
 
-const KNOWN_VARIANTS = new Set([
-  "decision",
-  "analysis",
-  "task",
-  "debug",
-  "glossary",
-  "flow",
-  "tc",
-  "feature",
-  "apiendpoint",
-  "screen",
-  "datamodel",
-  "verificationreport",
-]);
+import { visualTypeVariant } from "./visualLanguage";
 
 export function typeChipClass(type: string | undefined | null): string {
   if (!type) return "type-chip";
-  const variant = type.toLowerCase().replace(/[^a-z]/g, "");
-  if (!KNOWN_VARIANTS.has(variant)) return "type-chip";
+  const variant = visualTypeVariant(type);
+  if (!variant) return "type-chip";
   return `type-chip type-chip--${variant}`;
 }

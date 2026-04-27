@@ -10,6 +10,7 @@ import {
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
 import { RevisionTypeBadge } from "./RevisionTypeBadge";
+import { SurfaceHeader } from "./SurfacePrimitives";
 
 type Load =
   | { kind: "loading" }
@@ -38,7 +39,7 @@ const revisionTypes: RevisionType[] = [
 const rollupWindowMs = 30 * 60 * 1000;
 
 export function History() {
-  const { project = "", locale = "", slug = "" } = useParams<{ project: string; locale: string; slug: string }>();
+  const { project = "", slug = "" } = useParams<{ project: string; slug: string }>();
   const { t } = useI18n();
   const [state, setState] = useState<Load>({ kind: "loading" });
   const [enabledTypes, setEnabledTypes] = useState<Record<RevisionType, boolean>>({
@@ -88,15 +89,12 @@ export function History() {
     <main className="content">
       <article className="reader-article">
         <div className="crumbs">
-          <Link to={`/p/${project}/${locale}/wiki/${slug}`}>{data.title}</Link>
+          <Link to={`/p/${project}/wiki/${slug}`}>{data.title}</Link>
           <ChevronRight className="lucide" />
           <span className="current">{t("history.title")}</span>
         </div>
-        <h1 className="art-title">{t("history.title")}</h1>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 24 }}>
-          <div style={{ color: "var(--fg-3)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
-            {t("history.count", data.revisions.length)}
-          </div>
+        <SurfaceHeader name="history" count={data.revisions.length} />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 16, flexWrap: "wrap", marginBottom: 24 }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }} aria-label={t("history.type_filters")}>
             {revisionTypes.map((rt) => (
               <button
@@ -122,7 +120,6 @@ export function History() {
               key={entry.kind === "single" ? `rev-${entry.revision.revision_number}` : entry.key}
               entry={entry}
               project={project}
-              locale={locale}
               slug={slug}
               allRevisions={data.revisions}
               expanded={Boolean(expanded[entry.kind === "rollup" ? entry.key : ""])}
@@ -141,7 +138,6 @@ export function History() {
 function TimelineNode({
   entry,
   project,
-  locale,
   slug,
   allRevisions,
   expanded,
@@ -149,7 +145,6 @@ function TimelineNode({
 }: {
   entry: TimelineEntry;
   project: string;
-  locale: string;
   slug: string;
   allRevisions: RevisionRow[];
   expanded: boolean;
@@ -161,7 +156,6 @@ function TimelineNode({
       <RevisionListItem
         revision={entry.revision}
         project={project}
-        locale={locale}
         slug={slug}
         previous={previousRevision(allRevisions, entry.revision)}
       />
@@ -213,7 +207,6 @@ function TimelineNode({
               key={r.revision_number}
               revision={r}
               project={project}
-              locale={locale}
               slug={slug}
               previous={previousRevision(allRevisions, r)}
               nested
@@ -228,14 +221,12 @@ function TimelineNode({
 function RevisionListItem({
   revision,
   project,
-  locale,
   slug,
   previous,
   nested = false,
 }: {
   revision: RevisionRow;
   project: string;
-  locale: string;
   slug: string;
   previous?: RevisionRow;
   nested?: boolean;
@@ -243,7 +234,7 @@ function RevisionListItem({
   const { t } = useI18n();
   const av = agentAvatar(revision.author_id);
   const diffHref = previous
-    ? `/p/${project}/${locale}/wiki/${slug}/diff?from=${previous.revision_number}&to=${revision.revision_number}`
+    ? `/p/${project}/wiki/${slug}/diff?from=${previous.revision_number}&to=${revision.revision_number}`
     : null;
   const revisionType = revisionTypeOf(revision);
   const system = revisionType === "system_auto";

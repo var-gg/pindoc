@@ -1,0 +1,81 @@
+package tools
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestToolsetDrift(t *testing.T) {
+	if got, _ := toolsetDrift("", ToolsetVersion()); got != nil {
+		t.Fatalf("missing client hash should produce nil requires_resync")
+	}
+
+	got, changed := toolsetDrift(ToolsetVersion(), ToolsetVersion())
+	if got == nil || *got {
+		t.Fatalf("matching hash requires_resync = %v; want false", got)
+	}
+	if len(changed) != 0 {
+		t.Fatalf("matching hash changed tools = %v; want empty", changed)
+	}
+
+	got, changed = toolsetDrift("0:stale", ToolsetVersion())
+	if got == nil || !*got {
+		t.Fatalf("stale hash requires_resync = %v; want true", got)
+	}
+	if len(changed) == 0 {
+		t.Fatalf("stale hash should surface changed tool names")
+	}
+}
+
+func TestDetectHarnessDrift(t *testing.T) {
+	t.Run("missing PINDOC.md", func(t *testing.T) {
+		dir := t.TempDir()
+		hint := detectHarnessDrift(dir, "pindoc")
+		if hint == nil || !hint.Detected {
+			t.Fatalf("missing PINDOC.md should be detected: %+v", hint)
+		}
+		if hint.SuggestedCall != "pindoc.harness.install" {
+			t.Fatalf("suggested_call = %q", hint.SuggestedCall)
+		}
+	})
+
+	t.Run("matching frontmatter", func(t *testing.T) {
+		dir := t.TempDir()
+		writeTestPindoc(t, dir, "project_slug: pindoc\nschema_version: 1\n")
+		hint := detectHarnessDrift(dir, "pindoc")
+		if hint == nil || hint.Detected {
+			t.Fatalf("matching PINDOC.md should not drift: %+v", hint)
+		}
+	})
+
+	t.Run("project slug mismatch", func(t *testing.T) {
+		dir := t.TempDir()
+		writeTestPindoc(t, dir, "project_slug: other\nschema_version: 1\n")
+		hint := detectHarnessDrift(dir, "pindoc")
+		if hint == nil || !hint.Detected || hint.FoundProjectSlug != "other" {
+			t.Fatalf("mismatch should be detected with found slug: %+v", hint)
+		}
+		if !strings.Contains(hint.Reason, "expected project_slug") {
+			t.Fatalf("mismatch reason should mention expected project_slug: %q", hint.Reason)
+		}
+	})
+
+	t.Run("missing schema version", func(t *testing.T) {
+		dir := t.TempDir()
+		writeTestPindoc(t, dir, "project_slug: pindoc\n")
+		hint := detectHarnessDrift(dir, "pindoc")
+		if hint == nil || !hint.Detected || !strings.Contains(hint.Reason, "schema_version") {
+			t.Fatalf("missing schema_version should be detected: %+v", hint)
+		}
+	})
+}
+
+func writeTestPindoc(t *testing.T, dir, frontmatter string) {
+	t.Helper()
+	body := "---\n" + frontmatter + "---\n\n# PINDOC.md\n"
+	if err := os.WriteFile(filepath.Join(dir, "PINDOC.md"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write PINDOC.md: %v", err)
+	}
+}

@@ -8,6 +8,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -23,9 +24,21 @@ type Config struct {
 	// LogLevel is "debug" | "info" | "warn" | "error".
 	LogLevel string
 
+	// AuthMode selects the resolver family the server boots with.
+	// V1 supports trusted_local only; the other enum values are accepted
+	// at config-parse time so operators get a stable error when they try
+	// to enable a future mode before its implementation lands.
+	AuthMode AuthMode
+
 	// UserLanguage hints NOT_READY template selection until Phase 5 loads
 	// the real value from PINDOC.md. Default "en".
 	UserLanguage string
+
+	// ReceiptExemptionLimit is the create-path search_receipt bootstrap
+	// allowance per area/author before artifact.propose requires an
+	// explicit search/context receipt again. Default 5. Set to 0 to
+	// disable the exemption while keeping normal search_receipt gating.
+	ReceiptExemptionLimit int
 
 	// ProjectSlug is the MCP server's active scope and the HTTP API's default
 	// project. URL shares without /p/{project}/ prefix redirect here; MCP
@@ -35,6 +48,11 @@ type Config struct {
 
 	// Embed controls which embedding provider is built at startup.
 	Embed embed.Config
+
+	// Summary controls the optional source-bound LLM used by the Today
+	// briefing. Empty Endpoint means the Reader always uses the deterministic
+	// rule-based template and still writes/reads the summary cache.
+	Summary SummaryConfig
 
 	// RepoRoot is the absolute filesystem path of the working tree the
 	// agent pins against. Optional; set via PINDOC_REPO_ROOT. When
@@ -54,20 +72,98 @@ type Config struct {
 	// OAuth replaces these env vars with session-resolved principals.
 	UserName  string
 	UserEmail string
+
+	// OAuth 2.1 authorization-server settings for auth_mode=oauth_github.
+	// Pindoc acts as the MCP-facing OAuth authorization server while
+	// GitHub is the upstream identity provider used during signup/login.
+	OAuthSigningKeyPath  string
+	OAuthClientID        string
+	OAuthClientSecret    string
+	OAuthRedirectURIs    []string
+	OAuthRedirectBaseURL string
+	GitHubClientID       string
+	GitHubClientSecret   string
 }
 
-// Load builds a Config from process env vars. It never fails for Phase 1
-// usage (there are no required fields); the error return is reserved for
-// when real validation lands.
+type SummaryConfig struct {
+	Endpoint      string
+	APIKey        string
+	Model         string
+	DailyTokenCap int
+	GroupCap      int
+	Timeout       time.Duration
+}
+
+type AuthMode string
+
+const (
+	AuthModeTrustedLocal   AuthMode = "trusted_local"
+	AuthModePublicReadonly AuthMode = "public_readonly"
+	AuthModeSingleUser     AuthMode = "single_user"
+	AuthModeOAuthGitHub    AuthMode = "oauth_github"
+)
+
+func (m AuthMode) Valid() bool {
+	switch m {
+	case AuthModeTrustedLocal, AuthModePublicReadonly, AuthModeSingleUser, AuthModeOAuthGitHub:
+		return true
+	default:
+		return false
+	}
+}
+
+func ValidAuthModesString() string {
+	return strings.Join(validAuthModeStrings(), "|")
+}
+
+func parseAuthMode(raw string) (AuthMode, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return AuthModeTrustedLocal, nil
+	}
+	mode := AuthMode(strings.ToLower(trimmed))
+	if !mode.Valid() {
+		return "", fmt.Errorf("invalid PINDOC_AUTH_MODE: '%s'. valid: %s", trimmed, ValidAuthModesString())
+	}
+	return mode, nil
+}
+
+func validAuthModeStrings() []string {
+	return []string{
+		string(AuthModeTrustedLocal),
+		string(AuthModePublicReadonly),
+		string(AuthModeSingleUser),
+		string(AuthModeOAuthGitHub),
+	}
+}
+
+// Load builds a Config from process env vars and fails fast on invalid enum
+// values so a misspelled security mode never silently boots the wrong model.
 func Load() (*Config, error) {
+	authMode, err := parseAuthMode(env("PINDOC_AUTH_MODE", string(AuthModeTrustedLocal)))
+	if err != nil {
+		return nil, err
+	}
 	cfg := &Config{
-		DatabaseURL:  env("PINDOC_DATABASE_URL", "postgres://pindoc:pindoc_dev@localhost:5432/pindoc?sslmode=disable"),
-		LogLevel:     env("PINDOC_LOG_LEVEL", "info"),
-		UserLanguage: strings.ToLower(env("PINDOC_USER_LANGUAGE", "en")),
-		ProjectSlug:  env("PINDOC_PROJECT", "pindoc"),
-		RepoRoot:     env("PINDOC_REPO_ROOT", ""),
-		UserName:     strings.TrimSpace(env("PINDOC_USER_NAME", "")),
-		UserEmail:    strings.TrimSpace(env("PINDOC_USER_EMAIL", "")),
+		DatabaseURL:           env("PINDOC_DATABASE_URL", "postgres://pindoc:pindoc_dev@localhost:5432/pindoc?sslmode=disable"),
+		LogLevel:              env("PINDOC_LOG_LEVEL", "info"),
+		AuthMode:              authMode,
+		UserLanguage:          strings.ToLower(env("PINDOC_USER_LANGUAGE", "en")),
+		ReceiptExemptionLimit: envInt("PINDOC_RECEIPT_EXEMPTION_LIMIT", 5),
+		ProjectSlug:           env("PINDOC_PROJECT", "pindoc"),
+		RepoRoot:              env("PINDOC_REPO_ROOT", ""),
+		UserName:              strings.TrimSpace(env("PINDOC_USER_NAME", "")),
+		UserEmail:             strings.TrimSpace(env("PINDOC_USER_EMAIL", "")),
+		OAuthSigningKeyPath:   env("PINDOC_OAUTH_SIGNING_KEY_PATH", "./data/oauth-signing.pem"),
+		OAuthClientID:         strings.TrimSpace(env("PINDOC_OAUTH_CLIENT_ID", "claude-desktop")),
+		OAuthClientSecret:     strings.TrimSpace(env("PINDOC_OAUTH_CLIENT_SECRET", "")),
+		OAuthRedirectBaseURL:  strings.TrimSpace(env("PINDOC_OAUTH_REDIRECT_BASE_URL", "")),
+		GitHubClientID:        strings.TrimSpace(env("PINDOC_GITHUB_CLIENT_ID", "")),
+		GitHubClientSecret:    strings.TrimSpace(env("PINDOC_GITHUB_CLIENT_SECRET", "")),
+		OAuthRedirectURIs: envList("PINDOC_OAUTH_REDIRECT_URIS", []string{
+			"http://127.0.0.1:3846/callback",
+			"http://localhost:3846/callback",
+		}),
 		Embed: embed.Config{
 			// Empty default → gemma (bundled on-device embeddinggemma-300m).
 			// Set explicitly to "stub" for offline unit tests, "http" for
@@ -86,6 +182,14 @@ func Load() (*Config, error) {
 			Timeout:        envDuration("PINDOC_EMBED_TIMEOUT", 0),
 			PrefixQuery:    env("PINDOC_EMBED_PREFIX_QUERY", ""),
 			PrefixDocument: env("PINDOC_EMBED_PREFIX_DOCUMENT", ""),
+		},
+		Summary: SummaryConfig{
+			Endpoint:      env("PINDOC_SUMMARY_LLM_ENDPOINT", ""),
+			APIKey:        env("PINDOC_SUMMARY_LLM_API_KEY", ""),
+			Model:         env("PINDOC_SUMMARY_LLM_MODEL", ""),
+			DailyTokenCap: envInt("PINDOC_SUMMARY_DAILY_TOKEN_CAP", 20000),
+			GroupCap:      envInt("PINDOC_SUMMARY_GROUP_CAP", 20),
+			Timeout:       envDuration("PINDOC_SUMMARY_LLM_TIMEOUT", 15*time.Second),
 		},
 	}
 	return cfg, nil
@@ -116,6 +220,30 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 		}
 	}
 	return fallback
+}
+
+func envList(key string, fallback []string) []string {
+	raw, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return append([]string(nil), fallback...)
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n'
+	})
+	out := make([]string, 0, len(parts))
+	seen := map[string]bool{}
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return append([]string(nil), fallback...)
+	}
+	return out
 }
 
 func env(key, fallback string) string {

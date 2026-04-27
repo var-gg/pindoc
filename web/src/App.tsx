@@ -6,33 +6,38 @@ import { Telemetry } from "./ops/Telemetry";
 import { CreateProjectPage } from "./reader/CreateProjectPage";
 import { Diff } from "./reader/Diff";
 import { History } from "./reader/History";
+import { PindocTooltipProvider } from "./reader/Tooltip";
 import { ReaderShell } from "./reader/ReaderShell";
+import { SignupCompletePage } from "./signup/SignupCompletePage";
+import { SignupPage } from "./signup/SignupPage";
 import { findSurface, previews, uiKits } from "./surfaces";
 
 export function App() {
   return (
-    <Routes>
-      {/* Design-system scaffold. Lives at /design so the bare root can
+    <PindocTooltipProvider>
+      <Routes>
+        {/* Design-system scaffold. Lives at /design so the bare root can
           canonical-redirect to a project-scoped URL. */}
-      <Route path="/design" element={<ShellLayout />}>
-        <Route index element={<Home />} />
-        <Route path="preview/:slug" element={<EmbeddedPreview />} />
-      </Route>
-      <Route path="/ui/:slug" element={<UiKitViewport />} />
+        <Route path="/design" element={<ShellLayout />}>
+          <Route index element={<Home />} />
+          <Route path="preview/:slug" element={<EmbeddedPreview />} />
+        </Route>
+        <Route path="/ui/:slug" element={<UiKitViewport />} />
 
-      {/* Canonical project-scoped surfaces. Every live path carries
-          /p/:project/:locale so the same slug across locales stays
-          distinguishable (Task task-phase-18-project-locale-
-          implementation, migration 0015). */}
-      <Route path="/p/:project/:locale/wiki" element={<ReaderShell view="reader" />} />
-      <Route path="/p/:project/:locale/wiki/:slug" element={<ReaderShell view="reader" />} />
-      <Route path="/p/:project/:locale/wiki/:slug/history" element={<History />} />
-      <Route path="/p/:project/:locale/wiki/:slug/diff" element={<Diff />} />
-      <Route path="/p/:project/:locale/tasks" element={<ReaderShell view="tasks" />} />
-      <Route path="/p/:project/:locale/tasks/:slug" element={<ReaderShell view="tasks" />} />
-      <Route path="/p/:project/:locale/graph" element={<ReaderShell view="graph" />} />
-      <Route path="/p/:project/:locale/inbox" element={<ReaderShell view="inbox" />} />
+      {/* Canonical project-scoped surfaces. Locale is project metadata, not
+          route identity, after task-canonical-locale-migration. */}
+      <Route path="/p/:project/today" element={<ReaderShell view="today" />} />
+      <Route path="/p/:project/wiki" element={<ReaderShell view="reader" />} />
+      <Route path="/p/:project/wiki/:slug" element={<ReaderShell view="reader" />} />
+      <Route path="/p/:project/wiki/:slug/history" element={<History />} />
+      <Route path="/p/:project/wiki/:slug/diff" element={<Diff />} />
+      <Route path="/p/:project/tasks" element={<ReaderShell view="tasks" />} />
+      <Route path="/p/:project/tasks/:slug" element={<ReaderShell view="tasks" />} />
+      <Route path="/p/:project/graph" element={<ReaderShell view="graph" />} />
+      <Route path="/p/:project/inbox" element={<ReaderShell view="inbox" />} />
       <Route path="/help/design-legend" element={<DesignLegendRedirect />} />
+      <Route path="/signup" element={<SignupPage />} />
+      <Route path="/signup/complete" element={<SignupCompletePage />} />
 
       {/* Project bootstrap (Decision project-bootstrap-canonical-flow-
           reader-ui-first-class). The 1급 사용자 진입점 for new
@@ -42,18 +47,20 @@ export function App() {
           opening Claude Code in the workspace they pasted into. */}
       <Route path="/projects/new" element={<CreateProjectPage />} />
 
-      {/* Legacy /p/:project/... routes redirect into the project's
-          declared locale segment. Keeps pre-Phase-18 bookmarks and
-          agent-shared /p/:project/wiki/... URLs working. */}
-      <Route path="/p/:project/wiki/*" element={<LegacyLocaleRedirect base="wiki" />} />
-      <Route path="/p/:project/tasks/*" element={<LegacyLocaleRedirect base="tasks" />} />
-      <Route path="/p/:project/graph" element={<LegacyLocaleRedirect base="graph" />} />
-      <Route path="/p/:project/inbox" element={<LegacyLocaleRedirect base="inbox" />} />
+      {/* Legacy /p/:project/:locale/... routes remove the locale segment.
+          The daemon returns a real 301; this keeps Vite-dev sessions
+          compatible too. */}
+      <Route path="/p/:project/:locale/wiki/*" element={<LegacyLocaleRedirect base="wiki" />} />
+      <Route path="/p/:project/:locale/today" element={<LegacyLocaleRedirect base="today" />} />
+      <Route path="/p/:project/:locale/tasks/*" element={<LegacyLocaleRedirect base="tasks" />} />
+      <Route path="/p/:project/:locale/graph" element={<LegacyLocaleRedirect base="graph" />} />
+      <Route path="/p/:project/:locale/inbox" element={<LegacyLocaleRedirect base="inbox" />} />
 
       {/* Pre-project-scope legacy paths redirect to the default project's
           equivalent URL. Keeps old shares, old bookmarks, and the seed
           PINDOC.md pointer working. */}
       <Route path="/wiki/*" element={<LegacyRedirect base="wiki" />} />
+      <Route path="/today" element={<LegacyRedirect base="today" />} />
       <Route path="/tasks/*" element={<LegacyRedirect base="tasks" />} />
       <Route path="/graph" element={<LegacyRedirect base="graph" />} />
       <Route path="/inbox" element={<LegacyRedirect base="inbox" />} />
@@ -64,9 +71,10 @@ export function App() {
           TopNav's overflow menu. */}
       <Route path="/ops/telemetry" element={<Telemetry />} />
 
-      {/* Bare root. / redirects to /p/:default/:locale/wiki. */}
-      <Route path="/" element={<LegacyRedirect base="wiki" />} />
-    </Routes>
+      {/* Bare root. / redirects to /p/:default/today. */}
+        <Route path="/" element={<LegacyRedirect base="today" />} />
+      </Routes>
+    </PindocTooltipProvider>
   );
 }
 
@@ -165,7 +173,7 @@ function Home() {
 //   - /graph, /inbox
 // Purpose: keep URL shares from the pre-multiproject era working while every
 // canonical link migrates to the /p/:project/… shape.
-function LegacyRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "inbox" }) {
+function LegacyRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "inbox" | "today" }) {
   const location = useLocation();
   const [target, setTarget] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -181,7 +189,7 @@ function LegacyRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "inbox" }
         // flow-reader-ui-first-class): when the instance has no
         // projects other than the seed `pindoc` row, redirect a fresh
         // user to the new-project wizard instead of the legacy
-        // /p/{default}/{locale}/{base} landing. The wizard re-uses
+        // /p/{default}/{base} landing. The wizard re-uses
         // /projects/new with `?welcome=1` so the page renders a
         // friendlier header. Self-correcting — once they create a
         // project, onboarding_required flips to false on the next
@@ -193,8 +201,7 @@ function LegacyRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "inbox" }
         const tail = trimLegacyPrefix(location.pathname, base);
         const suffix = tail ? `/${tail}` : "";
         const search = location.search || "";
-        const locale = cfg.default_project_locale || "en";
-        setTarget(`/p/${cfg.default_project_slug}/${locale}/${base}${suffix}${search}`);
+        setTarget(`/p/${cfg.default_project_slug}/${base}${suffix}${search}`);
       } catch (e) {
         if (!cancelled) setErr(String(e));
       }
@@ -234,9 +241,8 @@ function DesignLegendRedirect() {
       try {
         const cfg = await api.config();
         if (cancelled) return;
-        const locale = cfg.default_project_locale || "en";
         setTarget(
-          `/p/${cfg.default_project_slug}/${locale}/wiki/visual-language-reference${location.search || ""}`,
+          `/p/${cfg.default_project_slug}/wiki/visual-language-reference${location.search || ""}`,
         );
       } catch (e) {
         if (!cancelled) setErr(String(e));
@@ -265,13 +271,11 @@ function DesignLegendRedirect() {
   return <Navigate to={target} replace />;
 }
 
-// LegacyLocaleRedirect fires for `/p/:project/(wiki|tasks|graph|inbox)`
-// shares from the pre-locale URL shape. Fetches the project's declared
-// locale from /api/p/:project and rewrites the URL to include it, keeping
-// every path suffix and query string intact. Task task-phase-18-project-
-// locale-implementation §URL backcompat.
-function LegacyLocaleRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "inbox" }) {
-  const { project = "" } = useParams<{ project: string }>();
+// LegacyLocaleRedirect fires for `/p/:project/:locale/(wiki|tasks|graph|inbox)`
+// shares from the Phase 18 URL shape and rewrites them to the canonical
+// locale-free URL, keeping every path suffix and query string intact.
+function LegacyLocaleRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "inbox" | "today" }) {
+  const { project = "", locale = "" } = useParams<{ project: string; locale: string }>();
   const location = useLocation();
   const [target, setTarget] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -281,17 +285,15 @@ function LegacyLocaleRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "in
     let cancelled = false;
     (async () => {
       try {
-        const proj = await api.project(project);
         if (cancelled) return;
-        // pathname looks like "/p/<project>/<base>/<rest>"; strip the
-        // prefix and rebuild with the locale inserted.
-        const prefix = `/p/${project}/${base}`;
+        // pathname looks like "/p/<project>/<locale>/<base>/<rest>"; strip
+        // the prefix and rebuild without the locale segment.
+        const prefix = `/p/${project}/${locale}/${base}`;
         const rest = location.pathname.startsWith(prefix)
           ? location.pathname.slice(prefix.length)
           : "";
         const search = location.search || "";
-        const locale = proj.locale || proj.primary_language || "en";
-        setTarget(`/p/${project}/${locale}/${base}${rest}${search}`);
+        setTarget(`/p/${project}/${base}${rest}${search}`);
       } catch (e) {
         if (!cancelled) setErr(String(e));
       }
@@ -299,7 +301,7 @@ function LegacyLocaleRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "in
     return () => {
       cancelled = true;
     };
-  }, [project, base, location.pathname, location.search]);
+  }, [project, locale, base, location.pathname, location.search]);
 
   if (err) {
     return (

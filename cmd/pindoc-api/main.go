@@ -21,6 +21,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/httpapi"
+	"github.com/var-gg/pindoc/internal/pindoc/projects"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
 	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
 )
@@ -66,6 +67,11 @@ func main() {
 		logger.Error("db migrate", "err", err)
 		os.Exit(1)
 	}
+	if normalized, err := projects.BootstrapDefaultProjectRepoFromWorkdir(ctx, pool, cfg.ProjectSlug, ""); err != nil {
+		logger.Info("default project repo bootstrap skipped", "project_slug", cfg.ProjectSlug, "err", err)
+	} else if normalized != "" {
+		logger.Info("default project repo bootstrap checked", "project_slug", cfg.ProjectSlug, "git_remote_url", normalized)
+	}
 
 	ssStore, err := settings.New(ctx, pool)
 	if err != nil {
@@ -86,17 +92,16 @@ func main() {
 	telemetryStore := telemetry.New(ctx, pool.Pool, logger, telemetry.Options{})
 	defer telemetryStore.Close()
 
-	// Resolve the default project's locale at startup so LegacyRedirect
-	// in the web UI can rebuild pre-Phase-18 URLs into /p/:slug/:locale/
-	// shape without an extra round-trip (Task task-phase-18-project-
-	// locale-implementation). Missing project row (fresh install before
-	// pindoc.project.create runs) is expected — leave empty and the
-	// client-side fallback kicks in.
+	// Resolve the default project's canonical language for the
+	// compatibility `default_project_locale` API field. Reader URLs no
+	// longer carry locale after task-canonical-locale-migration. Missing
+	// project row (fresh install before pindoc.project.create runs) is
+	// expected — leave empty and the client-side fallback kicks in.
 	var defaultLocale string
 	if err := pool.QueryRow(ctx,
-		`SELECT locale FROM projects WHERE slug = $1 LIMIT 1`, cfg.ProjectSlug,
+		`SELECT primary_language FROM projects WHERE slug = $1 LIMIT 1`, cfg.ProjectSlug,
 	).Scan(&defaultLocale); err != nil {
-		logger.Info("default project locale lookup skipped",
+		logger.Info("default project language lookup skipped",
 			"project_slug", cfg.ProjectSlug, "err", err)
 	}
 
