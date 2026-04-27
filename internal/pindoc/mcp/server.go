@@ -129,6 +129,7 @@ func NewServer(opts Options) *Server {
 	// Phase 1 handshake — same registration path as every other tool so
 	// the auth chain runs and telemetry records the call.
 	tools.RegisterPing(s, deps)
+	tools.RegisterRuntimeStatus(s, deps)
 
 	tools.RegisterProjectCurrent(s, deps)
 	tools.RegisterProjectCreate(s, deps)

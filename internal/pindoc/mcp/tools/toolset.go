@@ -17,6 +17,7 @@ import (
 // the user "restart me, the server grew a tool you can't see yet".
 var RegisteredTools = []string{
 	"pindoc.ping",
+	"pindoc.runtime.status",
 	"pindoc.project.current",
 	"pindoc.project.create",
 	"pindoc.area.list",
