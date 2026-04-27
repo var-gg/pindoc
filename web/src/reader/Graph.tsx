@@ -3,9 +3,12 @@ import { useNavigate } from "react-router";
 import { api, type Artifact, type ArtifactRef } from "../api/client";
 import { useI18n } from "../i18n";
 import { EmptyState, SurfaceHeader } from "./SurfacePrimitives";
+import { AtlasMinimap } from "./AtlasMinimap";
+import { computeAtlas } from "./atlas";
 import { appendBadgeFilters, type BadgeFilter } from "./badgeFilters";
 import {
-  computeForceLayout,
+  computeEgoSubgraph,
+  computeSemanticEgoLayout,
   depthFogFor,
   edgeFogFor,
   FOCUS_FRAME_WIDTH,
@@ -18,6 +21,7 @@ import {
   graphTypeClassSuffix,
   lerpFrame,
   viewBoxString,
+  type EgoNode,
   type GraphLayoutEdge,
   type GraphPoint,
   type GraphViewBox,
@@ -31,6 +35,19 @@ type Props = {
   selectedAreaLabel: string | null;
   selectedType: string | null;
   badgeFilters: BadgeFilter[];
+  // Focus is owned by ReaderShell (URL is source of truth). The graph
+  // surface fires onFocusChange when the user clicks a node and
+  // re-renders against the prop on every focusSlug update — this keeps
+  // browser back/forward and Sidecar in lockstep without a separate
+  // local copy.
+  focusSlug: string | null;
+  onFocusChange: (slug: string) => void;
+  // Atlas minimap support (P2). areaNameBySlug provides display labels;
+  // onSelectArea is the parent handler that pivots the surface filter
+  // to the clicked area_slug. Both optional so the surface stays usable
+  // outside ReaderShell (e.g. embedded preview).
+  areaNameBySlug?: ReadonlyMap<string, string>;
+  onSelectArea?: (areaSlug: string) => void;
 };
 
 type GraphEdge = {
@@ -42,9 +59,13 @@ type GraphEdge = {
 };
 
 const FLY_TO_DURATION_MS = 800;
-const AMBIENT_DRIFT_IDLE_MS = 5000;
-const AMBIENT_DRIFT_AMPLITUDE = 28; // px in viewBox units
-const AMBIENT_DRIFT_PERIOD_MS = 32000;
+// Quiet tour idle threshold (P3). After N ms of no input we cycle the
+// camera to point at successive cross-area bridge nodes — meaning the
+// drift is now an IA signal, not random panning. Disabled entirely
+// when prefers-reduced-motion is set.
+const QUIET_TOUR_IDLE_MS = 6000;
+const QUIET_TOUR_HOLD_MS = 4000;
+const QUIET_TOUR_OFFSET = 32;
 
 export function GraphSurface({
   projectSlug,
@@ -54,19 +75,19 @@ export function GraphSurface({
   selectedAreaLabel,
   selectedType,
   badgeFilters,
+  focusSlug,
+  onFocusChange,
+  areaNameBySlug,
+  onSelectArea,
 }: Props) {
   const { t, lang } = useI18n();
   const navigate = useNavigate();
   const [details, setDetails] = useState<Record<string, Artifact>>({});
   const [loadingEdges, setLoadingEdges] = useState(false);
-  const [focusId, setFocusId] = useState<string | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const nodeKey = useMemo(() => list.map((a) => a.slug).join("\x00"), [list]);
   const hasActiveFilters = Boolean(selectedArea || selectedType || badgeFilters.length > 0);
 
-  // Camera state lives in a ref + a tick state so the SVG re-renders
-  // each animation frame without React reconciling the whole node
-  // tree. The current viewBox is read in render via cameraRef.current.
   const cameraRef = useRef<GraphViewBox>(FULL_GRAPH_FRAME);
   const cameraAnimRef = useRef<{
     from: GraphViewBox;
@@ -75,11 +96,16 @@ export function GraphSurface({
     duration: number;
   } | null>(null);
   const lastUserActivityRef = useRef<number>(performance.now());
-  const driftPhaseRef = useRef<number>(0);
+  const tourCursorRef = useRef<number>(0);
   const [, setTick] = useState(0);
+  const reducedMotion = useMemo(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return false;
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }, []);
 
-  // Fetch full artifacts so we can read relates_to. Same as the legacy
-  // surface — every node detail is needed to draw edges.
+  // Detail fetch — same shape as before but only used for hover peek
+  // bodies and edge enumeration. The full force layout used to spin on
+  // every node detail; the ego mode lets us defer non-visible details.
   useEffect(() => {
     if (list.length === 0) {
       setDetails({});
@@ -105,69 +131,108 @@ export function GraphSurface({
     };
   }, [projectSlug, nodeKey, list]);
 
-  const graph = useMemo(() => {
+  const focusId = useMemo(() => {
+    if (!focusSlug) return null;
+    return list.find((a) => a.slug === focusSlug)?.id ?? null;
+  }, [focusSlug, list]);
+
+  const allEdges = useMemo(() => {
     const byID = new Map(list.map((a) => [a.id, a]));
-    const layoutEdges: GraphLayoutEdge[] = [];
-    const edgeSeen = new Set<string>();
-    const edges: GraphEdge[] = [];
+    const seen = new Set<string>();
+    const edges: Array<GraphLayoutEdge & { relation: string; crossArea: boolean; sourceRef: ArtifactRef; targetRef: ArtifactRef }> = [];
     for (const source of list) {
       const detail = details[source.id];
       for (const edge of detail?.relates_to ?? []) {
         const target = byID.get(edge.artifact_id);
         if (!target) continue;
-        const key = `${source.id}:${edge.artifact_id}:${edge.relation}`;
-        if (edgeSeen.has(key)) continue;
-        edgeSeen.add(key);
-        const crossArea = source.area_slug !== target.area_slug;
-        edges.push({ key, source, target, relation: edge.relation, crossArea });
-        layoutEdges.push({ source: source.id, target: target.id });
+        const key = `${source.id}::${edge.artifact_id}::${edge.relation}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        edges.push({
+          source: source.id,
+          target: edge.artifact_id,
+          relation: edge.relation,
+          crossArea: source.area_slug !== target.area_slug,
+          sourceRef: source,
+          targetRef: target,
+        });
       }
     }
-    const layout = computeForceLayout({ nodes: list, edges: layoutEdges });
-    return { layout, edges, layoutEdges, byID };
+    return edges;
   }, [details, list]);
 
-  // Pick a default focus once the layout is known. Most-connected node
-  // wins; ties go to the alphabetically-first slug for determinism.
-  // The user can move focus by clicking another node.
-  useEffect(() => {
-    if (list.length === 0) {
-      if (focusId !== null) setFocusId(null);
-      return;
+  const ego = useMemo(() => {
+    if (!focusId) {
+      return null;
     }
-    if (focusId && graph.byID.has(focusId)) return;
-    const degree = new Map<string, number>();
-    for (const e of graph.layoutEdges) {
-      degree.set(e.source, (degree.get(e.source) ?? 0) + 1);
-      degree.set(e.target, (degree.get(e.target) ?? 0) + 1);
+    return computeEgoSubgraph(focusId, list, allEdges);
+  }, [focusId, list, allEdges]);
+
+  const visibleEdges: GraphEdge[] = useMemo(() => {
+    if (!ego) return [];
+    const visibleIds = new Set(ego.nodes.map((n) => n.id));
+    const out: GraphEdge[] = [];
+    const seen = new Set<string>();
+    for (const e of allEdges) {
+      if (!visibleIds.has(e.source) || !visibleIds.has(e.target)) continue;
+      const key = `${e.source}::${e.target}::${e.relation}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        key,
+        source: e.sourceRef,
+        target: e.targetRef,
+        relation: e.relation,
+        crossArea: e.crossArea,
+      });
     }
-    let best: ArtifactRef | null = null;
-    let bestScore = -1;
-    for (const node of list) {
-      const score = degree.get(node.id) ?? 0;
-      if (
-        score > bestScore ||
-        (score === bestScore && best && node.slug < best.slug)
-      ) {
-        best = node;
-        bestScore = score;
-      }
+    return out;
+  }, [ego, allEdges]);
+
+  const layout = useMemo(() => {
+    if (!ego) {
+      return { positions: new Map<string, GraphPoint>(), bounds: FULL_GRAPH_FRAME };
     }
-    if (best) setFocusId(best.id);
-  }, [graph.layoutEdges, list, focusId, graph.byID]);
+    // Semantic layout needs the relation labels — ego.edges drops them
+    // for force compatibility, so we re-attach them from allEdges
+    // before running the placement.
+    const relationEdges = allEdges.map((e) => ({
+      source: e.source,
+      target: e.target,
+      relation: e.relation,
+    }));
+    return computeSemanticEgoLayout(ego, relationEdges);
+  }, [ego, allEdges]);
 
   const distances = useMemo(() => {
-    if (!focusId) return new Map<string, number>();
-    return graphHopDistances(focusId, graph.layoutEdges);
-  }, [focusId, graph.layoutEdges]);
+    if (!ego) return new Map<string, number>();
+    return graphHopDistances(ego.focusId, ego.edges);
+  }, [ego]);
 
-  // Drive the camera: focus changes start a fly-to, idle time drifts
-  // the camera around the focus. Single rAF loop handles both — exits
-  // when nothing is moving so we don't burn CPU on a static graph.
+  // Atlas data is computed against the full filtered list, not the ego
+  // subgraph — the minimap is the "where am I" map. allEdges already
+  // carries relation, but computeAtlas only needs source/target +
+  // cross-area lookups so we reuse it directly.
+  const atlas = useMemo(() => computeAtlas(list, allEdges), [list, allEdges]);
+  const focusAreaSlug = useMemo(() => {
+    if (!ego) return null;
+    return ego.nodes.find((n) => n.ego_kind === "focus")?.area_slug ?? null;
+  }, [ego]);
+
+  // Camera animation (P3 — IA-bound). On focus change we fly to the
+  // new focus node; afterwards an idle "quiet tour" leans the camera
+  // toward each bridge node in turn so the user sees Pindoc's
+  // cross-area connections instead of random pan. prefers-reduced-
+  // motion disables both: the camera jumps to focus and never drifts.
   useEffect(() => {
     if (!focusId) return;
-    const target = graph.layout.positions.get(focusId);
+    const target = layout.positions.get(focusId);
     if (!target) return;
+    if (reducedMotion) {
+      cameraRef.current = frameAround(target, FOCUS_FRAME_WIDTH);
+      setTick((n) => (n + 1) % 1_000_000);
+      return;
+    }
     cameraAnimRef.current = {
       from: cameraRef.current,
       to: frameAround(target, FOCUS_FRAME_WIDTH),
@@ -175,7 +240,10 @@ export function GraphSurface({
       duration: FLY_TO_DURATION_MS,
     };
     lastUserActivityRef.current = performance.now();
-    driftPhaseRef.current = 0;
+    tourCursorRef.current = 0;
+    const bridgeIds = ego
+      ? ego.nodes.filter((n) => n.ego_kind === "bridge").map((n) => n.id)
+      : [];
     let raf = 0;
     const loop = (now: number) => {
       const anim = cameraAnimRef.current;
@@ -185,43 +253,44 @@ export function GraphSurface({
         const next = lerpFrame(anim.from, anim.to, t);
         cameraRef.current = next;
         mutated = true;
-        if (t >= 1) {
-          cameraAnimRef.current = null;
-        }
+        if (t >= 1) cameraAnimRef.current = null;
       } else {
-        // Ambient drift: only after idle, only when no fly-to is
-        // running. Sin/cos in viewBox units shift the frame around the
-        // focus point.
         const idle = now - lastUserActivityRef.current;
-        if (idle >= AMBIENT_DRIFT_IDLE_MS) {
-          const t = ((now - lastUserActivityRef.current - AMBIENT_DRIFT_IDLE_MS) /
-            AMBIENT_DRIFT_PERIOD_MS) *
-            Math.PI *
-            2;
-          const focusPoint = graph.layout.positions.get(focusId);
-          if (focusPoint) {
-            const dx = Math.cos(t) * AMBIENT_DRIFT_AMPLITUDE;
-            const dy = Math.sin(t * 0.8) * (AMBIENT_DRIFT_AMPLITUDE * 0.7);
+        if (idle >= QUIET_TOUR_IDLE_MS && bridgeIds.length > 0) {
+          // Cycle through bridges; each holds for QUIET_TOUR_HOLD_MS.
+          // The lean is a small offset toward the bridge — never far
+          // enough to lose focus context, just enough to point.
+          const cyclePos = Math.floor(
+            (idle - QUIET_TOUR_IDLE_MS) / QUIET_TOUR_HOLD_MS,
+          );
+          const targetIdx = cyclePos % bridgeIds.length;
+          const targetBridgeId = bridgeIds[targetIdx];
+          const focusPoint = layout.positions.get(focusId);
+          const bridgePoint = layout.positions.get(targetBridgeId);
+          if (focusPoint && bridgePoint) {
+            const dx = bridgePoint.x - focusPoint.x;
+            const dy = bridgePoint.y - focusPoint.y;
+            const len = Math.hypot(dx, dy) || 1;
+            const ux = dx / len;
+            const uy = dy / len;
             const base = frameAround(focusPoint, FOCUS_FRAME_WIDTH);
             cameraRef.current = {
-              x: base.x + dx,
-              y: base.y + dy,
+              x: base.x + ux * QUIET_TOUR_OFFSET,
+              y: base.y + uy * QUIET_TOUR_OFFSET,
               w: base.w,
               h: base.h,
             };
             mutated = true;
-            driftPhaseRef.current = t;
+            tourCursorRef.current = targetIdx;
           }
         }
       }
-      if (mutated) {
-        setTick((n) => (n + 1) % 1_000_000);
-      }
+      if (mutated) setTick((n) => (n + 1) % 1_000_000);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [focusId, graph.layout.positions]);
+  }, [focusId, layout.positions, ego, reducedMotion]);
 
   const markActivity = () => {
     lastUserActivityRef.current = performance.now();
@@ -232,11 +301,8 @@ export function GraphSurface({
     ? t("graph.empty_filtered")
     : t("graph.empty");
 
-  // Pre-compute hover peek info — picked only when hovered node has a
-  // detail loaded. Failing to find a detail still draws the node, just
-  // without preview text.
   const hoverDetail = hoverId ? details[hoverId] : null;
-  const hoverPos = hoverId ? graph.layout.positions.get(hoverId) : null;
+  const hoverPos = hoverId ? layout.positions.get(hoverId) : null;
 
   return (
     <main className="content graph-content">
@@ -251,12 +317,20 @@ export function GraphSurface({
             {filterSummary}
             {loadingEdges && <span>{t("graph.loading_edges")}</span>}
             {!loadingEdges && list.length > 0 && (
-              <span>{t("graph.edge_count", graph.edges.length)}</span>
+              <span>{t("graph.edge_count", visibleEdges.length)}</span>
+            )}
+            {ego && (
+              <span className="graph-surface__ego">
+                {t("graph.ego_visible", ego.nodes.length)}
+                {ego.capped && ` · +${ego.dropped_bridges.length}`}
+              </span>
             )}
           </div>
         </div>
         {list.length === 0 ? (
           <EmptyState message={emptyMessage} />
+        ) : !ego ? (
+          <EmptyState message={t("graph.no_focus")} />
         ) : (
           <div
             className="graph-canvas-wrap graph-canvas-wrap--orbit"
@@ -266,7 +340,7 @@ export function GraphSurface({
               markActivity();
             }}
           >
-            {graph.edges.length === 0 && !loadingEdges && (
+            {visibleEdges.length === 0 && !loadingEdges && (
               <div className="graph-canvas-empty">{t("graph.no_edges")}</div>
             )}
             <svg
@@ -294,12 +368,9 @@ export function GraphSurface({
                 </radialGradient>
               </defs>
 
-              {/* Bloom backdrop centred on the focus node — adds the
-                  cinematic glow without blowing up GPU work. Skipped
-                  when there's no focus yet (initial mount). */}
               {focusId &&
                 (() => {
-                  const p = graph.layout.positions.get(focusId);
+                  const p = layout.positions.get(focusId);
                   if (!p) return null;
                   return (
                     <circle
@@ -312,9 +383,9 @@ export function GraphSurface({
                   );
                 })()}
 
-              {graph.edges.map((edge) => {
-                const start = graph.layout.positions.get(edge.source.id);
-                const end = graph.layout.positions.get(edge.target.id);
+              {visibleEdges.map((edge) => {
+                const start = layout.positions.get(edge.source.id);
+                const end = layout.positions.get(edge.target.id);
                 if (!start || !end) return null;
                 const sd = distances.get(edge.source.id);
                 const td = distances.get(edge.target.id);
@@ -324,7 +395,7 @@ export function GraphSurface({
                   hoverId === edge.target.id ||
                   (focusId &&
                     (focusId === edge.source.id || focusId === edge.target.id) &&
-                    graph.edges.length <= 24);
+                    visibleEdges.length <= 24);
                 const labelX = (start.x + end.x) / 2;
                 const labelY = (start.y + end.y) / 2 - 6;
                 return (
@@ -350,8 +421,8 @@ export function GraphSurface({
                 );
               })}
 
-              {list.map((node) => {
-                const p = graph.layout.positions.get(node.id);
+              {ego.nodes.map((node) => {
+                const p = layout.positions.get(node.id);
                 if (!p) return null;
                 const distance = focusId ? distances.get(node.id) : 0;
                 const fog = depthFogFor(distance);
@@ -362,7 +433,7 @@ export function GraphSurface({
                   <a
                     key={node.id}
                     href={href}
-                    className={`graph-canvas__node graph-canvas__node--${graphTypeClassSuffix(node.type)}${isFocus ? " graph-canvas__node--focus" : ""}${isHover ? " graph-canvas__node--hover" : ""}`}
+                    className={`graph-canvas__node graph-canvas__node--${graphTypeClassSuffix(node.type)}${isFocus ? " graph-canvas__node--focus" : ""}${isHover ? " graph-canvas__node--hover" : ""}${node.ego_kind === "bridge" ? " graph-canvas__node--bridge" : ""}`}
                     style={{ opacity: fog.opacity }}
                     onMouseEnter={() => {
                       setHoverId(node.id);
@@ -373,8 +444,10 @@ export function GraphSurface({
                       markActivity();
                     }}
                     onClick={(event) => {
+                      // Cmd/Ctrl/Shift/Alt or middle-click — let the
+                      // browser open the artifact in a new tab/pane.
+                      // Plain double-click opens the reader inline.
                       if (
-                        event.defaultPrevented ||
                         event.button !== 0 ||
                         event.metaKey ||
                         event.ctrlKey ||
@@ -383,11 +456,16 @@ export function GraphSurface({
                       ) {
                         return;
                       }
-                      // Click = move camera focus, not navigate. The
-                      // user opens the artifact via the peek card.
+                      if (event.detail >= 2) {
+                        // Browser-native double click — let the click
+                        // bubble through to the <a> by *not* preventing
+                        // default. The first single click already shifted
+                        // focus; the second navigates.
+                        return;
+                      }
                       event.preventDefault();
                       markActivity();
-                      setFocusId(node.id);
+                      onFocusChange(node.slug);
                     }}
                   >
                     <title>{`${node.title} (${node.type})`}</title>
@@ -457,6 +535,12 @@ export function GraphSurface({
                 </a>
               </div>
             )}
+            <AtlasMinimap
+              data={atlas}
+              focusAreaSlug={focusAreaSlug}
+              areaNameBySlug={areaNameBySlug}
+              onAreaClick={onSelectArea}
+            />
           </div>
         )}
       </div>
@@ -499,17 +583,10 @@ function truncateRunes(value: string, max: number): string {
   return `${runes.slice(0, max).join("")}...`;
 }
 
-// peekScreenX / peekScreenY map a world point to a CSS pixel offset
-// inside the wrapper, so the floating peek card lines up with its
-// node even as the camera animates. The conversion mirrors the
-// preserveAspectRatio="xMidYMid meet" we set on the svg.
 function peekScreenX(camera: GraphViewBox, p: GraphPoint): number {
   const aspect = FULL_GRAPH_VIEWBOX.width / FULL_GRAPH_VIEWBOX.height;
   const cameraAspect = camera.w / camera.h;
-  // The svg renders at its natural width/height ratio inside the
-  // wrapper. We assume the wrapper letterboxes / pillar-boxes only on
-  // the long axis; the short axis fills.
-  const renderHeight = 540; // matches CSS height on the wrapper
+  const renderHeight = 540;
   const renderWidth = renderHeight * aspect;
   const scale = renderWidth / camera.w;
   const offset = cameraAspect > aspect ? 0 : (renderWidth - renderHeight * cameraAspect) / 2;
@@ -521,3 +598,7 @@ function peekScreenY(camera: GraphViewBox, p: GraphPoint): number {
   const scale = renderHeight / camera.h;
   return (p.y - camera.y) * scale - 32;
 }
+
+// re-export for convenience: the legacy import surface used to expose
+// EgoNode-less typing. Keep the alias so any downstream caller compiles.
+export type { EgoNode };

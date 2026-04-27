@@ -552,6 +552,29 @@
   font-family: var(--font-mono);
   font-size: 10.5px;
 }
+.sidecar-focus-reason {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+}
+.sidecar-focus-reason__key {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+}
+.sidecar-focus-reason__value {
+  font-size: 12px;
+  color: var(--fg-1);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .sidecar-actions {
   display: flex;
   gap: 6px;
@@ -1549,6 +1572,79 @@
   border-radius: var(--r-1);
   background: var(--bg-1);
 }
+.graph-surface__meta .graph-surface__ego {
+  background: color-mix(in oklab, var(--accent) 16%, var(--bg-1));
+  color: var(--fg-1);
+}
+
+/* Atlas minimap — bottom-right corner of the graph canvas wrapper. The
+ * minimap is the "where am I" map for the project as a whole; it is
+ * always visible while the ego graph occupies the centre. */
+.atlas-minimap {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 3;
+  width: 248px;
+  background: color-mix(in oklab, var(--bg-1) 96%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  box-shadow: 0 6px 28px color-mix(in oklch, black 32%, transparent);
+  padding: 8px 8px 6px;
+  pointer-events: auto;
+}
+.atlas-minimap__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px 4px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+}
+.atlas-minimap__count {
+  font-feature-settings: "tnum" 1;
+  color: var(--fg-2);
+}
+.atlas-minimap__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.atlas-minimap__corridor {
+  stroke: color-mix(in oklch, var(--accent) 70%, white 20%);
+  stroke-width: 1.4;
+  fill: none;
+}
+.atlas-minimap__area {
+  cursor: pointer;
+  outline: none;
+}
+.atlas-minimap__area .atlas-minimap__bubble {
+  fill: var(--accent);
+  stroke: color-mix(in oklch, var(--accent) 70%, white 30%);
+  stroke-width: 1;
+  transition: stroke-width 160ms ease-out, transform 160ms ease-out;
+  transform-origin: center;
+}
+.atlas-minimap__area:hover .atlas-minimap__bubble {
+  stroke-width: 2;
+}
+.atlas-minimap__area--focus .atlas-minimap__bubble {
+  stroke-width: 2.4;
+  stroke: color-mix(in oklch, white 80%, var(--accent));
+  filter: drop-shadow(0 0 6px color-mix(in oklch, var(--accent) 60%, transparent));
+}
+.atlas-minimap__bubble-count {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  fill: color-mix(in oklch, white 92%, transparent);
+  pointer-events: none;
+  user-select: none;
+}
 .graph-surface > .empty-state {
   margin-top: 18px;
 }
@@ -1737,12 +1833,41 @@
 .graph-canvas--orbit .graph-canvas__node-inner {
   transition: transform 280ms ease-out;
 }
+
+/* P3 IA-bound bloom: cross-area edges get a soft stroke glow because
+ * Pindoc's differentiator is the cross-area bridge — they should read
+ * as "the meaningful connections" without any decoration. Inside-area
+ * edges stay unglow'd. */
+.graph-canvas--orbit .graph-canvas__edge--cross-area {
+  filter: drop-shadow(0 0 4px color-mix(in oklch, var(--accent) 50%, transparent));
+}
+
+/* Reduced motion (P3): kill animation/transition on the graph surface
+ * for users who opted into the OS preference. Camera jumps directly
+ * to focus from the React effect, and nodes/edges no longer ease in
+ * from opacity changes. The atlas minimap respects the same. */
+@media (prefers-reduced-motion: reduce) {
+  .graph-canvas--orbit .graph-canvas__node,
+  .graph-canvas--orbit .graph-canvas__node-inner,
+  .atlas-minimap__area .atlas-minimap__bubble {
+    transition: none;
+  }
+  .graph-canvas--orbit .graph-canvas__edge--cross-area {
+    filter: none;
+  }
+}
 .graph-canvas--orbit .graph-canvas__node--focus .graph-canvas__node-rect,
 .graph-canvas--orbit .graph-canvas__node--hover .graph-canvas__node-rect {
   fill: color-mix(in oklch, var(--graph-node-bg) 92%, transparent);
   stroke: color-mix(in oklch, var(--graph-node-border) 90%, white);
   stroke-width: 1.8;
   filter: drop-shadow(0 4px 16px color-mix(in oklch, var(--accent) 35%, transparent));
+}
+/* Bridge ring nodes — DOI-selected 2-hop neighbours that are not in
+ * the immediate hop-1 ring. Slight tint signals "this came in via DOI
+ * ranking, not direct adjacency"; users hover to see why. */
+.graph-canvas--orbit .graph-canvas__node--bridge .graph-canvas__node-type {
+  fill: color-mix(in oklch, var(--accent) 65%, white 30%);
 }
 
 /* Edge labels in orbit mode hide by default and fade in via the

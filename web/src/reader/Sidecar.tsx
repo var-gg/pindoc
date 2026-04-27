@@ -46,6 +46,7 @@ import {
   graphRelationClass,
   graphRelationLabel,
   graphTypeClassSuffix,
+  type StartFocusReason,
 } from "./graphSvg";
 
 type Props = {
@@ -74,6 +75,10 @@ type Props = {
   // full article is one explicit action away instead of implicit card
   // navigation.
   showOpenDetailAction?: boolean;
+  // focusReason explains why the graph surface picked this artifact as
+  // the current focus. Rendered as a chip just below IdentityStrip
+  // when present (graph mode only — Wiki/Tasks/Today leave it null).
+  focusReason?: StartFocusReason | null;
 };
 
 type CollapsibleKey = "provenance" | "policy" | "timeline" | "meta";
@@ -99,6 +104,7 @@ export function Sidecar({
   users,
   onArtifactUpdated,
   showOpenDetailAction,
+  focusReason,
 }: Props) {
   const { t } = useI18n();
   const [collapsed, toggleSection] = useSidecarCollapseState();
@@ -146,6 +152,7 @@ export function Sidecar({
   return (
     <aside id="sidecar-live-data" className="sidecar sidecar--detail">
       <IdentityStrip detail={detail} />
+      {focusReason && <FocusReasonChip reason={focusReason} />}
 
       <QuickActions detail={detail} artifactHref={artifactHref} />
       {showOpenDetailAction && (
@@ -273,6 +280,31 @@ function useSidecarCollapseState(): [CollapsedState, (key: CollapsibleKey) => vo
   };
 
   return [collapsed, toggle];
+}
+
+function FocusReasonChip({ reason }: { reason: StartFocusReason }) {
+  const { t } = useI18n();
+  let label: string;
+  switch (reason.kind) {
+    case "last_focused":
+      label = t("graph.focus_reason_last_focused");
+      break;
+    case "recent_meaningful":
+      label = `${t("graph.focus_reason_recent_meaningful")} · ${new Date(reason.updated_at).toLocaleDateString()}`;
+      break;
+    case "most_connected":
+      label = t("graph.focus_reason_most_connected", reason.degree);
+      break;
+    case "fallback":
+      label = t("graph.focus_reason_fallback");
+      break;
+  }
+  return (
+    <div className="sidecar-focus-reason" aria-label={t("graph.focus_reason_label")}>
+      <span className="sidecar-focus-reason__key">{t("graph.focus_reason_label")}</span>
+      <span className="sidecar-focus-reason__value">{label}</span>
+    </div>
+  );
 }
 
 function IdentityStrip({ detail }: { detail: Artifact }) {

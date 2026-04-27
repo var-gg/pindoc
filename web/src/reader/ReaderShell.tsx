@@ -7,6 +7,12 @@ import { useI18n } from "../i18n";
 import { InviteModal } from "../project/InviteModal";
 import { CmdK } from "./CmdK";
 import { GraphSurface } from "./Graph";
+import {
+  pickStartFocus,
+  readLastFocusedSlug,
+  writeLastFocusedSlug,
+  type StartFocusReason,
+} from "./graphSvg";
 import { Inbox } from "./Inbox";
 import { ArtifactByline } from "./ArtifactByline";
 import { ReaderSurface, type DetailScope } from "./ReaderSurface";
@@ -76,6 +82,16 @@ export function ReaderShell({ view }: Props) {
   const [taskInspectorLoading, setTaskInspectorLoading] = useState(false);
   const [taskInspectorReloadNonce, setTaskInspectorReloadNonce] = useState(0);
   const [inboxCount, setInboxCount] = useState(0);
+  // Graph surface owns its focus through the URL `?focus=slug`. We mirror
+  // it into local state so component children only see a single source of
+  // truth, but every focus change writes the URL — back/forward then
+  // restores the previous focus for free.
+  const [graphFocusSlug, setGraphFocusSlug] = useState<string | null>(
+    () => searchParams.get("focus"),
+  );
+  const [graphFocusDetail, setGraphFocusDetail] = useState<Artifact | null>(null);
+  const [graphFocusLoading, setGraphFocusLoading] = useState(false);
+  const [graphFocusReason, setGraphFocusReason] = useState<StartFocusReason | null>(null);
   // Surface·Type·Area 3축: Surface is owned by the URL segment (wiki|tasks|
   // graph|inbox — already carried in `view` prop). Area and Type are the
   // secondary filters layered on top and survive round-trips through the
@@ -132,10 +148,24 @@ export function ReaderShell({ view }: Props) {
     else next.delete("area");
     if (selectedType && view !== "tasks") next.set("type", selectedType);
     else next.delete("type");
+    if (graphFocusSlug && view === "graph") next.set("focus", graphFocusSlug);
+    else next.delete("focus");
     if (next.toString() !== searchParams.toString()) {
       setSearchParams(next, { replace: true });
     }
-  }, [selectedArea, selectedType, view, searchParams, setSearchParams]);
+  }, [selectedArea, selectedType, view, graphFocusSlug, searchParams, setSearchParams]);
+
+  // Pull focus changes back from the URL — pressing Back after a focus
+  // click restores the previous slug because we wrote ?focus= on the
+  // way in. searchParams.get("focus") is already what the React Router
+  // hook gives us, so the only work here is to reflect it into local
+  // state when the parameter and state diverge.
+  useEffect(() => {
+    if (view !== "graph") return;
+    const next = searchParams.get("focus");
+    if (next !== graphFocusSlug) setGraphFocusSlug(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, view]);
 
   const baseRoute = `/p/${project}/${view === "tasks" ? "tasks" : view === "today" ? "today" : "wiki"}`;
 
@@ -330,6 +360,33 @@ export function ReaderShell({ view }: Props) {
     };
   }, [view, slug, project, taskInspectorSlug, taskInspectorReloadNonce]);
 
+  // Graph focus → detail. Re-fetches when graphFocusSlug changes so the
+  // Sidecar shows body preview + edges for the current focus. Skipped
+  // outside the graph surface so the wiki/today inspector stays the
+  // sole writer to sidecarDetail there.
+  useEffect(() => {
+    if (view !== "graph" || !graphFocusSlug || !project) {
+      setGraphFocusDetail(null);
+      setGraphFocusLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setGraphFocusLoading(true);
+    api.artifact(project, graphFocusSlug)
+      .then((artifact) => {
+        if (!cancelled) setGraphFocusDetail(artifact);
+      })
+      .catch(() => {
+        if (!cancelled) setGraphFocusDetail(null);
+      })
+      .finally(() => {
+        if (!cancelled) setGraphFocusLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, project, graphFocusSlug]);
+
   // Hooks must stay at top level (rules-of-hooks). Filter against a
   // possibly-empty list when we haven't loaded yet so we never call
   // this hook conditionally.
@@ -377,6 +434,51 @@ export function ReaderShell({ view }: Props) {
     );
   }, [surfaceList, selectedArea, badgeFilters]);
 
+  // Start Queue: if graph view loaded without a ?focus= param, ask the
+  // ranker to pick one. Last-focused (sessionStorage) wins, then most
+  // recently meaningfully updated, then most-connected. The result is
+  // written to graphFocusSlug + URL via the focus change callback so
+  // the user lands on a real artifact instead of an empty canvas.
+  useEffect(() => {
+    if (view !== "graph") return;
+    if (graphFocusSlug) {
+      // Already have a focus from the URL. Re-derive a synthetic
+      // last_focused reason if our local state lost the original kind
+      // (e.g. user shared a URL or hit refresh).
+      if (!graphFocusReason) {
+        setGraphFocusReason({ kind: "last_focused", slug: graphFocusSlug });
+      }
+      return;
+    }
+    if (filteredArtifacts.length === 0) return;
+    const layoutEdges: Array<{ source: string; target: string }> = [];
+    // We don't have full edges here yet — surface-level Start Queue uses
+    // recency as the primary signal; cross-area edge boosts apply once
+    // the graph surface itself fetches details. This is intentional:
+    // the start picker shouldn't block on N round-trips when recency
+    // alone yields a sensible entry point.
+    const start = pickStartFocus(filteredArtifacts, layoutEdges, {
+      lastFocusedSlug: readLastFocusedSlug(project),
+    });
+    if (!start) return;
+    const startNode = filteredArtifacts.find((a) => a.id === start.focusId);
+    if (!startNode) return;
+    setGraphFocusSlug(startNode.slug);
+    setGraphFocusReason(start.reason);
+  }, [view, graphFocusSlug, graphFocusReason, filteredArtifacts, project]);
+
+  // Persist the last graph focus per project. Refresh restores it as
+  // the implicit fallback when no URL param is present.
+  useEffect(() => {
+    if (view !== "graph" || !project) return;
+    writeLastFocusedSlug(project, graphFocusSlug);
+  }, [view, project, graphFocusSlug]);
+
+  function handleGraphFocusChange(slug: string) {
+    setGraphFocusSlug(slug);
+    setGraphFocusReason({ kind: "last_focused", slug });
+  }
+
   useEffect(() => {
     if (paletteOpen || shortcutsOpen || view !== "reader" || slug || !wikiInspectorSlug) return;
     const inspectedSlug = wikiInspectorSlug;
@@ -418,6 +520,8 @@ export function ReaderShell({ view }: Props) {
         ? todayInspectorDetail
       : view === "tasks"
         ? detail ?? taskInspectorDetail
+      : view === "graph"
+        ? graphFocusDetail
         : null;
   const sidecarEmptyMessage =
     view === "reader" && !detail
@@ -432,6 +536,10 @@ export function ReaderShell({ view }: Props) {
       ? taskInspectorLoading
         ? t("tasks.inspector_loading")
         : t("tasks.inspector_empty")
+      : view === "graph" && !graphFocusDetail
+      ? graphFocusLoading
+        ? t("reader.inspector_loading")
+        : t("graph.no_focus")
       : undefined;
   function handleTaskInspectorUpdated() {
     reload();
@@ -505,6 +613,8 @@ export function ReaderShell({ view }: Props) {
           onApplyAreaFilter={applyAreaFilterFromBadge}
           onSelectArea={handleSelectArea}
           onInboxCountChange={setInboxCount}
+          graphFocusSlug={graphFocusSlug}
+          onGraphFocusChange={handleGraphFocusChange}
         />
         <Sidecar
           projectSlug={project}
@@ -513,8 +623,9 @@ export function ReaderShell({ view }: Props) {
           authMode={authMode}
           agents={agents}
           users={users}
-          showOpenDetailAction={(view === "reader" && !detail && Boolean(wikiInspectorDetail)) || (view === "today" && Boolean(todayInspectorDetail))}
+          showOpenDetailAction={(view === "reader" && !detail && Boolean(wikiInspectorDetail)) || (view === "today" && Boolean(todayInspectorDetail)) || (view === "graph" && Boolean(graphFocusDetail))}
           onArtifactUpdated={view === "tasks" ? handleTaskInspectorUpdated : reload}
+          focusReason={view === "graph" ? graphFocusReason : null}
         />
       </div>
       <CmdK projectSlug={project} open={paletteOpen} onClose={() => setPaletteOpen(false)} />
@@ -640,6 +751,8 @@ function Body({
   onApplyAreaFilter,
   onSelectArea,
   onInboxCountChange,
+  graphFocusSlug,
+  onGraphFocusChange,
 }: {
   view: ReaderView;
   projectSlug: string;
@@ -665,6 +778,8 @@ function Body({
   onApplyAreaFilter: (areaSlug: string) => void;
   onSelectArea: (areaSlug: string) => void;
   onInboxCountChange: (count: number) => void;
+  graphFocusSlug: string | null;
+  onGraphFocusChange: (slug: string) => void;
 }) {
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -713,6 +828,10 @@ function Body({
         selectedAreaLabel={selectedArea ? areaNameBySlug.get(selectedArea) ?? selectedArea : null}
         selectedType={selectedType}
         badgeFilters={badgeFilters}
+        focusSlug={graphFocusSlug}
+        onFocusChange={onGraphFocusChange}
+        areaNameBySlug={areaNameBySlug}
+        onSelectArea={onSelectArea}
       />
     );
   }
