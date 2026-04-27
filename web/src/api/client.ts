@@ -136,6 +136,10 @@ export type EdgeRef = {
   type: string;
   title: string;
   relation: string;
+  // body_locale of the target artifact (BCP47). Empty string when the
+  // target predates body_locale rollout. Reader uses this to label
+  // translation_of edges with a language chip without a second fetch.
+  body_locale?: string;
 };
 
 // AuthorUserRef is the thin projection of the `users` row an artifact

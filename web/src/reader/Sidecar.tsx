@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import {
   ArrowDownLeft,
@@ -74,10 +74,6 @@ type Props = {
   // the Reader refetches the detail and the revision rail / TaskControls
   // reflect the new head.
   onArtifactUpdated?: () => void;
-  // Wiki list inspector mode reuses Sidecar as a brief. In that mode the
-  // full article is one explicit action away instead of implicit card
-  // navigation.
-  showOpenDetailAction?: boolean;
   // focusReason explains why the graph surface picked this artifact as
   // the current focus. Rendered as a chip just below IdentityStrip
   // when present (graph mode only — Wiki/Tasks/Today leave it null).
@@ -107,7 +103,6 @@ export function Sidecar({
   agents,
   users,
   onArtifactUpdated,
-  showOpenDetailAction,
   focusReason,
 }: Props) {
   const { t } = useI18n();
@@ -159,12 +154,6 @@ export function Sidecar({
       {focusReason && <FocusReasonChip reason={focusReason} />}
 
       <QuickActions detail={detail} artifactHref={artifactHref} />
-      {showOpenDetailAction && (
-        <Link to={artifactHref} className="sidecar-open-detail">
-          <span>{t("reader.inspector_open_detail")}</span>
-          <ArrowUpRight className="lucide" aria-hidden="true" />
-        </Link>
-      )}
 
       {headings.length >= 2 && <Toc headings={headings} />}
 
@@ -335,49 +324,82 @@ function QuickActions({ detail, artifactHref }: { detail: Artifact; artifactHref
   const absoluteHref = typeof window === "undefined"
     ? artifactHref
     : `${window.location.origin}${artifactHref}`;
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+  const flashToast = (msg: string) => {
+    setToast(msg);
+    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 1800);
+  };
+  const copyWithToast = async (text: string, successLabel: string) => {
+    if (typeof navigator === "undefined" || !navigator.clipboard) {
+      flashToast(t("sidecar.copy_unsupported"));
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      flashToast(t("sidecar.copied_label", successLabel));
+    } catch {
+      flashToast(t("sidecar.copy_failed"));
+    }
+  };
   const actions: Array<
     | { id: QuickActionID; kind: "button"; onClick: () => void }
     | { id: QuickActionID; kind: "link"; to: string }
   > = [
-    { id: "verify_request", kind: "button", onClick: () => copyToClipboard(`Verify ${agentRef}`) },
-    { id: "update_request", kind: "button", onClick: () => copyToClipboard(`Update ${agentRef}`) },
-    { id: "copy_link", kind: "button", onClick: () => copyToClipboard(absoluteHref) },
-    { id: "copy_agent_ref", kind: "button", onClick: () => copyToClipboard(agentRef) },
+    { id: "verify_request", kind: "button", onClick: () => copyWithToast(`Verify ${agentRef}`, visualLabel(visualQuickAction("verify_request"), lang)) },
+    { id: "update_request", kind: "button", onClick: () => copyWithToast(`Update ${agentRef}`, visualLabel(visualQuickAction("update_request"), lang)) },
+    { id: "copy_link", kind: "button", onClick: () => copyWithToast(absoluteHref, visualLabel(visualQuickAction("copy_link"), lang)) },
+    { id: "copy_agent_ref", kind: "button", onClick: () => copyWithToast(agentRef, visualLabel(visualQuickAction("copy_agent_ref"), lang)) },
     { id: "history", kind: "link", to: `${artifactHref}/history` },
   ];
   return (
-    <div className="sidecar-actions" aria-label={t("sidecar.quick_actions")}>
-      {actions.map((action) => {
-        const entry = visualQuickAction(action.id);
-        const Icon = visualIconComponent(entry.icon);
-        const label = visualLabel(entry, lang);
-        const description = visualDescription(entry, lang);
-        if (action.kind === "link") {
+    <div className="sidecar-actions-wrap">
+      <div className="sidecar-actions" aria-label={t("sidecar.quick_actions")}>
+        {actions.map((action) => {
+          const entry = visualQuickAction(action.id);
+          const Icon = visualIconComponent(entry.icon);
+          const label = visualLabel(entry, lang);
+          const description = visualDescription(entry, lang);
+          if (action.kind === "link") {
+            return (
+              <Tooltip key={action.id} content={description}>
+                <Link
+                  className="sidecar-action"
+                  aria-label={label}
+                  to={action.to}
+                >
+                  <Icon className="lucide" />
+                </Link>
+              </Tooltip>
+            );
+          }
           return (
             <Tooltip key={action.id} content={description}>
-              <Link
+              <button
+                type="button"
                 className="sidecar-action"
                 aria-label={label}
-                to={action.to}
+                onClick={action.onClick}
               >
                 <Icon className="lucide" />
-              </Link>
+              </button>
             </Tooltip>
           );
-        }
-        return (
-          <Tooltip key={action.id} content={description}>
-            <button
-              type="button"
-              className="sidecar-action"
-              aria-label={label}
-              onClick={action.onClick}
-            >
-              <Icon className="lucide" />
-            </button>
-          </Tooltip>
-        );
-      })}
+        })}
+      </div>
+      <div
+        className={`sidecar-toast${toast ? " is-visible" : ""}`}
+        role="status"
+        aria-live="polite"
+      >
+        {toast ?? ""}
+      </div>
     </div>
   );
 }
@@ -429,10 +451,6 @@ function acceptanceStats(body: string): { resolved: number; total: number } {
   return { resolved, total };
 }
 
-function copyToClipboard(text: string) {
-  if (typeof navigator === "undefined" || !navigator.clipboard) return;
-  void navigator.clipboard.writeText(text);
-}
 
 function SidecarStaticSection({ heading, children }: { heading: string; children: ReactNode }) {
   return (
@@ -515,22 +533,27 @@ function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: strin
       {shown.map((r) => {
         const av = agentAvatar(r.author_id);
         return (
-          <div key={r.revision_number} style={{ padding: "4px 0", fontSize: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--fg-1)" }}>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-3)" }}>
-                rev {r.revision_number}
-              </span>
-              <RevisionTypeBadge revisionType={r.revision_type} compact />
-              <span className={av.className} style={{ width: 12, height: 12, fontSize: 7 }}>
-                {av.initials}
-              </span>
-              <span style={{ color: "var(--fg-2)", fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {r.commit_msg || t("history.no_commit_msg")}
-              </span>
-            </div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "var(--fg-4)", marginLeft: 36 }}>
-              {new Date(r.created_at).toLocaleString()}
-            </div>
+          <div
+            key={r.revision_number}
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0", fontSize: 12, color: "var(--fg-1)", minWidth: 0 }}
+          >
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-3)", flexShrink: 0 }}>
+              rev {r.revision_number}
+            </span>
+            <RevisionTypeBadge revisionType={r.revision_type} compact />
+            <span className={av.className} style={{ width: 12, height: 12, fontSize: 7, flexShrink: 0 }}>
+              {av.initials}
+            </span>
+            <span style={{ color: "var(--fg-2)", fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
+              {r.commit_msg || t("history.no_commit_msg")}
+            </span>
+            <time
+              dateTime={r.created_at}
+              title={new Date(r.created_at).toLocaleString()}
+              style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "var(--fg-4)", flexShrink: 0 }}
+            >
+              {new Date(r.created_at).toLocaleDateString()}
+            </time>
           </div>
         );
       })}
@@ -665,7 +688,7 @@ function ConnectedArtifacts({
   hasSupersedes: boolean;
   supersededBy: string;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const nothing = !hasSupersedes && relates.length === 0 && relatedBy.length === 0;
 
   if (nothing) {
@@ -695,29 +718,39 @@ function ConnectedArtifacts({
         </div>
       )}
       <ul className="relation-list">
-        {rows.map(({ edge, direction }) => (
-          <li key={`${direction}-${edge.relation}-${edge.artifact_id}`}>
-            <Tooltip content={edge.title}>
-              <Link
-                to={`/p/${projectSlug}/wiki/${edge.slug}`}
-                className="relation-card"
-              >
-                <span className="relation-card__dir" aria-hidden="true">
-                  {direction === "out" ? (
-                    <ArrowUpRight className="lucide" />
-                  ) : (
-                    <ArrowDownLeft className="lucide" />
-                  )}
-                </span>
-                <RelationIcon relation={edge.relation} />
-                <span className="relation-card__body">
-                  <span className="relation-card__title">{edge.title}</span>
-                  <span className="relation-card__type">{edge.type}</span>
-                </span>
-              </Link>
-            </Tooltip>
-          </li>
-        ))}
+        {rows.map(({ edge, direction }) => {
+          const relEntry = visualRelation(edge.relation);
+          const relLabel = relEntry ? visualLabel(relEntry, lang) : edge.relation;
+          const relDesc = relEntry ? visualDescription(relEntry, lang) : "";
+          const arrow = direction === "out" ? "→" : "←";
+          const tip = relDesc
+            ? `${arrow} ${relLabel} · ${edge.title}\n${relDesc}`
+            : `${arrow} ${relLabel} · ${edge.title}`;
+          return (
+            <li key={`${direction}-${edge.relation}-${edge.artifact_id}`}>
+              <Tooltip content={tip}>
+                <Link
+                  to={`/p/${projectSlug}/wiki/${edge.slug}`}
+                  className="relation-card"
+                  aria-label={`${arrow} ${relLabel}: ${edge.title}`}
+                >
+                  <span className="relation-card__dir" aria-hidden="true">
+                    {direction === "out" ? (
+                      <ArrowUpRight className="lucide" />
+                    ) : (
+                      <ArrowDownLeft className="lucide" />
+                    )}
+                  </span>
+                  <RelationIcon relation={edge.relation} />
+                  <span className="relation-card__body">
+                    <span className="relation-card__title">{edge.title}</span>
+                    <span className="relation-card__type">{edge.type}</span>
+                  </span>
+                </Link>
+              </Tooltip>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
@@ -951,13 +984,14 @@ function NextContextLine({ meta }: { meta: ArtifactMeta }) {
     ? { "--meta-color": `var(${entry.color_token})` } as React.CSSProperties & Record<"--meta-color", string>
     : undefined;
   return (
-    <div style={{ fontSize: 11, color: "var(--fg-2)" }}>
-      <span style={{ color: "var(--fg-3)" }}>Context: </span>
-      <BadgeWithExplain label={label} description={why} className="policy-enum-chip" style={style}>
-        <Icon className="lucide" />
-        {label}
-      </BadgeWithExplain>
-      {why && <span style={{ color: "var(--fg-3)", marginLeft: 6 }}>· {why}</span>}
+    <div className="provenance__row">
+      <span className="k">context</span>
+      <span className="v">
+        <BadgeWithExplain label={label} description={why} className="policy-enum-chip" style={style}>
+          <Icon className="lucide" />
+          {label}
+        </BadgeWithExplain>
+      </span>
     </div>
   );
 }

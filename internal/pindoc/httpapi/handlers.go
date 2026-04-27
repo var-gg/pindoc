@@ -589,6 +589,11 @@ type edgeRef struct {
 	Type       string `json:"type"`
 	Title      string `json:"title"`
 	Relation   string `json:"relation"`
+	// BodyLocale is the BCP47 locale of the target artifact's body. The
+	// Reader uses it to decorate translation_of edges with a language
+	// chip ("EN" / "KO") so the user knows which translation each link
+	// leads to without clicking through.
+	BodyLocale string `json:"body_locale,omitempty"`
 }
 
 // pinRow mirrors artifact_pins. Reader Sidecar groups by Kind for the
@@ -795,13 +800,13 @@ func (d Deps) loadEdges(ctx context.Context, artifactID, direction string) ([]ed
 	var sql string
 	switch direction {
 	case "out":
-		sql = `SELECT e.target_id::text, a.slug, a.type, a.title, e.relation
+		sql = `SELECT e.target_id::text, a.slug, a.type, a.title, e.relation, COALESCE(a.body_locale, '')
 			FROM artifact_edges e
 			JOIN artifacts a ON a.id = e.target_id
 			WHERE e.source_id = $1
 			ORDER BY e.created_at`
 	case "in":
-		sql = `SELECT e.source_id::text, a.slug, a.type, a.title, e.relation
+		sql = `SELECT e.source_id::text, a.slug, a.type, a.title, e.relation, COALESCE(a.body_locale, '')
 			FROM artifact_edges e
 			JOIN artifacts a ON a.id = e.source_id
 			WHERE e.target_id = $1
@@ -817,7 +822,7 @@ func (d Deps) loadEdges(ctx context.Context, artifactID, direction string) ([]ed
 	var out []edgeRef
 	for rows.Next() {
 		var e edgeRef
-		if err := rows.Scan(&e.ArtifactID, &e.Slug, &e.Type, &e.Title, &e.Relation); err != nil {
+		if err := rows.Scan(&e.ArtifactID, &e.Slug, &e.Type, &e.Title, &e.Relation, &e.BodyLocale); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

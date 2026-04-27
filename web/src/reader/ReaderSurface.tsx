@@ -110,21 +110,30 @@ export function ReaderSurface({
     projectSlug
       ? `/p/${projectSlug}/wiki/visual-language-reference`
       : undefined;
+  // Locale chips are driven by what actually exists: the artifact's own
+  // body_locale plus any translation_of edges that resolve to a sibling
+  // artifact. Locales without a published translation are omitted — agents
+  // initiate new translations via a separate flow, not by clicking a chip
+  // for a locale that doesn't yet exist.
   const translationEdges = [
     ...(detail.relates_to ?? []),
     ...(detail.related_by ?? []),
   ].filter((edge) => edge.relation === "translation_of");
-  const translateLocales = ["en", "ko", "ja", "hi"];
-  const translateHref = (locale: string) => {
-    const params = new URLSearchParams(location.search);
-    if (locale === detail.body_locale) {
-      params.delete("translate");
-    } else {
-      params.set("translate", locale);
+  const localeOptions = (() => {
+    const seen = new Set<string>();
+    const out: Array<{ locale: string; slug: string; title: string; isCurrent: boolean }> = [];
+    if (detail.body_locale) {
+      seen.add(detail.body_locale);
+      out.push({ locale: detail.body_locale, slug: detail.slug, title: detail.title, isCurrent: true });
     }
-    const query = params.toString();
-    return `${location.pathname}${query ? `?${query}` : ""}`;
-  };
+    for (const edge of translationEdges) {
+      const locale = edge.body_locale ?? "";
+      if (!locale || seen.has(locale)) continue;
+      seen.add(locale);
+      out.push({ locale, slug: edge.slug, title: edge.title, isCurrent: false });
+    }
+    return out;
+  })();
 
   return (
     <main className="content">
@@ -168,37 +177,33 @@ export function ReaderSurface({
             onApply={onApplyAreaFilter ? () => onApplyAreaFilter(detail.area_slug) : undefined}
             legendHref={legendHref}
           />
-          {detail.body_locale ? (
-            <Tooltip content={t("reader.body_language")}>
-              <span className="chip chip--area">
-                lang: {detail.body_locale}
-              </span>
-            </Tooltip>
-          ) : null}
-          <span className="translate-toggle" aria-label="Translation target">
-            <Languages className="lucide" aria-hidden="true" />
-            {translateLocales.map((locale) => (
-              <Link
-                key={locale}
-                to={translateHref(locale)}
-                className={`translate-toggle__option${highlightedLocale === locale ? " is-active" : ""}`}
-                aria-current={highlightedLocale === locale ? "true" : undefined}
-                aria-label={t("reader.translate_to", locale.toUpperCase())}
-              >
-                {locale.toUpperCase()}
-              </Link>
-            ))}
-          </span>
-          {projectSlug && translationEdges.map((edge) => (
-            <Tooltip key={`translation-${edge.artifact_id}`} content={edge.title}>
-              <Link
-                to={`/p/${projectSlug}/wiki/${edge.slug}`}
-                className="chip chip--area"
-              >
-                translation
-              </Link>
-            </Tooltip>
-          ))}
+          {projectSlug && localeOptions.length > 0 && (
+            <span className="translate-toggle" aria-label={t("reader.body_language")}>
+              <Languages className="lucide" aria-hidden="true" />
+              {localeOptions.map((option) => (
+                option.isCurrent ? (
+                  <span
+                    key={option.locale}
+                    className="translate-toggle__option is-active"
+                    aria-current="true"
+                    title={t("reader.body_language")}
+                  >
+                    {option.locale.toUpperCase()}
+                  </span>
+                ) : (
+                  <Tooltip key={option.locale} content={option.title}>
+                    <Link
+                      to={`/p/${projectSlug}/wiki/${option.slug}`}
+                      className="translate-toggle__option"
+                      aria-label={t("reader.open_translation", option.locale.toUpperCase())}
+                    >
+                      {option.locale.toUpperCase()}
+                    </Link>
+                  </Tooltip>
+                )
+              ))}
+            </span>
+          )}
           <span className="art-meta__sep">·</span>
           <ArtifactByline artifact={detail} />
           <span className="art-meta__sep">·</span>

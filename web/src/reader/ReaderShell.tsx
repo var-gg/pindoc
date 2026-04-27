@@ -624,7 +624,6 @@ export function ReaderShell({ view }: Props) {
           bindAddr={bindAddr}
           agents={agents}
           users={users}
-          showOpenDetailAction={(view === "reader" && !detail && Boolean(wikiInspectorDetail)) || (view === "today" && Boolean(todayInspectorDetail)) || (view === "graph" && Boolean(graphFocusDetail))}
           onArtifactUpdated={view === "tasks" ? handleTaskInspectorUpdated : reload}
           focusReason={view === "graph" ? graphFocusReason : null}
         />
@@ -955,7 +954,15 @@ function Body({
                   }}
                 >
                   <div className="backlink__head">
-                    <span className="backlink__title">{a.title}</span>
+                    <Tooltip content={t("reader.card_open_detail_hint")}>
+                      <Link
+                        to={href}
+                        className="backlink__title backlink__title-link"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {a.title}
+                      </Link>
+                    </Tooltip>
                     <Tooltip content={t("reader.card_select_hint")}>
                       <span className="backlink__inspect" aria-label={t("reader.card_select_hint")}>
                         <PanelRightOpen className="lucide" aria-hidden="true" />
