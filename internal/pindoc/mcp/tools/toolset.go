@@ -36,6 +36,7 @@ var RegisteredTools = []string{
 	"pindoc.task.queue",
 	"pindoc.task.assign",
 	"pindoc.task.bulk_assign",
+	"pindoc.task.claim_done",
 }
 
 // ToolsetVersion returns a stable short string identifying the current

@@ -246,11 +246,20 @@ Examples:
       reason="Rebalance UI verification tasks to Alice"
     )
 
+Use pindoc.task.claim_done when the implementation is finished. It
+toggles every unchecked acceptance item ("- [ ]") to "[x]" and sets
+task_meta.status="claimed_done" in one atomic revision — no need to
+re-send the body. Already-resolved markers ([x]/[~]/[-]) are preserved.
+
+    pindoc.task.claim_done(
+      slug_or_id="task-reader-ia-refactor",
+      reason="All acceptance items shipped in PR #142"
+    )
+
 Use artifact.propose(shape="meta_patch") for other operational metadata
 fields such as priority or due_at unless a narrower task-specific tool
-exists. Status changes are not assignment changes: claimed_done still
-goes through artifact.propose with the Task status gate, and verified
-goes through pindoc.artifact.verify.
+exists. Verified state is the next stop after claimed_done and goes
+through pindoc.artifact.verify (verifier ≠ implementer invariant).
 
 ## Conversation vs Memory
 

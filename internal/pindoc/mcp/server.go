@@ -159,6 +159,7 @@ func NewServer(opts Options) *Server {
 	tools.RegisterTaskQueue(s, deps)
 	tools.RegisterTaskAssign(s, deps)
 	tools.RegisterTaskBulkAssign(s, deps)
+	tools.RegisterTaskClaimDone(s, deps)
 
 	// Author identity dual (migration 0014) — user row read/update.
 	tools.RegisterUserCurrent(s, deps)
