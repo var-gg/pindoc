@@ -2,6 +2,7 @@ package projects
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -36,23 +37,35 @@ func TestProjectReposIntegration(t *testing.T) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Per-run unique git remote so the test never collides with whatever
+	// `pindoc` (or any other project) already has registered in the dev
+	// DB the suite runs against. Without this the lookup below returns
+	// the older `pindoc` row by ORDER BY pr.created_at ASC and the test
+	// fails on a fresh checkout. Repo-integration is checking the lookup
+	// contract, not the canonical pindoc slug, so a synthetic remote is
+	// fine here.
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	sshRemote := fmt.Sprintf("git@github.com:Repo-IT-%s/Pindoc.git", suffix)
+	httpsRemote := fmt.Sprintf("https://github.com/repo-it-%s/pindoc.git", suffix)
+	wantNormalized := fmt.Sprintf("github.com/repo-it-%s/pindoc", suffix)
+
 	out, err := CreateProject(ctx, tx, CreateProjectInput{
-		Slug:            "repo-integration",
+		Slug:            "repo-integration-" + suffix,
 		Name:            "Project Repo Integration",
 		PrimaryLanguage: "en",
-		GitRemoteURL:    "git@github.com:Var-GG/Pindoc.git",
+		GitRemoteURL:    sshRemote,
 	})
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
 
-	assertProjectRepoRow(t, ctx, tx, out.ID, "github.com/var-gg/pindoc", "git@github.com:Var-GG/Pindoc.git")
-	if got, err := LookupProjectSlugByGitRemoteURL(ctx, tx, "https://github.com/var-gg/pindoc.git"); err != nil || got != out.Slug {
+	assertProjectRepoRow(t, ctx, tx, out.ID, wantNormalized, sshRemote)
+	if got, err := LookupProjectSlugByGitRemoteURL(ctx, tx, httpsRemote); err != nil || got != out.Slug {
 		t.Fatalf("LookupProjectSlugByGitRemoteURL = %q, %v; want %q, nil", got, err, out.Slug)
 	}
 	if _, err := AddProjectRepo(ctx, tx, ProjectRepoInput{
 		ProjectID:    out.ID,
-		GitRemoteURL: "https://github.com/var-gg/pindoc.git",
+		GitRemoteURL: httpsRemote,
 	}); err != nil {
 		t.Fatalf("AddProjectRepo duplicate normalized remote: %v", err)
 	}
