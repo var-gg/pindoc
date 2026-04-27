@@ -84,7 +84,9 @@ func instrumentCall[I, O any](
 		errorCode = code
 	}
 
-	store.Record(telemetryEntry(start, name, p, input, inputJSON, outputJSON, errorCode, store))
+	entry := telemetryEntry(start, name, p, input, inputJSON, outputJSON, errorCode, store)
+	entry.Metadata = extractToolMetadata(name, input, outputJSON)
+	store.Record(entry)
 
 	return result, output, err
 }
@@ -178,4 +180,140 @@ func extractProjectSlug(v any) string {
 		return ""
 	}
 	return f.String()
+}
+
+// extractToolMetadata builds the per-tool metadata payload that lands
+// in mcp_tool_calls.metadata. V1 covers the four highest-value tools
+// the codex DX feedback (Decision mcp-dx-외부-리뷰-codex-1차-피드백-
+// 6항목 발견 4) called out by name:
+//
+//   - workspace.detect → "via" priority chain branch
+//   - area.list        → "include_templates" flag usage
+//   - artifact.propose → "shape" + "artifact_type" buckets
+//   - artifact.search  → "top_k" + "include_templates" + "hits_count"
+//
+// All other tools return a nil payload and the row defaults to '{}'.
+// Returning bytes (json.RawMessage) lets the writer pass them straight
+// to pgx without a second marshal round-trip.
+func extractToolMetadata(toolName string, input any, outputJSON []byte) json.RawMessage {
+	md := map[string]any{}
+
+	switch toolName {
+	case "pindoc.workspace.detect":
+		// "via" lives on the structured output. Decode lazily into a
+		// minimal envelope so an unrelated output-shape change doesn't
+		// break this extractor.
+		var out struct {
+			Via string `json:"via"`
+		}
+		_ = json.Unmarshal(outputJSON, &out)
+		if out.Via != "" {
+			md["via"] = out.Via
+		}
+
+	case "pindoc.area.list":
+		if v, ok := boolField(input, "IncludeTemplates"); ok {
+			md["include_templates"] = v
+		}
+
+	case "pindoc.artifact.propose":
+		if v := stringField(input, "Shape"); v != "" {
+			md["shape"] = v
+		}
+		if v := stringField(input, "Type"); v != "" {
+			// Avoid clashing with the column name "tool_name" if a
+			// future query joins both — store under artifact_type.
+			md["artifact_type"] = v
+		}
+		if v := stringField(input, "AreaSlug"); v != "" {
+			md["area_slug"] = v
+		}
+
+	case "pindoc.artifact.search":
+		if v := intField(input, "TopK"); v > 0 {
+			md["top_k"] = v
+		}
+		if v, ok := boolField(input, "IncludeTemplates"); ok {
+			md["include_templates"] = v
+		}
+		var out struct {
+			Hits []json.RawMessage `json:"hits"`
+		}
+		_ = json.Unmarshal(outputJSON, &out)
+		md["hits_count"] = len(out.Hits)
+	}
+
+	if len(md) == 0 {
+		return nil
+	}
+	buf, err := json.Marshal(md)
+	if err != nil {
+		return nil
+	}
+	return buf
+}
+
+// stringField reads a string-valued struct field by name, traversing a
+// single pointer level. Returns "" when the field is missing, of the
+// wrong kind, or empty.
+func stringField(v any, name string) string {
+	rv := reflectStruct(v)
+	if !rv.IsValid() {
+		return ""
+	}
+	f := rv.FieldByName(name)
+	if !f.IsValid() || f.Kind() != reflect.String {
+		return ""
+	}
+	return f.String()
+}
+
+// boolField reads a bool field by name. Second return distinguishes
+// "field is present and false" (true, false) from "field missing"
+// (false, false) so callers can decide whether to record the value.
+func boolField(v any, name string) (bool, bool) {
+	rv := reflectStruct(v)
+	if !rv.IsValid() {
+		return false, false
+	}
+	f := rv.FieldByName(name)
+	if !f.IsValid() || f.Kind() != reflect.Bool {
+		return false, false
+	}
+	return f.Bool(), true
+}
+
+// intField reads an int / int64 / int32 field by name. Returns 0 when
+// missing or not a signed integer kind. The caller decides whether 0 is
+// meaningful.
+func intField(v any, name string) int {
+	rv := reflectStruct(v)
+	if !rv.IsValid() {
+		return 0
+	}
+	f := rv.FieldByName(name)
+	if !f.IsValid() {
+		return 0
+	}
+	switch f.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return int(f.Int())
+	}
+	return 0
+}
+
+// reflectStruct dereferences a single pointer and returns the underlying
+// struct value (or invalid Value when the input isn't a struct).
+func reflectStruct(v any) reflect.Value {
+	rv := reflect.ValueOf(v)
+	for rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return reflect.Value{}
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return reflect.Value{}
+	}
+	return rv
 }

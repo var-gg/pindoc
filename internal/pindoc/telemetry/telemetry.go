@@ -27,6 +27,7 @@ package telemetry
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -39,20 +40,29 @@ import (
 // Entry is one tool call record. Sent from the handler wrapper to the
 // flusher over a buffered channel.
 type Entry struct {
-	StartedAt        time.Time
-	DurationMs       int64
-	ToolName         string
-	AgentID          string
-	UserID           string // empty when server has no user bound
-	ProjectSlug      string
-	InputBytes       int
-	OutputBytes      int
-	InputChars       int
-	OutputChars      int
-	InputTokensEst   int
-	OutputTokensEst  int
-	ErrorCode        string
-	ToolsetVersion   string
+	StartedAt       time.Time
+	DurationMs      int64
+	ToolName        string
+	AgentID         string
+	UserID          string // empty when server has no user bound
+	ProjectSlug     string
+	InputBytes      int
+	OutputBytes     int
+	InputChars      int
+	OutputChars     int
+	InputTokensEst  int
+	OutputTokensEst int
+	ErrorCode       string
+	ToolsetVersion  string
+
+	// Metadata is the tool-specific result-attribute payload (Decision
+	// mcp-dx-외부-리뷰-codex-1차-피드백-6항목 발견 4). The wrapper in
+	// internal/pindoc/mcp/tools/telemetry_wrap.go fills this from a
+	// per-tool extractor; tools without an extractor leave it nil and
+	// the row defaults to '{}'::jsonb in the DB. Use json.RawMessage so
+	// the writer can pass through pre-serialised bytes without a second
+	// json.Marshal.
+	Metadata json.RawMessage
 }
 
 // Store is the live async logger. Safe for concurrent Record() calls.
@@ -244,11 +254,12 @@ type sqlBatch struct {
 const insertCols = `
 	started_at, duration_ms, tool_name, agent_id, user_id, project_slug,
 	input_bytes, output_bytes, input_chars, output_chars,
-	input_tokens_est, output_tokens_est, error_code, toolset_version
+	input_tokens_est, output_tokens_est, error_code, toolset_version,
+	metadata
 `
 
 func pgxBatch(entries []Entry) sqlBatch {
-	const cols = 14
+	const cols = 15
 	args := make([]any, 0, len(entries)*cols)
 	sb := make([]byte, 0, 256+64*len(entries))
 	sb = append(sb, "INSERT INTO mcp_tool_calls ("+insertCols+") VALUES "...)
@@ -264,6 +275,11 @@ func pgxBatch(entries []Entry) sqlBatch {
 			idx := i*cols + j + 1
 			sb = append(sb, '$')
 			sb = appendInt(sb, idx)
+			// metadata column needs a JSONB cast so pgx ships bytes/text
+			// to the right type. It is the last column.
+			if j == cols-1 {
+				sb = append(sb, "::jsonb"...)
+			}
 		}
 		sb = append(sb, ')')
 
@@ -282,9 +298,21 @@ func pgxBatch(entries []Entry) sqlBatch {
 			e.OutputTokensEst,
 			nullIfEmpty(e.ErrorCode),
 			nullIfEmpty(e.ToolsetVersion),
+			metadataArg(e.Metadata),
 		)
 	}
 	return sqlBatch{sql: string(sb), args: args}
+}
+
+// metadataArg returns the SQL argument for the metadata column. Nil and
+// empty payloads default to '{}' so the column's NOT NULL contract is
+// preserved without forcing every tool wrapper to remember to pass a
+// non-nil RawMessage.
+func metadataArg(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return "{}"
+	}
+	return string(raw)
 }
 
 func appendInt(b []byte, n int) []byte {

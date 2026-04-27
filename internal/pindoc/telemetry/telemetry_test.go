@@ -81,23 +81,61 @@ func TestEmptyTextIsZero(t *testing.T) {
 }
 
 // TestPgxBatchShape locks down the SQL-template generator. A regression
-// that inflates parameter positions (e.g., $1..$14 on row 1 but $15..$29
+// that inflates parameter positions (e.g., $1..$15 on row 1 but $16..$30
 // on row 2 going sideways) would silently corrupt bulk inserts.
 func TestPgxBatchShape(t *testing.T) {
 	entries := []Entry{
 		{ToolName: "a"}, {ToolName: "b"}, {ToolName: "c"},
 	}
 	b := pgxBatch(entries)
-	// 14 columns × 3 rows = 42 placeholders.
-	if len(b.args) != 14*3 {
-		t.Fatalf("expected 42 args, got %d", len(b.args))
+	// 15 columns × 3 rows = 45 placeholders (column 15 is metadata,
+	// added in migration 0024).
+	if len(b.args) != 15*3 {
+		t.Fatalf("expected 45 args, got %d", len(b.args))
 	}
-	// Must contain $42 and not $43 — cheap sanity check.
-	if !contains(b.sql, "$42") {
-		t.Fatalf("sql missing final placeholder $42:\n%s", b.sql)
+	// Must contain $45 and not $46 — cheap sanity check.
+	if !contains(b.sql, "$45") {
+		t.Fatalf("sql missing final placeholder $45:\n%s", b.sql)
 	}
-	if contains(b.sql, "$43") {
-		t.Fatalf("sql leaked extra placeholder $43:\n%s", b.sql)
+	if contains(b.sql, "$46") {
+		t.Fatalf("sql leaked extra placeholder $46:\n%s", b.sql)
+	}
+	// metadata is the only column that needs a JSONB cast — every batch
+	// row must carry one. With 3 rows we expect exactly 3 occurrences.
+	if got := countOccurrences(b.sql, "::jsonb"); got != 3 {
+		t.Fatalf("expected 3 jsonb casts, got %d:\n%s", got, b.sql)
+	}
+}
+
+// TestMetadataArgDefaults asserts the empty-payload contract: nil and
+// zero-length RawMessage both produce '{}' so the NOT NULL column stays
+// happy without forcing every wrapper to remember the default.
+func TestMetadataArgDefaults(t *testing.T) {
+	if got := metadataArg(nil); got != "{}" {
+		t.Fatalf("nil metadata: got %v, want \"{}\"", got)
+	}
+	if got := metadataArg([]byte{}); got != "{}" {
+		t.Fatalf("empty metadata: got %v, want \"{}\"", got)
+	}
+	payload := []byte(`{"via":"git"}`)
+	if got := metadataArg(payload); got != string(payload) {
+		t.Fatalf("non-empty metadata: got %v, want %q", got, string(payload))
+	}
+}
+
+func countOccurrences(s, sub string) int {
+	if len(sub) == 0 {
+		return 0
+	}
+	count := 0
+	start := 0
+	for {
+		idx := indexOf(s[start:], sub)
+		if idx < 0 {
+			return count
+		}
+		count++
+		start += idx + len(sub)
 	}
 }
 
