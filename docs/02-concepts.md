@@ -191,6 +191,24 @@ MCP 응답이 즉답 대신 체크리스트로 에이전트에 작업 역지시.
 
 URL → `pindoc.artifact.read(url)` fetch 시 받는 번들: `{ artifact, neighbors, recent_changes, open_questions, source_session, related_resources, area_context, project }`.
 
+### Read tracking — 4-layer 모델
+
+읽기 신호와 검증 신호를 한 layer에 욱여넣지 않는다. AI-only lifecycle에서 두 신호는 시맨틱이 다르고, 합치면 Today / Wiki / verification UX가 동시에 무너진다 (2026-04-27 80% 결함 audit 결과).
+
+| Layer | 데이터 | 의미 | 변경 트리거 |
+|---|---|---|---|
+| **L1 Reading raw** | `read_events` (raw fact) | 한 세션의 dwell·scroll·idle | Reader가 페이지를 본 매 순간 (route / hidden / beforeunload) flush |
+| **L2 Read state** | `artifact_read_states` view + `readstate.Classify` | per-(artifact, user) 분류: `unseen` / `glanced` / `read` / `deeply_read`. `completion_pct = min(active_sec/expected_sec, 1) × scroll_max`, expected_sec은 본문 글자수 ÷ locale별 reading speed (ko 600 chars/min, en 1250 chars/min, 최소 10초 floor). 임계 read≥0.5 / deeply_read≥0.8 | L1 INSERT 시 view가 자동 재계산 |
+| **L3 Acknowledgement** | `reader_watermarks` | 사용자가 Today stream을 검토했다는 명시적 신호. project-level | Today viewport observer (1.5초 dwell) 또는 명시 "모두 읽음" 버튼만. **L1 / L2는 L3을 건드리지 않는다.** |
+| **L4 Verification** | `artifact_meta.verification_state` | AI 변경에 대한 정합 검증. `unverified` / `partially_verified` / `verified` | 명시 verify 호출 (`pindoc.artifact.verify`)만. Read state는 input signal이지 자동 transition이 아니다. |
+
+연결:
+- **MCP `pindoc.artifact.read_state`** — L2 노출. agent가 "사람이 이 artifact를 읽었나?" 조회해 L4 promotion 판단의 입력으로 사용.
+- **Trust Card** — L2의 `deeply_read` / `read` / `glanced`를 chip으로 노출 (`unseen`은 chip 없음). L4와 시각적으로 분리 — 같은 카드에 두 chip이 동시에 뜬다.
+- **Today fallback 3-tier** — L3가 비어 있어 since=watermark 결과 0개일 때 since=-7d → since=∞(importance order)로 자연스럽게 떨어진다. `baseline.fallback_used`가 어느 tier로 떨어졌는지 echo한다.
+
+이 분리가 깨지는 패턴 (회피 대상): `read_events` INSERT가 직접 `reader_watermarks`를 갱신, L2 임계 도달이 자동으로 `verification_state`를 `verified`로 promote, L3 watermark가 `defaulted_to_days>0`인 첫 방문자만 fallback받음 — 모두 layer-cross된 잘못된 트리거다.
+
 ### Completeness
 
 - `draft`: 구조만. UI 링크 disabled.

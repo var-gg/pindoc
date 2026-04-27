@@ -1,11 +1,18 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
-import { CheckCircle2, ChevronDown, ChevronRight, Download, Filter, Loader2, PanelRightOpen, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { CheckCircle2, CheckSquare, ChevronDown, ChevronRight, Download, Filter, Loader2, PanelRightOpen, Sparkles } from "lucide-react";
 import { Link, useNavigate } from "react-router";
-import { api, type ChangeGroup, type TodayResp } from "../api/client";
+import { api, type ArtifactReadState, type ChangeGroup, type ReadState, type TodayResp } from "../api/client";
 import { useI18n } from "../i18n";
 import { EmptyState } from "./SurfacePrimitives";
 import { Tooltip } from "./Tooltip";
 import { TypeCountChip, VisualAreaChip } from "./VisualChips";
+
+const READ_STATE_LABEL: Record<ReadState, string> = {
+  unseen: "안 읽음",
+  glanced: "훑어봄",
+  read: "읽음",
+  deeply_read: "정독",
+};
 
 type Props = {
   projectSlug: string;
@@ -44,6 +51,10 @@ export function Today({
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<KindFilter>("all");
   const [autoOpen, setAutoOpen] = useState(false);
+  const [readStates, setReadStates] = useState<Map<string, ArtifactReadState>>(new Map());
+  const [marking, setMarking] = useState(false);
+  const streamRef = useRef<HTMLDivElement | null>(null);
+  const autoMarkedRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,6 +71,81 @@ export function Today({
       cancelled = true;
     };
   }, [projectSlug, selectedArea, lang]);
+
+  // Layer 2 read states for visual chips on each card. Refetch only when
+  // the project changes — area/filter changes never invalidate this map.
+  useEffect(() => {
+    let cancelled = false;
+    api.readStates(projectSlug)
+      .then((resp) => {
+        if (cancelled) return;
+        const m = new Map<string, ArtifactReadState>();
+        for (const s of resp.states) m.set(s.artifact_id, s);
+        setReadStates(m);
+      })
+      .catch(() => {
+        // Soft-fail: read states are decorative, not gating.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectSlug]);
+
+  const markAllRead = async (target: number) => {
+    if (marking || target <= 0) return;
+    setMarking(true);
+    try {
+      const resp = await api.readMark(projectSlug, target);
+      setData((prev) => prev ? {
+        ...prev,
+        baseline: {
+          ...prev.baseline,
+          revision_watermark: resp.revision_watermark,
+          last_seen_at: new Date().toISOString(),
+          defaulted_to_days: undefined,
+          fallback_used: undefined,
+        },
+      } : prev);
+    } catch {
+      // Soft-fail; user can retry.
+    } finally {
+      setMarking(false);
+    }
+  };
+
+  // Auto-mark: when the stream is in the viewport AND there are unread
+  // groups (max_revision_id > watermark), advance the watermark to max
+  // after a short dwell. Idempotent guard via autoMarkedRef so we don't
+  // spam the endpoint on every scroll.
+  useEffect(() => {
+    if (!data) return;
+    const max = data.max_revision_id;
+    const watermark = data.baseline.revision_watermark;
+    if (max <= 0 || watermark >= max) return;
+    if (autoMarkedRef.current === max) return;
+    const node = streamRef.current;
+    if (!node) return;
+    if (typeof IntersectionObserver === "undefined") return;
+    let timer: number | null = null;
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries.some((e) => e.isIntersecting);
+      if (visible && timer === null) {
+        timer = window.setTimeout(() => {
+          autoMarkedRef.current = max;
+          void markAllRead(max);
+        }, 1500);
+      } else if (!visible && timer !== null) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+    }, { threshold: 0.25 });
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      if (timer !== null) window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.max_revision_id, data?.baseline.revision_watermark, projectSlug]);
 
   const groups = data?.groups ?? [];
   const visibleGroups = useMemo(
@@ -121,6 +207,17 @@ export function Today({
             </div>
           </div>
           <div className="today-head__actions">
+            <Tooltip content={t("today.mark_all_read")}>
+              <button
+                type="button"
+                className="today-icon-btn"
+                onClick={() => markAllRead(data.max_revision_id)}
+                aria-label={t("today.mark_all_read")}
+                disabled={marking || data.max_revision_id <= data.baseline.revision_watermark}
+              >
+                {marking ? <Loader2 className="lucide today-spin" /> : <CheckSquare className="lucide" />}
+              </button>
+            </Tooltip>
             <ExportButton
               url={api.exportProjectUrl(projectSlug)}
               label={t("today.export_project")}
@@ -128,6 +225,14 @@ export function Today({
             />
           </div>
         </header>
+
+        {data.baseline.fallback_used && (
+          <div className="today-fallback-hint" role="status">
+            {data.baseline.fallback_used === "recent_7d"
+              ? t("today.fallback_recent_7d")
+              : t("today.fallback_importance_top")}
+          </div>
+        )}
 
         <section className="today-brief" aria-label={t("today.brief")}>
           <div className="today-brief__icon">
@@ -158,7 +263,7 @@ export function Today({
           ))}
         </div>
 
-        <div className="today-stream">
+        <div className="today-stream" ref={streamRef}>
           {groups.length === 0 && (
             <EmptyState message={emptyMessage} />
           )}
@@ -171,6 +276,7 @@ export function Today({
               onSelectArea={onSelectArea}
               selectedArtifactSlug={selectedArtifactSlug}
               onSelectArtifact={onSelectArtifact}
+              readState={firstArtifactReadState(group, readStates)}
             />
           ))}
           {autoGroups.length > 0 && (
@@ -188,6 +294,7 @@ export function Today({
                   onSelectArea={onSelectArea}
                   selectedArtifactSlug={selectedArtifactSlug}
                   onSelectArtifact={onSelectArtifact}
+                  readState={firstArtifactReadState(group, readStates)}
                   compact
                 />
               ))}
@@ -202,6 +309,15 @@ export function Today({
   );
 }
 
+function firstArtifactReadState(
+  group: ChangeGroup,
+  states: Map<string, ArtifactReadState>,
+): ArtifactReadState | undefined {
+  const id = group.first_artifact?.id;
+  if (!id) return undefined;
+  return states.get(id);
+}
+
 function ChangeGroupCard({
   group,
   projectSlug,
@@ -209,6 +325,7 @@ function ChangeGroupCard({
   onSelectArea,
   selectedArtifactSlug,
   onSelectArtifact,
+  readState,
   compact,
 }: {
   group: ChangeGroup;
@@ -217,6 +334,7 @@ function ChangeGroupCard({
   onSelectArea: (areaSlug: string) => void;
   selectedArtifactSlug: string | null;
   onSelectArtifact: (slug: string) => void;
+  readState?: ArtifactReadState;
   compact?: boolean;
 }) {
   const { t } = useI18n();
@@ -280,6 +398,16 @@ function ChangeGroupCard({
         <span>{new Date(group.time_end).toLocaleString()}</span>
         <span>{group.grouping_key.kind} · {group.grouping_key.confidence}</span>
         <span>{group.verification_state}</span>
+        {firstArtifact && (
+          <span
+            className={`change-card__read-state change-card__read-state--${readState?.read_state ?? "unseen"}`}
+            title={readState?.last_seen_at
+              ? `${READ_STATE_LABEL[readState.read_state]} · ${new Date(readState.last_seen_at).toLocaleString()}`
+              : READ_STATE_LABEL[readState?.read_state ?? "unseen"]}
+          >
+            {READ_STATE_LABEL[readState?.read_state ?? "unseen"]}
+          </span>
+        )}
       </div>
       <div className="change-card__areas" onClick={(e) => e.stopPropagation()}>
         {group.areas.map((area) => (

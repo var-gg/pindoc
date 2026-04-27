@@ -106,6 +106,11 @@ type Baseline struct {
 	RevisionWatermark int        `json:"revision_watermark"`
 	LastSeenAt        *time.Time `json:"last_seen_at,omitempty"`
 	DefaultedToDays   int        `json:"defaulted_to_days,omitempty"`
+	// FallbackUsed names the tier the response landed on when the
+	// primary watermark-since query came back empty. Empty string means
+	// the primary query had results. Values: "recent_7d" / "importance_top".
+	// See docs/06-ui-flows.md Flow 1a for the 3-tier fallback contract.
+	FallbackUsed string `json:"fallback_used,omitempty"`
 }
 
 type QueryResult struct {

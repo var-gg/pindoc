@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { ChevronLeft, ChevronRight, Languages, ListFilter } from "lucide-react";
-import { api, type Artifact, type ArtifactRef } from "../api/client";
+import { api, type Artifact, type ArtifactReadState, type ArtifactRef } from "../api/client";
 import { useI18n } from "../i18n";
 import { estimateReadingTime } from "../utils/readingTime";
 import { ArtifactByline } from "./ArtifactByline";
@@ -75,6 +75,23 @@ export function ReaderSurface({
     };
   }, [detail?.id, detail?.body_locale, highlightedLocale, projectSlug]);
 
+  // Layer 2 read state for the Trust Card "human read" chip. Refetches on
+  // artifact change; soft-fails because the chip is purely informational.
+  const [serverReadState, setServerReadState] = useState<ArtifactReadState | undefined>();
+  useEffect(() => {
+    if (!detail?.id || !projectSlug) {
+      setServerReadState(undefined);
+      return;
+    }
+    let cancelled = false;
+    api.artifactReadState(projectSlug, detail.id)
+      .then((s) => { if (!cancelled) setServerReadState(s); })
+      .catch(() => { if (!cancelled) setServerReadState(undefined); });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail?.id, projectSlug]);
+
   if (!detail) {
     return (
       <div className="content">
@@ -129,6 +146,7 @@ export function ReaderSurface({
           pins={detail.pins}
           taskStatus={detail.type === "Task" ? detail.task_meta?.status : undefined}
           recentWarnings={detail.recent_warnings}
+          readState={serverReadState}
           onApplyFilter={onApplyBadgeFilter}
           legendHref={legendHref}
         />

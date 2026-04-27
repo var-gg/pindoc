@@ -265,15 +265,16 @@ Reader는 `?` 또는 `Shift+/` 전역 키로 shortcut + symbol overlay를 연다
 
 ## Flow 1a: Today First Screen
 
-`/`는 기본 프로젝트의 `/p/:project/today`로 redirect한다. Today는 사용자가 마지막으로 본 revision watermark 이후의 변경을 우선 보여 주고, 없으면 최근 7일, 그래도 없으면 importance 상위 Change Group으로 fallback한다.
+`/`는 기본 프로젝트의 `/p/:project/today`로 redirect한다. Today는 사용자가 마지막으로 본 revision watermark 이후의 변경을 우선 보여 주고, 없으면 최근 7일, 그래도 없으면 importance 상위 Change Group으로 fallback한다(3-tier). watermark가 이미 있는 사용자에게도 fallback이 동일하게 작동해야 한다 — 첫 방문자만 fallback을 받던 0034 시점 동작은 80% 결함이었고 Migration 0040과 함께 정공으로 close됐다.
 
 구성:
-- Header: 현재 baseline, revision watermark, export action
+- Header: 현재 baseline, revision watermark, export action, 명시 "모두 읽음" 버튼.
+- Fallback hint: 응답 `baseline.fallback_used`가 `recent_7d` 또는 `importance_top`이면 stream 위에 1줄 안내를 띄운다 ("새 변경이 없어 최근 7일 변경을 보여드립니다" 등). 정공 fallback이 의도된 동작임을 사용자에게 명시.
 - Brief card: deterministic template 또는 source-bound LLM summary. LLM 미설정/실패/예산 초과 시 rule-based로 fallback하며 UI에 `AI-generated` 또는 `rule-based` hint를 표시한다.
-- Filter chips: 전체, human trigger, 검증 필요, auto sync, maintenance, system
-- Stream: Change Group card. subtype badge, revision/artifact count, areas, importance, verification state, area open/export action을 포함한다.
+- Filter chips: 전체, human trigger, 검증 필요, auto sync, maintenance, system.
+- Stream: Change Group card. subtype badge, revision/artifact count, areas, importance, verification state, **first artifact의 read state chip** (`unseen` / `glanced` / `read` / `deeply_read`), area open/export action을 포함한다.
 - Auto/maintenance 묶음: 기본 collapsed aggregate로 노이즈를 낮춘다.
-- Read mark: stream이 viewport에 노출되면 user+project read watermark를 자동 갱신한다.
+- Read mark: stream이 viewport에 1.5초 이상 노출되면 user+project read watermark를 자동으로 max revision까지 끌어올린다. **read_events는 watermark를 갱신하지 않는다** — Wiki에서 한 artifact를 읽는 행위와 Today stream을 봤다는 행위는 시맨틱이 다르다(Layer 1 vs Layer 3). 명시 "모두 읽음" 버튼은 viewport observer가 닿지 않는 escape hatch.
 
 Change Group V0 grouping 우선순위:
 1. `bulk_op_id`

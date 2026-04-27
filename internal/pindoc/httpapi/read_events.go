@@ -55,12 +55,12 @@ func (d Deps) handleReadEvent(w http.ResponseWriter, r *http.Request) {
 	var eventID string
 	err = d.DB.QueryRow(r.Context(), `
 		INSERT INTO read_events (
-			artifact_id, user_id, started_at, ended_at,
+			artifact_id, user_id, user_key, started_at, ended_at,
 			active_seconds, scroll_max_pct, idle_seconds, locale
 		)
-		VALUES ($1, NULL, $2, $3, $4, $5, $6, NULLIF($7, ''))
+		VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, NULLIF($8, ''))
 		RETURNING id::text
-	`, artifactID, input.StartedAt, input.EndedAt,
+	`, artifactID, readerUserKey(r), input.StartedAt, input.EndedAt,
 		input.ActiveSeconds, input.ScrollMaxPct, input.IdleSeconds,
 		strings.TrimSpace(input.Locale),
 	).Scan(&eventID)
@@ -70,9 +70,10 @@ func (d Deps) handleReadEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := d.markCurrentProjectRevision(r, projectSlug, readerUserKey(r)); err != nil && d.Logger != nil {
-		d.Logger.Warn("read event watermark update failed", "err", err, "project_slug", projectSlug)
-	}
+	// Note: read_events does NOT update reader_watermarks. Reading one
+	// artifact ≠ reviewing today's Change Group stream. Watermark
+	// updates are driven by Today viewport observer + explicit
+	// "Mark all read" only — see docs/06-ui-flows.md Flow 1a.
 
 	writeJSON(w, http.StatusOK, readEventResponse{
 		ID:            eventID,

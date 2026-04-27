@@ -357,16 +357,45 @@ export type TodaySummary = {
   created_at: string;
 };
 
+export type TodayBaseline = {
+  revision_watermark: number;
+  last_seen_at?: string;
+  defaulted_to_days?: number;
+  // Set when the watermark-since query was empty and the server fell back.
+  // "recent_7d" — last-7-day window. "importance_top" — no time filter,
+  // importance ordering. Empty/undefined means primary tier had results.
+  fallback_used?: "recent_7d" | "importance_top";
+};
+
 export type TodayResp = {
   project_slug: string;
   groups: ChangeGroup[];
   summary: TodaySummary;
-  baseline: {
-    revision_watermark: number;
-    last_seen_at?: string;
-    defaulted_to_days?: number;
-  };
+  baseline: TodayBaseline;
   max_revision_id: number;
+};
+
+export type ReadState = "unseen" | "glanced" | "read" | "deeply_read";
+
+export type ArtifactReadState = {
+  artifact_id: string;
+  user_key?: string;
+  read_state: ReadState;
+  completion_pct: number;
+  last_seen_at?: string;
+  event_count: number;
+};
+
+export type ReadStatesResp = {
+  project_slug: string;
+  user_key: string;
+  states: ArtifactReadState[];
+};
+
+export type ReadMarkResp = {
+  project_slug: string;
+  user_key: string;
+  revision_watermark: number;
 };
 
 export type InboxResp = {
@@ -780,6 +809,22 @@ export const api = {
     if (params?.locale) qs.set("locale", params.locale);
     const q = qs.toString();
     return j<TodayResp>(`${p(project)}/change-groups${q ? `?${q}` : ""}`);
+  },
+  readStates: (project: string) =>
+    j<ReadStatesResp>(`${p(project)}/read-states`),
+  artifactReadState: (project: string, idOrSlug: string) =>
+    j<ArtifactReadState>(`${p(project)}/artifacts/${encodeURIComponent(idOrSlug)}/read-state`),
+  readMark: async (project: string, revisionWatermark?: number): Promise<ReadMarkResp> => {
+    const res = await fetch(`${p(project)}/read-mark`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision_watermark: revisionWatermark ?? 0 }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`${res.status} ${res.statusText}: ${body.slice(0, 200)}`);
+    }
+    return (await res.json()) as ReadMarkResp;
   },
   readEvent: async (
     project: string,

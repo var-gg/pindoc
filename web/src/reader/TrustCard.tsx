@@ -4,7 +4,7 @@
 // axes gracefully fall back to a single "unclassified" chip so legacy rows
 // (predating migration 0012 / artifact_meta) still read cleanly.
 
-import type { ArtifactMeta, PinRef, RecentWarning, TaskMeta } from "../api/client";
+import type { ArtifactMeta, ArtifactReadState, PinRef, RecentWarning, TaskMeta } from "../api/client";
 import { useI18n } from "../i18n";
 import { BadgePopoverChip } from "./BadgePopoverChip";
 import type { BadgeFilter } from "./badgeFilters";
@@ -23,6 +23,11 @@ type Props = {
   // revision codes stay in the history but don't clutter the card for
   // an artifact whose current revision is clean.
   recentWarnings?: RecentWarning[];
+  // readState is the Layer 2 signal — has a human actually read this?
+  // Layer 4 verification stays separate; the chip is the bridge between
+  // them on the card. 'deeply_read' nudges agents that this artifact is
+  // ready for explicit verify; 'unseen' / 'glanced' warns it is not.
+  readState?: ArtifactReadState;
   onApplyFilter?: (filter: BadgeFilter) => void;
   legendHref?: string;
 };
@@ -43,6 +48,7 @@ export function TrustCard({
   pins,
   taskStatus,
   recentWarnings,
+  readState,
   onApplyFilter,
   legendHref,
 }: Props) {
@@ -51,6 +57,10 @@ export function TrustCard({
   const taskChip = taskStatusChip(taskStatus, t);
   if (taskChip) {
     chips.unshift(taskChip);
+  }
+  const readChip = readStateChip(readState, t);
+  if (readChip) {
+    chips.push(readChip);
   }
   for (const warnChip of warningChips(recentWarnings, t)) {
     chips.push(warnChip);
@@ -128,6 +138,33 @@ function buildChips(meta: ArtifactMeta | undefined, pins: PinRef[] | undefined, 
   }
 
   return chips;
+}
+
+function readStateChip(state: ArtifactReadState | undefined, t: TFn): Chip | null {
+  if (!state || state.read_state === "unseen") return null;
+  const pct = Math.round((state.completion_pct ?? 0) * 100);
+  switch (state.read_state) {
+    case "deeply_read":
+      return {
+        label: t("trust.read_state.deeply_read.label"),
+        tone: "neutral",
+        title: t("trust.read_state.deeply_read.tip", pct),
+      };
+    case "read":
+      return {
+        label: t("trust.read_state.read.label"),
+        tone: "neutral",
+        title: t("trust.read_state.read.tip", pct),
+      };
+    case "glanced":
+      return {
+        label: t("trust.read_state.glanced.label"),
+        tone: "warning",
+        title: t("trust.read_state.glanced.tip", pct),
+      };
+    default:
+      return null;
+  }
 }
 
 function trustClassChip(meta: ArtifactMeta, t: TFn): Chip {

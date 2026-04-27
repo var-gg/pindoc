@@ -69,13 +69,38 @@ func (d Deps) handleChangeGroups(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
-	if len(groups) == 0 && baseline.DefaultedToDays > 0 && opts.SinceRevisionID == 0 {
-		opts.SinceTime = nil
-		groups, err = changegroup.Query(r.Context(), d.DB, projectSlug, opts)
-		if err != nil {
-			d.Logger.Error("change groups fallback query", "err", err)
-			writeError(w, http.StatusInternalServerError, "query failed")
-			return
+	// Flow 1a 3-tier fallback (docs/06-ui-flows.md): if the watermark-since
+	// query is empty, retry with last 7 days; if that's still empty, drop
+	// the time filter and let importance ordering surface the top groups.
+	// since_revision_id callers are explicit about their cutoff and bypass
+	// fallback entirely.
+	if len(groups) == 0 && opts.SinceRevisionID == 0 {
+		if baseline.LastSeenAt != nil {
+			cutoff := time.Now().Add(-7 * 24 * time.Hour)
+			retry := opts
+			retry.SinceTime = &cutoff
+			groups, err = changegroup.Query(r.Context(), d.DB, projectSlug, retry)
+			if err != nil {
+				d.Logger.Error("change groups 7d fallback query", "err", err)
+				writeError(w, http.StatusInternalServerError, "query failed")
+				return
+			}
+			if len(groups) > 0 {
+				baseline.FallbackUsed = "recent_7d"
+			}
+		}
+		if len(groups) == 0 {
+			retry := opts
+			retry.SinceTime = nil
+			groups, err = changegroup.Query(r.Context(), d.DB, projectSlug, retry)
+			if err != nil {
+				d.Logger.Error("change groups importance fallback query", "err", err)
+				writeError(w, http.StatusInternalServerError, "query failed")
+				return
+			}
+			if len(groups) > 0 {
+				baseline.FallbackUsed = "importance_top"
+			}
 		}
 	}
 	summary, err := d.todaySummary(r, projectSlug, userKey, locale, baseline.RevisionWatermark, maxRevisionID, filterHash(q), groups)

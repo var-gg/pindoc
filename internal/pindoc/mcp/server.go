@@ -167,6 +167,11 @@ func NewServer(opts Options) (*Server, error) {
 	// Task status v2 (migration 0013) — agent-to-agent verification.
 	tools.RegisterArtifactVerify(s, deps)
 
+	// Layer 2 — read state (migration 0040). Bridge to Layer 4 verification:
+	// agents query this to confirm a human has actually read AI revisions
+	// before promoting them into the verification candidate lane.
+	tools.RegisterArtifactReadState(s, deps)
+
 	// Task operation tools — Decision task-operation-tools-task-assign-
 	// 단건-task-bulk-assign-배치-reas. Semantic shortcuts over
 	// artifact.propose(shape="meta_patch", task_meta={assignee}) that

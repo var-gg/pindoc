@@ -102,8 +102,8 @@ func TestAuditUserFKsSetNullIntegration(t *testing.T) {
 		t.Fatalf("insert scope edge: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO read_events (artifact_id, user_id, started_at, ended_at, active_seconds, scroll_max_pct)
-		VALUES ($1::uuid, $2::uuid, now(), now() + interval '1 minute', 10, 0.5)
+		INSERT INTO read_events (artifact_id, user_id, user_key, started_at, ended_at, active_seconds, scroll_max_pct)
+		VALUES ($1::uuid, $2::uuid, 'audit-fk-tester', now(), now() + interval '1 minute', 10, 0.5)
 	`, artifactID, inviterID); err != nil {
 		t.Fatalf("insert read event: %v", err)
 	}
