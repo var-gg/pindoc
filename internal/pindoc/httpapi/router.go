@@ -27,6 +27,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
+	"github.com/var-gg/pindoc/internal/pindoc/providers"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
 	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
 )
@@ -49,6 +50,10 @@ type Deps struct {
 	Settings      *settings.Store
 	Telemetry     *telemetry.Store
 	OAuth         *pauth.OAuthService
+	// Providers is the runtime IdP registry (`instance_providers`
+	// table). Nil-safe — admin endpoints respond 503 when the store
+	// hasn't been wired (test fixtures).
+	Providers     *providers.Store
 	AuthProviders []string
 	BindAddr      string
 	// DefaultUserID / DefaultAgentID are stamped on loopback
@@ -131,6 +136,14 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	// dropping into psql. Read-only, same convention as the rest of
 	// httpapi.
 	mux.HandleFunc("GET /api/ops/telemetry", d.handleTelemetry)
+
+	// Instance-level admin: identity provider registry. task-providers-
+	// admin-ui — env seeds defaults, this surface mutates the DB row at
+	// runtime so credential rotation / IdP toggling works without a
+	// daemon restart. Loopback principal only (instance owner).
+	mux.HandleFunc("GET /api/instance/providers", d.handleInstanceProvidersList)
+	mux.HandleFunc("POST /api/instance/providers", d.handleInstanceProvidersUpsert)
+	mux.HandleFunc("DELETE /api/instance/providers/{idOrName}", d.handleInstanceProvidersDelete)
 
 	// Project-scoped reads. The {project} path segment resolves a row in
 	// projects.slug; 404 if missing so URL shares fail loudly rather than

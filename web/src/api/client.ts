@@ -557,6 +557,46 @@ export type ProjectCreateError = {
   message: string;
 };
 
+// task-providers-admin-ui — instance-level identity provider
+// registry. The admin UI mutates `instance_providers` rows at
+// runtime; the daemon swaps OAuth credentials in-process so changes
+// take effect on the next request.
+export type InstanceProvider = {
+  id: string;
+  provider_name: string;
+  display_name: string;
+  client_id: string;
+  has_client_secret: boolean;
+  config?: Record<string, unknown>;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by_user_id?: string;
+};
+
+export type InstanceProvidersResp = {
+  providers: InstanceProvider[];
+};
+
+export type InstanceProviderUpsertInput = {
+  provider_name: string;
+  display_name?: string;
+  client_id: string;
+  client_secret?: string;
+  config?: Record<string, unknown>;
+  enabled?: boolean;
+};
+
+export type InstanceProviderOpResp = {
+  status: "upserted" | "deleted";
+  provider?: InstanceProvider;
+};
+
+export type InstanceProviderError = {
+  error_code: string;
+  message: string;
+};
+
 // Phase D — permission management plane shapes. These mirror
 // internal/pindoc/httpapi/members.go envelopes 1:1. Errors come back
 // as the same { error_code, message } shape every other write
@@ -930,6 +970,63 @@ export const api = {
       throw err;
     }
     return (await res.json()) as MembersOpResp;
+  },
+
+  // task-providers-admin-ui — instance-level identity provider
+  // registry. Loopback principal only at the BE; non-loopback
+  // callers see INSTANCE_OWNER_REQUIRED, the ProvidersPanel maps
+  // each error_code to a friendly explanation.
+  instanceProviders: () => j<InstanceProvidersResp>("/api/instance/providers"),
+  upsertInstanceProvider: async (
+    input: InstanceProviderUpsertInput,
+  ): Promise<InstanceProviderOpResp> => {
+    const res = await fetch("/api/instance/providers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      let parsed: InstanceProviderError | null = null;
+      try {
+        parsed = (await res.json()) as InstanceProviderError;
+      } catch {
+        // fall through
+      }
+      const err = new Error(
+        parsed?.message ?? `${res.status} ${res.statusText}`,
+      ) as Error & Partial<InstanceProviderError>;
+      if (parsed) {
+        err.error_code = parsed.error_code;
+        err.message = parsed.message;
+      }
+      throw err;
+    }
+    return (await res.json()) as InstanceProviderOpResp;
+  },
+  deleteInstanceProvider: async (
+    idOrName: string,
+  ): Promise<InstanceProviderOpResp> => {
+    const res = await fetch(
+      `/api/instance/providers/${encodeURIComponent(idOrName)}`,
+      { method: "DELETE", headers: { Accept: "application/json" } },
+    );
+    if (!res.ok) {
+      let parsed: InstanceProviderError | null = null;
+      try {
+        parsed = (await res.json()) as InstanceProviderError;
+      } catch {
+        // fall through
+      }
+      const err = new Error(
+        parsed?.message ?? `${res.status} ${res.statusText}`,
+      ) as Error & Partial<InstanceProviderError>;
+      if (parsed) {
+        err.error_code = parsed.error_code;
+        err.message = parsed.message;
+      }
+      throw err;
+    }
+    return (await res.json()) as InstanceProviderOpResp;
   },
 
   // Ops — instance-wide MCP tool-call telemetry. Reads from the async

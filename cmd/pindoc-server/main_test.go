@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/var-gg/pindoc/internal/pindoc/config"
@@ -28,33 +27,40 @@ func TestValidateServerConfig_RejectsPublicWithoutAuth(t *testing.T) {
 	}
 }
 
-// TestValidateServerConfig_RequiresGitHubOAuthClient locks the
-// follow-on invariant: opting into the github provider without
-// supplying GitHub OAuth App credentials is also a boot-time error.
-// The validator names both env vars so the operator knows which to
-// set.
-func TestValidateServerConfig_RequiresGitHubOAuthClient(t *testing.T) {
-	err := validateServerConfig(&config.Config{
-		BindAddr:      "0.0.0.0:5830",
-		AuthProviders: []string{config.AuthProviderGitHub},
-	})
-	if err == nil {
-		t.Fatalf("validateServerConfig(github without credentials) error = nil")
+// TestValidateServerConfig_GitHubCredentialsAreOptional locks the
+// post-providers-admin-ui contract: validateServerConfig no longer
+// requires env GitHub credentials when AuthProviders includes github,
+// because the admin UI can supply them via instance_providers at
+// runtime. cmd/pindoc-server's main() still fails loud at OAuth init
+// time when neither env nor DB carries credentials — that path needs
+// the open DB pool, which the validator does not have.
+func TestValidateServerConfig_GitHubCredentialsAreOptional(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  config.Config
+	}{
+		{
+			name: "github provider without env credentials",
+			cfg: config.Config{
+				BindAddr:      "0.0.0.0:5830",
+				AuthProviders: []string{config.AuthProviderGitHub},
+			},
+		},
+		{
+			name: "github provider with env credentials",
+			cfg: config.Config{
+				BindAddr:           "0.0.0.0:5830",
+				AuthProviders:      []string{config.AuthProviderGitHub},
+				GitHubClientID:     "github-client",
+				GitHubClientSecret: "github-secret",
+			},
+		},
 	}
-	for _, want := range []string{"PINDOC_GITHUB_CLIENT_ID", "PINDOC_GITHUB_CLIENT_SECRET"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error %q missing %q", err.Error(), want)
-		}
-	}
-
-	err = validateServerConfig(&config.Config{
-		BindAddr:            "0.0.0.0:5830",
-		AuthProviders:       []string{config.AuthProviderGitHub},
-		GitHubClientID:      "github-client",
-		GitHubClientSecret:  "github-secret",
-		OAuthSigningKeyPath: "unused",
-	})
-	if err != nil {
-		t.Fatalf("validateServerConfig(github with credentials) error = %v", err)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if err := validateServerConfig(&c.cfg); err != nil {
+				t.Fatalf("validateServerConfig: %v", err)
+			}
+		})
 	}
 }

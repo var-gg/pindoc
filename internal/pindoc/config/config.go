@@ -71,6 +71,14 @@ type Config struct {
 	// proxy must set this to acknowledge the trust assumption.
 	AllowPublicUnauthenticated bool
 
+	// InstanceKeyB64 is the base64-encoded 32-byte master key used by
+	// the providers package to AES-GCM encrypt IdP credentials at
+	// rest. Empty when the operator has not opted into the runtime
+	// admin UI yet — daemon refuses to start if any encrypted row
+	// exists in `instance_providers` while this is empty so a key
+	// rotation footgun fails loud.
+	InstanceKeyB64 string
+
 	// UserLanguage hints NOT_READY template selection until Phase 5 loads
 	// the real value from PINDOC.md. Default "en".
 	UserLanguage string
@@ -188,6 +196,7 @@ func Load() (*Config, error) {
 		AuthProviders:              normalizeProviders(envList("PINDOC_AUTH_PROVIDERS", nil)),
 		BindAddr:                   strings.TrimSpace(env("PINDOC_BIND_ADDR", DefaultBindAddr)),
 		AllowPublicUnauthenticated: envBool("PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED", false),
+		InstanceKeyB64:             strings.TrimSpace(env("PINDOC_INSTANCE_KEY", "")),
 		UserLanguage:               strings.ToLower(env("PINDOC_USER_LANGUAGE", "en")),
 		ReceiptExemptionLimit:      envInt("PINDOC_RECEIPT_EXEMPTION_LIMIT", 5),
 		ProjectSlug:                env("PINDOC_PROJECT", "pindoc"),

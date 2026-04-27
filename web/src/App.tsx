@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation, useParams } from "react-router";
 import { api } from "./api/client";
+import { ProvidersPanel } from "./admin/ProvidersPanel";
 import { useI18n } from "./i18n";
 import { Telemetry } from "./ops/Telemetry";
 import { CreateProjectPage } from "./reader/CreateProjectPage";
@@ -70,6 +71,11 @@ export function App() {
           serves). Reachable via /ops/telemetry; linked from the Reader
           TopNav's overflow menu. */}
       <Route path="/ops/telemetry" element={<Telemetry />} />
+
+      {/* Admin — task-providers-admin-ui. Instance-level identity
+          provider registry. Loopback principal only at the BE so non-
+          owner callers see INSTANCE_OWNER_REQUIRED here too. */}
+      <Route path="/admin/providers" element={<ProvidersPanel />} />
 
       {/* Bare root. / redirects to /p/:default/today. */}
         <Route path="/" element={<LegacyRedirect base="today" />} />

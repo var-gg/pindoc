@@ -105,7 +105,8 @@ func newGitHubOAuth(cfg OAuthConfig, cookieSecret []byte) (*githubOAuth, error) 
 }
 
 func (s *OAuthService) handleGitHubLogin(w http.ResponseWriter, r *http.Request) {
-	if s == nil || s.github == nil {
+	gh := s.currentGitHub()
+	if gh == nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -121,7 +122,7 @@ func (s *OAuthService) handleGitHubLogin(w http.ResponseWriter, r *http.Request)
 	}
 	state := githubOAuthState{
 		InviteToken: invite,
-		ReturnTo:    s.github.safeReturnTo(r.URL.Query().Get("return_to")),
+		ReturnTo:    gh.safeReturnTo(r.URL.Query().Get("return_to")),
 		Nonce:       nonce,
 		ExpiresAt:   time.Now().Add(githubStateTTL).Unix(),
 	}
@@ -130,12 +131,13 @@ func (s *OAuthService) handleGitHubLogin(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "state signing failed", http.StatusInternalServerError)
 		return
 	}
-	http.SetCookie(w, s.github.cookie(githubStateCookieName, signed, int(githubStateTTL.Seconds())))
-	http.Redirect(w, r, s.github.config.AuthCodeURL(signed), http.StatusFound)
+	http.SetCookie(w, gh.cookie(githubStateCookieName, signed, int(githubStateTTL.Seconds())))
+	http.Redirect(w, r, gh.config.AuthCodeURL(signed), http.StatusFound)
 }
 
 func (s *OAuthService) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
-	if s == nil || s.github == nil {
+	gh := s.currentGitHub()
+	if gh == nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -149,7 +151,7 @@ func (s *OAuthService) handleGitHubCallback(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "invalid oauth state", http.StatusBadRequest)
 		return
 	}
-	clearCookie(w, s.github.cookie(githubStateCookieName, "", -1))
+	clearCookie(w, gh.cookie(githubStateCookieName, "", -1))
 	var state githubOAuthState
 	if err := verifySignedJSON(s.cookieSecret, rawState, &state); err != nil {
 		http.Error(w, "invalid oauth state", http.StatusBadRequest)
@@ -169,13 +171,13 @@ func (s *OAuthService) handleGitHubCallback(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	ctx := s.github.oauthContext(r.Context())
-	token, err := s.github.config.Exchange(ctx, code)
+	ctx := gh.oauthContext(r.Context())
+	token, err := gh.config.Exchange(ctx, code)
 	if err != nil {
 		http.Error(w, "github token exchange failed", http.StatusBadGateway)
 		return
 	}
-	identity, err := s.github.fetchIdentity(ctx, token)
+	identity, err := gh.fetchIdentity(ctx, token)
 	if err != nil {
 		status := http.StatusBadGateway
 		if errors.Is(err, errGitHubVerifiedEmailRequired) {
@@ -208,7 +210,7 @@ func (s *OAuthService) handleGitHubCallback(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "session signing failed", http.StatusInternalServerError)
 		return
 	}
-	returnTo := s.github.safeReturnTo(state.ReturnTo)
+	returnTo := gh.safeReturnTo(state.ReturnTo)
 	if (returnTo == "/" || returnTo == "/signup" || strings.HasPrefix(returnTo, "/signup?")) && joined.ProjectSlug != "" {
 		returnTo = "/p/" + url.PathEscape(joined.ProjectSlug) + "/today"
 	}
@@ -364,7 +366,8 @@ func clearCookie(w http.ResponseWriter, cookie *http.Cookie) {
 }
 
 func (s *OAuthService) setBrowserSession(w http.ResponseWriter, userID string) error {
-	if s == nil || s.github == nil {
+	gh := s.currentGitHub()
+	if gh == nil {
 		return errors.New("auth: github oauth is not configured")
 	}
 	value, err := signJSON(s.cookieSecret, browserSessionState{
@@ -374,7 +377,7 @@ func (s *OAuthService) setBrowserSession(w http.ResponseWriter, userID string) e
 	if err != nil {
 		return err
 	}
-	http.SetCookie(w, s.github.cookie(githubSessionCookieName, value, int(githubSessionTTL.Seconds())))
+	http.SetCookie(w, gh.cookie(githubSessionCookieName, value, int(githubSessionTTL.Seconds())))
 	return nil
 }
 

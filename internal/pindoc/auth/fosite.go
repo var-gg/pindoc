@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-jose/go-jose/v3"
@@ -65,7 +66,18 @@ type OAuthService struct {
 	clientID        string
 	bootstrapUserID string
 	cookieSecret    []byte
-	github          *githubOAuth
+
+	// github is swapped in-place when the admin UI rotates credentials.
+	// Read paths take a snapshot via currentGitHub() so a swap mid-
+	// request never tears state. nil = github IdP not configured (404
+	// on /auth/github/{login,callback}).
+	githubMu sync.RWMutex
+	github   *githubOAuth
+
+	// redirectBaseURL is captured at boot so SetGitHubCredentials can
+	// rebuild githubOAuth without re-resolving the public base URL on
+	// every refresh.
+	redirectBaseURL string
 }
 
 func NewOAuthService(ctx context.Context, pool *db.Pool, cfg OAuthConfig) (*OAuthService, error) {
@@ -149,6 +161,7 @@ func NewOAuthService(ctx context.Context, pool *db.Pool, cfg OAuthConfig) (*OAut
 		compose.OAuth2TokenIntrospectionFactory,
 		compose.OAuth2TokenRevocationFactory,
 	)
+	redirectBaseURL := normalizeBaseURL(firstNonEmpty(cfg.RedirectBaseURL, cfg.PublicBaseURL, cfg.Issuer))
 	githubOAuth, err := newGitHubOAuth(cfg, cookieSecret)
 	if err != nil {
 		return nil, err
@@ -166,7 +179,64 @@ func NewOAuthService(ctx context.Context, pool *db.Pool, cfg OAuthConfig) (*OAut
 		bootstrapUserID: strings.TrimSpace(cfg.BootstrapUserID),
 		cookieSecret:    cookieSecret,
 		github:          githubOAuth,
+		redirectBaseURL: redirectBaseURL,
 	}, nil
+}
+
+// currentGitHub returns the active githubOAuth snapshot under a read
+// lock. Callers receive a stable pointer for the duration of one
+// request even if SetGitHubCredentials swaps the field mid-flight.
+func (s *OAuthService) currentGitHub() *githubOAuth {
+	if s == nil {
+		return nil
+	}
+	s.githubMu.RLock()
+	defer s.githubMu.RUnlock()
+	return s.github
+}
+
+// SetGitHubCredentials swaps the active GitHub OAuth client at
+// runtime. Empty client_id + secret unwires the IdP — /auth/github/*
+// routes 404 on the next request. Returns an error when the inputs
+// are inconsistent (one of the two missing). Decision decision-auth-
+// model-loopback-and-providers § 3 — admin UI mutates credentials
+// without restarting the daemon.
+func (s *OAuthService) SetGitHubCredentials(clientID, clientSecret string) error {
+	if s == nil {
+		return errors.New("auth: nil OAuthService")
+	}
+	clientID = strings.TrimSpace(clientID)
+	clientSecret = strings.TrimSpace(clientSecret)
+	if clientID == "" && clientSecret == "" {
+		s.githubMu.Lock()
+		s.github = nil
+		s.githubMu.Unlock()
+		return nil
+	}
+	if clientID == "" || clientSecret == "" {
+		return errors.New("auth: github client_id and client_secret must both be set")
+	}
+	next, err := newGitHubOAuth(OAuthConfig{
+		PublicBaseURL:      s.publicBaseURL,
+		RedirectBaseURL:    s.redirectBaseURL,
+		Issuer:             s.issuer,
+		GitHubClientID:     clientID,
+		GitHubClientSecret: clientSecret,
+	}, s.cookieSecret)
+	if err != nil {
+		return err
+	}
+	s.githubMu.Lock()
+	s.github = next
+	s.githubMu.Unlock()
+	return nil
+}
+
+// HasGitHub reports whether the GitHub IdP is currently wired. Used
+// by capability surfaces to advertise login affordance and by tests
+// to assert hot-reload.
+func (s *OAuthService) HasGitHub() bool {
+	return s.currentGitHub() != nil
 }
 
 func (s *OAuthService) Store() *FositeStore {
@@ -227,10 +297,12 @@ func (s *OAuthService) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /oauth/authorize", s.handleAuthorize)
 	mux.HandleFunc("POST /oauth/token", s.handleToken)
 	mux.HandleFunc("POST /oauth/revoke", s.handleRevoke)
-	if s.github != nil {
-		mux.HandleFunc("GET /auth/github/login", s.handleGitHubLogin)
-		mux.HandleFunc("GET /auth/github/callback", s.handleGitHubCallback)
-	}
+	// Always register the github routes so admin UI hot-reload works:
+	// if no github IdP is currently configured, the handlers 404 via
+	// currentGitHub() == nil. This way provider activation does not
+	// require a daemon restart.
+	mux.HandleFunc("GET /auth/github/login", s.handleGitHubLogin)
+	mux.HandleFunc("GET /auth/github/callback", s.handleGitHubCallback)
 }
 
 func (s *OAuthService) handleProtectedResourceMetadata(w http.ResponseWriter, _ *http.Request) {
@@ -290,8 +362,8 @@ func (s *OAuthService) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		subject = strings.TrimSpace(s.bootstrapUserID)
 	}
 	if subject == "" {
-		if s.github != nil {
-			http.Redirect(w, r, s.github.signupURLForAuthorize(r), http.StatusFound)
+		if gh := s.currentGitHub(); gh != nil {
+			http.Redirect(w, r, gh.signupURLForAuthorize(r), http.StatusFound)
 			return
 		}
 		s.provider.WriteAuthorizeError(ctx, w, ar, fosite.ErrAccessDenied.WithHint("GitHub OAuth login is required before authorizing this client."))

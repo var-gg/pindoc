@@ -42,6 +42,7 @@ import (
 	pmcp "github.com/var-gg/pindoc/internal/pindoc/mcp"
 	pmcptools "github.com/var-gg/pindoc/internal/pindoc/mcp/tools"
 	"github.com/var-gg/pindoc/internal/pindoc/projects"
+	"github.com/var-gg/pindoc/internal/pindoc/providers"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
 	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
 )
@@ -175,6 +176,26 @@ func main() {
 	tele := telemetry.New(ctx, pool.Pool, logger, telemetry.Options{})
 	defer tele.Close()
 
+	// Build the providers cipher + store once so the HTTP daemon, the
+	// admin API, and the OAuthService share one decryption path. Empty
+	// PINDOC_INSTANCE_KEY is OK on a fresh install — the EnsureKey
+	// Available call below refuses to start only when the DB already
+	// holds an encrypted credential and the key is missing.
+	providerCipher, err := providers.NewCipherFromBase64(cfg.InstanceKeyB64)
+	if err != nil {
+		logger.Error("instance key invalid", "err", err)
+		os.Exit(1)
+	}
+	providerStore := providers.New(pool, providerCipher)
+	if err := providerStore.EnsureKeyAvailable(ctx); err != nil {
+		logger.Error("provider store gate", "err", err,
+			"hint", "PINDOC_INSTANCE_KEY is required because instance_providers contains encrypted credentials")
+		os.Exit(1)
+	}
+	logger.Info("provider store ready",
+		"instance_key_configured", providerCipher.Configured(),
+	)
+
 	// Resolve the bootstrap users.id once so the HTTP daemon and MCP
 	// layers stamp the same row on Loopback principals (Decision
 	// `decision-author-identity-dual`). Empty UserID is the "operator
@@ -228,8 +249,21 @@ func main() {
 			logger.Info("Reader SPA disabled — set PINDOC_SPA_DIST or `pnpm --dir web build` to enable")
 		}
 
+		// GitHub IdP activation: env CSV is the boot-time seed, DB is
+		// the runtime source of truth. The admin UI mutates the DB
+		// row, OAuthService.SetGitHubCredentials swaps creds without
+		// a restart. Either source enabling github is enough to wire
+		// the AS now.
+		dbProviderRows, err := providerStore.Active(ctx)
+		if err != nil {
+			logger.Error("provider store active query failed", "err", err)
+			os.Exit(1)
+		}
+		dbGithub, dbHasGithub := findGithubProvider(dbProviderRows)
+		githubActive := cfg.HasAuthProvider(config.AuthProviderGitHub) || dbHasGithub
+
 		var oauthSvc *pauth.OAuthService
-		if cfg.HasAuthProvider(config.AuthProviderGitHub) {
+		if githubActive {
 			oauthUserID, err := pauth.EnsureBootstrapUser(ctx, pool, cfg.UserName, cfg.UserEmail)
 			if err != nil {
 				logger.Error("oauth bootstrap user failed", "err", err)
@@ -241,6 +275,12 @@ func main() {
 			}
 			publicBaseURL := daemonPublicBaseURL(ssStore.Get().PublicBaseURL, httpAddr)
 			redirectBaseURL := daemonPublicBaseURL(firstNonEmpty(cfg.OAuthRedirectBaseURL, ssStore.Get().PublicBaseURL), httpAddr)
+			ghClientID := cfg.GitHubClientID
+			ghClientSecret := cfg.GitHubClientSecret
+			if dbHasGithub {
+				ghClientID = dbGithub.ClientID
+				ghClientSecret = dbGithub.ClientSecret
+			}
 			oauthSvc, err = pauth.NewOAuthService(ctx, pool, pauth.OAuthConfig{
 				Issuer:             publicBaseURL,
 				PublicBaseURL:      publicBaseURL,
@@ -250,8 +290,8 @@ func main() {
 				ClientSecret:       cfg.OAuthClientSecret,
 				RedirectURIs:       cfg.OAuthRedirectURIs,
 				BootstrapUserID:    oauthUserID,
-				GitHubClientID:     cfg.GitHubClientID,
-				GitHubClientSecret: cfg.GitHubClientSecret,
+				GitHubClientID:     ghClientID,
+				GitHubClientSecret: ghClientSecret,
 			})
 			if err != nil {
 				logger.Error("oauth service init failed", "err", err)
@@ -261,6 +301,8 @@ func main() {
 				"issuer", publicBaseURL,
 				"client_id", cfg.OAuthClientID,
 				"bootstrap_user_id", oauthUserID,
+				"github_credentials_source", credentialsSource(dbHasGithub),
+				"github_wired", oauthSvc.HasGitHub(),
 			)
 		}
 
@@ -273,6 +315,7 @@ func main() {
 			Settings:             ssStore,
 			Telemetry:            tele,
 			OAuth:                oauthSvc,
+			Providers:            providerStore,
 			AuthProviders:        cfg.AuthProviders,
 			BindAddr:             cfg.BindAddr,
 			DefaultUserID:        defaultUserID,
@@ -437,19 +480,32 @@ func validateServerConfig(cfg *config.Config) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	if cfg.HasAuthProvider(config.AuthProviderGitHub) {
-		missing := []string{}
-		if strings.TrimSpace(cfg.GitHubClientID) == "" {
-			missing = append(missing, "PINDOC_GITHUB_CLIENT_ID")
-		}
-		if strings.TrimSpace(cfg.GitHubClientSecret) == "" {
-			missing = append(missing, "PINDOC_GITHUB_CLIENT_SECRET")
-		}
-		if len(missing) > 0 {
-			return fmt.Errorf("PINDOC_AUTH_PROVIDERS=%s requires %s", config.AuthProviderGitHub, strings.Join(missing, " and "))
+	// PINDOC_GITHUB_CLIENT_ID / SECRET are no longer hard-required
+	// here — the admin UI can supply them via instance_providers
+	// (Decision decision-auth-model-loopback-and-providers § 3,
+	// task-providers-admin-ui). Boot still fails loud later if env
+	// CSV says github but neither env nor DB carries credentials.
+	return nil
+}
+
+// findGithubProvider scans an Active() result for the github IdP.
+// Returns the row + true when present; ok=false signals "no github
+// row in DB" so boot falls back to env credentials.
+func findGithubProvider(active []providers.Record) (providers.Record, bool) {
+	for _, r := range active {
+		if r.ProviderName == providers.ProviderGitHub {
+			return r, true
 		}
 	}
-	return nil
+	return providers.Record{}, false
+}
+
+// credentialsSource is a tiny helper to keep the boot log line readable.
+func credentialsSource(fromDB bool) string {
+	if fromDB {
+		return "instance_providers"
+	}
+	return "env"
 }
 
 func daemonPublicBaseURL(publicBaseURL, addr string) string {
