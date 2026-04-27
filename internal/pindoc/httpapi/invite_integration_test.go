@@ -66,12 +66,16 @@ func TestInviteIssueConsumeIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewOAuthService: %v", err)
 	}
-	handler := New(&config.Config{AuthMode: config.AuthModeOAuthGitHub}, Deps{
+	handler := New(&config.Config{
+		AuthProviders: []string{config.AuthProviderGitHub},
+		BindAddr:      "0.0.0.0:5830",
+	}, Deps{
 		DB:                 pool,
 		Logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
 		DefaultProjectSlug: slug,
 		OAuth:              oauthSvc,
-		AuthMode:           config.AuthModeOAuthGitHub,
+		AuthProviders:      []string{config.AuthProviderGitHub},
+		BindAddr:           "0.0.0.0:5830",
 	})
 
 	ownerProject := doInviteRequest(t, handler, oauthSvc, ownerID, http.MethodGet, "/api/p/"+slug, "")

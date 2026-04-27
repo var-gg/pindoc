@@ -105,7 +105,7 @@ func TestWorkspaceDetectMCPIntegration(t *testing.T) {
 		Logger:    logger,
 		Telemetry: tele,
 		AuthChain: auth.NewChain(auth.NewTrustedLocalResolver("", agentID)),
-		AuthMode:  config.AuthModeTrustedLocal,
+		BindAddr:  config.DefaultBindAddr,
 	})
 
 	clientTransport, serverTransport := sdk.NewInMemoryTransports()

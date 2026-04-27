@@ -7,7 +7,6 @@ package mcp
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"strings"
 
@@ -60,6 +59,13 @@ type Options struct {
 	// "unassigned" which still lets writes proceed but flags the gap in
 	// audit logs.
 	AgentID string
+
+	// UserID is the resolved users.id row this MCP session binds to.
+	// Empty means the operator hasn't set PINDOC_USER_NAME and the
+	// server runs without a user binding. Stamped onto loopback
+	// Principals via TrustedLocalResolver. Pre-resolved by main() so
+	// the HTTP daemon and MCP layers share one upsert.
+	UserID string
 
 	// Settings is the operator-editable config store (Phase 14a).
 	Settings *settings.Store
@@ -117,9 +123,13 @@ func NewServer(opts Options) (*Server, error) {
 		Telemetry:             opts.Telemetry,
 		DefaultProjectSlug:    opts.Config.ProjectSlug,
 		Transport:             transport,
-		AuthMode:              opts.Config.AuthMode,
+		AuthProviders:         opts.Config.AuthProviders,
+		BindAddr:              opts.Config.BindAddr,
 	}
-	userID := upsertStartupUserID(context.Background(), opts.Logger, deps, opts.Config)
+	userID := strings.TrimSpace(opts.UserID)
+	if userID == "" {
+		userID = upsertStartupUserID(context.Background(), opts.Logger, deps, opts.Config)
+	}
 	if err := projects.EnsureDefaultProjectOwnerMembership(context.Background(), opts.DB, opts.Config.ProjectSlug, userID); err != nil {
 		opts.Logger.Warn("default project owner membership bootstrap failed",
 			"project_slug", opts.Config.ProjectSlug,
@@ -133,11 +143,7 @@ func NewServer(opts Options) (*Server, error) {
 		)
 	}
 
-	authChain, err := authChainForMode(opts.Config.AuthMode, userID, opts.AgentID)
-	if err != nil {
-		return nil, err
-	}
-	deps.AuthChain = authChain
+	deps.AuthChain = authChainForConfig(opts.Config, userID, opts.AgentID)
 
 	// Phase 1 handshake — same registration path as every other tool so
 	// the auth chain runs and telemetry records the call.
@@ -198,20 +204,28 @@ func NewServer(opts Options) (*Server, error) {
 	}, nil
 }
 
-func authChainForMode(mode config.AuthMode, userID, agentID string) (*auth.Chain, error) {
-	if mode == "" {
-		mode = config.AuthModeTrustedLocal
+// authChainForConfig builds the resolver chain from config axes
+// (Decision `decision-auth-model-loopback-and-providers`):
+//
+//   - When AuthProviders includes a Pindoc-AS-backed IdP (`github`),
+//     a BearerTokenResolver runs first so requests carrying a valid
+//     Bearer JWT (validated by the OAuth middleware before the chain)
+//     produce Source=oauth principals.
+//   - TrustedLocalResolver runs last as the loopback fastpath. Stdio
+//     transports always land here (process trust); HTTP requests land
+//     here only when no Bearer is present, which the OAuth middleware
+//     allows for loopback addresses (and for AllowPublicUnauthenticated
+//     deployments per § 3 of the Decision).
+//
+// Result: handlers no longer branch on auth_mode strings; Source on
+// the produced Principal carries everything they need.
+func authChainForConfig(cfg *config.Config, userID, agentID string) *auth.Chain {
+	resolvers := []auth.Resolver{}
+	if cfg != nil && len(cfg.AuthProviders) > 0 {
+		resolvers = append(resolvers, auth.NewBearerTokenResolver(agentID))
 	}
-	switch mode {
-	case config.AuthModeTrustedLocal:
-		return auth.NewChain(auth.NewTrustedLocalResolver(userID, agentID)), nil
-	case config.AuthModeOAuthGitHub:
-		return auth.NewChain(auth.NewBearerTokenResolver(agentID)), nil
-	case config.AuthModePublicReadonly, config.AuthModeSingleUser:
-		return nil, fmt.Errorf("PINDOC_AUTH_MODE=%s is not supported yet in V1; use trusted_local", mode)
-	default:
-		return nil, fmt.Errorf("invalid PINDOC_AUTH_MODE: '%s'. valid: %s", mode, config.ValidAuthModesString())
-	}
+	resolvers = append(resolvers, auth.NewTrustedLocalResolver(userID, agentID))
+	return auth.NewChain(resolvers...)
 }
 
 // Run blocks until the transport returns (client disconnected, ctx cancelled,

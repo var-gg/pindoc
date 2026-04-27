@@ -11,25 +11,24 @@ import { useI18n } from "../i18n";
 
 // MembersPanel — Phase D permission management plane.
 //
-// Renders only when the daemon is running auth_mode=oauth_github (the
-// trusted_local single-operator install has nothing to manage; surfacing
-// an empty list there would be visual clutter and an unneeded fetch on
-// every modal open). The panel groups two concerns the owner cares about
-// in the same context as "issue an invite": who is already in the project
-// (members) and which outstanding invites can still be claimed (active
-// invites). Both sections expose a destructive action — remove a member,
-// revoke a token — with confirmation inline rather than a second modal,
-// because Pindoc is owner-only at the OSS launch tier and the
-// out-of-scope ownership transfer / role swap flows would dilute the
-// "tighten the project" intent of this panel if we added them here.
+// Always renders. Decision `decision-auth-model-loopback-and-
+// providers` retired the auth_mode framing the previous conditional
+// gate ("show only when auth_mode=oauth_github") leaned on; a 1-
+// person self-host operator should still see "you are the only
+// member" + "issue invite to add someone" without flipping any env
+// first. The panel groups two concerns the owner cares about in the
+// same context as "issue an invite": who is already in the project
+// (members) and which outstanding invites can still be claimed
+// (active invites). Both sections expose a destructive action —
+// remove a member, revoke a token — with confirmation inline rather
+// than a second modal.
 //
-// All fetches are owner-scoped at the server; the FE permission gate is
-// purely cosmetic. We still hide actions the viewer cannot perform so
-// they don't see a button that always 403s.
+// All fetches are owner-scoped at the server; the FE permission gate
+// is purely cosmetic. We still hide actions the viewer cannot perform
+// so they don't see a button that always 403s.
 
 type Props = {
   project: Project;
-  authMode?: "trusted_local" | "project_token" | "oauth";
   // refreshNonce is incremented by the parent (InviteModal) right after
   // a successful invite issue so we re-fetch the active-invites list
   // without forcing the user to close + reopen the modal.
@@ -43,17 +42,12 @@ type Status =
   | { kind: "ready"; members: MemberRow[]; invites: ActiveInviteRow[]; viewerRole: string; viewerId?: string }
   | { kind: "error"; message: string };
 
-export function MembersPanel({ project, authMode, refreshNonce = 0, users }: Props) {
+export function MembersPanel({ project, refreshNonce = 0, users }: Props) {
   const { t, lang } = useI18n();
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [reloadCounter, setReloadCounter] = useState(0);
-
-  // Show panel only in oauth_github mode. trusted_local treats every
-  // project as owner-by-self and the panel would be dead UI; older
-  // auth modes don't expose project_members at all.
-  const enabled = authMode === "oauth";
 
   const usersByID = useMemo(() => {
     const map = new Map<string, UserRef>();
@@ -67,7 +61,6 @@ export function MembersPanel({ project, authMode, refreshNonce = 0, users }: Pro
   }, []);
 
   useEffect(() => {
-    if (!enabled) return;
     let cancelled = false;
     setStatus({ kind: "loading" });
     Promise.all([
@@ -98,9 +91,7 @@ export function MembersPanel({ project, authMode, refreshNonce = 0, users }: Pro
     return () => {
       cancelled = true;
     };
-  }, [project.slug, refreshNonce, reloadCounter, enabled]);
-
-  if (!enabled) return null;
+  }, [project.slug, refreshNonce, reloadCounter]);
 
   async function handleRemove(userId: string) {
     if (pendingAction) return;

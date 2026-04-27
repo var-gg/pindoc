@@ -6,7 +6,11 @@
 //
 // Edit contract:
 //   - only renders when detail.type === "Task"
-//   - auth_mode="trusted_local" → inline-editable; anything else → read-only
+//   - inline-editable when no IdP is configured (loopback self-host —
+//     the Reader user is the operator on their own box). Any non-empty
+//     `providers` list flips the panel to read-only because the Reader
+//     can be anyone with a browser session and writes belong on the
+//     MCP path. Decision `decision-auth-model-loopback-and-providers`.
 //   - assignee changes use POST .../task-assign, the browser bridge for
 //     pindoc.task.assign; status / priority / due_at stay on
 //     POST .../task-meta
@@ -33,7 +37,16 @@ import { Tooltip } from "./Tooltip";
 type Props = {
   projectSlug: string;
   detail: Artifact;
-  authMode?: string;
+  // providers + bindAddr are forwarded from /api/config (Decision
+  // `decision-auth-model-loopback-and-providers`). Empty providers
+  // means no IdP is wired so the Reader user is the operator on a
+  // loopback box and the panel can edit inline. Any non-empty
+  // providers list flips the panel read-only — writes belong on the
+  // MCP path. bindAddr is reserved for future "running on host:port"
+  // affordances and currently unused; kept on the prop list so the
+  // FE wire format mirrors the BE without an asymmetric drop.
+  providers?: string[];
+  bindAddr?: string;
   // agents is the project's author_id aggregate (see ReaderData.agents).
   // Rendered as one optgroup in the assignee dropdown so the user can
   // hand off to any agent that's previously written in this project.
@@ -96,10 +109,13 @@ function buildAssigneeOptions(agents: Aggregate[], users: UserRef[]): AssigneeOp
   return [...agentOptions, ...userOptions];
 }
 
-export function TaskControls({ projectSlug, detail, authMode, agents, users, onUpdated }: Props) {
+export function TaskControls({ projectSlug, detail, providers, bindAddr: _bindAddr, agents, users, onUpdated }: Props) {
   const { t } = useI18n();
   const taskMeta = detail.task_meta ?? {};
-  const readOnly = authMode !== "trusted_local";
+  // providers undefined = config not yet loaded → stay read-only
+  // until we know. providers === [] = loopback / no IdP → editable.
+  // Any non-empty list = OAuth path active → read-only.
+  const readOnly = providers === undefined || providers.length > 0;
 
   const [assignee, setAssignee] = useState<string>(taskMeta.assignee ?? "");
   const [priority, setPriority] = useState<Priority | "">((taskMeta.priority as Priority | undefined) ?? "");

@@ -5,7 +5,6 @@ import {
   type InviteIssueResp,
   type InviteRole,
   type Project,
-  type ServerConfig,
   type UserRef,
 } from "../api/client";
 import { useI18n } from "../i18n";
@@ -17,15 +16,13 @@ type Props = {
   project: Project;
   open: boolean;
   onClose: () => void;
-  // Phase D — auth_mode + users are passed through so MembersPanel
-  // (which renders below the issue form) can decide whether to show
-  // itself and how to label invited_by ids. Both optional so the
-  // modal still works in legacy callers / snapshot tests.
-  authMode?: ServerConfig["auth_mode"];
+  // users is forwarded to MembersPanel so the invited_by labels resolve
+  // to display names rather than raw user ids. Optional so the modal
+  // still works in legacy callers / snapshot tests.
   users?: UserRef[] | null;
 };
 
-export function InviteModal({ project, open, onClose, authMode, users }: Props) {
+export function InviteModal({ project, open, onClose, users }: Props) {
   const { t, lang } = useI18n();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [role, setRole] = useState<InviteRole>("viewer");
@@ -183,7 +180,6 @@ export function InviteModal({ project, open, onClose, authMode, users }: Props) 
 
         <MembersPanel
           project={project}
-          authMode={authMode}
           refreshNonce={refreshNonce}
           users={users}
         />

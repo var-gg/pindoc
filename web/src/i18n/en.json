@@ -177,7 +177,7 @@
   "sidecar.prov_id": "slug",
 
   "task_controls.header": "Task controls",
-  "task_controls.read_only": "read-only (auth_mode)",
+  "task_controls.read_only": "read-only (OAuth — edit via MCP)",
   "task_controls.status": "status",
   "task_controls.status_verified_readonly": "verified is set only through the verification tool.",
   "task_controls.priority": "priority",

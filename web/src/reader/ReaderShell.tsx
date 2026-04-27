@@ -511,7 +511,7 @@ export function ReaderShell({ view }: Props) {
     );
   }
 
-  const { project: projectData, areas, detail, agents, users, authMode } = state.data;
+  const { project: projectData, areas, detail, agents, users, providers, bindAddr } = state.data;
   const reload = state.reload;
   const sidecarDetail =
     view === "reader"
@@ -620,7 +620,8 @@ export function ReaderShell({ view }: Props) {
           projectSlug={project}
           detail={sidecarDetail}
           emptyMessage={sidecarEmptyMessage}
-          authMode={authMode}
+          providers={providers}
+          bindAddr={bindAddr}
           agents={agents}
           users={users}
           showOpenDetailAction={(view === "reader" && !detail && Boolean(wikiInspectorDetail)) || (view === "today" && Boolean(todayInspectorDetail)) || (view === "graph" && Boolean(graphFocusDetail))}
@@ -633,7 +634,6 @@ export function ReaderShell({ view }: Props) {
         project={projectData}
         open={inviteOpen}
         onClose={() => setInviteOpen(false)}
-        authMode={authMode}
         users={users}
       />
       <ShortcutsOverlay

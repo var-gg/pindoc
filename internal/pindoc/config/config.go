@@ -1,20 +1,46 @@
 // Package config loads Pindoc server configuration from env vars.
 //
-// For Phase 1 we only need the bare minimum: a DB connection string (unused
-// until Phase 2) and a log level. A PINDOC.md-driven config file layer
-// lands in Phase 5 — until then, everything is env-driven because the
-// server is typically launched by Claude Code as a stdio subprocess and
-// env is the simplest shared channel.
+// Decision `decision-auth-model-loopback-and-providers` retired the
+// 4-mode `PINDOC_AUTH_MODE` enum in favour of three orthogonal env
+// axes: BindAddr (where to listen), AuthProviders (which IdPs are
+// active), and AllowPublicUnauthenticated (explicit opt-in for
+// external exposure without IdP). Loopback bind + empty providers
+// matches the historical "single-user self-host" mental model with
+// zero config.
 package config
 
 import (
-	"fmt"
+	"errors"
+	"net"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
+)
+
+// ErrPublicWithoutAuth is the boot-time refusal Decision
+// `decision-auth-model-loopback-and-providers` § 4 enforces: a
+// non-loopback `PINDOC_BIND_ADDR` with empty `PINDOC_AUTH_PROVIDERS`
+// and `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED=false` would expose the
+// daemon to the network with no authenticated identity at all.
+// Treating that as a configuration error and refusing to start makes
+// the operator's intent explicit — they must either add an IdP or
+// opt in to the public-without-auth network model.
+var ErrPublicWithoutAuth = errors.New("config: PINDOC_BIND_ADDR is non-loopback but PINDOC_AUTH_PROVIDERS is empty and PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED is false — set one of them to opt in")
+
+const (
+	// DefaultBindAddr matches the "loopback only, no IdP" single-user
+	// path. Operators flipping to `0.0.0.0:5830` (or any non-loopback
+	// host) must also set AuthProviders or AllowPublicUnauthenticated
+	// (Public-Without-Auth Refusal).
+	DefaultBindAddr = "127.0.0.1:5830"
+
+	// AuthProviderGitHub is the only provider Pindoc ships with
+	// today. Future providers (`google`, `local-password`, `passkey`)
+	// extend this list — the AuthProviders CSV is the wire surface.
+	AuthProviderGitHub = "github"
 )
 
 type Config struct {
@@ -24,11 +50,26 @@ type Config struct {
 	// LogLevel is "debug" | "info" | "warn" | "error".
 	LogLevel string
 
-	// AuthMode selects the resolver family the server boots with.
-	// V1 supports trusted_local only; the other enum values are accepted
-	// at config-parse time so operators get a stable error when they try
-	// to enable a future mode before its implementation lands.
-	AuthMode AuthMode
+	// AuthProviders is the CSV-decoded list of identity providers the
+	// daemon exposes to external requests. Empty (default) means no
+	// IdP is wired — combined with a loopback BindAddr that yields the
+	// "loopback only, single user" model. The first non-empty value
+	// drives MCP `/.well-known/oauth-authorization-server` metadata
+	// and the OAuth bootstrap path; loopback requests bypass it.
+	AuthProviders []string
+
+	// BindAddr is the host:port the daemon listens on. Loopback
+	// (127.0.0.1 / ::1 / localhost) is the "self-host" baseline where
+	// every request is auto-trusted; non-loopback values trip the
+	// Public-Without-Auth Refusal unless an IdP or the explicit
+	// AllowPublicUnauthenticated opt-in is also set.
+	BindAddr string
+
+	// AllowPublicUnauthenticated is the explicit opt-in for "external
+	// exposure with no IdP". Default false — an operator who wants
+	// their daemon reachable on a private LAN behind a trusted reverse
+	// proxy must set this to acknowledge the trust assumption.
+	AllowPublicUnauthenticated bool
 
 	// UserLanguage hints NOT_READY template selection until Phase 5 loads
 	// the real value from PINDOC.md. Default "en".
@@ -68,14 +109,14 @@ type Config struct {
 	// from this MCP session can be tagged with the human author_user_id
 	// alongside the agent's author_id label. Empty UserName skips the
 	// upsert and artifact.propose leaves author_user_id NULL — Reader
-	// falls back to "(unknown) via {agent_id}" byline. V1.5 GitHub
-	// OAuth replaces these env vars with session-resolved principals.
+	// falls back to "(unknown) via {agent_id}" byline.
 	UserName  string
 	UserEmail string
 
-	// OAuth 2.1 authorization-server settings for auth_mode=oauth_github.
-	// Pindoc acts as the MCP-facing OAuth authorization server while
-	// GitHub is the upstream identity provider used during signup/login.
+	// OAuth 2.1 authorization-server settings used when AuthProviders
+	// includes an IdP that needs upstream OAuth (today: github). Pindoc
+	// acts as the MCP-facing OAuth authorization server while GitHub is
+	// the upstream identity provider used during signup/login.
 	OAuthSigningKeyPath  string
 	OAuthClientID        string
 	OAuthClientSecret    string
@@ -94,80 +135,76 @@ type SummaryConfig struct {
 	Timeout       time.Duration
 }
 
-type AuthMode string
-
-const (
-	AuthModeTrustedLocal   AuthMode = "trusted_local"
-	AuthModePublicReadonly AuthMode = "public_readonly"
-	AuthModeSingleUser     AuthMode = "single_user"
-	AuthModeOAuthGitHub    AuthMode = "oauth_github"
-)
-
-func (m AuthMode) Valid() bool {
-	switch m {
-	case AuthModeTrustedLocal, AuthModePublicReadonly, AuthModeSingleUser, AuthModeOAuthGitHub:
-		return true
-	default:
+// HasAuthProvider reports whether the given provider name is active.
+// Comparison is case-insensitive — operators who set
+// `PINDOC_AUTH_PROVIDERS=GitHub` get the same wiring as `github`.
+func (c *Config) HasAuthProvider(name string) bool {
+	if c == nil {
 		return false
 	}
-}
-
-func ValidAuthModesString() string {
-	return strings.Join(validAuthModeStrings(), "|")
-}
-
-func parseAuthMode(raw string) (AuthMode, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return AuthModeTrustedLocal, nil
+	target := strings.ToLower(strings.TrimSpace(name))
+	for _, p := range c.AuthProviders {
+		if strings.ToLower(strings.TrimSpace(p)) == target {
+			return true
+		}
 	}
-	mode := AuthMode(strings.ToLower(trimmed))
-	if !mode.Valid() {
-		return "", fmt.Errorf("invalid PINDOC_AUTH_MODE: '%s'. valid: %s", trimmed, ValidAuthModesString())
-	}
-	return mode, nil
+	return false
 }
 
-func validAuthModeStrings() []string {
-	return []string{
-		string(AuthModeTrustedLocal),
-		string(AuthModePublicReadonly),
-		string(AuthModeSingleUser),
-		string(AuthModeOAuthGitHub),
+// IsLoopbackBind reports whether BindAddr resolves to a loopback host
+// (127.0.0.1, ::1, or `localhost`). Empty BindAddr is treated as
+// loopback because the daemon defaults to `127.0.0.1:5830`. Used by
+// the boot-time Public-Without-Auth Refusal and by the streamable_http
+// transport to decide whether the OAuth middleware is mandatory.
+func (c *Config) IsLoopbackBind() bool {
+	if c == nil {
+		return true
 	}
+	return isLoopbackHostPort(c.BindAddr)
 }
 
-// Load builds a Config from process env vars and fails fast on invalid enum
-// values so a misspelled security mode never silently boots the wrong model.
+// Validate runs the cross-field invariants Load() would otherwise have
+// to repeat. Today the only invariant is the Public-Without-Auth
+// Refusal — exported so tests and `cmd/pindoc-server` can call it on
+// configs they assemble manually.
+func (c *Config) Validate() error {
+	if c == nil {
+		return errors.New("config: nil")
+	}
+	if !c.IsLoopbackBind() && len(c.AuthProviders) == 0 && !c.AllowPublicUnauthenticated {
+		return ErrPublicWithoutAuth
+	}
+	return nil
+}
+
+// Load builds a Config from process env vars and fails fast on
+// configurations that would expose the daemon to the network without
+// authentication so a misconfigured daemon never silently boots in
+// the wrong security model.
 func Load() (*Config, error) {
-	authMode, err := parseAuthMode(env("PINDOC_AUTH_MODE", string(AuthModeTrustedLocal)))
-	if err != nil {
-		return nil, err
-	}
 	cfg := &Config{
-		DatabaseURL:           env("PINDOC_DATABASE_URL", "postgres://pindoc:pindoc_dev@localhost:5432/pindoc?sslmode=disable"),
-		LogLevel:              env("PINDOC_LOG_LEVEL", "info"),
-		AuthMode:              authMode,
-		UserLanguage:          strings.ToLower(env("PINDOC_USER_LANGUAGE", "en")),
-		ReceiptExemptionLimit: envInt("PINDOC_RECEIPT_EXEMPTION_LIMIT", 5),
-		ProjectSlug:           env("PINDOC_PROJECT", "pindoc"),
-		RepoRoot:              env("PINDOC_REPO_ROOT", ""),
-		UserName:              strings.TrimSpace(env("PINDOC_USER_NAME", "")),
-		UserEmail:             strings.TrimSpace(env("PINDOC_USER_EMAIL", "")),
-		OAuthSigningKeyPath:   env("PINDOC_OAUTH_SIGNING_KEY_PATH", "./data/oauth-signing.pem"),
-		OAuthClientID:         strings.TrimSpace(env("PINDOC_OAUTH_CLIENT_ID", "claude-desktop")),
-		OAuthClientSecret:     strings.TrimSpace(env("PINDOC_OAUTH_CLIENT_SECRET", "")),
-		OAuthRedirectBaseURL:  strings.TrimSpace(env("PINDOC_OAUTH_REDIRECT_BASE_URL", "")),
-		GitHubClientID:        strings.TrimSpace(env("PINDOC_GITHUB_CLIENT_ID", "")),
-		GitHubClientSecret:    strings.TrimSpace(env("PINDOC_GITHUB_CLIENT_SECRET", "")),
+		DatabaseURL:                env("PINDOC_DATABASE_URL", "postgres://pindoc:pindoc_dev@localhost:5432/pindoc?sslmode=disable"),
+		LogLevel:                   env("PINDOC_LOG_LEVEL", "info"),
+		AuthProviders:              normalizeProviders(envList("PINDOC_AUTH_PROVIDERS", nil)),
+		BindAddr:                   strings.TrimSpace(env("PINDOC_BIND_ADDR", DefaultBindAddr)),
+		AllowPublicUnauthenticated: envBool("PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED", false),
+		UserLanguage:               strings.ToLower(env("PINDOC_USER_LANGUAGE", "en")),
+		ReceiptExemptionLimit:      envInt("PINDOC_RECEIPT_EXEMPTION_LIMIT", 5),
+		ProjectSlug:                env("PINDOC_PROJECT", "pindoc"),
+		RepoRoot:                   env("PINDOC_REPO_ROOT", ""),
+		UserName:                   strings.TrimSpace(env("PINDOC_USER_NAME", "")),
+		UserEmail:                  strings.TrimSpace(env("PINDOC_USER_EMAIL", "")),
+		OAuthSigningKeyPath:        env("PINDOC_OAUTH_SIGNING_KEY_PATH", "./data/oauth-signing.pem"),
+		OAuthClientID:              strings.TrimSpace(env("PINDOC_OAUTH_CLIENT_ID", "claude-desktop")),
+		OAuthClientSecret:          strings.TrimSpace(env("PINDOC_OAUTH_CLIENT_SECRET", "")),
+		OAuthRedirectBaseURL:       strings.TrimSpace(env("PINDOC_OAUTH_REDIRECT_BASE_URL", "")),
+		GitHubClientID:             strings.TrimSpace(env("PINDOC_GITHUB_CLIENT_ID", "")),
+		GitHubClientSecret:         strings.TrimSpace(env("PINDOC_GITHUB_CLIENT_SECRET", "")),
 		OAuthRedirectURIs: envList("PINDOC_OAUTH_REDIRECT_URIS", []string{
 			"http://127.0.0.1:3846/callback",
 			"http://localhost:3846/callback",
 		}),
 		Embed: embed.Config{
-			// Empty default → gemma (bundled on-device embeddinggemma-300m).
-			// Set explicitly to "stub" for offline unit tests, "http" for
-			// external TEI / OpenAI / bge-m3, or "gemma" for clarity.
 			Provider:       env("PINDOC_EMBED_PROVIDER", ""),
 			GemmaVariant:   env("PINDOC_EMBED_GEMMA_VARIANT", ""),
 			ModelDir:       env("PINDOC_EMBED_MODEL_DIR", ""),
@@ -192,7 +229,61 @@ func Load() (*Config, error) {
 			Timeout:       envDuration("PINDOC_SUMMARY_LLM_TIMEOUT", 15*time.Second),
 		},
 	}
+	if cfg.BindAddr == "" {
+		cfg.BindAddr = DefaultBindAddr
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+// normalizeProviders trims and lowercases each entry, dropping
+// duplicates and empty fragments so `PINDOC_AUTH_PROVIDERS=GitHub , `
+// boots the same chain as `github`.
+func normalizeProviders(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	seen := map[string]bool{}
+	for _, item := range raw {
+		v := strings.ToLower(strings.TrimSpace(item))
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// isLoopbackHostPort reports whether `addr` (host:port or just host)
+// names a loopback address. Treats empty / unparseable as loopback so
+// the default boot path stays loopback-only.
+func isLoopbackHostPort(addr string) bool {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return true
+	}
+	host := addr
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	if host == "" {
+		return true
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 func envInt(key string, fallback int) int {
@@ -251,4 +342,14 @@ func env(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// FormatProvidersForLog renders an authentication providers list for
+// log lines. Empty list returns "(none)" so log scrapers can grep it
+// without parsing CSV.
+func FormatProvidersForLog(providers []string) string {
+	if len(providers) == 0 {
+		return "(none)"
+	}
+	return strings.Join(providers, ",")
 }

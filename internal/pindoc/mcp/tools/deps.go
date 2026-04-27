@@ -4,7 +4,6 @@ import (
 	"log/slog"
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
-	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/receipts"
@@ -63,11 +62,19 @@ type Deps struct {
 	// buildCapabilities.
 	Transport string
 
-	// AuthMode is the env-derived PINDOC_AUTH_MODE value advertised in
-	// capabilities. The resolver chain is selected at server startup from
-	// the same enum; tool handlers should read this field only for
-	// capability/reporting surfaces, not for authorization branching.
-	AuthMode config.AuthMode
+	// AuthProviders is the env-derived PINDOC_AUTH_PROVIDERS list
+	// advertised in capabilities. The resolver chain is selected at
+	// server startup from the same list; tool handlers should read
+	// this field only for capability/reporting surfaces, not for
+	// authorization branching (Decision `decision-auth-model-
+	// loopback-and-providers`).
+	AuthProviders []string
+
+	// BindAddr mirrors Config.BindAddr — capability surfaces echo it
+	// so agents and the Reader can tell whether the daemon is bound
+	// loopback-only (auto-trusted) or to an external interface (OAuth
+	// in front).
+	BindAddr string
 
 	// Embedder generates vectors for chunking on write and for query-side
 	// search / context.for_task. Phase 3+.

@@ -72,23 +72,34 @@ func (d Deps) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if d.Settings != nil {
 		publicBase = d.Settings.Get().PublicBaseURL
 	}
+	bindAddr := strings.TrimSpace(d.BindAddr)
+	if bindAddr == "" {
+		bindAddr = config.DefaultBindAddr
+	}
+	providers := append([]string(nil), d.AuthProviders...)
+	if providers == nil {
+		providers = []string{}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"default_project_slug":   d.DefaultProjectSlug,
 		"default_project_locale": d.DefaultProjectLocale,
 		"multi_project":          d.deriveMultiProject(r.Context()),
 		"public_base_url":        publicBase,
 		"version":                d.Version,
-		// auth_mode mirrors the Capabilities.AuthMode surfaced by
-		// pindoc.project.current. Reader's TaskControls branches off this:
-		// "trusted_local" → inline editable, anything else → read-only.
-		"auth_mode": string(d.authMode()),
-		// onboarding_required tells the React app to redirect / → wizard.
-		// True when only the seed `pindoc` project exists (Decision
-		// project-bootstrap-canonical-flow-reader-ui-first-class). The
-		// react app reads this on mount and, if true, sends the user
-		// to /projects/new?welcome=1 instead of the legacy redirect.
-		// Self-correcting — if the user later deletes their projects,
-		// the wizard returns. Acceptable for V1 single-user self-host.
+		// providers + bind_addr replace the deprecated auth_mode enum
+		// (Decision `decision-auth-model-loopback-and-providers`).
+		// Reader keys "is the operator the calling principal" off the
+		// loopback judgement of the current request, not off this
+		// instance-wide config.
+		"providers": providers,
+		"bind_addr": bindAddr,
+		// onboarding_required tells the React app to redirect / →
+		// wizard. True when only the seed `pindoc` project exists
+		// (Decision project-bootstrap-canonical-flow-reader-ui-first-
+		// class). The react app reads this on mount and, if true,
+		// sends the user to /projects/new?welcome=1 instead of the
+		// legacy redirect. Self-correcting — if the user later
+		// deletes their projects, the wizard returns.
 		"onboarding_required": d.checkOnboardingRequired(r.Context()),
 	})
 }
@@ -136,15 +147,18 @@ func (d Deps) checkOnboardingRequired(ctx context.Context) bool {
 	return count == 0
 }
 
-// AuthModeTrustedLocal is kept as a compatibility alias for older HTTP-side
-// tests and comments. Runtime auth mode now comes from Deps.AuthMode.
-const AuthModeTrustedLocal = string(config.AuthModeTrustedLocal)
-
-func (d Deps) authMode() config.AuthMode {
-	if d.AuthMode.Valid() {
-		return d.AuthMode
-	}
-	return config.AuthModeTrustedLocal
+// principalForRequest is the single helper every Reader-side HTTP
+// handler calls to identify the calling user. Loopback addresses get
+// auto-trusted owner principals (Decision § 2 Loopback Trust); non-
+// loopback requests must present a valid OAuth browser session.
+// Wraps auth.PrincipalFromRequest with the daemon's defaults so
+// handlers don't repeat them on every call site.
+func (d Deps) principalForRequest(r *http.Request) *pauth.Principal {
+	return pauth.PrincipalFromRequest(r, pauth.HTTPDeps{
+		OAuth:          d.OAuth,
+		DefaultUserID:  d.DefaultUserID,
+		DefaultAgentID: d.DefaultAgentID,
+	})
 }
 
 type projectListRow struct {
@@ -283,29 +297,28 @@ func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// currentProjectRole returns the calling caller's role on the named
+// project. Loopback callers — the operator on their own box — see
+// every project as owner so the Reader's role chip lights up
+// correctly. OAuth callers consult project_members via
+// auth.ResolveProject. Empty string means "no role" (anonymous or
+// project not found) — the Reader treats that as read-only.
 func (d Deps) currentProjectRole(ctx context.Context, r *http.Request, projectSlug string) string {
-	switch d.authMode() {
-	case config.AuthModeTrustedLocal, "":
-		return pauth.RoleOwner
-	case config.AuthModeOAuthGitHub:
-		if d.DB == nil || d.OAuth == nil {
-			return ""
-		}
-		userID := d.OAuth.BrowserSessionUserID(r)
-		if strings.TrimSpace(userID) == "" {
-			return ""
-		}
-		scope, err := pauth.ResolveProject(ctx, d.DB, &pauth.Principal{
-			UserID:   userID,
-			AuthMode: pauth.AuthModeOAuthGitHub,
-		}, projectSlug)
-		if err != nil {
-			return ""
-		}
-		return scope.Role
-	default:
+	if d.DB == nil {
 		return ""
 	}
+	principal := d.principalForRequest(r)
+	if principal == nil {
+		return ""
+	}
+	if principal.IsLoopback() {
+		return pauth.RoleOwner
+	}
+	scope, err := pauth.ResolveProject(ctx, d.DB, principal, projectSlug)
+	if err != nil {
+		return ""
+	}
+	return scope.Role
 }
 
 type areaRow struct {

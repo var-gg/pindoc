@@ -3,11 +3,11 @@
 // Derives type/agent counts from the artifact list so the sidebar doesn't
 // need a separate endpoint.
 //
-// auth_mode piggybacks on the /api/config call so the Reader's
-// TaskControls can flip read-only without a second fetch. reload() lets
-// the TaskControls refetch the artifact detail after a meta_patch write
-// so the Sidecar shows the new revision + task_meta without a full page
-// navigation.
+// providers + bindAddr piggyback on the /api/config call so the
+// Reader's TaskControls can flip read-only without a second fetch.
+// reload() lets the TaskControls refetch the artifact detail after a
+// meta_patch write so the Sidecar shows the new revision + task_meta
+// without a full page navigation.
 
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -37,8 +37,11 @@ export type ReaderData = {
    * shell. TaskControls combines this with `agents` to build the
    * assignee datalist. */
   users: UserRef[] | null;
-  /** Server auth mode — "trusted_local" | "project_token" | "oauth". */
-  authMode?: ServerConfig["auth_mode"];
+  /** Active IdP list — empty list = loopback / no IdP path active.
+   * Decision `decision-auth-model-loopback-and-providers`. */
+  providers?: ServerConfig["providers"];
+  /** Daemon bind addr — loopback host = single-user trust boundary. */
+  bindAddr?: ServerConfig["bind_addr"];
 };
 
 export type LoadState =
@@ -87,7 +90,8 @@ export function useReaderData(projectSlug: string, slug?: string, includeTemplat
             types: aggregate(listResp.artifacts, (a) => a.type),
             agents: aggregate(listResp.artifacts, (a) => a.author_id),
             users: usersResp?.users ?? null,
-            authMode: cfg?.auth_mode,
+            providers: cfg?.providers,
+            bindAddr: cfg?.bind_addr,
           },
           reload,
         });

@@ -11,6 +11,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
+	"github.com/var-gg/pindoc/internal/pindoc/config"
 )
 
 // runtimeStatusInput is intentionally empty: pindoc.runtime.status is a
@@ -50,10 +51,21 @@ type runtimeStatusOutput struct {
 	// save callers from parsing toolset_version.
 	ToolCount int `json:"tool_count"`
 
-	// AuthMode echoes the resolver that produced the calling Principal.
-	// trusted_local in V1; oauth_github / bearer_token become possible
-	// once the chain grows.
-	AuthMode string `json:"auth_mode,omitempty"`
+	// Source echoes the trust path that produced the calling
+	// Principal. "loopback" — process trust / 127.0.0.1; "oauth" —
+	// Pindoc AS-issued JWT validated by the bearer middleware.
+	// Decision `decision-auth-model-loopback-and-providers` § 1.
+	Source string `json:"source,omitempty"`
+
+	// AuthProviders mirrors PINDOC_AUTH_PROVIDERS — the active IdP
+	// list. Empty list means the daemon is loopback-only with no
+	// external IdP wired.
+	AuthProviders []string `json:"providers"`
+
+	// BindAddr mirrors PINDOC_BIND_ADDR. Loopback host = single-user
+	// trust boundary; external host = OAuth path is mandatory unless
+	// AllowPublicUnauthenticated is set.
+	BindAddr string `json:"bind_addr,omitempty"`
 
 	// Ports lists the conventional listeners (http=5830, sidecar=5832)
 	// with whatever override env vars set them to, so the operator can
@@ -106,9 +118,9 @@ func RegisterRuntimeStatus(server *sdk.Server, deps Deps) {
 		},
 		func(ctx context.Context, p *auth.Principal, _ runtimeStatusInput) (*sdk.CallToolResult, runtimeStatusOutput, error) {
 			commit, modified := readBuildVCS()
-			authMode := ""
+			source := ""
 			if p != nil {
-				authMode = p.AuthMode
+				source = p.Source
 			}
 			dbHealthy := false
 			if deps.DB != nil {
@@ -117,13 +129,23 @@ func RegisterRuntimeStatus(server *sdk.Server, deps Deps) {
 				}
 			}
 			hostname, _ := os.Hostname()
+			bindAddr := strings.TrimSpace(deps.BindAddr)
+			if bindAddr == "" {
+				bindAddr = config.DefaultBindAddr
+			}
+			providers := append([]string(nil), deps.AuthProviders...)
+			if providers == nil {
+				providers = []string{}
+			}
 			return nil, runtimeStatusOutput{
 				Version:        deps.Version,
 				ServerCommit:   commit,
 				BuildModified:  modified,
 				ToolsetVersion: ToolsetVersion(),
 				ToolCount:      len(RegisteredTools),
-				AuthMode:       authMode,
+				Source:         source,
+				AuthProviders:  providers,
+				BindAddr:       bindAddr,
 				Ports:          configuredPorts(),
 				ContainerID:    detectContainerID(),
 				ImageTag:       strings.TrimSpace(os.Getenv("PINDOC_IMAGE_TAG")),

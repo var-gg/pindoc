@@ -8,7 +8,7 @@ import (
 // TestTrustedLocalResolver_StampsAccountFields verifies the resolver
 // faithfully copies the constructor inputs onto the Principal it
 // returns. Account-level (Decision mcp-scope-account-level-industry-
-// standard) means only UserID + AgentID + AuthMode travel on the
+// standard) means only UserID + AgentID + Source travel on the
 // Principal — project info comes from each tool input via
 // ResolveProject.
 func TestTrustedLocalResolver_StampsAccountFields(t *testing.T) {
@@ -26,8 +26,11 @@ func TestTrustedLocalResolver_StampsAccountFields(t *testing.T) {
 	if p.AgentID != "claude-code-A" {
 		t.Errorf("AgentID = %q; want claude-code-A", p.AgentID)
 	}
-	if p.AuthMode != AuthModeTrustedLocal {
-		t.Errorf("AuthMode = %q; want %q", p.AuthMode, AuthModeTrustedLocal)
+	if p.Source != SourceLoopback {
+		t.Errorf("Source = %q; want %q", p.Source, SourceLoopback)
+	}
+	if !p.IsLoopback() {
+		t.Errorf("IsLoopback() = false; want true on loopback principal")
 	}
 }
 
@@ -49,8 +52,8 @@ func TestTrustedLocalResolver_EmptyUserIDStillMatches(t *testing.T) {
 	if p.UserID != "" {
 		t.Errorf("UserID = %q; want empty", p.UserID)
 	}
-	if p.AuthMode != AuthModeTrustedLocal {
-		t.Errorf("AuthMode = %q; want %q (empty UserID should not change mode)", p.AuthMode, AuthModeTrustedLocal)
+	if p.Source != SourceLoopback {
+		t.Errorf("Source = %q; want %q (empty UserID should not change source)", p.Source, SourceLoopback)
 	}
 }
 

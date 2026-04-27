@@ -21,11 +21,12 @@ import (
 // wrong invite or wants to evict a leaked secondary account can do so
 // from the UI alone.
 //
-// All four handlers gate on auth_mode like principalForInvite does: the
-// trusted_local single-operator install is allowed (every project is
-// owner) so a self-host owner can still see and prune their own state,
-// and oauth_github checks project_members for the resolved scope. Other
-// auth modes (e.g. public_readonly) refuse with AUTH_MODE_LOCKED.
+// All four handlers run through d.principalForInvite, which delegates
+// to auth.PrincipalFromRequest: loopback callers get Source=loopback +
+// auto-trusted owner, non-loopback callers must present a Pindoc AS
+// browser session. project_members decides editor / viewer for OAuth
+// callers. Decision `decision-auth-model-loopback-and-providers`
+// retired the auth_mode enum these handlers previously branched on.
 
 type memberRowResponse struct {
 	UserID       string    `json:"user_id"`

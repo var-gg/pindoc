@@ -95,9 +95,9 @@ Tier A core 강제 + Tier B Domain Pack + Tier C Custom(V2+).
 
 **stdio (기본, subprocess-per-session)** — `pindoc-server` 단독 실행. Claude Code가 `.mcp.json`의 `command` entry로 launch. `PINDOC_PROJECT` env는 `pindoc.project.current`의 fallback일 뿐이고, project-scoped tool은 `project_slug` input으로 scope를 고른다. `capabilities`: `scope_mode="per_call"`, `new_project_requires_reconnect=false`, `transport="stdio"`.
 
-**streamable_http (데몬, V1 멀티프로젝트 운영 모델)** — `pindoc-server -http 127.0.0.1:5830` 단일 데몬을 띄우면 다수 Claude Code/Codex 세션이 같은 `.mcp.json` URL `http://127.0.0.1:5830/mcp`에 attach한다. 연결 URL은 account-level이고, 매 tool call의 `project_slug`가 project scope를 결정한다. 한 데몬에서 RAM·embedder·telemetry가 공유되고, 새 프로젝트는 다음 tool call부터 바로 addressable하다. 같은 데몬이 같은 포트에서 Reader read-only HTTP API(`/api/...`)와 liveness probe(`/health`)도 함께 서빙하므로 V1 운영에서는 별도 `pindoc-api` 프로세스가 필요 없다. `capabilities`: `scope_mode="per_call"`, `new_project_requires_reconnect=false`, `transport="streamable_http"`, `auth_mode=$PINDOC_AUTH_MODE`. Decision `mcp-scope-account-level-industry-standard`.
+**streamable_http (데몬, V1 멀티프로젝트 운영 모델)** — `pindoc-server -http 127.0.0.1:5830` 단일 데몬을 띄우면 다수 Claude Code/Codex 세션이 같은 `.mcp.json` URL `http://127.0.0.1:5830/mcp`에 attach한다. 연결 URL은 account-level이고, 매 tool call의 `project_slug`가 project scope를 결정한다. 한 데몬에서 RAM·embedder·telemetry가 공유되고, 새 프로젝트는 다음 tool call부터 바로 addressable하다. 같은 데몬이 같은 포트에서 Reader read-only HTTP API(`/api/...`)와 liveness probe(`/health`)도 함께 서빙하므로 V1 운영에서는 별도 `pindoc-api` 프로세스가 필요 없다. `capabilities`: `scope_mode="per_call"`, `new_project_requires_reconnect=false`, `transport="streamable_http"`, `providers=$PINDOC_AUTH_PROVIDERS`, `bind_addr=$PINDOC_BIND_ADDR`. Decision `mcp-scope-account-level-industry-standard`.
 
-기본값은 `auth_mode="trusted_local"` — V1은 단일 사용자/loopback 신뢰 모델. `PINDOC_AUTH_MODE` enum은 `trusted_local|public_readonly|single_user|oauth_github`를 받지만, 현재 런타임은 `trusted_local` 외 값을 startup error로 거절한다. 자기-호스팅 공개(타 사용자가 데몬에 직접 attach) 시 OAuth / agent token 도입은 별 Task로 이어진다.
+기본값은 loopback bind + 빈 providers. Decision `decision-auth-model-loopback-and-providers`가 framing 자체를 폐기했다 — 더 이상 `auth_mode` enum이 아니라 세 직교축(외부 노출 / IdP / public 허용 opt-in)으로 인증 정책을 표현한다. 자세한 흐름은 본 문서 § principal resolution 참조.
 
 Web UI(`pindoc-api`)는 두 transport와 무관하게 멀티프로젝트 switcher를 지원 (`/p/:project/…` canonical URL).
 
@@ -157,8 +157,9 @@ Web UI(`pindoc-api`)는 두 transport와 무관하게 멀티프로젝트 switche
 ### MCP Layer
 
 Account-level MCP connection. Project-scoped tool은 `project_slug` input으로
-scope를 고른다. V1 local mode는 `trusted_local`이고, agent token은 공개
-self-host / SaaS 인증 도입 시점의 별도 관심사다.
+scope를 고른다. V1 local 셋업은 loopback bind + 빈 providers — 모든 요청이
+Source=loopback owner principal로 매핑된다. Agent token은 공개 self-host /
+SaaS 인증 도입 시점의 별도 관심사다.
 
 **V1 MCP Tools**:
 
@@ -339,7 +340,7 @@ localhost:5830 — Pindoc HTTP daemon + PostgreSQL
 - 현재 M1 dev: `docker compose up -d --build`
 - legacy Windows NSSM 서비스가 5830을 점유하면 `PINDOC_DAEMON_PORT=5832`
   같은 host port override로 side-by-side 기동 후 NSSM을 관리자 권한으로 제거
-- 인증: `PINDOC_AUTH_MODE=trusted_local` loopback 신뢰 모델 (default)
+- 인증: 기본 `PINDOC_BIND_ADDR=127.0.0.1:5830` + 빈 `PINDOC_AUTH_PROVIDERS` — 모든 loopback 요청은 자동 owner principal (Loopback Trust)
 - OAuth: 불필요
 - MCP 설정: account-level URL `http://127.0.0.1:5830/mcp`, project scope는
   tool input의 `project_slug`
@@ -381,7 +382,7 @@ $ pindoc init
 
 ```
 [1/7] Server 감지 (localhost:5830 자동 또는 URL 입력 또는 local daemon 기동 제안)
-[2/7] 인증 (Local: trusted_local / Self-host: GitHub OAuth 브라우저)
+[2/7] 인증 (Local: loopback bind 자동 신뢰 / Self-host: GitHub IdP 활성화 + 브라우저 OAuth)
 [3/7] Project 선택/생성 (repo 자동 감지)
 [4/7] Domain Pack 선택 (신규 Project만)
 [5/7] Project scope 기록 (PINDOC.md frontmatter project_slug)
@@ -403,22 +404,65 @@ $ pindoc init
 
 ## 보안과 프라이버시
 
-### 3-tier 인증
+### Principal resolution
 
-| 시나리오 | 사용자 인증 | Agent Token |
+Decision `decision-auth-model-loopback-and-providers`가 정의한 흐름.
+사용자 식별의 진실 공급원은 `Principal.Source` 한 필드 — `loopback` 또는
+`oauth` — 이고, 어느 trust 경로로 도착했는지를 표현한다.
+
+```
+HTTP 요청 도착
+  ├─ remote_addr ∈ {127.0.0.1, ::1, localhost} ?
+  │    └─ Yes → Loopback Trust → default user를 Source=loopback owner로
+  │            (RFC 9728 endpoint 우회, OAuth 미들웨어 bypass)
+  │
+  └─ No → RFC 9728 PRM 흐름 강제
+         ├─ Authorization: Bearer <jwt> 검증 (Pindoc AS)
+         ├─ JWT user_id 클레임 → users 행 매칭 → Source=oauth
+         ├─ project_members 조회로 role 결정 (per-call project_slug)
+         └─ 401 시 WWW-Authenticate 헤더로 PRM URL 안내
+
+stdio MCP transport
+  └─ subprocess (process trust boundary) → loopback과 동일하게
+     default user owner principal 부여
+```
+
+세 env가 정책을 결정한다:
+
+| env | 기본값 | 의미 |
 |---|---|---|
-| Local | 없음 (`trusted_local`) | 없음 |
-| Self-host 도메인 | **GitHub OAuth** | User가 Settings에서 발급, per-agent |
-| Hosted (V2+) | GitHub + Google | auto-provision |
+| `PINDOC_BIND_ADDR` | `127.0.0.1:5830` | 외부 노출 결정 |
+| `PINDOC_AUTH_PROVIDERS` | empty | 활성 IdP CSV (예: `github`) |
+| `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED` | `false` | "외부 노출 + IdP 없음"의 명시적 opt-in |
 
-`PINDOC_AUTH_MODE`는 config enum으로 `trusted_local`, `public_readonly`,
-`single_user`, `oauth_github`를 허용한다. V1 서버는 `trusted_local`만
-resolver chain을 구성하고, 나머지 값은 해당 resolver 구현이 들어오기 전까지
-startup error로 실패한다.
+비-loopback bind + empty providers + opt-in false 조합은 부팅을 거부한다
+(Public-Without-Auth Refusal — `ErrPublicWithoutAuth` sentinel).
+
+### AS / IdP / RS 역할 분리
+
+| 역할 | 실체 |
+|---|---|
+| AS (Authorization Server) | Pindoc daemon (`ory/fosite`) — RFC 9728 PRM + RFC 8414 metadata + `/oauth/{authorize,token,revoke}` |
+| RS (Resource Server) | Pindoc daemon — Bearer JWT 검증 후 MCP/HTTP 리소스 제공 |
+| IdP (Identity Provider) | 외부 위임 — `PINDOC_AUTH_PROVIDERS`의 항목 (현재 `github` 한 개, 미래 `google` / `local-password` / `passkey` 등) |
+| MCP client | Claude Desktop / Code / Codex / Cursor — Pindoc AS 토큰만 사용 |
+
+`users` 행 1개에 IdP identity N개가 link되는 SSO 모델 — 어떤 IdP로
+로그인하든 같은 `users.id`로 수렴한다.
+
+### 시나리오 매핑
+
+| 시나리오 | bind | providers | 운영자 경험 |
+|---|---|---|---|
+| Solo 1인 / 같은 박스 | loopback | empty | env 작업 0. 모든 요청 owner |
+| Solo 1인 / cross-device | external | github | OAuth 1회. loopback 운영자는 그대로 |
+| 2~10인 팀 | external | github | invite 발급 → 친구 GitHub 로그인 → project_members |
+| LAN-only / proxy 신뢰망 | external | empty + ALLOW=true | 명시 opt-in. 인증 없음을 운영자가 보증 |
+| Hosted (V2+) | external | github,google | Multi-tenant 격리는 별도 설계 |
 
 ### Agent Token
 
-- Local V1에서는 미사용. MCP daemon은 loopback `trusted_local`로 동작.
+- Local V1에서는 미사용. MCP daemon은 loopback bind + 자동 신뢰로 동작.
 - 공개 self-host / SaaS에서 도입.
 - account-level token + per-call `project_slug` 권한 확인.
 - 90일 rotation (기본)
@@ -433,7 +477,7 @@ startup error로 실패한다.
 
 ### 기타
 
-- MCP 인증: Local V1은 `trusted_local`; 공개 self-host / SaaS는 OAuth + Agent token 예정
+- MCP 인증: Local V1은 loopback bind 자동 신뢰; 공개 self-host / SaaS는 `PINDOC_AUTH_PROVIDERS=github,...` 활성화로 OAuth + Agent token 도입
 - 데이터 암호화: 호스팅 인프라 위임
 - Git credentials: 사용자 제공, read-only
 - LLM 호출: Pindoc 서버 직접 호출 없음

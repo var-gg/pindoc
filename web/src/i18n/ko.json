@@ -177,7 +177,7 @@
   "sidecar.prov_id": "slug",
 
   "task_controls.header": "Task 운영 필드",
-  "task_controls.read_only": "읽기 전용 (auth_mode)",
+  "task_controls.read_only": "읽기 전용 (OAuth — MCP로 편집)",
   "task_controls.status": "상태",
   "task_controls.status_verified_readonly": "verified 상태는 검증 도구로만 설정됩니다.",
   "task_controls.priority": "priority",

@@ -3,10 +3,22 @@ package auth
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// newTestRequest builds an httptest request with the given remote
+// address. RemoteAddr is normally set by the HTTP server; httptest
+// leaves it empty by default, so the helper sets it explicitly to
+// exercise the loopback judgement.
+func newTestRequest(method, path, remoteAddr string) *http.Request {
+	r := httptest.NewRequest(method, path, nil)
+	r.RemoteAddr = remoteAddr
+	return r
+}
 
 // stubResolver is a configurable Resolver used by chain tests. Set
 // `principal` to make it claim the request, `err` to make it fail, or
@@ -131,7 +143,7 @@ func TestChainResolve_NilChain(t *testing.T) {
 }
 
 // TestNewChain_SkipsNilResolvers lets callers conditionally pass nil
-// when a mode isn't configured ("var bearer Resolver; if oauth then
+// when a source isn't configured ("var bearer Resolver; if oauth then
 // bearer = ...; chain := NewChain(bearer, trustedLocal)") without
 // having to juggle slice appends.
 func TestNewChain_SkipsNilResolvers(t *testing.T) {
@@ -143,5 +155,74 @@ func TestNewChain_SkipsNilResolvers(t *testing.T) {
 	got, err := c.Resolve(context.Background(), nil)
 	if err != nil || got == nil || got.UserID != "match" {
 		t.Fatalf("Resolve = (%+v, %v); want match", got, err)
+	}
+}
+
+// TestIsLoopbackAddr locks the loopback judgement table the request-
+// side trust boundary depends on. Stdio (RemoteAddr="") gets the
+// loopback verdict because process trust is the same envelope. IPv4
+// loopback, IPv6 loopback, and the literal "localhost" host all
+// register; non-loopback IPs do not.
+func TestIsLoopbackAddr(t *testing.T) {
+	cases := []struct {
+		name string
+		addr string
+		want bool
+	}{
+		{name: "empty (stdio)", addr: "", want: true},
+		{name: "ipv4 loopback host:port", addr: "127.0.0.1:54321", want: true},
+		{name: "ipv4 loopback bare", addr: "127.0.0.1", want: true},
+		{name: "ipv6 loopback bracketed", addr: "[::1]:54321", want: true},
+		{name: "ipv6 loopback bare", addr: "::1", want: true},
+		{name: "localhost host:port", addr: "localhost:54321", want: true},
+		{name: "localhost case-insensitive", addr: "Localhost:80", want: true},
+		{name: "private LAN", addr: "192.168.1.4:54321", want: false},
+		{name: "ipv4 mapped public", addr: "203.0.113.5:443", want: false},
+		{name: "garbage", addr: "definitely-not-an-addr", want: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := IsLoopbackAddr(c.addr); got != c.want {
+				t.Fatalf("IsLoopbackAddr(%q) = %v; want %v", c.addr, got, c.want)
+			}
+		})
+	}
+}
+
+// TestPrincipalFromRequest_Loopback verifies the loopback fastpath
+// returns a Source=loopback principal with the configured default
+// user. This is the request-side mirror of TrustedLocalResolver for
+// HTTP handlers.
+func TestPrincipalFromRequest_Loopback(t *testing.T) {
+	r := newTestRequest("GET", "/api/p/foo", "127.0.0.1:54321")
+	p := PrincipalFromRequest(r, HTTPDeps{DefaultUserID: "user-1", DefaultAgentID: "agent-x"})
+	if p == nil {
+		t.Fatal("PrincipalFromRequest returned nil for loopback")
+	}
+	if !p.IsLoopback() {
+		t.Fatalf("Source = %q; want loopback", p.Source)
+	}
+	if p.UserID != "user-1" || p.AgentID != "agent-x" {
+		t.Fatalf("principal = %+v", p)
+	}
+}
+
+// TestPrincipalFromRequest_NonLoopbackNoOAuth covers the deny path:
+// non-loopback request with no OAuth dependency wired returns nil so
+// the handler can emit 401. This is the security guarantee the
+// Public-Without-Auth Refusal at boot-time relies on at runtime.
+func TestPrincipalFromRequest_NonLoopbackNoOAuth(t *testing.T) {
+	r := newTestRequest("GET", "/api/p/foo", "10.0.0.5:54321")
+	if got := PrincipalFromRequest(r, HTTPDeps{}); got != nil {
+		t.Fatalf("PrincipalFromRequest = %+v; want nil for non-loopback without OAuth", got)
+	}
+}
+
+// TestPrincipalFromRequest_NilRequest is a defensive guard: handlers
+// invoking the helper before the request is wired (test fixtures, odd
+// server middleware) get a nil principal rather than a panic.
+func TestPrincipalFromRequest_NilRequest(t *testing.T) {
+	if got := PrincipalFromRequest(nil, HTTPDeps{DefaultUserID: "x"}); got != nil {
+		t.Fatalf("PrincipalFromRequest(nil) = %+v; want nil", got)
 	}
 }

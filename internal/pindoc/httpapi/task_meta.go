@@ -147,12 +147,10 @@ func countTaskAcceptanceResolution(body string) (resolved, total int) {
 // verified remains verify-tool only, and claimed_done is rejected unless
 // the current body has no unresolved acceptance checkboxes.
 func (d Deps) handleTaskMetaPatch(w http.ResponseWriter, r *http.Request) {
-	// auth_mode gate lives here. M1 is always trusted_local so there is
-	// no runtime check; V1.5+ will introduce a Deps.AuthMode field and
-	// this is the seam that flips to `if d.AuthMode != "trusted_local" {
-	// writeTaskMetaError(w, 403, "AUTH_MODE_LOCKED", ...) }`. Leaving the
-	// comment so reviewers see where the ACL split lands without a
-	// dead-code branch.
+	// task_meta is the operational-metadata write lane (Decision
+	// agent-only-write-분할). Authorization rides on the resolved
+	// Principal (Loopback Trust auto-trusts; OAuth callers go through
+	// project_members), no instance-level auth_mode gate needed.
 
 	projectSlug := r.PathValue("project")
 	idOrSlug := r.PathValue("idOrSlug")

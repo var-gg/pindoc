@@ -40,6 +40,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/httpapi"
 	pmcp "github.com/var-gg/pindoc/internal/pindoc/mcp"
+	pmcptools "github.com/var-gg/pindoc/internal/pindoc/mcp/tools"
 	"github.com/var-gg/pindoc/internal/pindoc/projects"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
 	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
@@ -82,7 +83,7 @@ func main() {
 		os.Exit(1)
 	}
 	if err := validateServerConfig(cfg); err != nil {
-		logger.Error("auth mode unsupported", "err", err)
+		logger.Error("server config rejected", "err", err)
 		os.Exit(1)
 	}
 
@@ -90,7 +91,9 @@ func main() {
 		"version", version,
 		"commit", commit,
 		"transport", transportName,
-		"auth_mode", cfg.AuthMode,
+		"providers", config.FormatProvidersForLog(cfg.AuthProviders),
+		"bind_addr", cfg.BindAddr,
+		"loopback_only", cfg.IsLoopbackBind(),
 		"db_configured", cfg.DatabaseURL != "",
 	)
 
@@ -172,6 +175,27 @@ func main() {
 	tele := telemetry.New(ctx, pool.Pool, logger, telemetry.Options{})
 	defer tele.Close()
 
+	// Resolve the bootstrap users.id once so the HTTP daemon and MCP
+	// layers stamp the same row on Loopback principals (Decision
+	// `decision-author-identity-dual`). Empty UserID is the "operator
+	// skipped PINDOC_USER_NAME" path — handlers fall back to
+	// anonymous attribution.
+	defaultUserID := ""
+	if uid, err := pmcptools.UpsertUserFromEnv(ctx, pmcptools.Deps{DB: pool}, cfg.UserName, cfg.UserEmail); err != nil {
+		logger.Warn("user upsert from env failed; loopback principals run without user binding",
+			"error", err,
+			"user_name", cfg.UserName,
+		)
+	} else {
+		defaultUserID = uid
+		if uid != "" {
+			logger.Info("user binding resolved",
+				"user_id", uid,
+				"display_name", cfg.UserName,
+			)
+		}
+	}
+
 	if httpAddr != "" {
 		// Resolve the default project's canonical language once for the
 		// compatibility `default_project_locale` API field. Reader URLs no
@@ -205,7 +229,7 @@ func main() {
 		}
 
 		var oauthSvc *pauth.OAuthService
-		if cfg.AuthMode == config.AuthModeOAuthGitHub {
+		if cfg.HasAuthProvider(config.AuthProviderGitHub) {
 			oauthUserID, err := pauth.EnsureBootstrapUser(ctx, pool, cfg.UserName, cfg.UserEmail)
 			if err != nil {
 				logger.Error("oauth bootstrap user failed", "err", err)
@@ -249,6 +273,10 @@ func main() {
 			Settings:             ssStore,
 			Telemetry:            tele,
 			OAuth:                oauthSvc,
+			AuthProviders:        cfg.AuthProviders,
+			BindAddr:             cfg.BindAddr,
+			DefaultUserID:        defaultUserID,
+			DefaultAgentID:       agentID,
 			Version:              version,
 			BuildCommit:          commit,
 			StartTime:            startTime,
@@ -263,10 +291,11 @@ func main() {
 			DB:        pool,
 			Embedder:  embedder,
 			AgentID:   agentID,
+			UserID:    defaultUserID,
 			Settings:  ssStore,
 			Telemetry: tele,
 			Transport: "streamable_http",
-		}, apiHandler, oauthSvc)
+		}, apiHandler, oauthSvc, cfg)
 		return
 	}
 
@@ -278,6 +307,7 @@ func main() {
 		DB:        pool,
 		Embedder:  embedder,
 		AgentID:   agentID,
+		UserID:    defaultUserID,
 		Settings:  ssStore,
 		Telemetry: tele,
 		Transport: "stdio",
@@ -316,7 +346,7 @@ func main() {
 // dependencies; apiHandler carries the Reader API mux (httpapi.New) —
 // Go 1.22's ServeMux picks /mcp over the catch-all `/` so the routing
 // is unambiguous.
-func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOpts pmcp.Options, apiHandler http.Handler, oauthSvc *pauth.OAuthService) {
+func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOpts pmcp.Options, apiHandler http.Handler, oauthSvc *pauth.OAuthService, cfg *config.Config) {
 	mcp, err := pmcp.NewServer(baseOpts)
 	if err != nil {
 		logger.Error("mcp server init failed", "err", err)
@@ -328,15 +358,26 @@ func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOp
 	}
 	streamHandler := sdk.NewStreamableHTTPHandler(getServer, nil)
 	var mcpHandler http.Handler = streamHandler
-	if baseOpts.Config != nil && baseOpts.Config.AuthMode == config.AuthModeOAuthGitHub {
+	if cfg != nil && cfg.HasAuthProvider(config.AuthProviderGitHub) {
 		if oauthSvc == nil {
-			logger.Error("oauth_github mode requires oauth service")
+			logger.Error("oauth provider configured but oauth service is nil")
 			os.Exit(1)
 		}
-		mcpHandler = mcpauth.RequireBearerToken(oauthSvc.TokenVerifier, &mcpauth.RequireBearerTokenOptions{
+		bearer := mcpauth.RequireBearerToken(oauthSvc.TokenVerifier, &mcpauth.RequireBearerTokenOptions{
 			ResourceMetadataURL: oauthSvc.ResourceMetadataURL(),
 			Scopes:              []string{pauth.ScopePindoc},
 		})(mcpHandler)
+		// Loopback Trust (Decision § 2): same-host calls bypass the
+		// bearer middleware so stdio-loopback parity holds for the
+		// HTTP transport too. Non-loopback callers still must
+		// present a Pindoc AS JWT.
+		mcpHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if pauth.IsLoopbackRequest(r) {
+				streamHandler.ServeHTTP(w, r)
+				return
+			}
+			bearer.ServeHTTP(w, r)
+		})
 	}
 
 	mux := http.NewServeMux()
@@ -389,28 +430,14 @@ func agentIDSource() string {
 	return "generated"
 }
 
-func validateServerAuthMode(mode config.AuthMode) error {
-	if mode == "" || mode == config.AuthModeTrustedLocal {
-		return nil
-	}
-	switch mode {
-	case config.AuthModeOAuthGitHub:
-		return nil
-	case config.AuthModePublicReadonly, config.AuthModeSingleUser:
-		return fmt.Errorf("PINDOC_AUTH_MODE=%s is not supported yet in V1; use trusted_local", mode)
-	default:
-		return fmt.Errorf("invalid PINDOC_AUTH_MODE: '%s'. valid: %s", mode, config.ValidAuthModesString())
-	}
-}
-
 func validateServerConfig(cfg *config.Config) error {
 	if cfg == nil {
 		return fmt.Errorf("config is required")
 	}
-	if err := validateServerAuthMode(cfg.AuthMode); err != nil {
+	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	if cfg.AuthMode == config.AuthModeOAuthGitHub {
+	if cfg.HasAuthProvider(config.AuthProviderGitHub) {
 		missing := []string{}
 		if strings.TrimSpace(cfg.GitHubClientID) == "" {
 			missing = append(missing, "PINDOC_GITHUB_CLIENT_ID")
@@ -419,7 +446,7 @@ func validateServerConfig(cfg *config.Config) error {
 			missing = append(missing, "PINDOC_GITHUB_CLIENT_SECRET")
 		}
 		if len(missing) > 0 {
-			return fmt.Errorf("PINDOC_AUTH_MODE=oauth_github requires %s", strings.Join(missing, " and "))
+			return fmt.Errorf("PINDOC_AUTH_PROVIDERS=%s requires %s", config.AuthProviderGitHub, strings.Join(missing, " and "))
 		}
 	}
 	return nil

@@ -14,12 +14,14 @@ export type ServerConfig = {
   default_project_locale?: string;
   multi_project: boolean;
   version: string;
-  // auth_mode mirrors Capabilities.AuthMode. TaskControls flips between
-  // inline-editable and read-only off this value. M1 always returns
-  // "trusted_local"; V1.5+ adds "project_token" / "oauth" where the
-  // Reader must fall back to read-only + chat-shortcut UX
-  // (Decision agent-only-write-분할, Alternative C).
-  auth_mode?: "trusted_local" | "project_token" | "oauth";
+  // providers + bind_addr replace the deprecated auth_mode enum
+  // (Decision `decision-auth-model-loopback-and-providers`). Empty
+  // providers list + loopback bind_addr matches the historical
+  // single-user self-host path. TaskControls now keys "operator can
+  // edit inline" off providers being empty (no IdP active means the
+  // Reader user is the operator on their own box).
+  providers: string[];
+  bind_addr: string;
   // onboarding_required tells the SPA to redirect a fresh install to
   // the new-project wizard instead of the legacy "open default project"
   // landing. True when the instance has no projects other than the

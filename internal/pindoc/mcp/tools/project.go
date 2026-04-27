@@ -81,10 +81,15 @@ type Capabilities struct {
 	// RetrievalQuality: "stub" → hash-based (dev only), "http" → real
 	// embedder backing pindoc.artifact.search / context.for_task.
 	RetrievalQuality string `json:"retrieval_quality"`
-	// AuthMode mirrors PINDOC_AUTH_MODE. V1 supports "trusted_local" at
-	// runtime and advertises the configured enum so future modes can fail
-	// loudly before a server accidentally reports the wrong security model.
-	AuthMode string `json:"auth_mode"`
+	// AuthProviders mirrors PINDOC_AUTH_PROVIDERS — the active IdPs
+	// the daemon exposes. Empty when the daemon is loopback-only
+	// (Decision `decision-auth-model-loopback-and-providers` § 3).
+	AuthProviders []string `json:"providers"`
+
+	// BindAddr mirrors PINDOC_BIND_ADDR. Loopback addresses tell the
+	// Reader the operator is the calling principal; external bind
+	// addresses signal multi-user / cross-device deployments.
+	BindAddr string `json:"bind_addr,omitempty"`
 	// Transport identifies how the agent reached this server. "stdio" =
 	// classic subprocess-per-session model where Claude Code launches
 	// pindoc-server as a child process. "streamable_http" = daemon mode
@@ -276,23 +281,25 @@ func buildCapabilities(deps Deps, p *auth.Principal, multiProject bool) Capabili
 	if deps.Settings != nil {
 		publicBase = deps.Settings.Get().PublicBaseURL
 	}
-	authMode := deps.AuthMode
-	if authMode == "" && p != nil && p.AuthMode != "" {
-		authMode = config.AuthMode(p.AuthMode)
-	}
-	if authMode == "" {
-		authMode = config.AuthModeTrustedLocal
-	}
 	transport := strings.TrimSpace(deps.Transport)
 	if transport == "" {
 		transport = "stdio"
+	}
+	bindAddr := strings.TrimSpace(deps.BindAddr)
+	if bindAddr == "" {
+		bindAddr = config.DefaultBindAddr
+	}
+	providers := append([]string(nil), deps.AuthProviders...)
+	if providers == nil {
+		providers = []string{}
 	}
 	return Capabilities{
 		MultiProject:                multiProject,
 		ScopeMode:                   "per_call",
 		NewProjectRequiresReconnect: false,
 		RetrievalQuality:            quality,
-		AuthMode:                    string(authMode),
+		AuthProviders:               providers,
+		BindAddr:                    bindAddr,
 		Transport:                   transport,
 		UpdateVia:                   "update_of",
 		RequiresExpectedVersion:     true,

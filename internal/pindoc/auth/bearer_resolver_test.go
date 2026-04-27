@@ -28,8 +28,11 @@ func TestBearerTokenResolver_StampsTokenPrincipal(t *testing.T) {
 	if p == nil {
 		t.Fatal("Resolve() principal = nil")
 	}
-	if p.UserID != "user-uuid" || p.AgentID != "agent-x" || p.AuthMode != AuthModeOAuthGitHub || p.TokenID != "sig-123" {
+	if p.UserID != "user-uuid" || p.AgentID != "agent-x" || p.Source != SourceOAuth || p.TokenID != "sig-123" {
 		t.Fatalf("principal = %+v", p)
+	}
+	if !p.IsOAuth() {
+		t.Fatalf("IsOAuth() = false; want true on bearer-token principal")
 	}
 	if !p.ExpiresAt.Equal(expiresAt) {
 		t.Fatalf("ExpiresAt = %v, want %v", p.ExpiresAt, expiresAt)

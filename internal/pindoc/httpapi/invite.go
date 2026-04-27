@@ -9,7 +9,6 @@ import (
 	"time"
 
 	pauth "github.com/var-gg/pindoc/internal/pindoc/auth"
-	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/invites"
 )
 
@@ -157,29 +156,24 @@ func (d Deps) lookupInviteForHTTP(w http.ResponseWriter, rawToken string, r *htt
 	return rec, true
 }
 
+// principalForInvite is the invite-flow wrapper around
+// d.principalForRequest. It applies the same Loopback Trust + OAuth
+// session rules as every other Reader-side handler, plus the invite-
+// specific gate "requireUser" for paths that must attribute the
+// action to a concrete users.id row (e.g. POST /join). Decision
+// `task-loopback-trust-policy` removed the auth_mode switch in favour
+// of this single helper.
 func (d Deps) principalForInvite(w http.ResponseWriter, r *http.Request, requireUser bool) (*pauth.Principal, bool) {
-	switch d.authMode() {
-	case config.AuthModeOAuthGitHub:
-		if d.OAuth == nil {
-			writeInviteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "OAuth session is required")
-			return nil, false
-		}
-		userID := d.OAuth.BrowserSessionUserID(r)
-		if strings.TrimSpace(userID) == "" {
-			writeInviteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "OAuth session is required")
-			return nil, false
-		}
-		return &pauth.Principal{UserID: userID, AuthMode: pauth.AuthModeOAuthGitHub}, true
-	case config.AuthModeTrustedLocal, "":
-		if requireUser {
-			writeInviteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "authenticated user is required")
-			return nil, false
-		}
-		return &pauth.Principal{AuthMode: pauth.AuthModeTrustedLocal}, true
-	default:
-		writeInviteError(w, http.StatusForbidden, "AUTH_MODE_LOCKED", "invite endpoints require trusted_local or oauth_github")
+	principal := d.principalForRequest(r)
+	if principal == nil {
+		writeInviteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "OAuth session is required")
 		return nil, false
 	}
+	if requireUser && strings.TrimSpace(principal.UserID) == "" {
+		writeInviteError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "authenticated user is required")
+		return nil, false
+	}
+	return principal, true
 }
 
 func (d Deps) writeProjectAuthError(w http.ResponseWriter, err error) {

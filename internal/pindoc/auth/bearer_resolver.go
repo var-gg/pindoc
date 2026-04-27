@@ -8,6 +8,12 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// BearerTokenResolver claims requests where the SDK's bearer-token
+// middleware has already validated a Pindoc AS-issued JWT and stashed
+// the resulting TokenInfo on the request. The resolver itself does not
+// re-verify the token — that work belongs to the OAuth middleware that
+// runs before the chain. Source is stamped as SourceOAuth (Decision
+// `decision-auth-model-loopback-and-providers` § 1).
 type BearerTokenResolver struct {
 	agentID string
 }
@@ -28,7 +34,7 @@ func (r *BearerTokenResolver) Resolve(_ context.Context, req *sdk.CallToolReques
 	p := &Principal{
 		UserID:    userID,
 		AgentID:   r.agentID,
-		AuthMode:  AuthModeOAuthGitHub,
+		Source:    SourceOAuth,
 		ExpiresAt: info.Expiration,
 	}
 	if info.Extra != nil {

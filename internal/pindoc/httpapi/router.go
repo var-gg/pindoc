@@ -45,14 +45,22 @@ type Deps struct {
 	// but canonical Reader URLs are /p/<slug>/...
 	DefaultProjectLocale string
 
-	Embedder    embed.Provider
-	Settings    *settings.Store
-	Telemetry   *telemetry.Store
-	OAuth       *pauth.OAuthService
-	AuthMode    config.AuthMode
-	Version     string
-	BuildCommit string
-	Summary     changegroup.SummaryConfig
+	Embedder      embed.Provider
+	Settings      *settings.Store
+	Telemetry     *telemetry.Store
+	OAuth         *pauth.OAuthService
+	AuthProviders []string
+	BindAddr      string
+	// DefaultUserID / DefaultAgentID are stamped on loopback
+	// Principals so MCP and HTTP layers attribute writes to the same
+	// (users, agents) row even when the caller never authenticated.
+	// Empty UserID is the "operator skipped PINDOC_USER_NAME" case —
+	// handlers fall back to anonymous attribution.
+	DefaultUserID  string
+	DefaultAgentID string
+	Version        string
+	BuildCommit    string
+	Summary        changegroup.SummaryConfig
 
 	// StartTime stamps when the daemon process began running. Surfaced
 	// via GET /health as uptime_sec so operators can spot-check that
@@ -81,11 +89,16 @@ func New(cfg *config.Config, d Deps) http.Handler {
 			GroupCap:      cfg.Summary.GroupCap,
 		}
 	}
-	if cfg != nil && d.AuthMode == "" {
-		d.AuthMode = cfg.AuthMode
+	if cfg != nil {
+		if d.AuthProviders == nil {
+			d.AuthProviders = cfg.AuthProviders
+		}
+		if d.BindAddr == "" {
+			d.BindAddr = cfg.BindAddr
+		}
 	}
-	if d.AuthMode == "" {
-		d.AuthMode = config.AuthModeTrustedLocal
+	if d.BindAddr == "" {
+		d.BindAddr = config.DefaultBindAddr
 	}
 	if d.OAuth != nil {
 		d.OAuth.RegisterRoutes(mux)

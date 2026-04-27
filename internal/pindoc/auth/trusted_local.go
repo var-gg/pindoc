@@ -6,28 +6,26 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// AuthModeTrustedLocal is the AuthMode string TrustedLocalResolver
-// stamps on every Principal it produces. Other resolvers use their own
-// constants ("oauth_github", "project_token") so telemetry can group by
-// mode without parsing the resolver type at runtime.
-const AuthModeTrustedLocal = "trusted_local"
-
-// Role values mirror project_members.role.
+// Role values mirror project_members.role. Defined in the auth package
+// so handlers don't need a separate `roles` import for the three
+// strings the table accepts.
 const (
 	RoleOwner  = "owner"
 	RoleEditor = "editor"
 	RoleViewer = "viewer"
 )
 
-// TrustedLocalResolver produces a Principal from process-level state
-// (env-derived user). Always matches every request — it never returns
-// (nil, nil), so chains that include it terminate at this resolver if
-// no upstream resolver claimed the request first.
+// TrustedLocalResolver produces a loopback Principal from process-level
+// state (env-derived user). Always matches every request — it never
+// returns (nil, nil), so chains that include it terminate at this
+// resolver if no upstream resolver claimed the request first.
 //
-// This resolver is the OSS default and the one that lets dev / homelab
-// deployments run without any token wiring. It is also why the
-// auth_mode spectrum keeps "trusted_local" as a first-class mode
-// rather than retiring it once OAuth ships.
+// "Loopback Trust" (Decision § 2): stdio MCP transport runs as a child
+// process of the caller, so OS process boundaries are the trust
+// envelope. The streamable_http transport relies on the daemon binding
+// to a loopback address — non-loopback HTTP requests must reach a
+// resolver that demands a Bearer JWT (the OAuth middleware refuses
+// them before the chain runs).
 type TrustedLocalResolver struct {
 	template Principal
 }
@@ -49,9 +47,9 @@ type TrustedLocalResolver struct {
 func NewTrustedLocalResolver(userID, agentID string) *TrustedLocalResolver {
 	return &TrustedLocalResolver{
 		template: Principal{
-			UserID:   userID,
-			AgentID:  agentID,
-			AuthMode: AuthModeTrustedLocal,
+			UserID:  userID,
+			AgentID: agentID,
+			Source:  SourceLoopback,
 		},
 	}
 }
@@ -65,7 +63,7 @@ func NewTrustedLocalResolver(userID, agentID string) *TrustedLocalResolver {
 //
 // The req argument is unused today — trusted_local doesn't inspect
 // headers — but is part of the Resolver contract so the chain
-// signature is stable across all modes.
+// signature is stable across all sources.
 func (r *TrustedLocalResolver) Resolve(_ context.Context, _ *sdk.CallToolRequest) (*Principal, error) {
 	if r == nil {
 		return nil, nil

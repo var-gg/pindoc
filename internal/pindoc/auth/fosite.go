@@ -33,9 +33,8 @@ import (
 )
 
 const (
-	AuthModeOAuthGitHub = "oauth_github"
-	ScopePindoc         = "pindoc"
-	ScopeOfflineAccess  = "offline_access"
+	ScopePindoc        = "pindoc"
+	ScopeOfflineAccess = "offline_access"
 )
 
 type OAuthConfig struct {
@@ -211,7 +210,7 @@ func (s *OAuthService) TokenVerifier(ctx context.Context, token string, _ *http.
 		Scopes:     scopes,
 		Expiration: expiresAt,
 		Extra: map[string]any{
-			"auth_mode": AuthModeOAuthGitHub,
+			"source":    SourceOAuth,
 			"token_id":  s.strategy.AccessTokenSignature(ctx, token),
 			"client_id": clientIDFromRequester(ar),
 		},
@@ -385,7 +384,7 @@ func (s *OAuthService) prepareSession(session *foauth2.JWTSession, subject strin
 	if session.JWTClaims.Extra == nil {
 		session.JWTClaims.Extra = map[string]interface{}{}
 	}
-	session.JWTClaims.Extra["auth_mode"] = AuthModeOAuthGitHub
+	session.JWTClaims.Extra["source"] = SourceOAuth
 	session.JWTHeader.Add("kid", s.keyID)
 	if session.GetExpiresAt(fosite.AuthorizeCode).IsZero() {
 		session.SetExpiresAt(fosite.AuthorizeCode, now.Add(defaultAuthorizeCodeTTL))

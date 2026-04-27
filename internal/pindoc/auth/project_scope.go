@@ -109,8 +109,11 @@ func (s *ProjectScope) Can(action string) bool {
 //   - slug not in projects table → ErrProjectNotFound (caller mistyped)
 //   - DB error → wrapped with %w
 //
-// trusted_local: every Principal sees every project as owner. oauth_github:
-// project_members decides owner/editor/viewer and no row is a denial.
+// loopback Principals (Source=loopback): every project is visible as
+// owner, matching the historical "single user self-host" UX. OAuth
+// Principals (Source=oauth) consult project_members and a missing row
+// is a denial. Decision `decision-auth-model-loopback-and-providers`
+// § 2 (Loopback Trust Policy) covers the loopback short-circuit.
 func ResolveProject(ctx context.Context, pool *db.Pool, p *Principal, slug string) (*ProjectScope, error) {
 	slug = strings.TrimSpace(slug)
 	if slug == "" {
@@ -136,7 +139,7 @@ func ResolveProject(ctx context.Context, pool *db.Pool, p *Principal, slug strin
 	}
 
 	role := resolveRole(p)
-	if p != nil && p.AuthMode == AuthModeOAuthGitHub {
+	if p != nil && p.Source == SourceOAuth {
 		var err error
 		role, err = resolveProjectMemberRole(ctx, pool, p.UserID, projectID)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -157,14 +160,16 @@ func ResolveProject(ctx context.Context, pool *db.Pool, p *Principal, slug strin
 	}, nil
 }
 
-// resolveRole picks the Role for the (Principal, project) pair. V1
-// trusted_local stamps owner unconditionally. OAuth returns empty here
-// because ResolveProject must query project_members.
+// resolveRole picks the Role for the (Principal, project) pair.
+// Loopback principals get owner unconditionally — matches the
+// "single-user self-host" UX where the operator owns every project on
+// the box. OAuth principals return empty here so ResolveProject knows
+// to query project_members.
 func resolveRole(p *Principal) string {
 	if p == nil {
 		return ""
 	}
-	if p.AuthMode == AuthModeOAuthGitHub {
+	if p.Source == SourceOAuth {
 		return ""
 	}
 	return RoleOwner

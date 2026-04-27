@@ -95,19 +95,20 @@ func TestResolveProject_NilPool(t *testing.T) {
 	}
 }
 
-// TestResolveRole_TrustedLocalAlwaysOwner pins the V1 contract: any
-// resolved Principal under trusted_local mode gets owner role on
-// every project. V1.5 OAuth will branch on AuthMode; this test should
-// extend rather than disappear.
-func TestResolveRole_TrustedLocalAlwaysOwner(t *testing.T) {
-	for _, mode := range []string{AuthModeTrustedLocal, "", "anything-else"} {
-		got := resolveRole(&Principal{AuthMode: mode})
+// TestResolveRole_LoopbackAlwaysOwner pins the loopback fastpath
+// contract: any Principal stamped with Source=loopback gets owner
+// role on every project, matching the historical single-user self-
+// host UX. OAuth principals return empty here so ResolveProject
+// queries project_members.
+func TestResolveRole_LoopbackAlwaysOwner(t *testing.T) {
+	for _, source := range []string{SourceLoopback, "", "anything-else"} {
+		got := resolveRole(&Principal{Source: source})
 		if got != RoleOwner {
-			t.Fatalf("resolveRole(mode=%q) = %q; want %q", mode, got, RoleOwner)
+			t.Fatalf("resolveRole(source=%q) = %q; want %q", source, got, RoleOwner)
 		}
 	}
-	if got := resolveRole(&Principal{AuthMode: AuthModeOAuthGitHub}); got != "" {
-		t.Fatalf("resolveRole(oauth_github) = %q; want empty so project_members is consulted", got)
+	if got := resolveRole(&Principal{Source: SourceOAuth}); got != "" {
+		t.Fatalf("resolveRole(oauth) = %q; want empty so project_members is consulted", got)
 	}
 	if got := resolveRole(nil); got != "" {
 		t.Fatalf("resolveRole(nil) = %q; want empty string", got)

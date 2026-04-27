@@ -88,8 +88,8 @@ $ pindoc init
   또는 "local daemon을 기동할까요?" 자동 안내
 
 [2/7] 인증
-  로컬: trusted_local (loopback, header 없음)
-  도메인: GitHub OAuth 브라우저 오픈
+  로컬 (loopback bind, providers empty): 자동 신뢰 — header 없음
+  외부 노출 + GitHub IdP (PINDOC_AUTH_PROVIDERS=github): 브라우저 OAuth 오픈
 
 [3/7] Project 선택/생성
   기존:
@@ -146,6 +146,22 @@ $ pindoc init
     }
   }
 ```
+
+### 협업으로 확장 — "전환" 없음, 두 결정만
+
+Decision `decision-auth-model-loopback-and-providers`가 정한 네
+사고실험을 그대로 UI 스토리로 옮기면:
+
+| Case | 시나리오 | 운영자가 만지는 것 |
+|---|---|---|
+| **A1** | 1인 / 같은 박스 / HTTP MCP attach | env 0개. `docker compose up -d`만 |
+| **A2** | 1인 / 같은 박스 / stdio MCP | env 0개. agent가 subprocess 띄움 |
+| **A3** | 1인 / 데스크톱 + 노트북 (cross-device) | `PINDOC_BIND_ADDR=0.0.0.0:5830` + `PINDOC_AUTH_PROVIDERS=github` + GitHub credentials. 노트북에서 OAuth 1회 |
+| **D**  | 1인이 쓰던 곳에 친구 합류 | A3와 동일 셋업 + Reader Members panel에서 invite 발급 |
+
+핵심: A3/D 모두 운영자 본인의 loopback 워크플로우는 변하지 않는다.
+agent 재인증 없음, 본인 재로그인 없음 — 외부에서 들어오는 트래픽만
+OAuth를 거친다. 4-mode "협업 모드 전환" 흐름은 폐기됐다.
 
 ---
 

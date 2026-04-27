@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
@@ -31,7 +32,7 @@ func TestBuildCapabilities_AlwaysPerCall(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			caps := buildCapabilities(
 				Deps{Transport: c.transport},
-				&auth.Principal{AuthMode: auth.AuthModeTrustedLocal},
+				&auth.Principal{Source: auth.SourceLoopback},
 				false,
 			)
 			if caps.Transport != c.wantTransport {
@@ -43,16 +44,11 @@ func TestBuildCapabilities_AlwaysPerCall(t *testing.T) {
 			if caps.NewProjectRequiresReconnect {
 				t.Errorf("NewProjectRequiresReconnect = true, want false (account-level always)")
 			}
-			// Invariants — these don't depend on transport, but if a
-			// future refactor accidentally drops them the multi-project
-			// rollout silently breaks read-side advertisement. Keep
-			// these here so the regression bites at this test, not in
-			// production logs.
-			if caps.AuthMode != "trusted_local" {
-				t.Errorf("AuthMode = %q, want trusted_local (transport-independent)", caps.AuthMode)
-			}
 			if caps.UpdateVia != "update_of" {
 				t.Errorf("UpdateVia = %q, want update_of (transport-independent)", caps.UpdateVia)
+			}
+			if caps.BindAddr != config.DefaultBindAddr {
+				t.Errorf("BindAddr = %q, want %q (default)", caps.BindAddr, config.DefaultBindAddr)
 			}
 		})
 	}
@@ -76,7 +72,7 @@ func TestBuildCapabilities_MultiProjectPassThrough(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			caps := buildCapabilities(
 				Deps{Transport: "stdio"},
-				&auth.Principal{AuthMode: auth.AuthModeTrustedLocal},
+				&auth.Principal{Source: auth.SourceLoopback},
 				c.multiProject,
 			)
 			if caps.MultiProject != c.multiProject {
@@ -89,7 +85,7 @@ func TestBuildCapabilities_MultiProjectPassThrough(t *testing.T) {
 func TestBuildCapabilities_ReceiptExemptionLimit(t *testing.T) {
 	caps := buildCapabilities(
 		Deps{ReceiptExemptionLimit: 5},
-		&auth.Principal{AuthMode: auth.AuthModeTrustedLocal},
+		&auth.Principal{Source: auth.SourceLoopback},
 		false,
 	)
 	if caps.ReceiptExemptionLimit != 5 {
@@ -97,13 +93,34 @@ func TestBuildCapabilities_ReceiptExemptionLimit(t *testing.T) {
 	}
 }
 
-func TestBuildCapabilities_AuthModeComesFromConfig(t *testing.T) {
-	caps := buildCapabilities(
-		Deps{AuthMode: config.AuthModeOAuthGitHub},
-		&auth.Principal{AuthMode: auth.AuthModeTrustedLocal},
-		false,
-	)
-	if caps.AuthMode != string(config.AuthModeOAuthGitHub) {
-		t.Fatalf("AuthMode = %q, want %q", caps.AuthMode, config.AuthModeOAuthGitHub)
+// TestBuildCapabilities_ProvidersFromConfig verifies AuthProviders /
+// BindAddr flow from Deps to Capabilities verbatim. Decision
+// `decision-auth-model-loopback-and-providers` retired the auth_mode
+// enum field in favour of these two axes.
+func TestBuildCapabilities_ProvidersFromConfig(t *testing.T) {
+	deps := Deps{
+		AuthProviders: []string{config.AuthProviderGitHub},
+		BindAddr:      "0.0.0.0:5830",
+	}
+	caps := buildCapabilities(deps, &auth.Principal{Source: auth.SourceOAuth}, false)
+	wantProviders := []string{config.AuthProviderGitHub}
+	if !reflect.DeepEqual(caps.AuthProviders, wantProviders) {
+		t.Fatalf("AuthProviders = %#v, want %#v", caps.AuthProviders, wantProviders)
+	}
+	if caps.BindAddr != "0.0.0.0:5830" {
+		t.Fatalf("BindAddr = %q, want 0.0.0.0:5830", caps.BindAddr)
+	}
+}
+
+// TestBuildCapabilities_ProvidersEmptySerialisesAsArray ensures the
+// JSON wire surface always emits a `providers` array (Reader / agents
+// can iterate without a nil guard) even when no IdP is configured.
+func TestBuildCapabilities_ProvidersEmptySerialisesAsArray(t *testing.T) {
+	caps := buildCapabilities(Deps{}, &auth.Principal{Source: auth.SourceLoopback}, false)
+	if caps.AuthProviders == nil {
+		t.Fatalf("AuthProviders = nil; want non-nil empty slice for stable JSON shape")
+	}
+	if len(caps.AuthProviders) != 0 {
+		t.Fatalf("AuthProviders = %#v, want empty", caps.AuthProviders)
 	}
 }

@@ -79,7 +79,7 @@ Agent Session ── checkpoint ──▶ Promote ──▶ Artifact ──▶ G
 - ✅ Phase 11 — write contract 강화 (`search_receipt` hard enforce + bootstrap receipt/empty-area first-N exemption + `pins[]` + `expected_version` + `supersede_of` + `relates_to[]` + semantic conflict block + `_unsorted` area)
 - ✅ Phase 12 — agent ergonomics (`not_ready`에 `Failed[]`/`NextTools[]`/`Related[]` + `artifact.read(view=brief|full|continuation)` + server-issued `agent_id` + revision `source_session_ref`)
 - ✅ Phase 13 — template artifact seed (`_template_{debug,decision,analysis,task}` — 포맷도 evolving artifact, Reader UI "Show templates" 토글)
-- ✅ Phase 14 — operator settings + contract hardening (server_settings 테이블 + `pindoc-admin` CLI + `human_url_abs` + `expected_version` hard + `patchable_fields[]` + candidate warning + receipt TTL 30m + auth_mode rename)
+- ✅ Phase 14 — operator settings + contract hardening (server_settings 테이블 + `pindoc-admin` CLI + `human_url_abs` + `expected_version` hard + `patchable_fields[]` + candidate warning + receipt TTL 30m + ~~auth_mode rename~~ — `auth_mode` framing은 Decision `decision-auth-model-loopback-and-providers`에서 폐기되고 `PINDOC_AUTH_PROVIDERS` + `PINDOC_BIND_ADDR` + `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED` 세 env로 대체됨)
 - ✅ Phase 15 — dogfood-driven UX 완결 (Task heuristic + Area hierarchy + pin kind enum + task_meta + kanban-lite + Sidecar 연결 카드)
 - ✅ Phase 16 — Today first screen + Change Group backend + summary cache + project markdown export (`pindoc.project_export`, `/api/p/:project/export`)
 
@@ -115,12 +115,14 @@ docker compose up -d --build
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `PINDOC_AUTH_MODE` | `trusted_local` | 인증 모드 enum. 허용값은 `trusted_local`, `public_readonly`, `single_user`, `oauth_github`. `oauth_github`는 GitHub Client ID/Secret이 있을 때만 부팅한다. |
+| `PINDOC_BIND_ADDR` | `127.0.0.1:5830` | 데몬이 listen할 host:port. 루프백(`127.0.0.1` / `::1` / `localhost`)이면 모든 incoming 요청은 자동 신뢰(Loopback Trust). 비-루프백이면 `PINDOC_AUTH_PROVIDERS` 또는 `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED` 중 하나를 명시해야 부팅. |
+| `PINDOC_AUTH_PROVIDERS` | empty | 활성화할 IdP CSV. 현재 지원: `github`. 비어 있으면 외부 IdP가 노출되지 않는다. 외부 노출(비-루프백 bind) + 빈 리스트 + `ALLOW_PUBLIC_UNAUTHENTICATED=false` 조합은 부팅 거부 (`ErrPublicWithoutAuth`). |
+| `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED` | `false` | "외부 노출인데 IdP 없음"을 명시적으로 opt-in. 신뢰망 LAN의 reverse proxy 뒤에서만 켠다. |
 | `PINDOC_PROJECT` | `pindoc` | `project_slug`를 생략한 일부 read/config 호출의 fallback 프로젝트. |
 | `PINDOC_DAEMON_PORT` | `5830` | Docker Compose daemon의 host port override. |
 | `PINDOC_PUBLIC_BASE_URL` | `http://127.0.0.1:${PINDOC_DAEMON_PORT}` | MCP resource/issuer metadata에 노출되는 public base URL. |
 | `PINDOC_OAUTH_REDIRECT_BASE_URL` | empty | GitHub OAuth callback base URL override. 비어 있으면 `PINDOC_PUBLIC_BASE_URL`을 쓴다. GitHub App callback은 `{base}/auth/github/callback`이다. |
-| `PINDOC_GITHUB_CLIENT_ID` / `PINDOC_GITHUB_CLIENT_SECRET` | empty | `PINDOC_AUTH_MODE=oauth_github`에서 필수인 GitHub OAuth App credentials. |
+| `PINDOC_GITHUB_CLIENT_ID` / `PINDOC_GITHUB_CLIENT_SECRET` | empty | `PINDOC_AUTH_PROVIDERS=github`이 활성일 때 필수인 GitHub OAuth App credentials. |
 
 Windows에서 기존 NSSM 서비스가 아직 5830 포트를 점유 중이면, 관리자
 PowerShell에서 제거하기 전까지 Docker daemon을 임시 포트로 띄운다.
@@ -130,20 +132,54 @@ $env:PINDOC_DAEMON_PORT = "5832"
 docker compose up -d --build pindoc-server-daemon
 ```
 
-GitHub OAuth를 켤 때는 GitHub OAuth App의 callback URL을
-`http://127.0.0.1:5830/auth/github/callback`(포트 override 시 해당 포트)로
-등록한 뒤 아래처럼 기동한다.
+### 1인 self-host (default)
+
+`docker compose up -d` 한 번이 그대로 1인 셋업이다. `PINDOC_BIND_ADDR`은
+루프백 `127.0.0.1:5830`이고 `PINDOC_AUTH_PROVIDERS`는 비어 있으니 모든
+요청이 자동 owner principal로 매핑된다. agent stdio MCP / `localhost`
+브라우저 / `.mcp.json`의 streamable_http URL — 셋 다 동일하게 동작
+(Decision Case A1/A2). 추가 env 작업 없음.
+
+### 외부 노출 + GitHub IdP 활성화 (협업)
+
+데스크톱 데몬에 노트북이 OAuth로 합류하거나(Case A3), 1인 프로젝트에
+친구가 invite로 합류(Case D)하는 경우 — 두 결정만 명시한다:
+
+1. **외부 노출** — `PINDOC_BIND_ADDR=0.0.0.0:5830` 또는 reverse proxy.
+2. **IdP 추가** — `PINDOC_AUTH_PROVIDERS=github` + GitHub OAuth App
+   credentials. callback URL은 `{public-base}/auth/github/callback`로
+   GitHub OAuth App에 등록.
 
 ```bash
-PINDOC_AUTH_MODE=oauth_github \
+PINDOC_BIND_ADDR=0.0.0.0:5830 \
+PINDOC_AUTH_PROVIDERS=github \
 PINDOC_GITHUB_CLIENT_ID=... \
 PINDOC_GITHUB_CLIENT_SECRET=... \
 docker compose up -d --build pindoc-server-daemon
 ```
 
+Loopback에서 들어오는 요청(=박스의 운영자 본인)은 OAuth를 거치지 않고
+그대로 owner로 동작 — 협업 모드로 "전환"하면서 운영자가 자기 자신을
+재로그인하거나 agent를 재인증할 일이 없다. 외부에서 들어오는 요청만
+Pindoc AS의 Bearer JWT를 요구한다.
+
 초대 링크는 `/signup?invite=<token>` 형태로 Reader에서 열며, 현재 구현은
 GitHub verified primary email로 기존 `users.email` 행을 자동 링크하거나 새
-행을 만든다. invite token 발급/소비는 별도 후속 task 범위다.
+행을 만든다. invite token 발급/취소·멤버 제거는 Reader Members panel에서
+가능하다.
+
+### 외부 노출, IdP 없음 (LAN-only / reverse-proxy 신뢰망)
+
+위의 둘 어느 쪽에도 해당하지 않는 third-track. `0.0.0.0`에 bind하지만
+인증 없이 신뢰하겠다는 의도를 명시할 때:
+
+```bash
+PINDOC_BIND_ADDR=0.0.0.0:5830 \
+PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED=true \
+docker compose up -d --build pindoc-server-daemon
+```
+
+이 opt-in을 안 켜면 Public-Without-Auth Refusal이 부팅을 거부한다.
 
 Host-native 개발 경로가 필요하면 아래처럼 직접 실행할 수 있다.
 
@@ -205,7 +241,7 @@ go build -o bin/pindoc-server ./cmd/pindoc-server
 # 또는 PINDOC_HTTP_MCP_ADDR=127.0.0.1:5830 ./bin/pindoc-server
 ```
 
-각 세션에서 `pindoc.project.current(project_slug="...")`를 호출하면 프로젝트 메타데이터와 capabilities가 반환된다. 현재 HTTP 데몬은 `transport=streamable_http`, `scope_mode=per_call`, `auth_mode=$PINDOC_AUTH_MODE`를 advertise한다. V1에서 실제 기동 가능한 값은 `trusted_local`뿐이며, 데몬은 loopback(`127.0.0.1`)에 bind되어 외부에서 접근 불가 — 자기-호스팅 공개 시 인증 도입은 별 작업.
+각 세션에서 `pindoc.project.current(project_slug="...")`를 호출하면 프로젝트 메타데이터와 capabilities가 반환된다. 현재 HTTP 데몬은 `transport=streamable_http`, `scope_mode=per_call`, `providers=[...]`(빈 배열이면 IdP 없음), `bind_addr=$PINDOC_BIND_ADDR`을 advertise한다. 기본 셋업(loopback bind + 빈 providers)에서 모든 요청은 자동 owner. 외부 노출이 필요하면 위 "협업" 섹션 참고.
 
 `pindoc.harness.install`이 생성하는 `PINDOC.md`는 YAML frontmatter(`project_slug`, `project_id`, `locale`, `schema_version`)를 포함한다. Frontmatter는 이후 workspace detection의 명시적 source다. Section X는 정책 wiki를 `context.for_task`의 `applicable_rules[]`로 자동 적용하는 규약을 설명하고, Section 12는 chip/parallel work가 시작·진행·merge·중단될 때 Pindoc Task status와 acceptance checkbox를 어떻게 갱신할지 규정한다. 기본 응답은 호환성을 위해 `response_format=full`이지만, 반복 호출은 `file_only` 또는 이전 etag(`if_content_etag`, `if_style_snippet_etag`)로 대형 body 재전송을 피한다.
 

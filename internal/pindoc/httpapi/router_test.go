@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/var-gg/pindoc/internal/pindoc/config"
@@ -25,8 +26,18 @@ func TestLegacyReaderLocaleRedirect(t *testing.T) {
 	}
 }
 
-func TestConfigReportsAuthMode(t *testing.T) {
-	handler := New(&config.Config{AuthMode: config.AuthModeSingleUser}, Deps{})
+// TestConfigReportsProvidersAndBind locks the wire format the Reader
+// reads from /api/config. Decision `decision-auth-model-loopback-and-
+// providers` retired the auth_mode enum in favour of `providers` +
+// `bind_addr`; FE keys "is the operator the calling principal" off
+// the loopback judgement of the current request, not off this
+// instance-wide config.
+func TestConfigReportsProvidersAndBind(t *testing.T) {
+	cfg := &config.Config{
+		AuthProviders: []string{config.AuthProviderGitHub},
+		BindAddr:      "0.0.0.0:5830",
+	}
+	handler := New(cfg, Deps{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	rec := httptest.NewRecorder()
@@ -39,7 +50,47 @@ func TestConfigReportsAuthMode(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if got := body["auth_mode"]; got != string(config.AuthModeSingleUser) {
-		t.Fatalf("auth_mode = %v, want %q", got, config.AuthModeSingleUser)
+	if got, want := body["bind_addr"], "0.0.0.0:5830"; got != want {
+		t.Fatalf("bind_addr = %v, want %q", got, want)
+	}
+	rawProviders, ok := body["providers"].([]any)
+	if !ok {
+		t.Fatalf("providers = %v (%T), want []any", body["providers"], body["providers"])
+	}
+	wantProviders := []any{config.AuthProviderGitHub}
+	if !reflect.DeepEqual(rawProviders, wantProviders) {
+		t.Fatalf("providers = %#v, want %#v", rawProviders, wantProviders)
+	}
+	if _, ok := body["auth_mode"]; ok {
+		t.Fatalf("auth_mode should be retired from /api/config")
+	}
+}
+
+// TestConfigDefaultBindReportsLoopback verifies the default boot path
+// surfaces the loopback bind addr so the Reader can show "running on
+// localhost" cues without the operator setting any env.
+func TestConfigDefaultBindReportsLoopback(t *testing.T) {
+	handler := New(&config.Config{}, Deps{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; want 200", rec.Code)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got, want := body["bind_addr"], config.DefaultBindAddr; got != want {
+		t.Fatalf("bind_addr = %v, want %q", got, want)
+	}
+	rawProviders, ok := body["providers"].([]any)
+	if !ok {
+		t.Fatalf("providers should always serialise as an array; got %T", body["providers"])
+	}
+	if len(rawProviders) != 0 {
+		t.Fatalf("providers = %#v, want empty", rawProviders)
 	}
 }

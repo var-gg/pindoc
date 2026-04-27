@@ -53,11 +53,14 @@ type Props = {
   projectSlug: string;
   detail: Artifact | null;
   emptyMessage?: string;
-  // auth_mode lets TaskControls flip between inline-editable and
-  // read-only without a second round-trip (Decision agent-only-write-
-  // 분할). Undefined = config not yet loaded — treat as non-trusted and
-  // stay read-only until we know.
-  authMode?: ServerConfig["auth_mode"];
+  // providers + bindAddr replace the deprecated auth_mode prop the
+  // Reader used to thread through to TaskControls (Decision
+  // `decision-auth-model-loopback-and-providers`). Empty providers
+  // means no IdP is wired so the Reader user is the operator on a
+  // loopback box and TaskControls can edit inline. Undefined = config
+  // not yet loaded — treat as "stay read-only until we know".
+  providers?: ServerConfig["providers"];
+  bindAddr?: ServerConfig["bind_addr"];
   // agents is the author_id aggregate across the current project's
   // artifact list. TaskControls surfaces it as the "assigned to an
   // agent" half of the assignee dropdown.
@@ -99,7 +102,8 @@ export function Sidecar({
   projectSlug,
   detail,
   emptyMessage,
-  authMode,
+  providers,
+  bindAddr,
   agents,
   users,
   onArtifactUpdated,
@@ -170,7 +174,8 @@ export function Sidecar({
         <TaskControls
           projectSlug={projectSlug}
           detail={detail}
-          authMode={authMode}
+          providers={providers}
+          bindAddr={bindAddr}
           agents={agents ?? []}
           users={users ?? []}
           onUpdated={() => onArtifactUpdated?.()}

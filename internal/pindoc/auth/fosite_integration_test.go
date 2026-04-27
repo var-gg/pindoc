@@ -75,7 +75,7 @@ func TestFositePKCEFlowIntegration(t *testing.T) {
 	if info.UserID != userID || !contains(info.Scopes, ScopePindoc) || info.Extra["token_id"] == "" {
 		t.Fatalf("TokenInfo = %+v", info)
 	}
-	scope, err := ResolveProject(ctx, pool, &Principal{UserID: userID, AuthMode: AuthModeOAuthGitHub}, projectSlug)
+	scope, err := ResolveProject(ctx, pool, &Principal{UserID: userID, Source: SourceOAuth}, projectSlug)
 	if err != nil {
 		t.Fatalf("ResolveProject oauth: %v", err)
 	}

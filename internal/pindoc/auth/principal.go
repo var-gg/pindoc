@@ -1,32 +1,44 @@
 // Package auth holds Pindoc's caller-identity abstraction. A Principal is
-// who is calling — UserID + AgentID + auth-mode metadata, account-level.
+// who is calling — UserID + AgentID + Source metadata, account-level.
 // ProjectScope is per-call: the project slug travels in each tool input
-// and ResolveProject turns it into id/canonical-language/role after a project_members
-// lookup. Resolvers are the per-mode flow that produces a Principal from
-// the incoming request. The Resolver chain is the only place auth_mode
-// branches exist — every tool handler downstream is mode-blind.
+// and ResolveProject turns it into id/canonical-language/role after a
+// project_members lookup. Resolvers are the per-source flow that
+// produces a Principal from the incoming request.
 //
-// Decision: mcp-scope-account-level-industry-standard supersedes the
-// per-connection ProjectID/ProjectSlug fields once carried on Principal —
-// industry MCPs (Notion / Figma / Linear / GitHub) all bind the
-// connection at account level and take resource ids per call. Adding a
-// new auth_mode (e.g. oauth_github via fosite IntrospectToken) means
-// writing one new Resolver and prepending it to the chain — handler code
-// does not change.
+// Decision `decision-auth-model-loopback-and-providers` retired the
+// 4-mode `auth_mode` enum that previously straddled "is the daemon
+// public", "which IdP is active", and "how many users are there" axes
+// in one variable. Principal.Source is the single bit handlers branch
+// on now — "loopback" (process / 127.0.0.1 trust boundary) vs "oauth"
+// (Pindoc AS validated bearer JWT). New IdPs are still SourceOAuth
+// once exchanged for a Pindoc AS token; they don't add new Source
+// values because the framing is "Pindoc-issued JWT vs not".
 package auth
 
 import "time"
+
+// Source values stamped on Principal by the resolver chain. New IdPs
+// (Google / passkey / local-password) all flow through the Pindoc AS
+// and surface as SourceOAuth — Source reports the trust path Pindoc
+// took to identify this caller, not the upstream IdP.
+const (
+	// SourceLoopback marks Principals produced by the trusted-local
+	// resolver: the request came in over stdio (process trust) or from
+	// a loopback HTTP address. Decision § 2 "Loopback Trust Policy".
+	SourceLoopback = "loopback"
+
+	// SourceOAuth marks Principals produced from a Bearer JWT issued
+	// by the Pindoc Authorization Server. Decision § 1 "AS / IdP / RS
+	// 명시적 분리".
+	SourceOAuth = "oauth"
+)
 
 // Principal is the per-call answer to "who is calling". Scope (which
 // project the call is about) lives on auth.ProjectScope which the
 // handler resolves from the input's project_slug field. Every handler
 // receives a non-nil Principal — when no Resolver matches the incoming
-// request, the chain short-circuits with an error before the handler is
-// ever entered.
-//
-// Fields specific to V1.5+ modes (TokenID, ExpiresAt) are present but
-// left at zero values for trusted_local — adding BearerTokenResolver
-// later will populate them without touching the struct.
+// request, the chain short-circuits with an error before the handler
+// is ever entered.
 type Principal struct {
 	// UserID is the users.id (uuid) row this caller is bound to. Empty
 	// when the operator hasn't configured PINDOC_USER_NAME — handlers
@@ -41,28 +53,29 @@ type Principal struct {
 	// audit rows.
 	AgentID string
 
-	// AuthMode is the resolver that produced this Principal
-	// ("trusted_local" today; "oauth_github" / "project_token" /
-	// "public_readonly" later). Carried for telemetry + debugging only;
-	// handler logic must not branch on it.
-	AuthMode string
+	// Source is the trust path that produced this Principal:
+	// SourceLoopback (process / 127.0.0.1) or SourceOAuth (Pindoc AS
+	// JWT). project_scope.go branches off this to decide whether to
+	// short-circuit role lookup as owner (loopback) or consult the
+	// project_members table (oauth). Carried for telemetry too.
+	Source string
 
 	// TokenID is the auth_tokens.token_hash matched by a BearerToken /
-	// OAuth resolver. Empty for trusted_local. Surfaced so audit log
-	// can attribute writes to a specific issued token without storing
-	// the bearer secret itself.
+	// OAuth resolver. Empty for loopback. Surfaced so audit log can
+	// attribute writes to a specific issued token without storing the
+	// bearer secret itself.
 	TokenID string
 
 	// ExpiresAt is the absolute moment the underlying credential stops
-	// being valid. Zero = no expiry (trusted_local, long-lived
-	// project_token without TTL). Resolvers that wrap an OAuth token
-	// populate this so handlers needing long-running work can decide
-	// whether to refresh or fail fast.
+	// being valid. Zero = no expiry (loopback, long-lived tokens).
+	// Resolvers that wrap an OAuth token populate this so handlers
+	// needing long-running work can decide whether to refresh or fail
+	// fast.
 	ExpiresAt time.Time
 }
 
 // IsExpired reports whether the underlying credential's TTL has passed.
-// Zero ExpiresAt is treated as "no expiry" so trusted_local Principals
+// Zero ExpiresAt is treated as "no expiry" so loopback Principals
 // always return false. Handlers issuing long-running operations may
 // gate on this before kicking off work that would outlive the token.
 func (p *Principal) IsExpired(now time.Time) bool {
@@ -70,4 +83,18 @@ func (p *Principal) IsExpired(now time.Time) bool {
 		return false
 	}
 	return !now.Before(p.ExpiresAt)
+}
+
+// IsLoopback reports whether this Principal came from the loopback
+// trust path. Sugar over `p.Source == SourceLoopback` so handlers
+// reading their own logic don't have to import the constant.
+func (p *Principal) IsLoopback() bool {
+	return p != nil && p.Source == SourceLoopback
+}
+
+// IsOAuth reports whether this Principal came from a Pindoc AS bearer
+// JWT. Used by project_scope.go to decide between "loopback owner
+// short-circuit" and "consult project_members".
+func (p *Principal) IsOAuth() bool {
+	return p != nil && p.Source == SourceOAuth
 }

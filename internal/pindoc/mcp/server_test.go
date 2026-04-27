@@ -1,46 +1,49 @@
 package mcp
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 )
 
-func TestAuthChainForModeTrustedLocal(t *testing.T) {
-	chain, err := authChainForMode(config.AuthModeTrustedLocal, "user-id", "agent-id")
-	if err != nil {
-		t.Fatalf("authChainForMode() error = %v", err)
-	}
+// TestAuthChainForConfigLoopbackOnly locks the default boot path: no
+// IdP configured → chain has only TrustedLocalResolver, which always
+// matches (loopback fastpath). Decision `decision-auth-model-loopback-
+// and-providers` § 2.
+func TestAuthChainForConfigLoopbackOnly(t *testing.T) {
+	chain := authChainForConfig(&config.Config{}, "user-id", "agent-id")
 	if chain == nil {
-		t.Fatalf("authChainForMode() chain = nil")
+		t.Fatalf("authChainForConfig() chain = nil")
+	}
+	if chain.Len() != 1 {
+		t.Fatalf("Len = %d; want 1 (TrustedLocal only)", chain.Len())
 	}
 }
 
-func TestAuthChainForModeOAuthGitHub(t *testing.T) {
-	chain, err := authChainForMode(config.AuthModeOAuthGitHub, "user-id", "agent-id")
-	if err != nil {
-		t.Fatalf("authChainForMode() error = %v", err)
-	}
+// TestAuthChainForConfigWithGitHubProvider verifies adding `github`
+// to AuthProviders prepends a BearerTokenResolver so JWT-bearing
+// requests are recognised before the loopback fallback.
+func TestAuthChainForConfigWithGitHubProvider(t *testing.T) {
+	chain := authChainForConfig(
+		&config.Config{AuthProviders: []string{config.AuthProviderGitHub}},
+		"user-id", "agent-id",
+	)
 	if chain == nil {
-		t.Fatalf("authChainForMode() chain = nil")
+		t.Fatalf("authChainForConfig() chain = nil")
+	}
+	if chain.Len() != 2 {
+		t.Fatalf("Len = %d; want 2 (Bearer + TrustedLocal)", chain.Len())
 	}
 }
 
-func TestAuthChainForModeUnsupported(t *testing.T) {
-	cases := []config.AuthMode{
-		config.AuthModePublicReadonly,
-		config.AuthModeSingleUser,
+// TestAuthChainForConfigNilSafe guards against panics when the boot
+// wiring hasn't filled the Config pointer yet (test fixtures).
+func TestAuthChainForConfigNilSafe(t *testing.T) {
+	chain := authChainForConfig(nil, "user-id", "agent-id")
+	if chain == nil {
+		t.Fatalf("authChainForConfig(nil) chain = nil")
 	}
-	for _, mode := range cases {
-		t.Run(string(mode), func(t *testing.T) {
-			chain, err := authChainForMode(mode, "user-id", "agent-id")
-			if err == nil {
-				t.Fatalf("authChainForMode() error = nil, chain = %#v", chain)
-			}
-			if !strings.Contains(err.Error(), "PINDOC_AUTH_MODE="+string(mode)) {
-				t.Fatalf("error %q does not name mode %q", err.Error(), mode)
-			}
-		})
+	if chain.Len() != 1 {
+		t.Fatalf("Len = %d; want 1 (TrustedLocal fallback even with nil cfg)", chain.Len())
 	}
 }
