@@ -28,6 +28,20 @@ var (
 	ErrRoleInvalid   = errors.New("invites: role must be editor or viewer")
 )
 
+// ListSummary is the read shape returned to the Reader UI for the
+// active-invite panel. Token hash is the public id (the raw token
+// remains owner-only knowledge after issue), role/expiry/issued_by
+// drive the row UI, IsConsumed lets the UI greyout already-claimed
+// tokens if the panel ever surfaces history.
+type ListSummary struct {
+	TokenHash  string
+	Role       string
+	IssuedByID string
+	ExpiresAt  time.Time
+	CreatedAt  time.Time
+	ConsumedAt *time.Time
+}
+
 type Record struct {
 	TokenHash   string
 	ProjectID   string
@@ -257,4 +271,111 @@ func ValidRole(role string) bool {
 	default:
 		return false
 	}
+}
+
+// ListActive returns invite_tokens rows for the project that haven't
+// been consumed and haven't expired. Sorted newest issued first so
+// the Reader UI shows the most recent invite at the top, matching the
+// human flow of "I just sent one — let me revoke it".
+func ListActive(ctx context.Context, pool *db.Pool, projectID string, now time.Time) ([]ListSummary, error) {
+	if pool == nil {
+		return nil, errors.New("invites: nil DB pool")
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return nil, errors.New("invites: project_id is required")
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT token_hash, role, COALESCE(issued_by::text, ''),
+		       expires_at, issued_at, consumed_at
+		  FROM invite_tokens
+		 WHERE project_id = $1::uuid
+		   AND consumed_at IS NULL
+		   AND expires_at > $2
+		 ORDER BY issued_at DESC
+	`, projectID, now)
+	if err != nil {
+		return nil, fmt.Errorf("list active invites: %w", err)
+	}
+	defer rows.Close()
+	out := make([]ListSummary, 0, 4)
+	for rows.Next() {
+		var s ListSummary
+		var consumedAt *time.Time
+		if err := rows.Scan(&s.TokenHash, &s.Role, &s.IssuedByID, &s.ExpiresAt, &s.CreatedAt, &consumedAt); err != nil {
+			return nil, fmt.Errorf("scan invite row: %w", err)
+		}
+		s.ConsumedAt = consumedAt
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate invites: %w", err)
+	}
+	return out, nil
+}
+
+// Revoke marks an invite token consumed (consumed_at = now, consumed_by
+// = revoker) so the same lookup path that rejects already-consumed
+// tokens also rejects revoked ones — no separate revoked column
+// needed in the first pass. The caller is the owner who pressed the
+// revoke button; we record them as consumed_by so the audit trail
+// shows who killed which token.
+//
+// Returns ErrTokenNotFound when no row matches the hash + project_id
+// pair (404 / mistyped hash); ErrTokenInactive when the token was
+// already consumed (no-op double-revoke is treated as inactive so
+// the UI can collapse an idempotent retry without surfacing an
+// error). Project scoping is enforced at the SQL layer so a leaked
+// hash from project A cannot be revoked through project B's URL.
+func Revoke(ctx context.Context, pool *db.Pool, projectID, tokenHash, revokerUserID string, now time.Time) error {
+	if pool == nil {
+		return errors.New("invites: nil DB pool")
+	}
+	projectID = strings.TrimSpace(projectID)
+	tokenHash = strings.TrimSpace(tokenHash)
+	if projectID == "" || tokenHash == "" {
+		return errors.New("invites: project_id and token_hash are required")
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	var revokerArg any
+	if v := strings.TrimSpace(revokerUserID); v != "" {
+		revokerArg = v
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin invite revoke: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var consumedAt *time.Time
+	err = tx.QueryRow(ctx, `
+		SELECT consumed_at FROM invite_tokens
+		 WHERE token_hash = $1 AND project_id = $2::uuid
+		 FOR UPDATE
+	`, tokenHash, projectID).Scan(&consumedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrTokenNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("lock invite for revoke: %w", err)
+	}
+	if consumedAt != nil {
+		return ErrTokenInactive
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE invite_tokens
+		   SET consumed_at = $3,
+		       consumed_by = $4::uuid
+		 WHERE token_hash = $1 AND project_id = $2::uuid
+	`, tokenHash, projectID, now, revokerArg); err != nil {
+		return fmt.Errorf("mark invite revoked: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit invite revoke: %w", err)
+	}
+	return nil
 }

@@ -522,6 +522,50 @@ export type ProjectCreateError = {
   message: string;
 };
 
+// Phase D — permission management plane shapes. These mirror
+// internal/pindoc/httpapi/members.go envelopes 1:1. Errors come back
+// as the same { error_code, message } shape every other write
+// endpoint uses; the helper below throws a typed Error so the panel
+// can map error_code → user-facing copy.
+export type MemberRow = {
+  user_id: string;
+  display_name?: string;
+  github_handle?: string;
+  role: "owner" | "editor" | "viewer";
+  invited_by_id?: string;
+  joined_at: string;
+  is_self?: boolean;
+};
+
+export type MembersListResp = {
+  project_slug: string;
+  viewer_role: "owner" | "editor" | "viewer";
+  viewer_id?: string;
+  members: MemberRow[];
+};
+
+export type ActiveInviteRow = {
+  token_hash: string;
+  role: "editor" | "viewer";
+  issued_by_id?: string;
+  issued_at: string;
+  expires_at: string;
+};
+
+export type InvitesListResp = {
+  project_slug: string;
+  invites: ActiveInviteRow[];
+};
+
+export type MembersOpResp = {
+  status: "removed" | "revoked";
+};
+
+export type MembersOpError = {
+  error_code: string;
+  message: string;
+};
+
 export const api = {
   // Instance-wide
   config: () => j<ServerConfig>("/api/config"),
@@ -776,6 +820,65 @@ export const api = {
     return j<DiffResp>(
       `${p(project)}/artifacts/${encodeURIComponent(idOrSlug)}/diff${q ? `?${q}` : ""}`,
     );
+  },
+
+  // Phase D — permission management plane. Members list is open to
+  // anyone in the project; invites list and the two DELETEs are
+  // owner-only at the server. The fetch helpers below all parse the
+  // standard error envelope so the panel can show a friendly message
+  // (LAST_OWNER, PROJECT_OWNER_REQUIRED, etc.) instead of a raw status.
+  members: (project: string) =>
+    j<MembersListResp>(`${p(project)}/members`),
+  removeMember: async (project: string, userId: string): Promise<MembersOpResp> => {
+    const res = await fetch(`${p(project)}/members/${encodeURIComponent(userId)}`, {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      let parsed: MembersOpError | null = null;
+      try {
+        parsed = (await res.json()) as MembersOpError;
+      } catch {
+        // fall through
+      }
+      const err = new Error(
+        parsed?.message ?? `${res.status} ${res.statusText}`,
+      ) as Error & Partial<MembersOpError>;
+      if (parsed) {
+        err.error_code = parsed.error_code;
+        err.message = parsed.message;
+      }
+      throw err;
+    }
+    return (await res.json()) as MembersOpResp;
+  },
+  activeInvites: (project: string) =>
+    j<InvitesListResp>(`${p(project)}/invites`),
+  revokeInvite: async (
+    project: string,
+    tokenHash: string,
+  ): Promise<MembersOpResp> => {
+    const res = await fetch(
+      `${p(project)}/invites/${encodeURIComponent(tokenHash)}`,
+      { method: "DELETE", headers: { Accept: "application/json" } },
+    );
+    if (!res.ok) {
+      let parsed: MembersOpError | null = null;
+      try {
+        parsed = (await res.json()) as MembersOpError;
+      } catch {
+        // fall through
+      }
+      const err = new Error(
+        parsed?.message ?? `${res.status} ${res.statusText}`,
+      ) as Error & Partial<MembersOpError>;
+      if (parsed) {
+        err.error_code = parsed.error_code;
+        err.message = parsed.message;
+      }
+      throw err;
+    }
+    return (await res.json()) as MembersOpResp;
   },
 
   // Ops — instance-wide MCP tool-call telemetry. Reads from the async

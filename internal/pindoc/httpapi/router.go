@@ -133,6 +133,11 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/p/{project}/inbox", d.handleInbox)
 	mux.HandleFunc("POST /api/p/{project}/inbox/{idOrSlug}/review", d.handleInboxReview)
 	mux.HandleFunc("POST /api/p/{project}/invite", d.handleInviteIssue)
+	// Phase D — permission management plane.
+	mux.HandleFunc("GET /api/p/{project}/members", d.handleMembersList)
+	mux.HandleFunc("DELETE /api/p/{project}/members/{user_id}", d.handleMemberRemove)
+	mux.HandleFunc("GET /api/p/{project}/invites", d.handleInvitesList)
+	mux.HandleFunc("DELETE /api/p/{project}/invites/{token_hash}", d.handleInviteRevoke)
 	mux.HandleFunc("POST /api/p/{project}/read-mark", d.handleReadMark)
 	mux.HandleFunc("POST /api/p/{project}/read-events", d.handleReadEvent)
 	mux.HandleFunc("GET /api/p/{project}/export", d.handleProjectExport)
@@ -181,7 +186,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 func withCORS(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

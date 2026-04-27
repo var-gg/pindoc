@@ -629,7 +629,13 @@ export function ReaderShell({ view }: Props) {
         />
       </div>
       <CmdK projectSlug={project} open={paletteOpen} onClose={() => setPaletteOpen(false)} />
-      <InviteModal project={projectData} open={inviteOpen} onClose={() => setInviteOpen(false)} />
+      <InviteModal
+        project={projectData}
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        authMode={authMode}
+        users={users}
+      />
       <ShortcutsOverlay
         open={shortcutsOpen}
         view={view}

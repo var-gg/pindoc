@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Loader2, X } from "lucide-react";
-import { api, type InviteIssueResp, type InviteRole, type Project } from "../api/client";
+import {
+  api,
+  type InviteIssueResp,
+  type InviteRole,
+  type Project,
+  type ServerConfig,
+  type UserRef,
+} from "../api/client";
 import { useI18n } from "../i18n";
+import { MembersPanel } from "./MembersPanel";
 
 const EXPIRY_OPTIONS = [24, 72, 168, 720] as const;
 
@@ -9,9 +17,15 @@ type Props = {
   project: Project;
   open: boolean;
   onClose: () => void;
+  // Phase D — auth_mode + users are passed through so MembersPanel
+  // (which renders below the issue form) can decide whether to show
+  // itself and how to label invited_by ids. Both optional so the
+  // modal still works in legacy callers / snapshot tests.
+  authMode?: ServerConfig["auth_mode"];
+  users?: UserRef[] | null;
 };
 
-export function InviteModal({ project, open, onClose }: Props) {
+export function InviteModal({ project, open, onClose, authMode, users }: Props) {
   const { t, lang } = useI18n();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [role, setRole] = useState<InviteRole>("viewer");
@@ -20,6 +34,7 @@ export function InviteModal({ project, open, onClose }: Props) {
   const [result, setResult] = useState<InviteIssueResp | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
   const formattedExpiry = useMemo(() => {
     if (!result?.expires_at) return "";
@@ -55,6 +70,10 @@ export function InviteModal({ project, open, onClose }: Props) {
         expires_in_hours: expiresInHours,
       });
       setResult(out);
+      // Tell MembersPanel to refetch — the new token belongs in the
+      // active-invites list right away. Without this the user has to
+      // close + reopen the modal before they see what they just issued.
+      setRefreshNonce((n) => n + 1);
     } catch (e) {
       const err = e as Error & { error_code?: string };
       setError(err.error_code ? `${err.error_code}: ${err.message}` : err.message);
@@ -161,6 +180,13 @@ export function InviteModal({ project, open, onClose }: Props) {
             </button>
           </section>
         )}
+
+        <MembersPanel
+          project={project}
+          authMode={authMode}
+          refreshNonce={refreshNonce}
+          users={users}
+        />
       </div>
     </div>
   );
