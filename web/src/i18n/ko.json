@@ -433,6 +433,7 @@
   "graph.scope_all": "전체 artifact",
   "graph.filter_area": "Area",
   "graph.filter_type": "Type",
+  "graph.peek_open": "열기 →",
 
   "today.eyebrow": "Briefing",
   "today.title": "Today",
