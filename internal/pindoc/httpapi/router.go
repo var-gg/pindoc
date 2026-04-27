@@ -63,6 +63,14 @@ type Deps struct {
 	// handlers fall back to anonymous attribution.
 	DefaultUserID  string
 	DefaultAgentID string
+
+	// TrustedSameHostProxy widens the loopback principal trust to
+	// any source IP when the daemon is behind a same-host proxy
+	// (docker port forwarding, NSSM reverse proxy). Set true at boot
+	// when (a) the daemon detects it is running in a container and
+	// (b) operator intent is loopback-only (cfg.IsLoopbackBind). See
+	// auth.HTTPDeps.TrustedSameHostProxy for the security envelope.
+	TrustedSameHostProxy bool
 	Version        string
 	BuildCommit    string
 	Summary        changegroup.SummaryConfig
@@ -129,6 +137,11 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	// so Reader TaskControls can offer a real assignee dropdown next to
 	// the agents aggregate (Decision agent-only-write-분할 AC).
 	mux.HandleFunc("GET /api/users", d.handleUserList)
+
+	// Agent-era first-time identity flow. POST creates / rebinds the
+	// loopback principal's users.id row + sets server_settings.
+	// default_loopback_user_id atomically. Loopback only.
+	mux.HandleFunc("POST /api/onboarding/identity", d.handleOnboardingIdentity)
 
 	// Ops surface (Phase J UI). Instance-wide telemetry aggregation —
 	// per-tool averages + recent call timeline so operators can see

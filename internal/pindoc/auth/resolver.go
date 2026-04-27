@@ -149,18 +149,30 @@ func IsLoopbackRequest(r *http.Request) bool {
 // pass the OAuthService that owns BrowserSessionUserID. DefaultUserID
 // is the bootstrap user the loopback principal binds to (mirrors the
 // trusted_local resolver's UserID input).
+//
+// TrustedSameHostProxy=true tells PrincipalFromRequest to accept any
+// source IP as loopback. Set when the daemon is behind a same-host
+// proxy that operators arrange themselves — Docker port forwarding,
+// NSSM-wrapped reverse proxy, systemd-socket activation. cfg.IsLoopback
+// Bind() being true is the operator's intent assertion that the public
+// surface is same-host only; trusting the proxy chain follows from
+// that assertion. Mismatch (proxy publishes externally + intent says
+// loopback) is the operator's footgun, not a daemon-side check —
+// PINDOC_BIND_ADDR is the contract surface.
 type HTTPDeps struct {
-	OAuth          *OAuthService
-	DefaultUserID  string
-	DefaultAgentID string
+	OAuth                *OAuthService
+	DefaultUserID        string
+	DefaultAgentID       string
+	TrustedSameHostProxy bool
 }
 
 // PrincipalFromRequest is the single principal resolver Reader-side
 // HTTP handlers (`/api/...`) call. It folds the previous "switch on
 // d.authMode()" branches in handlers.go / invite.go / members.go
-// into one rule: loopback addresses are auto-trusted, non-loopback
-// addresses must present a valid OAuth browser session. Any other
-// case returns nil so the handler can answer 401.
+// into one rule: loopback (or trusted same-host proxy) requests are
+// auto-trusted, non-loopback addresses must present a valid OAuth
+// browser session. Any other case returns nil so the handler can
+// answer 401.
 //
 // Decision `decision-auth-model-loopback-and-providers` § 2 covers
 // the loopback fastpath; `task-loopback-trust-policy` is the
@@ -170,7 +182,7 @@ func PrincipalFromRequest(r *http.Request, deps HTTPDeps) *Principal {
 	if r == nil {
 		return nil
 	}
-	if IsLoopbackRequest(r) {
+	if isTrustedLoopback(r, deps) {
 		return &Principal{
 			UserID:  deps.DefaultUserID,
 			AgentID: deps.DefaultAgentID,
@@ -189,4 +201,18 @@ func PrincipalFromRequest(r *http.Request, deps HTTPDeps) *Principal {
 		AgentID: deps.DefaultAgentID,
 		Source:  SourceOAuth,
 	}
+}
+
+// isTrustedLoopback combines the request-side loopback check with
+// the operator's same-host proxy opt-in (TrustedSameHostProxy). The
+// docker compose daemon listens on 0.0.0.0 inside the container so
+// docker port forwarding sees source IPs from the bridge gateway,
+// not loopback — without the opt-in, every Reader call from the
+// host would 401. Daemons running outside containers leave the flag
+// unset and behave the same as before.
+func isTrustedLoopback(r *http.Request, deps HTTPDeps) bool {
+	if IsLoopbackRequest(r) {
+		return true
+	}
+	return deps.TrustedSameHostProxy
 }

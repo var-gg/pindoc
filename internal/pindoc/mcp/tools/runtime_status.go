@@ -147,7 +147,7 @@ func RegisterRuntimeStatus(server *sdk.Server, deps Deps) {
 				AuthProviders:  providers,
 				BindAddr:       bindAddr,
 				Ports:          configuredPorts(),
-				ContainerID:    detectContainerID(),
+				ContainerID:    DetectContainerID(),
 				ImageTag:       strings.TrimSpace(os.Getenv("PINDOC_IMAGE_TAG")),
 				Hostname:       hostname,
 				Transport:      deps.Transport,
@@ -210,13 +210,15 @@ func resolvePort(name, env string, fallback int) runtimeStatusPort {
 	return runtimeStatusPort{Name: name, Port: port, Healthy: true}
 }
 
-// detectContainerID returns Docker's short hostname-as-cid when running
+// DetectContainerID returns Docker's short hostname-as-cid when running
 // inside a container, otherwise empty. Docker sets HOSTNAME to the
 // 12-char shortened container id by default; non-container environments
 // have HOSTNAME set to the actual hostname which doesn't match the
 // 12-hex shape. Best-effort — operators on Kubernetes / Podman get an
-// empty string and should rely on Hostname instead.
-func detectContainerID() string {
+// empty string and should rely on Hostname instead. Exported so the
+// daemon entrypoint can wire same-host proxy trust off the same
+// detection runtime_status surfaces.
+func DetectContainerID() string {
 	h, err := os.Hostname()
 	if err != nil {
 		return ""

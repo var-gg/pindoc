@@ -28,6 +28,40 @@ export type ServerConfig = {
   // seed `pindoc` row. Decision project-bootstrap-canonical-flow-
   // reader-ui-first-class.
   onboarding_required?: boolean;
+  // identity_required surfaces the loopback identity gap so the
+  // Reader can route fresh installs to /onboarding/identity before
+  // any project / artifact UI loads. True only when the daemon could
+  // not bind a user from settings, env, or the lone-row backfill.
+  identity_required?: boolean;
+};
+
+// task: agent-era first-time identity flow. The Reader posts the
+// form, gets the new user_id + the three MCP-connect copy targets
+// (URL only / `.mcp.json` / agent prompt).
+export type OnboardingIdentityInput = {
+  display_name: string;
+  email: string;
+  github_handle?: string;
+};
+
+export type OnboardingMCPConnect = {
+  url: string;
+  mcp_json: string;
+  agent_prompt: string;
+};
+
+export type OnboardingIdentityResp = {
+  status: "ok";
+  user_id: string;
+  display_name: string;
+  email: string;
+  project: { slug: string; role: "owner"; url: string };
+  mcp_connect: OnboardingMCPConnect;
+};
+
+export type OnboardingIdentityError = {
+  error_code: string;
+  message: string;
 };
 
 export type Project = {
@@ -970,6 +1004,37 @@ export const api = {
       throw err;
     }
     return (await res.json()) as MembersOpResp;
+  },
+
+  // First-time identity flow — fresh installs land on /onboarding/
+  // identity, fill the form, and the BE binds settings + creates
+  // the loopback principal's users.id row in one call. Loopback
+  // only; non-loopback callers see INSTANCE_OWNER_REQUIRED.
+  setupIdentity: async (
+    input: OnboardingIdentityInput,
+  ): Promise<OnboardingIdentityResp> => {
+    const res = await fetch("/api/onboarding/identity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      let parsed: OnboardingIdentityError | null = null;
+      try {
+        parsed = (await res.json()) as OnboardingIdentityError;
+      } catch {
+        // fall through
+      }
+      const err = new Error(
+        parsed?.message ?? `${res.status} ${res.statusText}`,
+      ) as Error & Partial<OnboardingIdentityError>;
+      if (parsed) {
+        err.error_code = parsed.error_code;
+        err.message = parsed.message;
+      }
+      throw err;
+    }
+    return (await res.json()) as OnboardingIdentityResp;
   },
 
   // task-providers-admin-ui — instance-level identity provider

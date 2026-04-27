@@ -93,15 +93,45 @@ func (d Deps) handleConfig(w http.ResponseWriter, r *http.Request) {
 		// instance-wide config.
 		"providers": providers,
 		"bind_addr": bindAddr,
+		// identity_required surfaces the loopback identity gap so the
+		// Reader can route fresh installs to the onboarding form
+		// instead of attributing every revision to a NULL author. True
+		// only when the daemon could not bind a user from settings,
+		// env, or the lone-row backfill — i.e. truly fresh installs.
+		"identity_required": d.identityRequired(),
 		// onboarding_required tells the React app to redirect / →
-		// wizard. True when only the seed `pindoc` project exists
-		// (Decision project-bootstrap-canonical-flow-reader-ui-first-
-		// class). The react app reads this on mount and, if true,
-		// sends the user to /projects/new?welcome=1 instead of the
-		// legacy redirect. Self-correcting — if the user later
-		// deletes their projects, the wizard returns.
+		// new-project wizard. True when only the seed `pindoc`
+		// project exists (Decision project-bootstrap-canonical-flow-
+		// reader-ui-first-class). Independent from identity_required
+		// — both can be true on first boot.
 		"onboarding_required": d.checkOnboardingRequired(r.Context()),
 	})
+}
+
+// isLoopbackOrTrustedProxy mirrors the same-host trust envelope
+// PrincipalFromRequest applies — used by handlers that need a binary
+// "is the caller the operator on this box" answer without going
+// through the full principal resolver. Auth.PrincipalFromRequest
+// returns nil for non-trusted-non-OAuth callers, but a few handlers
+// (onboarding, providers admin) refuse outright with INSTANCE_OWNER_
+// REQUIRED before consulting OAuth.
+func (d Deps) isLoopbackOrTrustedProxy(r *http.Request) bool {
+	if pauth.IsLoopbackRequest(r) {
+		return true
+	}
+	return d.TrustedSameHostProxy
+}
+
+// identityRequired is true when the loopback principal has no bound
+// users.id row. The Reader uses this to redirect a fresh install to
+// the onboarding form before any project / artifact UI loads. Reads
+// settings so it stays accurate after the operator submits the form
+// without a daemon restart.
+func (d Deps) identityRequired() bool {
+	if d.Settings == nil {
+		return false
+	}
+	return strings.TrimSpace(d.Settings.Get().DefaultLoopbackUserID) == ""
 }
 
 // deriveMultiProject is the HTTP-side mirror of mcp/tools.deriveMultiProject.
@@ -153,11 +183,24 @@ func (d Deps) checkOnboardingRequired(ctx context.Context) bool {
 // loopback requests must present a valid OAuth browser session.
 // Wraps auth.PrincipalFromRequest with the daemon's defaults so
 // handlers don't repeat them on every call site.
+//
+// DefaultUserID is read from settings.DefaultLoopbackUserID at
+// request time so the onboarding flow's identity binding takes
+// effect immediately — no daemon restart required after a fresh
+// operator submits the form. Falls back to Deps.DefaultUserID
+// (env-derived bootstrap) when settings is unset (test fixtures).
 func (d Deps) principalForRequest(r *http.Request) *pauth.Principal {
+	defaultUserID := strings.TrimSpace(d.DefaultUserID)
+	if d.Settings != nil {
+		if uid := strings.TrimSpace(d.Settings.Get().DefaultLoopbackUserID); uid != "" {
+			defaultUserID = uid
+		}
+	}
 	return pauth.PrincipalFromRequest(r, pauth.HTTPDeps{
-		OAuth:          d.OAuth,
-		DefaultUserID:  d.DefaultUserID,
-		DefaultAgentID: d.DefaultAgentID,
+		OAuth:                d.OAuth,
+		DefaultUserID:        defaultUserID,
+		DefaultAgentID:       d.DefaultAgentID,
+		TrustedSameHostProxy: d.TrustedSameHostProxy,
 	})
 }
 

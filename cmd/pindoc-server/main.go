@@ -196,26 +196,13 @@ func main() {
 		"instance_key_configured", providerCipher.Configured(),
 	)
 
-	// Resolve the bootstrap users.id once so the HTTP daemon and MCP
-	// layers stamp the same row on Loopback principals (Decision
-	// `decision-author-identity-dual`). Empty UserID is the "operator
-	// skipped PINDOC_USER_NAME" path — handlers fall back to
-	// anonymous attribution.
-	defaultUserID := ""
-	if uid, err := pmcptools.UpsertUserFromEnv(ctx, pmcptools.Deps{DB: pool}, cfg.UserName, cfg.UserEmail); err != nil {
-		logger.Warn("user upsert from env failed; loopback principals run without user binding",
-			"error", err,
-			"user_name", cfg.UserName,
-		)
-	} else {
-		defaultUserID = uid
-		if uid != "" {
-			logger.Info("user binding resolved",
-				"user_id", uid,
-				"display_name", cfg.UserName,
-			)
-		}
-	}
+	// Resolve the loopback identity binding (server_settings.default_
+	// loopback_user_id). DB is source of truth; env is a one-time
+	// seed; `users` lone-row backfill catches existing installs that
+	// pre-date the column. Empty after all three is the "fresh
+	// install" state — the Reader's onboarding flow surfaces a form,
+	// no env edit required.
+	defaultUserID := bootstrapDefaultLoopbackUser(ctx, logger, pool, ssStore, cfg)
 
 	if httpAddr != "" {
 		// Resolve the default project's canonical language once for the
@@ -306,6 +293,21 @@ func main() {
 			)
 		}
 
+		// TrustedSameHostProxy collapses the docker-port-forwarder
+		// "source IP is the bridge gateway" case down to the operator's
+		// declared loopback intent. Active only when the daemon is
+		// running inside a container AND cfg says loopback-only —
+		// container deployments that publish externally must flip
+		// PINDOC_BIND_ADDR to a non-loopback host so this stays false
+		// and Public-Without-Auth Refusal forces an IdP / opt-in.
+		trustedProxy := pmcptools.DetectContainerID() != "" && cfg.IsLoopbackBind()
+		if trustedProxy {
+			logger.Info("same-host proxy trust enabled",
+				"reason", "container + loopback bind intent",
+				"hint", "set PINDOC_BIND_ADDR to non-loopback when publishing externally",
+			)
+		}
+
 		apiHandler := httpapi.New(cfg, httpapi.Deps{
 			DB:                   pool,
 			Logger:               logger,
@@ -320,6 +322,7 @@ func main() {
 			BindAddr:             cfg.BindAddr,
 			DefaultUserID:        defaultUserID,
 			DefaultAgentID:       agentID,
+			TrustedSameHostProxy: trustedProxy,
 			Version:              version,
 			BuildCommit:          commit,
 			StartTime:            startTime,
@@ -486,6 +489,92 @@ func validateServerConfig(cfg *config.Config) error {
 	// task-providers-admin-ui). Boot still fails loud later if env
 	// CSV says github but neither env nor DB carries credentials.
 	return nil
+}
+
+// bootstrapDefaultLoopbackUser folds the three precedence rules for
+// loopback identity binding (Decision agent-only-write-분할 +
+// task-providers-admin-ui follow-up):
+//
+//   1. server_settings.default_loopback_user_id (DB) wins when set —
+//      the operator's onboarding flow already wrote it.
+//   2. PINDOC_USER_NAME / PINDOC_USER_EMAIL env seed when (1) is empty
+//      — same first-boot semantics as PINDOC_PUBLIC_BASE_URL.
+//   3. Single non-test users row (excluding `*@example.invalid` test
+//      residue) backfills automatically — covers existing installs
+//      that predate the column without making the operator click
+//      through the onboarding form.
+//
+// Empty return value triggers the Reader-side onboarding form on the
+// next /api/config request. Anything that returns a user_id also
+// pins it as owner of the default project so cross-device flows
+// don't fail at project_members lookup later.
+func bootstrapDefaultLoopbackUser(ctx context.Context, logger *slog.Logger, pool *db.Pool, ssStore *settings.Store, cfg *config.Config) string {
+	if existing := strings.TrimSpace(ssStore.Get().DefaultLoopbackUserID); existing != "" {
+		logger.Info("loopback user binding from settings",
+			"user_id", existing,
+			"source", "settings",
+		)
+		ensureProjectOwner(ctx, logger, pool, cfg.ProjectSlug, existing)
+		return existing
+	}
+
+	if uid, err := pmcptools.UpsertUserFromEnv(ctx, pmcptools.Deps{DB: pool}, cfg.UserName, cfg.UserEmail); err != nil {
+		logger.Warn("user upsert from env failed; falling back to backfill heuristic",
+			"error", err,
+			"user_name", cfg.UserName,
+		)
+	} else if uid != "" {
+		if err := ssStore.SetDefaultLoopbackUserID(ctx, uid); err != nil {
+			logger.Warn("settings seed default_loopback_user_id failed",
+				"error", err, "user_id", uid)
+		} else {
+			logger.Info("loopback user binding seeded from env",
+				"user_id", uid,
+				"display_name", cfg.UserName,
+				"source", "env",
+			)
+		}
+		ensureProjectOwner(ctx, logger, pool, cfg.ProjectSlug, uid)
+		return uid
+	}
+
+	candidate, err := settings.FindBackfillCandidate(ctx, pool)
+	if err != nil {
+		logger.Warn("loopback backfill scan failed", "error", err)
+		return ""
+	}
+	if candidate == "" {
+		logger.Info("loopback user binding deferred to onboarding flow",
+			"hint", "Reader UI will show identity setup on next request",
+		)
+		return ""
+	}
+	if err := ssStore.SetDefaultLoopbackUserID(ctx, candidate); err != nil {
+		logger.Warn("loopback backfill write failed",
+			"error", err, "user_id", candidate)
+		return ""
+	}
+	logger.Info("loopback user binding back-filled from existing users row",
+		"user_id", candidate,
+		"source", "backfill",
+	)
+	ensureProjectOwner(ctx, logger, pool, cfg.ProjectSlug, candidate)
+	return candidate
+}
+
+// ensureProjectOwner is a thin wrapper over EnsureDefaultProjectOwnerMembership
+// that logs warnings without halting boot. The seed `pindoc` project
+// is also reconciled so loopback owners have an explicit project_members
+// row — V1.5 OAuth callers need it, and the loopback fastpath benefits
+// from a real row when admin tooling cross-checks ownership.
+func ensureProjectOwner(ctx context.Context, logger *slog.Logger, pool *db.Pool, slug, userID string) {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(slug) == "" {
+		return
+	}
+	if err := projects.EnsureDefaultProjectOwnerMembership(ctx, pool, slug, userID); err != nil {
+		logger.Warn("default project owner membership reconcile failed",
+			"project_slug", slug, "user_id", userID, "error", err)
+	}
 }
 
 // findGithubProvider scans an Active() result for the github IdP.

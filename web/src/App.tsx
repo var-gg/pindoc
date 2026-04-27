@@ -3,6 +3,7 @@ import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation, useParams 
 import { api } from "./api/client";
 import { ProvidersPanel } from "./admin/ProvidersPanel";
 import { useI18n } from "./i18n";
+import { IdentitySetup } from "./onboarding/IdentitySetup";
 import { Telemetry } from "./ops/Telemetry";
 import { CreateProjectPage } from "./reader/CreateProjectPage";
 import { Diff } from "./reader/Diff";
@@ -76,6 +77,12 @@ export function App() {
           provider registry. Loopback principal only at the BE so non-
           owner callers see INSTANCE_OWNER_REQUIRED here too. */}
       <Route path="/admin/providers" element={<ProvidersPanel />} />
+
+      {/* Agent-era first-time identity flow. Fresh installs land
+          here from LegacyRedirect when /api/config.identity_required.
+          Once the form is submitted, server_settings binds the new
+          users.id and subsequent visits skip this route. */}
+      <Route path="/onboarding/identity" element={<IdentitySetup />} />
 
       {/* Bare root. / redirects to /p/:default/today. */}
         <Route path="/" element={<LegacyRedirect base="today" />} />
@@ -191,6 +198,15 @@ function LegacyRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "inbox" |
       try {
         const cfg = await api.config();
         if (cancelled) return;
+        // Identity intercept first — the agent-era first-time flow
+        // routes a fresh install to /onboarding/identity before any
+        // project chrome loads. Self-correcting: once the form
+        // commits, settings.default_loopback_user_id is bound and
+        // identity_required flips to false on the next /api/config.
+        if (cfg.identity_required) {
+          setTarget(`/onboarding/identity`);
+          return;
+        }
         // Onboarding intercept (Decision project-bootstrap-canonical-
         // flow-reader-ui-first-class): when the instance has no
         // projects other than the seed `pindoc` row, redirect a fresh
