@@ -5,6 +5,7 @@ import { api, type ArtifactReadState, type ChangeGroup, type ReadState, type Tod
 import { useI18n } from "../i18n";
 import { EmptyState } from "./SurfacePrimitives";
 import { Tooltip } from "./Tooltip";
+import { buildChangeGroupCardView, buildTodayBrief } from "./todayViewModel";
 import { TypeCountChip, VisualAreaChip } from "./VisualChips";
 
 const READ_STATE_LABEL: Record<ReadState, string> = {
@@ -31,13 +32,6 @@ type KindFilter =
   | "system"
   | "verification";
 
-const KIND_LABEL: Record<Exclude<KindFilter, "all" | "verification">, string> = {
-  human_trigger: "Human",
-  auto_sync: "Auto",
-  maintenance: "Maintenance",
-  system: "System",
-};
-
 export function Today({
   projectSlug,
   selectedArea,
@@ -46,7 +40,7 @@ export function Today({
   selectedArtifactSlug,
   onSelectArtifact,
 }: Props) {
-  const { t, lang } = useI18n();
+  const { t } = useI18n();
   const [data, setData] = useState<TodayResp | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<KindFilter>("all");
@@ -60,7 +54,11 @@ export function Today({
     let cancelled = false;
     setError(null);
     setData(null);
-    api.changeGroups(projectSlug, { limit: 40, area: selectedArea ?? undefined, locale: lang })
+    // UI language is presentation-only here. The server `locale` parameter
+    // shapes generated summary copy, but the Reader derives visible Today
+    // brief copy from i18n below so KO/EN toggles never refetch or change the
+    // change-group population.
+    api.changeGroups(projectSlug, { limit: 40, area: selectedArea ?? undefined })
       .then((resp) => {
         if (!cancelled) setData(resp);
       })
@@ -70,7 +68,7 @@ export function Today({
     return () => {
       cancelled = true;
     };
-  }, [projectSlug, selectedArea, lang]);
+  }, [projectSlug, selectedArea]);
 
   // Layer 2 read states for visual chips on each card. Refetch only when
   // the project changes — area/filter changes never invalidate this map.
@@ -173,6 +171,7 @@ export function Today({
   const emptyFilteredMessage = selectedArea
     ? t("today.empty_filtered_area", scopeName)
     : t("today.empty_filtered_all");
+  const brief = useMemo(() => data ? buildTodayBrief(data, t) : null, [data, t]);
   const baselineLabel = data?.baseline.last_seen_at
     ? new Date(data.baseline.last_seen_at).toLocaleString()
     : data?.baseline.defaulted_to_days
@@ -226,11 +225,9 @@ export function Today({
           </div>
         </header>
 
-        {data.baseline.fallback_used && (
+        {brief?.fallbackHint && (
           <div className="today-fallback-hint" role="status">
-            {data.baseline.fallback_used === "recent_7d"
-              ? t("today.fallback_recent_7d")
-              : t("today.fallback_importance_top")}
+            {brief.fallbackHint}
           </div>
         )}
 
@@ -239,10 +236,10 @@ export function Today({
             {data.summary.source === "llm" ? <Sparkles className="lucide" /> : <CheckCircle2 className="lucide" />}
           </div>
           <div className="today-brief__body">
-            <div className="today-brief__label">{data.summary.ai_hint ?? data.summary.source}</div>
-            <h2>{data.summary.headline}</h2>
+            <div className="today-brief__label">{brief?.sourceLabel ?? data.summary.source}</div>
+            <h2>{brief?.headline ?? data.summary.headline}</h2>
             <ul>
-              {data.summary.bullets.slice(0, 3).map((bullet) => (
+              {(brief?.bullets ?? data.summary.bullets).slice(0, 3).map((bullet) => (
                 <li key={bullet}>{bullet}</li>
               ))}
             </ul>
@@ -344,6 +341,7 @@ function ChangeGroupCard({
   const detailHref = firstArtifact ? `/p/${projectSlug}/wiki/${firstArtifact.slug}` : null;
   const isActive = Boolean(firstArtifact && selectedArtifactSlug === firstArtifact.slug);
   const isInteractive = Boolean(firstArtifact);
+  const card = useMemo(() => buildChangeGroupCardView(group, t), [group, t]);
   function openDetail() {
     if (detailHref) navigate(detailHref);
   }
@@ -376,8 +374,8 @@ function ChangeGroupCard({
       onKeyDown={onKeyDown}
     >
       <div className="change-card__top">
-        <span className={`change-kind change-kind--${group.group_kind}`}>{KIND_LABEL[group.group_kind] ?? group.group_kind}</span>
-        <span className={`change-importance change-importance--${group.importance.level}`}>{group.importance.level}</span>
+        <span className={`change-kind change-kind--${group.group_kind}`}>{card.kindLabel}</span>
+        <span className={`change-importance change-importance--${group.importance.level}`}>{card.importanceLabel}</span>
         <span>{t("today.revision_count", group.revision_count)}</span>
         <span>{t("today.artifact_count", group.artifact_count)}</span>
         {group.type_counts && group.type_counts.length > 0 && (
@@ -393,11 +391,17 @@ function ChangeGroupCard({
           </span>
         )}
       </div>
-      <h2>{group.commit_summary}</h2>
+      <h2>{card.title}</h2>
+      {card.bullets.length > 0 && (
+        <ul className="change-card__summary">
+          {card.bullets.map((bullet) => (
+            <li key={bullet}>{bullet}</li>
+          ))}
+        </ul>
+      )}
       <div className="change-card__meta">
         <span>{new Date(group.time_end).toLocaleString()}</span>
-        <span>{group.grouping_key.kind} · {group.grouping_key.confidence}</span>
-        <span>{group.verification_state}</span>
+        <span>{card.verificationLabel}</span>
         {firstArtifact && (
           <span
             className={`change-card__read-state change-card__read-state--${readState?.read_state ?? "unseen"}`}
@@ -475,12 +479,12 @@ function filterLabel(id: KindFilter, t: (key: string, ...args: Array<string | nu
     case "verification":
       return t("today.filter_verification");
     case "human_trigger":
-      return "Human";
+      return t("today.kind_human_trigger");
     case "auto_sync":
-      return "Auto";
+      return t("today.kind_auto_sync");
     case "maintenance":
-      return "Maintenance";
+      return t("today.kind_maintenance");
     case "system":
-      return "System";
+      return t("today.kind_system");
   }
 }

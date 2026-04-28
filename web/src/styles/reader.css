@@ -3645,6 +3645,16 @@
   line-height: 1.4;
   letter-spacing: 0;
 }
+.change-card__summary {
+  margin: -2px 0 10px;
+  padding-left: 18px;
+  color: var(--fg-2);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.change-card__summary li + li {
+  margin-top: 3px;
+}
 .change-card__areas {
   margin-top: 10px;
 }

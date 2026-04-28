@@ -12,6 +12,8 @@ import { PindocTooltipProvider } from "./reader/Tooltip";
 import { ReaderShell } from "./reader/ReaderShell";
 import { SignupCompletePage } from "./signup/SignupCompletePage";
 import { SignupPage } from "./signup/SignupPage";
+import { EmptyState, SurfaceHeader } from "./reader/SurfacePrimitives";
+import { normalizeReaderSurfaceSegment, projectSurfacePath } from "./readerRoutes";
 import { findSurface, previews, uiKits } from "./surfaces";
 
 export function App() {
@@ -33,10 +35,14 @@ export function App() {
       <Route path="/p/:project/wiki/:slug" element={<ReaderShell view="reader" />} />
       <Route path="/p/:project/wiki/:slug/history" element={<History />} />
       <Route path="/p/:project/wiki/:slug/diff" element={<Diff />} />
+      <Route path="/p/:project/task" element={<ProjectSurfaceRedirect segment="task" />} />
+      <Route path="/p/:project/task/:slug" element={<ProjectSurfaceRedirect segment="task" />} />
       <Route path="/p/:project/tasks" element={<ReaderShell view="tasks" />} />
       <Route path="/p/:project/tasks/:slug" element={<ReaderShell view="tasks" />} />
       <Route path="/p/:project/graph" element={<ReaderShell view="graph" />} />
       <Route path="/p/:project/inbox" element={<ReaderShell view="inbox" />} />
+      <Route path="/p/:project/:surface" element={<ProjectSurfaceNotFound />} />
+      <Route path="/p/:project/:surface/*" element={<ProjectSurfaceNotFound />} />
       <Route path="/help/design-legend" element={<DesignLegendRedirect />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/signup/complete" element={<SignupCompletePage />} />
@@ -88,6 +94,42 @@ export function App() {
         <Route path="/" element={<LegacyRedirect base="today" />} />
       </Routes>
     </PindocTooltipProvider>
+  );
+}
+
+function ProjectSurfaceRedirect({ segment }: { segment: string }) {
+  const { project = "", slug } = useParams<{ project: string; slug?: string }>();
+  const location = useLocation();
+  const surface = normalizeReaderSurfaceSegment(segment);
+  if (!surface) return <ProjectSurfaceNotFound surfaceOverride={segment} />;
+  return (
+    <Navigate
+      to={`${projectSurfacePath(project, surface, slug)}${location.search || ""}`}
+      replace
+    />
+  );
+}
+
+function ProjectSurfaceNotFound({ surfaceOverride }: { surfaceOverride?: string }) {
+  const { project = "", surface = surfaceOverride ?? "" } = useParams<{
+    project: string;
+    surface?: string;
+  }>();
+  const { t } = useI18n();
+  const surfaceLabel = surfaceOverride ?? surface;
+  return (
+    <main className="content">
+      <article className="reader-article">
+        <SurfaceHeader name="surface" count={0} />
+        <EmptyState
+          message={t("surface.not_found", surfaceLabel)}
+          action={{
+            label: t("surface.return_today"),
+            href: projectSurfacePath(project, "today"),
+          }}
+        />
+      </article>
+    </main>
   );
 }
 
