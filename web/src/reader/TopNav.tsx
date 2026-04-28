@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink } from "react-router";
+import { NavLink, useLocation } from "react-router";
 import { Activity, AlignCenter, AlignJustify, CalendarDays, ChevronDown, CircleHelp, ExternalLink, FileText, Inbox, Maximize2, Menu, Moon, Search, Share2, Sun } from "lucide-react";
 import type { ComponentType } from "react";
 import { api, type ProjectListItem } from "../api/client";
@@ -12,6 +12,8 @@ import { typeChipClass } from "./typeChip";
 import { topLevelVisualAreaSlugs, visualDescription, visualLabel, visualLanguage } from "./visualLanguage";
 import { visualIconComponent } from "./visualLanguageIcons";
 import { Tooltip } from "./Tooltip";
+import { canShowTelemetryNav, telemetryDebugEnabled } from "./opsAccess";
+import { paletteOpenAfterProjectSwitcherToggle, projectSwitcherOpenAfterPaletteChange } from "./overlayStack";
 
 type Props = {
   project: Project;
@@ -19,7 +21,9 @@ type Props = {
   theme: Theme;
   onToggleTheme: () => void;
   onOpenPalette: () => void;
+  onClosePalette: () => void;
   onToggleMenu: () => void;
+  paletteOpen: boolean;
   inboxCount: number;
   readerWidth: ReaderWidth;
   onChangeReaderWidth: (next: ReaderWidth) => void;
@@ -43,16 +47,41 @@ export function TopNav({
   theme,
   onToggleTheme,
   onOpenPalette,
+  onClosePalette,
   onToggleMenu,
+  paletteOpen,
   inboxCount,
   readerWidth,
   onChangeReaderWidth,
   onOpenInvite,
 }: Props) {
   const { t, lang, setLang } = useI18n();
+  const location = useLocation();
   const nextLang: Lang = lang === "ko" ? "en" : "ko";
   const baseRoute = `/p/${project.slug}`;
   const canInvite = project.current_role === "owner" && Boolean(onOpenInvite);
+  const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
+  const opsDebug = telemetryDebugEnabled(
+    location.search,
+    typeof window === "undefined" ? null : window.localStorage.getItem("pindoc.ops.debug"),
+  );
+  const showTelemetry = canShowTelemetryNav(project.current_role, opsDebug);
+
+  useEffect(() => {
+    setProjectSwitcherOpen((open) => projectSwitcherOpenAfterPaletteChange(open, paletteOpen));
+  }, [paletteOpen]);
+
+  function openPalette() {
+    setProjectSwitcherOpen(false);
+    onOpenPalette();
+  }
+
+  function setProjectSwitcher(next: boolean) {
+    setProjectSwitcherOpen(next);
+    if (!paletteOpenAfterProjectSwitcherToggle(next, paletteOpen)) {
+      onClosePalette();
+    }
+  }
 
   return (
     <div className="nav">
@@ -68,7 +97,12 @@ export function TopNav({
         <span className="word">pindoc</span>
       </NavLink>
 
-      <ProjectSwitcher project={project} />
+      <ProjectSwitcher
+        project={project}
+        open={projectSwitcherOpen}
+        onOpenChange={setProjectSwitcher}
+        showHiddenProjects={opsDebug}
+      />
 
       <div className="nav__tabs">
         <NavLink to={`${baseRoute}/today`} className="nav__tab">
@@ -96,7 +130,7 @@ export function TopNav({
 
       <div className="nav__spacer" />
 
-      <button className="nav__search" onClick={onOpenPalette}>
+      <button className="nav__search" onClick={openPalette}>
         <Search className="lucide" />
         <span>{t("nav.search_hint")}</span>
         <span className="kbd">⌘K</span>
@@ -133,15 +167,17 @@ export function TopNav({
         {lang === "ko" ? "KO" : "EN"}
       </button>
 
-      <Tooltip content={t("nav.telemetry")}>
-        <NavLink
-          to="/ops/telemetry"
-          className="nav__theme"
-          aria-label={t("nav.telemetry")}
-        >
-          <Activity className="lucide" />
-        </NavLink>
-      </Tooltip>
+      {showTelemetry && (
+        <Tooltip content={t("nav.telemetry")}>
+          <NavLink
+            to="/ops/telemetry"
+            className="nav__theme"
+            aria-label={t("nav.telemetry")}
+          >
+            <Activity className="lucide" />
+          </NavLink>
+        </Tooltip>
+      )}
 
       <button className="nav__theme" onClick={onToggleTheme} aria-label={t("nav.theme_toggle")}>
         {theme === "dark" ? <Moon className="lucide" /> : <Sun className="lucide" />}
@@ -258,37 +294,54 @@ function HelpPopover({ surface }: { surface: SurfaceId }) {
 // new projects is intentionally not available here: per architecture principle
 // 1 (agent-only write surface), the user asks the agent which calls
 // pindoc.project.create. The "+ new project" row surfaces that hint.
-function ProjectSwitcher({ project }: { project: Project }) {
+function ProjectSwitcher({
+  project,
+  open,
+  onOpenChange,
+  showHiddenProjects,
+}: {
+  project: Project;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  showHiddenProjects: boolean;
+}) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
   const [projects, setProjects] = useState<ProjectListItem[] | null>(null);
+  const [loadedHiddenProjects, setLoadedHiddenProjects] = useState<boolean | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!open || projects) return;
+    if (!open || loadedHiddenProjects === showHiddenProjects) return;
     let cancelled = false;
+    setProjects(null);
     (async () => {
       try {
-        const resp = await api.projectList();
-        if (!cancelled) setProjects(resp.projects);
+        const resp = await api.projectList({ includeHidden: showHiddenProjects });
+        if (!cancelled) {
+          setProjects(resp.projects);
+          setLoadedHiddenProjects(showHiddenProjects);
+        }
       } catch {
-        if (!cancelled) setProjects([]);
+        if (!cancelled) {
+          setProjects([]);
+          setLoadedHiddenProjects(showHiddenProjects);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, projects]);
+  }, [open, loadedHiddenProjects, showHiddenProjects]);
 
   useEffect(() => {
     if (!open) return;
     function onClickAway(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
+        onOpenChange(false);
       }
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") onOpenChange(false);
     }
     window.addEventListener("mousedown", onClickAway);
     window.addEventListener("keydown", onKey);
@@ -296,7 +349,7 @@ function ProjectSwitcher({ project }: { project: Project }) {
       window.removeEventListener("mousedown", onClickAway);
       window.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, onOpenChange]);
 
   return (
     <div className="nav__project-wrap" ref={ref} style={{ position: "relative" }}>
@@ -305,7 +358,7 @@ function ProjectSwitcher({ project }: { project: Project }) {
         className="nav__project"
         aria-expanded={open}
         aria-haspopup="listbox"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => onOpenChange(!open)}
       >
         <span>{project.slug}</span>
         <ChevronDown className="lucide" />
@@ -319,6 +372,8 @@ function ProjectSwitcher({ project }: { project: Project }) {
             top: "calc(100% + 4px)",
             left: 0,
             minWidth: 240,
+            maxHeight: "min(70vh, 420px)",
+            overflowY: "auto",
             background: "var(--bg-1)",
             border: "1px solid var(--border)",
             borderRadius: "var(--r-2)",

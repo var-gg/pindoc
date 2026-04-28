@@ -70,6 +70,10 @@ function splitCommitSummary(summary: string): string[] {
     .map((part) => trimText(part, 150));
 }
 
+function commitSummaryTitle(summary: string, t: TFn): string {
+  return splitCommitSummary(summary)[0] ?? t("today.change_group_title_fallback");
+}
+
 function cleanCommitSummary(summary: string): string {
   return summary
     .replace(/\[fallback_missing_commit_msg\]/gi, "")
@@ -143,7 +147,7 @@ function buildBullets(data: TodayResp, t: TFn): string[] {
   );
 
   return [
-    t("today.brief_bullet_top", groups[0]?.commit_summary ?? ""),
+    t("today.brief_bullet_top", groups[0] ? commitSummaryTitle(groups[0].commit_summary, t) : ""),
     t("today.brief_bullet_counts", groups.length, totals.revisions, totals.artifacts),
     totals.verificationRisk
       ? t("today.brief_bullet_verification_risk")

@@ -1,3 +1,5 @@
+import { useI18n } from "../i18n";
+
 type SurfaceHeaderProps = {
   name: string;
   count: number;
@@ -17,13 +19,15 @@ type EmptyStateProps = {
 };
 
 export function SurfaceHeader({ name, count, secondary }: SurfaceHeaderProps) {
-  const surfaceName = name.trim().toLowerCase();
+  const { t } = useI18n();
+  const surfaceKey = name.trim().toLowerCase();
+  const surfaceName = t(`surface.name.${surfaceKey}`);
   return (
     <header className="surface-header">
-      <div className="surface-header__chip">surface</div>
+      <div className="surface-header__chip">{t("surface.header_label")}</div>
       <div className="surface-header__line">
         <h1 className="surface-header__name">{surfaceName}</h1>
-        <span className="surface-header__count" aria-label={`${surfaceName} count ${count}`}>
+        <span className="surface-header__count" aria-label={t("surface.count_label", surfaceName, count)}>
           <span className="surface-header__dot">·</span>
           <span className="surface-header__number">{count}</span>
           {secondary && (

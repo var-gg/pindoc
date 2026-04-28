@@ -7,6 +7,10 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   }
 }
 
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(message);
+}
+
 function t(prefix: string) {
   return (key: string, ...args: Array<string | number>) =>
     `${prefix}:${key}${args.length ? `:${args.join("/")}` : ""}`;
@@ -79,6 +83,40 @@ function testCardViewHidesRawFallbackAndEnums(): void {
   assertEqual(view.verificationLabel, "ko:today.verification_needs_review", "verification label");
 }
 
+function testBriefingSnapshotsStayUserFacing(): void {
+  const data = today([
+    group({
+      commit_summary: "[fallback_missing_commit_msg] create artifact: Reader QA followup; [fallback_missing_commit_msg] create artifact: Today copy cleanup",
+      grouping_key: { kind: "source_session_time_window", value: "session-1", confidence: "low" },
+      verification_state: "unverified",
+    }),
+  ]);
+  const brief = buildTodayBrief(data, t("ko"));
+  const firstCard = buildChangeGroupCardView(data.groups[0], t("ko"));
+  const desktopSnapshot = [
+    brief.sourceLabel,
+    brief.headline,
+    ...brief.bullets,
+    firstCard.title,
+    ...firstCard.bullets,
+    firstCard.verificationLabel,
+  ].join("\n");
+  const mobileSnapshot = [
+    brief.headline,
+    brief.bullets[0],
+    firstCard.title,
+    firstCard.verificationLabel,
+  ].join("\n");
+
+  for (const [name, snapshot] of [["desktop", desktopSnapshot], ["mobile", mobileSnapshot]] as const) {
+    assert(!snapshot.includes("fallback_missing_commit_msg"), `${name} snapshot hides fallback marker`);
+    assert(!snapshot.includes("source_session_time_window"), `${name} snapshot hides grouping key`);
+    assert(!snapshot.includes("unverified"), `${name} snapshot hides raw verification enum`);
+    assert(snapshot.includes("Reader QA followup"), `${name} snapshot keeps a readable first-card title`);
+  }
+}
+
 testHeadlineUsesSameDataWithLocaleCopyOnly();
 testFallbackAvoidsTodayReviewHeadline();
 testCardViewHidesRawFallbackAndEnums();
+testBriefingSnapshotsStayUserFacing();

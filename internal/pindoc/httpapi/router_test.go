@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/var-gg/pindoc/internal/pindoc/config"
@@ -63,6 +64,22 @@ func TestConfigReportsProvidersAndBind(t *testing.T) {
 	}
 	if _, ok := body["auth_mode"]; ok {
 		t.Fatalf("auth_mode should be retired from /api/config")
+	}
+}
+
+func TestTelemetryRequiresInstanceOwner(t *testing.T) {
+	handler := New(&config.Config{}, Deps{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ops/telemetry", nil)
+	req.RemoteAddr = "10.0.0.5:54321"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d; want 403; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "INSTANCE_OWNER_REQUIRED") {
+		t.Fatalf("body missing INSTANCE_OWNER_REQUIRED: %s", rec.Body.String())
 	}
 }
 

@@ -8,6 +8,7 @@ import type { Aggregate } from "./useReaderData";
 import { visualArea, visualDescription, visualLabel, visualType } from "./visualLanguage";
 import { visualIconComponent } from "./visualLanguageIcons";
 import { Tooltip } from "./Tooltip";
+import { sidebarAgentRows } from "./readerInternalVisibility";
 
 type Props = {
   areas: Area[];
@@ -25,6 +26,7 @@ type Props = {
   open: boolean;
   showTemplates: boolean;
   onToggleTemplates: () => void;
+  showInternalAgents?: boolean;
 };
 
 // AreaNode is the tree-enriched Area: same fields + resolved children.
@@ -84,6 +86,7 @@ export function Sidebar({
   open,
   showTemplates,
   onToggleTemplates,
+  showInternalAgents = false,
 }: Props) {
   const { t, lang } = useI18n();
 
@@ -91,6 +94,7 @@ export function Sidebar({
   const crossCutting = areas.filter((a) => a.is_cross_cutting);
   const tree = buildAreaTree(regular);
   const crossCuttingTree = buildAreaTree(crossCutting);
+  const visibleAgents = sidebarAgentRows(agents, showInternalAgents);
 
   return (
     <aside className={`sidebar${open ? " open" : ""}`}>
@@ -196,23 +200,24 @@ export function Sidebar({
         </button>
       </Tooltip>
 
-      {agents.length > 0 && (
+      {visibleAgents.length > 0 && (
         <>
           <div className="side-section" style={{ marginTop: 12 }}>
             {t("sidebar.agents")}
           </div>
-          {agents.map(({ key, count }) => {
-            const av = agentAvatar(key);
+          {visibleAgents.map((row) => {
+            const av = agentAvatar(row.avatarKey);
+            const label = row.labelKey ? t(row.labelKey) : row.key;
             return (
-              <div className="side-item" key={key} role="listitem">
+              <div className="side-item" key={row.key} role="listitem">
                 <span
                   className={av.className}
                   style={{ width: 14, height: 14, fontSize: 8 }}
                 >
                   {av.initials}
                 </span>
-                <span>{key}</span>
-                <span className="side-item__count">{count}</span>
+                <span className="side-item__label">{label}</span>
+                <span className="side-item__count">{row.count}</span>
               </div>
             );
           })}

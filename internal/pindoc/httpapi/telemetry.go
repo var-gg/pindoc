@@ -71,6 +71,11 @@ type TelemetryTotals struct {
 //   - project: filter to one project_slug (optional; default = all)
 //   - recent_limit: number of recent calls to include (default 50, max 500)
 func (d Deps) handleTelemetry(w http.ResponseWriter, r *http.Request) {
+	if d.instanceOwner(r) == nil {
+		writeProviderError(w, http.StatusForbidden, "INSTANCE_OWNER_REQUIRED", "instance owner only")
+		return
+	}
+
 	windowHours := parseWindowHours(r.URL.Query().Get("window"))
 	projectFilter := strings.TrimSpace(r.URL.Query().Get("project"))
 	recentLimit := parseLimit(r.URL.Query().Get("recent_limit"), 50, 500)

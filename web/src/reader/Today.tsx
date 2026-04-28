@@ -1,19 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { CheckCircle2, CheckSquare, ChevronDown, ChevronRight, Download, Filter, Loader2, PanelRightOpen, Sparkles } from "lucide-react";
 import { Link, useNavigate } from "react-router";
-import { api, type ArtifactReadState, type ChangeGroup, type ReadState, type TodayResp } from "../api/client";
+import { api, type ArtifactReadState, type ChangeGroup, type TodayResp } from "../api/client";
 import { useI18n } from "../i18n";
 import { EmptyState } from "./SurfacePrimitives";
 import { Tooltip } from "./Tooltip";
 import { buildChangeGroupCardView, buildTodayBrief } from "./todayViewModel";
 import { TypeCountChip, VisualAreaChip } from "./VisualChips";
-
-const READ_STATE_LABEL: Record<ReadState, string> = {
-  unseen: "안 읽음",
-  glanced: "훑어봄",
-  read: "읽음",
-  deeply_read: "정독",
-};
+import { readStateLabel } from "./readStateLabel";
 
 type Props = {
   projectSlug: string;
@@ -342,6 +336,7 @@ function ChangeGroupCard({
   const isActive = Boolean(firstArtifact && selectedArtifactSlug === firstArtifact.slug);
   const isInteractive = Boolean(firstArtifact);
   const card = useMemo(() => buildChangeGroupCardView(group, t), [group, t]);
+  const readLabel = readStateLabel(readState?.read_state, t);
   function openDetail() {
     if (detailHref) navigate(detailHref);
   }
@@ -406,10 +401,10 @@ function ChangeGroupCard({
           <span
             className={`change-card__read-state change-card__read-state--${readState?.read_state ?? "unseen"}`}
             title={readState?.last_seen_at
-              ? `${READ_STATE_LABEL[readState.read_state]} · ${new Date(readState.last_seen_at).toLocaleString()}`
-              : READ_STATE_LABEL[readState?.read_state ?? "unseen"]}
+              ? `${readLabel} · ${new Date(readState.last_seen_at).toLocaleString()}`
+              : readLabel}
           >
-            {READ_STATE_LABEL[readState?.read_state ?? "unseen"]}
+            {readLabel}
           </span>
         )}
       </div>

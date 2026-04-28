@@ -93,12 +93,17 @@ export type ProjectListItem = {
   primary_language: string;
   artifacts_count: number;
   created_at: string;
+  reader_hidden?: boolean;
 };
 
 export type ProjectListResp = {
   projects: ProjectListItem[];
   default_project_slug: string;
   multi_project: boolean;
+};
+
+export type ProjectListOptions = {
+  includeHidden?: boolean;
 };
 
 export type Area = {
@@ -485,6 +490,13 @@ function p(project: string): string {
   return `/api/p/${encodeURIComponent(project)}`;
 }
 
+export function projectListPath(options: ProjectListOptions = {}): string {
+  if (!options.includeHidden) return "/api/projects";
+  const qs = new URLSearchParams();
+  qs.set("include_hidden", "true");
+  return `/api/projects?${qs.toString()}`;
+}
+
 // TaskMetaPatchInput is the write surface the Reader's TaskControls
 // ships to POST /api/p/{project}/artifacts/{idOrSlug}/task-meta. Fields
 // map 1:1 onto the server taskMetaPatchRequest — status / assignee /
@@ -678,7 +690,7 @@ export type MembersOpError = {
 export const api = {
   // Instance-wide
   config: () => j<ServerConfig>("/api/config"),
-  projectList: () => j<ProjectListResp>("/api/projects"),
+  projectList: (options?: ProjectListOptions) => j<ProjectListResp>(projectListPath(options)),
   users: () => j<{ users: UserRef[] }>("/api/users"),
 
   // Project bootstrap (Decision project-bootstrap-canonical-flow-reader-

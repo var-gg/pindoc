@@ -1848,6 +1848,8 @@
 .graph-canvas--orbit {
   display: block;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   height: 100%;
   aspect-ratio: auto;
   cursor: default;
@@ -2614,6 +2616,19 @@
   .graph-canvas-wrap {
     min-height: 420px;
   }
+  .graph-canvas {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .graph-canvas-wrap--orbit {
+    height: min(520px, calc(100vh - 260px));
+    min-height: 420px;
+  }
+  .atlas-minimap {
+    right: 10px;
+    bottom: 10px;
+    width: min(232px, calc(100% - 20px));
+  }
   .art-title { font-size: 24px; }
   .art-body { font-size: 15.5px; }
   .art-meta { gap: 8px; }
@@ -2649,6 +2664,31 @@
   .shortcut-row { grid-template-columns: 72px 16px minmax(0, 1fr); }
   .symbol-row { grid-template-columns: minmax(76px, auto) 16px minmax(0, 1fr); }
   .shortcuts-panel__foot { align-items: flex-start; flex-direction: column; }
+}
+
+@media (max-width: 480px) {
+  .nav {
+    gap: 6px;
+    padding: 0 8px;
+  }
+  .nav__spacer {
+    display: none;
+  }
+  .nav__search {
+    flex: 0 1 34px;
+    width: 34px;
+    padding: 0;
+    justify-content: center;
+  }
+  .nav__width,
+  .nav__user {
+    display: none;
+  }
+  .nav__theme,
+  .nav__lang {
+    padding-left: 5px;
+    padding-right: 5px;
+  }
 }
 
 /* Scrollbars match dev-tool aesthetic */
@@ -2750,6 +2790,64 @@
 }
 .task-filter-chip__remove .lucide { width: 12px; height: 12px; }
 
+.task-backlog-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 16px 14px;
+}
+.task-summary-tile {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  background: var(--bg-1);
+}
+.task-summary-tile__label,
+.task-summary-tile__hint {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-summary-tile__label {
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.task-summary-tile strong {
+  display: block;
+  margin: 5px 0 2px;
+  color: var(--fg-0);
+  font-family: var(--font-mono);
+  font-size: 22px;
+  line-height: 1;
+}
+.task-summary-tile__hint {
+  color: var(--fg-3);
+  font-size: 11.5px;
+}
+.task-summary-tile--review {
+  border-color: color-mix(in oklch, var(--task-prog) 42%, var(--border));
+  background: color-mix(in oklch, var(--task-prog) 8%, var(--bg-1));
+}
+.task-summary-tile--blocked {
+  border-color: color-mix(in oklch, var(--prio-p0) 34%, var(--border));
+}
+@media (max-width: 767px) {
+  .task-backlog-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 480px) {
+  .task-backlog-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .task-clear-filter {
   display: inline-flex;
   align-items: center;
@@ -2777,7 +2875,7 @@
 
 .kanban {
   display: grid;
-  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  grid-template-columns: repeat(5, minmax(200px, 1fr));
   gap: 12px;
   padding: 0 16px 24px;
   overflow-x: auto;
@@ -2818,6 +2916,20 @@
   font-size: 11px;
   font-style: italic;
   padding: 4px 2px;
+}
+.kanban-col__empty--action {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--fg-3);
+  font-style: normal;
+  line-height: 1.45;
+  padding: 6px 2px 4px;
+}
+.kanban-col__empty--action strong {
+  color: var(--fg-1);
+  font-size: 12px;
+  font-weight: 600;
 }
 .kanban-col__empty--filtered {
   color: var(--fg-3);
@@ -2882,6 +2994,13 @@
   gap: 6px;
   flex-wrap: wrap;
   margin-bottom: 6px;
+  min-width: 0;
+}
+.task-card .chip-area {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .task-card__inspect {
   display: inline-flex;
@@ -2899,11 +3018,15 @@
   color: var(--accent);
 }
 .task-card__title {
-  display: block;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   font-size: 13px;
   line-height: 1.35;
   color: var(--fg-0);
   margin: 0;
+  overflow-wrap: anywhere;
 }
 .task-card__title-link {
   text-decoration: none;
@@ -2917,12 +3040,20 @@
 }
 .task-card__foot {
   display: flex;
-  gap: 6px;
+  gap: 4px 6px;
   margin-top: 6px;
   font-family: var(--font-mono);
   font-size: 11px;
+  line-height: 1.35;
   color: var(--fg-3);
   flex-wrap: wrap;
+}
+.task-card__foot span {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Status-pill — task lifecycle v2 */
@@ -3372,6 +3503,9 @@
   gap: 16px;
   margin-bottom: 16px;
 }
+.today-head > div {
+  min-width: 0;
+}
 .today-head__eyebrow {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -3393,14 +3527,17 @@
   color: var(--fg-3);
 }
 .today-head__meta span {
+  min-width: 0;
   padding: 3px 7px;
   border: 1px solid var(--border-1);
   border-radius: var(--r-1);
   background: var(--bg-1);
+  overflow-wrap: anywhere;
 }
 .today-head__actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .today-icon-btn {
@@ -3467,6 +3604,7 @@
   font-size: 11px;
   color: var(--fg-3);
   margin-bottom: 4px;
+  overflow-wrap: anywhere;
 }
 .today-brief h2 {
   font-size: 16px;
@@ -3531,6 +3669,7 @@
   height: 22px;
 }
 .change-card {
+  min-width: 0;
   padding: 14px 16px;
   border: 1px solid var(--border-1);
   border-radius: var(--r-2);
@@ -3563,13 +3702,21 @@
 }
 .change-card__top,
 .change-card__meta {
+  min-width: 0;
   font-size: 12px;
   color: var(--fg-3);
+}
+.change-card__top > span,
+.change-card__meta > span {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .change-card__types {
   display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
+  min-width: 0;
   gap: 4px;
 }
 .change-card__read-state {
@@ -3644,6 +3791,7 @@
   font-size: 15px;
   line-height: 1.4;
   letter-spacing: 0;
+  overflow-wrap: anywhere;
 }
 .change-card__summary {
   margin: -2px 0 10px;
@@ -3651,6 +3799,7 @@
   color: var(--fg-2);
   font-size: 13px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 .change-card__summary li + li {
   margin-top: 3px;
@@ -3734,9 +3883,14 @@
   }
   .today-head {
     align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
   }
   .today-head h1 {
     font-size: 24px;
+  }
+  .today-head__actions {
+    align-self: flex-start;
   }
   .today-brief {
     position: sticky;
@@ -3751,5 +3905,9 @@
   }
   .change-card {
     padding: 12px;
+  }
+  .change-card__inspect,
+  .change-card__read-state {
+    margin-left: 0;
   }
 }

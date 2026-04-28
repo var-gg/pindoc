@@ -1,4 +1,5 @@
-import { createReadTracker, ReadTrackerCore, type ReadTrackerFlushReason } from "../src/reader/readTracker";
+import { createReadTracker, readerReadingMetrics, ReadTrackerCore, type ReadTrackerFlushReason } from "../src/reader/readTracker";
+import { readStateLabel } from "../src/reader/readStateLabel";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -92,6 +93,45 @@ function testFlushReasons(): void {
   }
 }
 
+function testReadingMetricsKeepZeroTimeAndCompletionAligned(): void {
+  const metrics = readerReadingMetrics({
+    startedAtMs: 0,
+    endedAtMs: 1_000,
+    activeSeconds: 0,
+    idleSeconds: 0,
+    scrollMaxPct: 0.29,
+    visible: true,
+    intersecting: true,
+    idle: false,
+  });
+
+  assertEqual(metrics.readMinutes, "0", "zero active seconds should read as 0 minutes");
+  assertEqual(metrics.completionPct, 0, "zero active seconds should suppress nonzero completion");
+}
+
+function testReadingMetricsShowCompletionAfterActiveRead(): void {
+  const metrics = readerReadingMetrics({
+    startedAtMs: 0,
+    endedAtMs: 1_000,
+    activeSeconds: 0.5,
+    idleSeconds: 0,
+    scrollMaxPct: 0.29,
+    visible: true,
+    intersecting: true,
+    idle: false,
+  });
+
+  assertEqual(metrics.readMinutes, "<1", "short active session should read as under a minute");
+  assertEqual(metrics.completionPct, 29, "active read should expose completion progress");
+}
+
+function testReadStateLabelUsesNaturalKoreanCopy(): void {
+  const label = readStateLabel("glanced", (key) => `ko:${key}`);
+
+  assertEqual(label, "ko:reader.read_state.glanced", "glanced label should use i18n key");
+  assert(!label.includes("흩어봄"), "glanced label must not contain the misspelled Korean copy");
+}
+
 function fakeDOM(): { window: FakeRuntimeTarget; document: FakeRuntimeDocument; element: HTMLElement } {
   const win = new FakeEventTarget() as unknown as FakeRuntimeTarget & {
     innerHeight: number;
@@ -145,3 +185,6 @@ testVisibilityFalseStopsActiveTime();
 testIntersectionFalseStopsActiveTime();
 testIdleFalseAxisStopsActiveTimeAfterThreshold();
 testFlushReasons();
+testReadingMetricsKeepZeroTimeAndCompletionAligned();
+testReadingMetricsShowCompletionAfterActiveRead();
+testReadStateLabelUsesNaturalKoreanCopy();

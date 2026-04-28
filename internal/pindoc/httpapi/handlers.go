@@ -214,6 +214,7 @@ type projectListRow struct {
 	PrimaryLanguage string    `json:"primary_language"`
 	ArtifactsCount  int       `json:"artifacts_count"`
 	CreatedAt       time.Time `json:"created_at"`
+	ReaderHidden    bool      `json:"reader_hidden,omitempty"`
 }
 
 // userRow is the thin projection of users table rows TaskControls needs
@@ -262,6 +263,7 @@ func (d Deps) handleUserList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
+	includeHidden := includeReaderHiddenProjects(r)
 	rows, err := d.DB.Query(r.Context(), `
 		SELECT
 			p.id::text, p.slug, p.name, p.owner_id, p.description, p.color,
@@ -293,6 +295,10 @@ func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
 		}
 		if color != nil {
 			p.Color = *color
+		}
+		p.ReaderHidden = readerHiddenProjectSlug(p.Slug)
+		if p.ReaderHidden && !includeHidden {
+			continue
 		}
 		out = append(out, p)
 	}

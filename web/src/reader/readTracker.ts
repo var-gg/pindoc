@@ -22,6 +22,11 @@ export type ReadTrackerOptions = {
   flush: (payload: ReadEventInput, reason: ReadTrackerFlushReason) => void | Promise<void>;
 };
 
+export type ReaderReadingMetrics = {
+  readMinutes: string;
+  completionPct: number;
+};
+
 export class ReadTrackerCore {
   private readonly nowMs: () => number;
   private readonly idleAfterMs: number;
@@ -221,6 +226,15 @@ export function createReadTracker(opts: ReadTrackerOptions): { stop: (reason?: R
   };
 }
 
+export function readerReadingMetrics(snapshot: ReadTrackerSnapshot): ReaderReadingMetrics {
+  return {
+    readMinutes: formatReadMinutes(snapshot.activeSeconds),
+    completionPct: snapshot.activeSeconds <= 0
+      ? 0
+      : Math.min(100, Math.round(snapshot.scrollMaxPct * 100)),
+  };
+}
+
 function bodyProgress(element: HTMLElement, win: Window | null): number {
   if (!win) return 0;
   const rect = element.getBoundingClientRect();
@@ -232,4 +246,10 @@ function bodyProgress(element: HTMLElement, win: Window | null): number {
 
 function roundSeconds(ms: number): number {
   return Math.floor(ms / 100) / 10;
+}
+
+function formatReadMinutes(seconds: number): string {
+  if (seconds <= 0) return "0";
+  if (seconds < 60) return "<1";
+  return String(Math.floor(seconds / 60));
 }

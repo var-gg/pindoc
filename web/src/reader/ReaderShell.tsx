@@ -27,7 +27,18 @@ import { ArtifactTypeChip, VisualAreaChip } from "./VisualChips";
 import { initTheme, setTheme, type Theme } from "./theme";
 import { useReaderData } from "./useReaderData";
 import { initReaderWidth, setReaderWidth as applyReaderWidth, type ReaderWidth } from "./readerWidth";
+import { telemetryDebugEnabled } from "./opsAccess";
 import { localizedAreaName } from "./areaLocale";
+import {
+  countPendingTasks,
+  groupTasksByStatus,
+  orderedTaskList,
+  taskBoardSummary,
+  taskColumnInitialLimit,
+  taskColumnPageSize,
+  visibleTaskGroups,
+  type TaskBoardSummary,
+} from "./taskBoardViewModel";
 import {
   appendBadgeFilters,
   artifactMatchesBadgeFilters,
@@ -107,6 +118,10 @@ export function ReaderShell({ view }: Props) {
   const badgeFilters = useMemo(
     () => readBadgeFilters(searchParams, t),
     [searchParams, t],
+  );
+  const opsDebug = telemetryDebugEnabled(
+    searchParams.toString(),
+    typeof window === "undefined" ? null : window.localStorage.getItem("pindoc.ops.debug"),
   );
 
   // Surface transition policy (Decision `decision-reader-ia-hierarchy`):
@@ -568,7 +583,9 @@ export function ReaderShell({ view }: Props) {
         theme={theme}
         onToggleTheme={toggleTheme}
         onOpenPalette={() => setPaletteOpen(true)}
+        onClosePalette={() => setPaletteOpen(false)}
         onToggleMenu={() => setMenuOpen((v) => !v)}
+        paletteOpen={paletteOpen}
         inboxCount={inboxCount}
         readerWidth={readerWidth}
         onChangeReaderWidth={changeReaderWidth}
@@ -587,6 +604,7 @@ export function ReaderShell({ view }: Props) {
           open={menuOpen}
           showTemplates={showTemplates}
           onToggleTemplates={() => setShowTemplates((v) => !v)}
+          showInternalAgents={opsDebug}
         />
         <Body
           view={view}
@@ -1015,8 +1033,8 @@ const TASK_COLUMNS: TaskColumnSpec[] = [
   { id: "claimed_done", labelKey: "tasks.col_claimed_done", pill: "in_progress" },
   { id: "verified", labelKey: "tasks.col_verified", pill: "done" },
   { id: "blocked", labelKey: "tasks.col_blocked", pill: "blocked" },
+  { id: "cancelled", labelKey: "tasks.col_cancelled", pill: "archived" },
 ];
-const TASK_COLUMN_PAGE_SIZE = 50;
 
 const PRIORITY_CLASS: Record<string, string> = {
   p0: "prio prio--p0",
@@ -1063,6 +1081,7 @@ function TasksKanban({
   const visibleGroups = visibleTaskGroups(groups, visibleCounts);
   const allGroups = groupTasksByStatus(allList);
   const orderedTasks = orderedTaskList(visibleGroups);
+  const summary = taskBoardSummary(groups);
   const hasActiveFilters = Boolean(selectedArea || badgeFilters.length > 0);
   const paginationResetKey = useMemo(
     () => `${selectedArea ?? ""}|${badgeFilters.map((f) => `${f.key}:${f.value}`).sort().join("|")}`,
@@ -1079,13 +1098,14 @@ function TasksKanban({
   }, [paginationResetKey]);
 
   function visibleLimitFor(columnId: string): number {
-    return visibleCounts[columnId] ?? TASK_COLUMN_PAGE_SIZE;
+    return visibleCounts[columnId] ?? taskColumnInitialLimit(columnId, groups.get(columnId)?.length ?? 0);
   }
 
   function showMoreColumn(columnId: string) {
+    const current = visibleLimitFor(columnId);
     setVisibleCounts((prev) => ({
       ...prev,
-      [columnId]: (prev[columnId] ?? TASK_COLUMN_PAGE_SIZE) + TASK_COLUMN_PAGE_SIZE,
+      [columnId]: current + taskColumnPageSize(columnId),
     }));
   }
 
@@ -1142,6 +1162,7 @@ function TasksKanban({
         onClearAreaFilter={onClearAreaFilter}
         onClearBadgeFilter={onClearBadgeFilter}
       />
+      <TaskBacklogSummary summary={summary} />
       {list.length === 0 && hasActiveFilters && (
         <TaskFilterEmptyState
           allPendingCount={allPendingCount}
@@ -1190,73 +1211,8 @@ function TasksKanban({
           />
         </div>
       )}
-      {(groups.get("cancelled")?.length ?? 0) > 0 && (
-        <div className="kanban__extra">
-          <TaskColumn
-            columnId="cancelled"
-            label={t("tasks.col_cancelled")}
-            pill="archived"
-            items={groups.get("cancelled") ?? []}
-            visibleLimit={visibleLimitFor("cancelled")}
-            allCount={allGroups.get("cancelled")?.length ?? 0}
-            hasActiveFilters={hasActiveFilters}
-            onClearFilters={onClearFilters}
-            onShowMore={() => showMoreColumn("cancelled")}
-            projectSlug={projectSlug}
-            currentSlug={currentSlug}
-            selectedTaskSlug={selectedTaskSlug}
-            onSelectTask={onSelectTask}
-            subtle
-            areaNameBySlug={areaNameBySlug}
-          />
-        </div>
-      )}
     </main>
   );
-}
-
-function groupTasksByStatus(list: ArtifactRef[]): Map<string, ArtifactRef[]> {
-  const groups = new Map<string, ArtifactRef[]>();
-  for (const col of TASK_COLUMNS) groups.set(col.id, []);
-  groups.set("no_status", []);
-  groups.set("cancelled", []);
-  for (const a of list) {
-    const s = a.task_meta?.status;
-    if (s === "cancelled") {
-      groups.get("cancelled")!.push(a);
-    } else if (s && groups.has(s)) {
-      groups.get(s)!.push(a);
-    } else {
-      groups.get("no_status")!.push(a);
-    }
-  }
-  return groups;
-}
-
-function visibleTaskGroups(
-  groups: Map<string, ArtifactRef[]>,
-  visibleCounts: Record<string, number>,
-): Map<string, ArtifactRef[]> {
-  const visible = new Map<string, ArtifactRef[]>();
-  for (const [columnId, items] of groups) {
-    visible.set(columnId, items.slice(0, visibleCounts[columnId] ?? TASK_COLUMN_PAGE_SIZE));
-  }
-  return visible;
-}
-
-function countPendingTasks(list: ArtifactRef[]): number {
-  return list.filter((a) => {
-    const status = a.task_meta?.status;
-    return !status || status === "open";
-  }).length;
-}
-
-function orderedTaskList(groups: Map<string, ArtifactRef[]>): ArtifactRef[] {
-  return [
-    ...TASK_COLUMNS.flatMap((col) => groups.get(col.id) ?? []),
-    ...(groups.get("no_status") ?? []),
-    ...(groups.get("cancelled") ?? []),
-  ];
 }
 
 function TaskBoardHeader({
@@ -1315,6 +1271,61 @@ function TaskBoardHeader({
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+function TaskBacklogSummary({ summary }: { summary: TaskBoardSummary }) {
+  const { t } = useI18n();
+  const reviewHint = summary.reviewQueue >= 50
+    ? t("tasks.summary_review_large")
+    : t("tasks.summary_review_hint");
+  return (
+    <section className="task-backlog-summary" aria-label={t("tasks.summary_label")}>
+      <TaskSummaryTile
+        tone="review"
+        label={t("tasks.summary_review")}
+        value={summary.reviewQueue}
+        hint={reviewHint}
+      />
+      <TaskSummaryTile
+        tone="open"
+        label={t("tasks.summary_open")}
+        value={summary.open}
+        hint={t("tasks.summary_open_hint")}
+      />
+      <TaskSummaryTile
+        tone="blocked"
+        label={t("tasks.summary_blocked")}
+        value={summary.blocked}
+        hint={t("tasks.summary_blocked_hint")}
+      />
+      <TaskSummaryTile
+        tone="done"
+        label={t("tasks.summary_recent_done")}
+        value={summary.recentDone}
+        hint={summary.verified === 0 ? t("tasks.summary_verified_zero_hint") : t("tasks.summary_recent_done_hint")}
+      />
+    </section>
+  );
+}
+
+function TaskSummaryTile({
+  tone,
+  label,
+  value,
+  hint,
+}: {
+  tone: "review" | "open" | "blocked" | "done";
+  label: string;
+  value: number;
+  hint: string;
+}) {
+  return (
+    <div className={`task-summary-tile task-summary-tile--${tone}`}>
+      <span className="task-summary-tile__label">{label}</span>
+      <strong>{value}</strong>
+      <span className="task-summary-tile__hint">{hint}</span>
     </div>
   );
 }
@@ -1449,7 +1460,7 @@ function TaskColumn({
   const { t } = useI18n();
   const visibleItems = items.slice(0, visibleLimit);
   const hiddenCount = Math.max(0, items.length - visibleItems.length);
-  const nextCount = Math.min(TASK_COLUMN_PAGE_SIZE, hiddenCount);
+  const nextCount = Math.min(taskColumnPageSize(columnId), hiddenCount);
   return (
     <div className={`kanban-col${subtle ? " kanban-col--subtle" : ""}`} data-task-column={columnId}>
       <div className="kanban-col__head">
@@ -1493,6 +1504,11 @@ function TaskColumn({
               <button type="button" className="task-clear-filter task-clear-filter--compact" onClick={onClearFilters}>
                 {t("tasks.clear_filters")}
               </button>
+            </div>
+          ) : columnId === "verified" ? (
+            <div className="kanban-col__empty kanban-col__empty--action">
+              <strong>{t("tasks.verified_empty_title")}</strong>
+              <span>{t("tasks.verified_empty_hint")}</span>
             </div>
           ) : (
             <div className="kanban-col__empty">—</div>

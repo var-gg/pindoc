@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/var-gg/pindoc/internal/pindoc/projects"
@@ -74,6 +75,49 @@ func TestMapProjectCreateError(t *testing.T) {
 			}
 			if gotCode != c.wantCode {
 				t.Errorf("code = %q, want %q", gotCode, c.wantCode)
+			}
+		})
+	}
+}
+
+func TestReaderHiddenProjectSlug(t *testing.T) {
+	cases := []struct {
+		slug string
+		want bool
+	}{
+		{"oauth-it-abc123", true},
+		{"invite-http-abc123", true},
+		{"workspace-detect-abc123", true},
+		{"OAuth-IT-ABC123", true},
+		{"pindoc", false},
+		{"customer-docs", false},
+	}
+	for _, c := range cases {
+		t.Run(c.slug, func(t *testing.T) {
+			if got := readerHiddenProjectSlug(c.slug); got != c.want {
+				t.Fatalf("readerHiddenProjectSlug(%q) = %v, want %v", c.slug, got, c.want)
+			}
+		})
+	}
+}
+
+func TestIncludeReaderHiddenProjects(t *testing.T) {
+	cases := []struct {
+		query string
+		want  bool
+	}{
+		{"", false},
+		{"include_hidden=true", true},
+		{"include_internal=true", true},
+		{"ops=1", true},
+		{"debug=ops", true},
+		{"include_hidden=false", false},
+	}
+	for _, c := range cases {
+		t.Run(c.query, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/projects?"+c.query, nil)
+			if got := includeReaderHiddenProjects(req); got != c.want {
+				t.Fatalf("includeReaderHiddenProjects(%q) = %v, want %v", c.query, got, c.want)
 			}
 		})
 	}

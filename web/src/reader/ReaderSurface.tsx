@@ -11,7 +11,7 @@ import { TrustCard } from "./TrustCard";
 import { Tooltip } from "./Tooltip";
 import { localizedAreaName } from "./areaLocale";
 import type { BadgeFilter } from "./badgeFilters";
-import { createReadTracker, type ReadTrackerFlushReason, type ReadTrackerSnapshot } from "./readTracker";
+import { createReadTracker, readerReadingMetrics, type ReadTrackerFlushReason, type ReadTrackerSnapshot } from "./readTracker";
 import { EmptyState } from "./SurfacePrimitives";
 import { typeChipClass } from "./typeChip";
 
@@ -52,8 +52,7 @@ export function ReaderSurface({
     () => estimateReadingTime(detail?.body_markdown ?? "", highlightedLocale || detail?.body_locale),
     [detail?.body_markdown, detail?.body_locale, highlightedLocale],
   );
-  const completionPct = Math.min(100, Math.round(readSnapshot.scrollMaxPct * 100));
-  const readMinutes = formatReadMinutes(readSnapshot.activeSeconds);
+  const readingMetrics = readerReadingMetrics(readSnapshot);
 
   useEffect(() => {
     setReadSnapshot(emptyReadSnapshot());
@@ -210,7 +209,7 @@ export function ReaderSurface({
           <span className="prov">{t("reader.published", publishedAt)}</span>
           <span className="art-meta__sep">·</span>
           <span className="prov art-reading-metrics">
-            {t("reader.reading_metrics", readingEstimate.estimatedMinutes, readMinutes, completionPct)}
+            {t("reader.reading_metrics", readingEstimate.estimatedMinutes, readingMetrics.readMinutes, readingMetrics.completionPct)}
           </span>
         </div>
 
@@ -239,11 +238,6 @@ function emptyReadSnapshot(): ReadTrackerSnapshot {
   };
 }
 
-function formatReadMinutes(seconds: number): string {
-  if (seconds <= 0) return "0";
-  if (seconds < 60) return "<1";
-  return String(Math.floor(seconds / 60));
-}
 
 function DetailScopeBar({ scope }: { scope: DetailScope | null }) {
   const { t } = useI18n();
