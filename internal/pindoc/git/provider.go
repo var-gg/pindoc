@@ -27,8 +27,19 @@ type Repo struct {
 }
 
 type ChangedFile struct {
-	Path   string `json:"path"`
-	Status string `json:"status"`
+	Path      string `json:"path"`
+	Status    string `json:"status"`
+	Additions int    `json:"additions,omitempty"`
+	Deletions int    `json:"deletions,omitempty"`
+	Binary    bool   `json:"binary,omitempty"`
+}
+
+type CommitInfo struct {
+	SHA         string `json:"sha"`
+	Author      string `json:"author"`
+	AuthorEmail string `json:"author_email,omitempty"`
+	AuthorTime  string `json:"author_time"`
+	Summary     string `json:"summary"`
 }
 
 type RecentCommit struct {

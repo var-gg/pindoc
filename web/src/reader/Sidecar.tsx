@@ -7,6 +7,8 @@ import {
   ChevronRight,
   History as HistoryIcon,
 } from "lucide-react";
+import { GitBlobPreview, GitDiff, PinKindBadge, formatShortSha } from "../git/GitPreview";
+import { gitCommitPath } from "../git/routes";
 import {
   api,
   type Artifact,
@@ -186,6 +188,10 @@ export function Sidecar({
           hasSupersedes={hasSupersedes}
           supersededBy={detail.superseded_by ?? ""}
         />
+      </SidecarStaticSection>
+
+      <SidecarStaticSection heading={t("sidecar.references")}>
+        <PinReferencesPanel projectSlug={projectSlug} pins={detail.pins ?? []} />
       </SidecarStaticSection>
 
       <SidecarCollapsibleSection
@@ -770,6 +776,159 @@ function RelationIcon({ relation }: { relation: string }) {
       <Icon className="lucide" />
     </BadgeWithExplain>
   );
+}
+
+type PinGroup = {
+  key: string;
+  label: string;
+  pins: PinRef[];
+};
+
+function PinReferencesPanel({
+  projectSlug,
+  pins,
+}: {
+  projectSlug: string;
+  pins: PinRef[];
+}) {
+  const { t, lang } = useI18n();
+  const visiblePins = pins.filter((pin) => Boolean(pin.path));
+  const [activeKey, setActiveKey] = useState("");
+  const [showDiff, setShowDiff] = useState(false);
+  const groups = useMemo<PinGroup[]>(() => {
+    const byCommit = new Map<string, PinRef[]>();
+    for (const pin of visiblePins) {
+      const key = pin.commit_sha || pin.path || pin.kind;
+      if (!byCommit.has(key)) byCommit.set(key, []);
+      byCommit.get(key)!.push(pin);
+    }
+    return Array.from(byCommit.entries()).map(([key, items]) => ({
+      key,
+      label: items[0]?.commit_sha ? formatShortSha(items[0].commit_sha) : t("sidecar.references_external"),
+      pins: items,
+    }));
+  }, [visiblePins, t]);
+  const activePin = useMemo(() => {
+    if (visiblePins.length === 0) return undefined;
+    return visiblePins.find((pin) => pinKey(pin) === activeKey) ?? visiblePins[0];
+  }, [visiblePins, activeKey]);
+
+  useEffect(() => {
+    if (!activePin) {
+      setActiveKey("");
+      return;
+    }
+    const key = pinKey(activePin);
+    if (key !== activeKey) setActiveKey(key);
+  }, [activePin, activeKey]);
+
+  useEffect(() => {
+    setShowDiff(false);
+  }, [activeKey]);
+
+  if (visiblePins.length === 0) {
+    return <div className="sidecar-empty-line">{t("sidecar.no_references")}</div>;
+  }
+
+  const canOpenCommit = Boolean(activePin?.repo_id && activePin?.commit_sha);
+  const canDiff = Boolean(
+    activePin?.repo_id
+      && activePin.commit_sha
+      && activePin.path
+      && activePin.kind !== "url"
+      && activePin.kind !== "resource"
+      && activePin.kind !== "asset",
+  );
+
+  return (
+    <div className="pin-references">
+      <div className="pin-references__groups">
+        {groups.map((group) => (
+          <section key={group.key} className="pin-reference-group">
+            <div className="pin-reference-group__head">
+              <span>{group.label}</span>
+              <span>{group.pins.length}</span>
+            </div>
+            <div className="pin-reference-group__items">
+              {group.pins.map((pin) => {
+                const key = pinKey(pin);
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`pin-reference-item${key === pinKey(activePin) ? " is-active" : ""}`}
+                    onClick={() => setActiveKey(key)}
+                  >
+                    <PinKindBadge pin={pin} />
+                    <span className="pin-reference-item__body">
+                      <span className="pin-reference-item__path">{pin.path}</span>
+                      <span className="pin-reference-item__meta">
+                        {pinLabelForSidecar(pin, lang)}
+                        {pin.lines_start
+                          ? ` · ${pin.lines_start}${pin.lines_end && pin.lines_end !== pin.lines_start ? `-${pin.lines_end}` : ""}`
+                          : ""}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ))}
+      </div>
+
+      {activePin && (
+        <div className="pin-reference-preview">
+          <div className="pin-reference-preview__head">
+            <span className="pin-reference-preview__title">
+              {activePin.path}
+            </span>
+            <span className="pin-reference-preview__actions">
+              {canDiff && (
+                <button type="button" onClick={() => setShowDiff((v) => !v)}>
+                  {showDiff ? t("git.preview") : t("git.diff")}
+                </button>
+              )}
+              {canOpenCommit && activePin.repo_id && activePin.commit_sha && (
+                <Link to={gitCommitPath(projectSlug, activePin.repo_id, activePin.commit_sha)}>
+                  {t("sidecar.open_full_reference")}
+                </Link>
+              )}
+            </span>
+          </div>
+          {showDiff && canDiff && activePin.repo_id && activePin.commit_sha ? (
+            <GitDiff
+              project={projectSlug}
+              repoID={activePin.repo_id}
+              commit={activePin.commit_sha}
+              path={activePin.path}
+            />
+          ) : (
+            <GitBlobPreview project={projectSlug} pin={activePin} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function pinKey(pin: PinRef | undefined): string {
+  if (!pin) return "";
+  return [
+    pin.kind,
+    pin.repo_id ?? "",
+    pin.commit_sha ?? "",
+    pin.path,
+    pin.lines_start ?? "",
+    pin.lines_end ?? "",
+  ].join("|");
+}
+
+function pinLabelForSidecar(pin: PinRef, locale: string): string {
+  const entry = visualPin(pin.kind);
+  const kind = entry ? visualLabel(entry, locale) : pin.kind;
+  const commit = pin.commit_sha ? formatShortSha(pin.commit_sha) : "";
+  return commit ? `${kind} · ${commit}` : kind;
 }
 
 // ProvenanceBlock renders the epistemic + evidence data the Trust Card

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { FileText, Search } from "lucide-react";
-import { api, type SearchHit } from "../api/client";
+import { FileText, GitCommit, Search } from "lucide-react";
+import { api, type GitRepoSummary, type SearchHit } from "../api/client";
 import { useI18n } from "../i18n";
+import { gitCommitPath, isCommitQuery, shortSha } from "../git/routes";
 import { cmdkResultMeta } from "./cmdkViewModel";
 
 type Props = {
@@ -15,10 +16,19 @@ export function CmdK({ projectSlug, open, onClose }: Props) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
+  const [repos, setRepos] = useState<GitRepoSummary[]>([]);
   const [notice, setNotice] = useState<string | undefined>();
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const navigate = useNavigate();
+  const q = query.trim();
+  const commitCandidate = open && isCommitQuery(q) && repos[0]
+    ? { kind: "commit" as const, repo: repos[0], sha: q }
+    : null;
+  const items = [
+    ...(commitCandidate ? [commitCandidate] : []),
+    ...hits.map((hit) => ({ kind: "artifact" as const, hit })),
+  ];
 
   // Focus the input when the palette opens.
   useEffect(() => {
@@ -32,7 +42,6 @@ export function CmdK({ projectSlug, open, onClose }: Props) {
   // Debounced search against the project-scoped search endpoint.
   useEffect(() => {
     if (!open) return;
-    const q = query.trim();
     if (!q) {
       setHits([]);
       setNotice(undefined);
@@ -53,6 +62,17 @@ export function CmdK({ projectSlug, open, onClose }: Props) {
   }, [open, query, projectSlug]);
 
   useEffect(() => {
+    if (!open || !isCommitQuery(q)) return;
+    let cancelled = false;
+    api.gitRepos(projectSlug)
+      .then((resp) => { if (!cancelled) setRepos(resp.repos); })
+      .catch(() => { if (!cancelled) setRepos([]); });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, q, projectSlug]);
+
+  useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -62,7 +82,7 @@ export function CmdK({ projectSlug, open, onClose }: Props) {
       }
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setSelected((s) => Math.min(s + 1, Math.max(0, hits.length - 1)));
+        setSelected((s) => Math.min(s + 1, Math.max(0, items.length - 1)));
         return;
       }
       if (e.key === "ArrowUp") {
@@ -72,16 +92,20 @@ export function CmdK({ projectSlug, open, onClose }: Props) {
       }
       if (e.key === "Enter") {
         e.preventDefault();
-        const hit = hits[selected];
-        if (hit) {
-          navigate(`/p/${projectSlug}/wiki/${hit.slug}`);
+        const item = items[selected];
+        if (item?.kind === "artifact") {
+          navigate(`/p/${projectSlug}/wiki/${item.hit.slug}`);
+          onClose();
+        }
+        if (item?.kind === "commit") {
+          navigate(gitCommitPath(projectSlug, item.repo.id, item.sha));
           onClose();
         }
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, hits, selected, navigate, onClose, projectSlug]);
+  }, [open, items, selected, navigate, onClose, projectSlug]);
 
   if (!open) return null;
 
@@ -100,26 +124,32 @@ export function CmdK({ projectSlug, open, onClose }: Props) {
         </div>
         <div className="palette__section">
           <div className="palette__section-head">{t("cmdk.artifacts")}</div>
-          {hits.length === 0 && (
+          {items.length === 0 && (
             <div className="palette__empty">
               {query ? t("cmdk.no_hits") : t("cmdk.hint")}
             </div>
           )}
-          {hits.map((hit, i) => (
+          {items.map((item, i) => (
             <button
-              key={hit.artifact_id}
+              key={item.kind === "artifact" ? item.hit.artifact_id : `commit-${item.repo.id}-${item.sha}`}
               className={`palette__item${i === selected ? " selected" : ""}`}
               onClick={() => {
-                navigate(`/p/${projectSlug}/wiki/${hit.slug}`);
+                if (item.kind === "artifact") {
+                  navigate(`/p/${projectSlug}/wiki/${item.hit.slug}`);
+                } else {
+                  navigate(gitCommitPath(projectSlug, item.repo.id, item.sha));
+                }
                 onClose();
               }}
               onMouseEnter={() => setSelected(i)}
             >
-              <FileText className="lucide" />
+              {item.kind === "artifact" ? <FileText className="lucide" /> : <GitCommit className="lucide" />}
               <div>
-                <div>{hit.title}</div>
+                <div>{item.kind === "artifact" ? item.hit.title : t("cmdk.commit_result", shortSha(item.sha))}</div>
                 <div className="mono">
-                  {cmdkResultMeta(hit, t)}
+                  {item.kind === "artifact"
+                    ? cmdkResultMeta(item.hit, t)
+                    : `${item.repo.name || item.repo.id} · ${item.repo.default_branch}`}
                 </div>
               </div>
               <span className="mono">↵</span>

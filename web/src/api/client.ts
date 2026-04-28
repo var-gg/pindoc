@@ -170,6 +170,97 @@ export type PinRef = {
   lines_end?: number;
 };
 
+export type GitPreviewEnvelope = {
+  available: boolean;
+  reason?: string;
+  fallback_url?: string;
+};
+
+export type GitRepoSummary = {
+  id: string;
+  name: string;
+  default_branch: string;
+  git_remote_url?: string;
+};
+
+export type GitReposResp = {
+  project_slug: string;
+  repos: GitRepoSummary[];
+};
+
+export type GitCommitInfo = {
+  sha: string;
+  author: string;
+  author_email?: string;
+  author_time: string;
+  summary: string;
+};
+
+export type GitChangedFile = {
+  path: string;
+  status: string;
+  additions?: number;
+  deletions?: number;
+  binary?: boolean;
+};
+
+export type GitChangedFilesResp = {
+  git_preview: GitPreviewEnvelope;
+  repo_id: string;
+  commit: string;
+  commit_info?: GitCommitInfo;
+  files?: GitChangedFile[];
+};
+
+export type GitCommitResp = {
+  git_preview: GitPreviewEnvelope;
+  repo_id: string;
+  commit: string;
+  commit_info?: GitCommitInfo;
+};
+
+export type GitBlob = {
+  path: string;
+  size: number;
+  text?: string;
+  binary?: boolean;
+};
+
+export type GitBlobResp = {
+  git_preview: GitPreviewEnvelope;
+  repo_id: string;
+  commit: string;
+  blob?: GitBlob;
+};
+
+export type GitDiffResp = {
+  git_preview: GitPreviewEnvelope;
+  repo_id: string;
+  commit: string;
+  path?: string;
+  diff?: string;
+};
+
+export type GitCommitReference = {
+  artifact_id: string;
+  slug: string;
+  type: string;
+  title: string;
+  area_slug: string;
+  kind: PinRef["kind"];
+  path: string;
+  lines_start?: number;
+  lines_end?: number;
+  human_url: string;
+  human_url_abs?: string;
+};
+
+export type GitCommitReferencesResp = {
+  project_slug: string;
+  commit: string;
+  references: GitCommitReference[];
+};
+
 export type EdgeRef = {
   artifact_id: string;
   slug: string;
@@ -487,8 +578,36 @@ async function j<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function gitJ<T extends { git_preview?: GitPreviewEnvelope }>(path: string): Promise<T> {
+  const res = await fetch(base + path, { headers: { Accept: "application/json" } });
+  const text = await res.text();
+  let parsed: unknown = null;
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+  }
+  if (!res.ok) {
+    if (parsed && typeof parsed === "object" && "git_preview" in parsed) {
+      return parsed as T;
+    }
+    throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 200)}`);
+  }
+  return parsed as T;
+}
+
 function p(project: string): string {
   return `/api/p/${encodeURIComponent(project)}`;
+}
+
+function gitQuery(params: Record<string, string | undefined>): string {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) qs.set(key, value);
+  }
+  return qs.toString();
 }
 
 export function projectListPath(options: ProjectListOptions = {}): string {
@@ -959,6 +1078,28 @@ export const api = {
       `${p(project)}/artifacts/${encodeURIComponent(idOrSlug)}/diff${q ? `?${q}` : ""}`,
     );
   },
+  gitRepos: (project: string) =>
+    j<GitReposResp>(`${p(project)}/git/repos`),
+  gitCommit: (project: string, repoID: string, commit: string) =>
+    gitJ<GitCommitResp>(
+      `${p(project)}/git/commit?${gitQuery({ repo_id: repoID, commit })}`,
+    ),
+  gitChangedFiles: (project: string, repoID: string, commit: string) =>
+    gitJ<GitChangedFilesResp>(
+      `${p(project)}/git/changed-files?${gitQuery({ repo_id: repoID, commit })}`,
+    ),
+  gitBlob: (project: string, repoID: string, commit: string, path: string) =>
+    gitJ<GitBlobResp>(
+      `${p(project)}/git/blob?${gitQuery({ repo_id: repoID, commit, path })}`,
+    ),
+  gitDiff: (project: string, repoID: string, commit: string, path: string) =>
+    gitJ<GitDiffResp>(
+      `${p(project)}/git/diff?${gitQuery({ repo_id: repoID, commit, path })}`,
+    ),
+  gitCommitReferences: (project: string, sha: string) =>
+    j<GitCommitReferencesResp>(
+      `${p(project)}/git/commits/${encodeURIComponent(sha)}/referencing-artifacts`,
+    ),
 
   // Phase D — permission management plane. Members list is open to
   // anyone in the project; invites list and the two DELETEs are

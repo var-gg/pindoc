@@ -20,7 +20,27 @@ type changedFilesResponse struct {
 	GitPreview gitPreviewEnvelope `json:"git_preview"`
 	RepoID     string             `json:"repo_id"`
 	Commit     string             `json:"commit"`
+	CommitInfo *pgit.CommitInfo   `json:"commit_info,omitempty"`
 	Files      []pgit.ChangedFile `json:"files,omitempty"`
+}
+
+type commitResponse struct {
+	GitPreview gitPreviewEnvelope `json:"git_preview"`
+	RepoID     string             `json:"repo_id"`
+	Commit     string             `json:"commit"`
+	CommitInfo *pgit.CommitInfo   `json:"commit_info,omitempty"`
+}
+
+type gitRepoSummary struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	DefaultBranch string `json:"default_branch"`
+	GitRemoteURL  string `json:"git_remote_url,omitempty"`
+}
+
+type gitReposResponse struct {
+	ProjectSlug string           `json:"project_slug"`
+	Repos       []gitRepoSummary `json:"repos"`
 }
 
 type blobResponse struct {
@@ -38,6 +58,31 @@ type diffResponse struct {
 	Diff       string             `json:"diff,omitempty"`
 }
 
+func (d Deps) handleGitRepos(w http.ResponseWriter, r *http.Request) {
+	projectSlug := projectSlugFrom(r)
+	var projectID string
+	if err := d.DB.QueryRow(r.Context(), `SELECT id::text FROM projects WHERE slug = $1`, projectSlug).Scan(&projectID); err != nil {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	repos, err := pgit.LoadProjectRepos(r.Context(), d.DB, projectID)
+	if err != nil {
+		d.Logger.Error("git repos lookup failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "git repos lookup failed")
+		return
+	}
+	out := make([]gitRepoSummary, 0, len(repos))
+	for _, repo := range repos {
+		out = append(out, gitRepoSummary{
+			ID:            repo.ID,
+			Name:          repo.Name,
+			DefaultBranch: repo.DefaultBranch,
+			GitRemoteURL:  repo.GitRemoteURL,
+		})
+	}
+	writeJSON(w, http.StatusOK, gitReposResponse{ProjectSlug: projectSlug, Repos: out})
+}
+
 func (d Deps) handleGitChangedFiles(w http.ResponseWriter, r *http.Request) {
 	repo, ok := d.gitRepoFromRequest(w, r)
 	if !ok {
@@ -48,16 +93,44 @@ func (d Deps) handleGitChangedFiles(w http.ResponseWriter, r *http.Request) {
 		commit = "HEAD"
 	}
 	provider := pgit.LocalGitProvider{}
+	info, infoErr := provider.CommitInfo(r.Context(), repo, commit)
 	files, err := provider.ChangedFiles(r.Context(), repo, commit)
 	if err != nil {
 		d.writeGitPreviewError(w, http.StatusOK, repo, commit, "", err, changedFilesResponse{})
 		return
 	}
+	if infoErr == nil {
+		commit = info.SHA
+	}
 	writeJSON(w, http.StatusOK, changedFilesResponse{
 		GitPreview: gitPreviewEnvelope{Available: true},
 		RepoID:     repo.ID,
 		Commit:     commit,
+		CommitInfo: commitInfoPtr(info, infoErr),
 		Files:      files,
+	})
+}
+
+func (d Deps) handleGitCommit(w http.ResponseWriter, r *http.Request) {
+	repo, ok := d.gitRepoFromRequest(w, r)
+	if !ok {
+		return
+	}
+	commit := strings.TrimSpace(r.URL.Query().Get("commit"))
+	if commit == "" {
+		commit = "HEAD"
+	}
+	provider := pgit.LocalGitProvider{}
+	info, err := provider.CommitInfo(r.Context(), repo, commit)
+	if err != nil {
+		d.writeGitPreviewError(w, http.StatusOK, repo, commit, "", err, commitResponse{})
+		return
+	}
+	writeJSON(w, http.StatusOK, commitResponse{
+		GitPreview: gitPreviewEnvelope{Available: true},
+		RepoID:     repo.ID,
+		Commit:     info.SHA,
+		CommitInfo: &info,
 	})
 }
 
@@ -119,6 +192,102 @@ func (d Deps) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 		Path:       path,
 		Diff:       diff,
 	})
+}
+
+type gitCommitReference struct {
+	ArtifactID  string `json:"artifact_id"`
+	Slug        string `json:"slug"`
+	Type        string `json:"type"`
+	Title       string `json:"title"`
+	AreaSlug    string `json:"area_slug"`
+	Kind        string `json:"kind"`
+	Path        string `json:"path"`
+	LinesStart  int    `json:"lines_start,omitempty"`
+	LinesEnd    int    `json:"lines_end,omitempty"`
+	HumanURL    string `json:"human_url"`
+	HumanURLAbs string `json:"human_url_abs,omitempty"`
+}
+
+type gitCommitReferencesResponse struct {
+	ProjectSlug string               `json:"project_slug"`
+	Commit      string               `json:"commit"`
+	References  []gitCommitReference `json:"references"`
+}
+
+func (d Deps) handleGitCommitReferences(w http.ResponseWriter, r *http.Request) {
+	projectSlug := projectSlugFrom(r)
+	sha := strings.TrimSpace(r.PathValue("sha"))
+	if len(sha) < 7 {
+		writeError(w, http.StatusBadRequest, "commit sha must be at least 7 characters")
+		return
+	}
+	rows, err := d.DB.Query(r.Context(), `
+		SELECT a.id::text, a.slug, a.type, a.title, ar.slug,
+		       ap.kind, ap.path, COALESCE(ap.lines_start, 0), COALESCE(ap.lines_end, 0)
+		  FROM artifact_pins ap
+		  JOIN artifacts a ON a.id = ap.artifact_id
+		  JOIN areas ar ON ar.id = a.area_id
+		  JOIN projects p ON p.id = a.project_id
+		 WHERE p.slug = $1
+		   AND a.status <> 'archived'
+		   AND ap.commit_sha IS NOT NULL
+		   AND (ap.commit_sha = $2 OR ap.commit_sha LIKE $2 || '%' OR $2 LIKE ap.commit_sha || '%')
+		 ORDER BY a.updated_at DESC, a.slug, ap.path
+		 LIMIT 100
+	`, projectSlug, sha)
+	if err != nil {
+		d.Logger.Error("git commit references lookup failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "commit references lookup failed")
+		return
+	}
+	defer rows.Close()
+	refs := make([]gitCommitReference, 0)
+	for rows.Next() {
+		var ref gitCommitReference
+		if err := rows.Scan(
+			&ref.ArtifactID, &ref.Slug, &ref.Type, &ref.Title, &ref.AreaSlug,
+			&ref.Kind, &ref.Path, &ref.LinesStart, &ref.LinesEnd,
+		); err != nil {
+			d.Logger.Error("git commit references scan failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "commit references scan failed")
+			return
+		}
+		ref.HumanURL = httpArtifactURL(projectSlug, ref.Slug)
+		ref.HumanURLAbs = d.httpArtifactURLAbs(projectSlug, ref.Slug)
+		refs = append(refs, ref)
+	}
+	if err := rows.Err(); err != nil {
+		d.Logger.Error("git commit references rows failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "commit references rows failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, gitCommitReferencesResponse{
+		ProjectSlug: projectSlug,
+		Commit:      sha,
+		References:  refs,
+	})
+}
+
+func commitInfoPtr(info pgit.CommitInfo, err error) *pgit.CommitInfo {
+	if err != nil || strings.TrimSpace(info.SHA) == "" {
+		return nil
+	}
+	return &info
+}
+
+func httpArtifactURL(projectSlug, slug string) string {
+	return "/p/" + projectSlug + "/wiki/" + slug
+}
+
+func (d Deps) httpArtifactURLAbs(projectSlug, slug string) string {
+	if d.Settings == nil {
+		return ""
+	}
+	base := strings.TrimRight(d.Settings.Get().PublicBaseURL, "/")
+	if base == "" {
+		return ""
+	}
+	return base + httpArtifactURL(projectSlug, slug)
 }
 
 func (d Deps) gitRepoFromRequest(w http.ResponseWriter, r *http.Request) (pgit.Repo, bool) {
@@ -209,14 +378,17 @@ func gitPreviewReason(err error) string {
 
 func githubFallbackURL(repo pgit.Repo, commit, p string) string {
 	p = strings.Trim(strings.ReplaceAll(p, "\\", "/"), "/")
-	if p == "" {
-		return ""
-	}
 	commit = strings.TrimSpace(commit)
 	if commit == "" {
 		commit = repo.DefaultBranch
 	}
 	for _, raw := range append([]string{repo.GitRemoteOriginal, repo.GitRemoteURL}, repo.URLs...) {
+		if p == "" {
+			if u := githubCommitURL(raw, commit); u != "" {
+				return u
+			}
+			continue
+		}
 		if u := githubBlobURL(raw, commit, p); u != "" {
 			return u
 		}
@@ -225,9 +397,28 @@ func githubFallbackURL(repo pgit.Repo, commit, p string) string {
 }
 
 func githubBlobURL(raw, commit, p string) string {
+	owner, name := githubRepoParts(raw)
+	if owner == "" || name == "" {
+		return ""
+	}
+	return "https://github.com/" + owner + "/" + name + "/blob/" + url.PathEscape(commit) + "/" + strings.TrimLeft(p, "/")
+}
+
+func githubCommitURL(raw, commit string) string {
+	owner, name := githubRepoParts(raw)
+	if owner == "" || name == "" {
+		return ""
+	}
+	if commit == "" {
+		return "https://github.com/" + owner + "/" + name
+	}
+	return "https://github.com/" + owner + "/" + name + "/commit/" + url.PathEscape(commit)
+}
+
+func githubRepoParts(raw string) (string, string) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return ""
+		return "", ""
 	}
 	if strings.HasPrefix(raw, "git@github.com:") {
 		raw = "https://github.com/" + strings.TrimPrefix(raw, "git@github.com:")
@@ -237,11 +428,11 @@ func githubBlobURL(raw, commit, p string) string {
 	}
 	u, err := url.Parse(raw)
 	if err != nil || !strings.EqualFold(u.Hostname(), "github.com") {
-		return ""
+		return "", ""
 	}
 	parts := strings.Split(strings.Trim(strings.TrimSuffix(u.Path, ".git"), "/"), "/")
 	if len(parts) < 2 {
-		return ""
+		return "", ""
 	}
-	return "https://github.com/" + parts[0] + "/" + parts[1] + "/blob/" + url.PathEscape(commit) + "/" + strings.TrimLeft(p, "/")
+	return parts[0], parts[1]
 }

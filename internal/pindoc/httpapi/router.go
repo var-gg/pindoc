@@ -183,7 +183,10 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/p/{project}/read-states", d.handleReadStates)
 	mux.HandleFunc("GET /api/p/{project}/artifacts/{idOrSlug}/read-state", d.handleArtifactReadState)
 	mux.HandleFunc("GET /api/p/{project}/export", d.handleProjectExport)
+	mux.HandleFunc("GET /api/p/{project}/git/repos", d.handleGitRepos)
 	mux.HandleFunc("GET /api/p/{project}/git/changed-files", d.handleGitChangedFiles)
+	mux.HandleFunc("GET /api/p/{project}/git/commit", d.handleGitCommit)
+	mux.HandleFunc("GET /api/p/{project}/git/commits/{sha}/referencing-artifacts", d.handleGitCommitReferences)
 	mux.HandleFunc("GET /api/p/{project}/git/blob", d.handleGitBlob)
 	mux.HandleFunc("GET /api/p/{project}/git/diff", d.handleGitDiff)
 

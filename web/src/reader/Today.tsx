@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { CheckCircle2, CheckSquare, ChevronDown, ChevronRight, Download, Filter, Loader2, PanelRightOpen, Sparkles } from "lucide-react";
+import { CheckCircle2, CheckSquare, ChevronDown, ChevronRight, Download, Filter, GitCommit, Loader2, PanelRightOpen, Sparkles } from "lucide-react";
 import { Link, useNavigate } from "react-router";
-import { api, type ArtifactReadState, type ChangeGroup, type TodayResp } from "../api/client";
+import { api, type ArtifactReadState, type ChangeGroup, type GitRepoSummary, type TodayResp } from "../api/client";
 import { useI18n } from "../i18n";
+import { gitCommitPath, isCommitQuery, shortSha } from "../git/routes";
 import { EmptyState } from "./SurfacePrimitives";
 import { Tooltip } from "./Tooltip";
 import { buildChangeGroupCardView, buildTodayBrief } from "./todayViewModel";
@@ -40,6 +41,7 @@ export function Today({
   const [filter, setFilter] = useState<KindFilter>("all");
   const [autoOpen, setAutoOpen] = useState(false);
   const [readStates, setReadStates] = useState<Map<string, ArtifactReadState>>(new Map());
+  const [gitRepos, setGitRepos] = useState<GitRepoSummary[]>([]);
   const [marking, setMarking] = useState(false);
   const streamRef = useRef<HTMLDivElement | null>(null);
   const autoMarkedRef = useRef<number | null>(null);
@@ -78,6 +80,16 @@ export function Today({
       .catch(() => {
         // Soft-fail: read states are decorative, not gating.
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectSlug]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.gitRepos(projectSlug)
+      .then((resp) => { if (!cancelled) setGitRepos(resp.repos); })
+      .catch(() => { if (!cancelled) setGitRepos([]); });
     return () => {
       cancelled = true;
     };
@@ -268,6 +280,7 @@ export function Today({
               selectedArtifactSlug={selectedArtifactSlug}
               onSelectArtifact={onSelectArtifact}
               readState={firstArtifactReadState(group, readStates)}
+              defaultRepo={gitRepos[0]}
             />
           ))}
           {autoGroups.length > 0 && (
@@ -286,6 +299,7 @@ export function Today({
                   selectedArtifactSlug={selectedArtifactSlug}
                   onSelectArtifact={onSelectArtifact}
                   readState={firstArtifactReadState(group, readStates)}
+                  defaultRepo={gitRepos[0]}
                   compact
                 />
               ))}
@@ -309,6 +323,23 @@ function firstArtifactReadState(
   return states.get(id);
 }
 
+function commitTargetFromGroup(
+  group: ChangeGroup,
+  defaultRepo?: GitRepoSummary,
+): { repoID: string; sha: string } | null {
+  const key = group.grouping_key;
+  const value = key.value.trim();
+  const explicit = /^([^:\s]+):([0-9a-f]{7,40})$/i.exec(value);
+  if (explicit) return { repoID: explicit[1], sha: explicit[2] };
+  if ((key.kind.includes("commit") || key.kind.includes("sha")) && isCommitQuery(value) && defaultRepo) {
+    return { repoID: defaultRepo.id, sha: value };
+  }
+  if (isCommitQuery(value) && defaultRepo) {
+    return { repoID: defaultRepo.id, sha: value };
+  }
+  return null;
+}
+
 function ChangeGroupCard({
   group,
   projectSlug,
@@ -317,6 +348,7 @@ function ChangeGroupCard({
   selectedArtifactSlug,
   onSelectArtifact,
   readState,
+  defaultRepo,
   compact,
 }: {
   group: ChangeGroup;
@@ -326,6 +358,7 @@ function ChangeGroupCard({
   selectedArtifactSlug: string | null;
   onSelectArtifact: (slug: string) => void;
   readState?: ArtifactReadState;
+  defaultRepo?: GitRepoSummary;
   compact?: boolean;
 }) {
   const { t } = useI18n();
@@ -336,6 +369,7 @@ function ChangeGroupCard({
   const isActive = Boolean(firstArtifact && selectedArtifactSlug === firstArtifact.slug);
   const isInteractive = Boolean(firstArtifact);
   const card = useMemo(() => buildChangeGroupCardView(group, t), [group, t]);
+  const commitTarget = useMemo(() => commitTargetFromGroup(group, defaultRepo), [group, defaultRepo]);
   const readLabel = readStateLabel(readState?.read_state, t);
   function openDetail() {
     if (detailHref) navigate(detailHref);
@@ -419,6 +453,15 @@ function ChangeGroupCard({
         ))}
       </div>
       <div className="change-card__actions" onClick={(e) => e.stopPropagation()}>
+        {commitTarget && (
+          <Link
+            className="change-card__commit-link"
+            to={gitCommitPath(projectSlug, commitTarget.repoID, commitTarget.sha)}
+          >
+            <GitCommit className="lucide" />
+            <span>{t("today.open_commit", shortSha(commitTarget.sha))}</span>
+          </Link>
+        )}
         {firstArea && <Link to={`/p/${projectSlug}/wiki?area=${encodeURIComponent(firstArea)}`}>{t("today.open_area")}</Link>}
         {firstArea && <ExportButton url={api.exportProjectUrl(projectSlug, { area: firstArea })} label={t("today.export_area")} />}
       </div>

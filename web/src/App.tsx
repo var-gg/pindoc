@@ -5,6 +5,7 @@ import { ProvidersPanel } from "./admin/ProvidersPanel";
 import { useI18n } from "./i18n";
 import { IdentitySetup } from "./onboarding/IdentitySetup";
 import { Telemetry } from "./ops/Telemetry";
+import { CommitDetailPage } from "./git/CommitDetailPage";
 import { CreateProjectPage } from "./reader/CreateProjectPage";
 import { Diff } from "./reader/Diff";
 import { History } from "./reader/History";
@@ -41,6 +42,7 @@ export function App() {
       <Route path="/p/:project/tasks/:slug" element={<ReaderShell view="tasks" />} />
       <Route path="/p/:project/graph" element={<ReaderShell view="graph" />} />
       <Route path="/p/:project/inbox" element={<ReaderShell view="inbox" />} />
+      <Route path="/p/:project/git/:repoId/commit/:sha" element={<CommitDetailPage />} />
       <Route path="/p/:project/:surface" element={<ProjectSurfaceNotFound />} />
       <Route path="/p/:project/:surface/*" element={<ProjectSurfaceNotFound />} />
       <Route path="/help/design-legend" element={<DesignLegendRedirect />} />

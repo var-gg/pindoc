@@ -34,6 +34,7 @@ func (p LocalGitProvider) ChangedFiles(ctx context.Context, repo Repo, commit st
 		}
 		return nil, err
 	}
+	stats := changedFileStats(ctx, root, commit)
 	var files []ChangedFile
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		line = strings.TrimSpace(line)
@@ -44,9 +45,45 @@ func (p LocalGitProvider) ChangedFiles(ctx context.Context, repo Repo, commit st
 		if len(fields) < 2 {
 			continue
 		}
-		files = append(files, ChangedFile{Status: fields[0], Path: fields[len(fields)-1]})
+		path := fields[len(fields)-1]
+		file := ChangedFile{Status: fields[0], Path: path}
+		if stat, ok := stats[path]; ok {
+			file.Additions = stat.Additions
+			file.Deletions = stat.Deletions
+			file.Binary = stat.Binary
+		}
+		files = append(files, file)
 	}
 	return files, nil
+}
+
+func (p LocalGitProvider) CommitInfo(ctx context.Context, repo Repo, commit string) (CommitInfo, error) {
+	root := firstUsableRoot(ctx, repo)
+	if root == "" {
+		return CommitInfo{}, ErrNoProviderForRepo
+	}
+	commit, err := validateCommit(ctx, root, commit)
+	if err != nil {
+		return CommitInfo{}, err
+	}
+	out, err := gitOutput(ctx, root, "show", "-s", "--format=%H%x09%an%x09%ae%x09%aI%x09%s", commit)
+	if err != nil {
+		if isUnknownRevision(err) {
+			return CommitInfo{}, ErrCommitNotFound
+		}
+		return CommitInfo{}, err
+	}
+	parts := strings.SplitN(strings.TrimSpace(string(out)), "\t", 5)
+	if len(parts) < 5 {
+		return CommitInfo{SHA: commit}, nil
+	}
+	return CommitInfo{
+		SHA:         strings.TrimSpace(parts[0]),
+		Author:      strings.TrimSpace(parts[1]),
+		AuthorEmail: strings.TrimSpace(parts[2]),
+		AuthorTime:  strings.TrimSpace(parts[3]),
+		Summary:     strings.TrimSpace(parts[4]),
+	}, nil
 }
 
 func (p LocalGitProvider) RecentCommitFiles(ctx context.Context, repo Repo, author string, limit int) ([]RecentCommit, error) {
@@ -93,6 +130,30 @@ func (p LocalGitProvider) RecentCommitFiles(ctx context.Context, repo Repo, auth
 		})
 	}
 	return commits, nil
+}
+
+func changedFileStats(ctx context.Context, root, commit string) map[string]ChangedFile {
+	out, err := gitOutput(ctx, root, "show", "--format=", "--numstat", "--no-renames", commit)
+	if err != nil {
+		return nil
+	}
+	stats := map[string]ChangedFile{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 3 {
+			continue
+		}
+		path := fields[len(fields)-1]
+		stat := ChangedFile{Path: path}
+		if fields[0] == "-" || fields[1] == "-" {
+			stat.Binary = true
+		} else {
+			_, _ = fmt.Sscanf(fields[0], "%d", &stat.Additions)
+			_, _ = fmt.Sscanf(fields[1], "%d", &stat.Deletions)
+		}
+		stats[path] = stat
+	}
+	return stats
 }
 
 func (p LocalGitProvider) Blob(ctx context.Context, repo Repo, commit, filePath string, sizeCap int64) (Blob, error) {
