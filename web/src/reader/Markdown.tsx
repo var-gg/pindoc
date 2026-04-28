@@ -1,7 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  isValidElement,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent,
+  type ReactNode,
+  type WheelEvent,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import mermaid from "mermaid";
+import { Maximize2, Minimize2, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { headingsFromBody, slugifyHeading } from "./slug";
 import { useI18n } from "../i18n";
 import { pindocUrlTransform } from "./urlTransform";
@@ -11,16 +21,41 @@ import { isStructureOverlapHeading, type StructureOverlapSection } from "./struc
 // class on <html>. We invert the theme selection at render time so fresh
 // toggles take effect on next render.
 let mermaidInited = false;
-function ensureMermaid(): void {
-  if (mermaidInited) return;
-  const isDark = document.documentElement.classList.contains("theme-dark");
+let mermaidTheme: "default" | "dark" | null = null;
+let mermaidRenderQueue: Promise<void> = Promise.resolve();
+let mermaidRenderCounter = 0;
+const mermaidSvgCache = new Map<string, string>();
+
+function currentMermaidTheme(): "default" | "dark" {
+  return document.documentElement.classList.contains("theme-dark") ? "dark" : "default";
+}
+
+function mermaidCacheKey(source: string, theme: "default" | "dark"): string {
+  return `${theme}\n${source}`;
+}
+
+function ensureMermaid(): "default" | "dark" {
+  const theme = currentMermaidTheme();
+  if (mermaidInited && mermaidTheme === theme) return theme;
   mermaid.initialize({
     startOnLoad: false,
-    theme: isDark ? "dark" : "default",
+    theme,
     securityLevel: "loose",
     fontFamily: "JetBrains Mono, ui-monospace, monospace",
+    flowchart: { useMaxWidth: false },
+    sequence: { useMaxWidth: false },
+    er: { useMaxWidth: false },
+    gantt: { useMaxWidth: false },
   });
   mermaidInited = true;
+  mermaidTheme = theme;
+  return theme;
+}
+
+function queueMermaidRender(render: () => Promise<void>): Promise<void> {
+  const next = mermaidRenderQueue.then(render, render);
+  mermaidRenderQueue = next.catch(() => undefined);
+  return next;
 }
 
 /**
@@ -81,14 +116,8 @@ function MarkdownBlock({
       remarkPlugins={[remarkGfm]}
       urlTransform={(url) => pindocUrlTransform(url, projectSlug)}
       components={{
-        code(props) {
-          const { className, children } = props;
-          const match = /language-(\w+)/.exec(className || "");
-          if (match && match[1] === "mermaid") {
-            return <MermaidBlock source={String(children).trimEnd()} />;
-          }
-          return <code className={className}>{children}</code>;
-        },
+        pre: MarkdownPre,
+        code: MarkdownCode,
         h2({ children }) {
           // extractHeadingText flattens children (often an array of
           // strings + inline code + emphasis) back into the plain text
@@ -103,6 +132,36 @@ function MarkdownBlock({
       {source}
     </ReactMarkdown>
   );
+}
+
+function MarkdownPre({ children }: { children?: ReactNode }) {
+  const mermaidSource = mermaidSourceFromPre(children);
+  if (mermaidSource !== null) {
+    return <MermaidBlock source={mermaidSource} />;
+  }
+  return <pre>{children}</pre>;
+}
+
+function MarkdownCode({
+  className,
+  children,
+}: {
+  className?: string;
+  children?: ReactNode;
+}) {
+  return <code className={className}>{children}</code>;
+}
+
+function mermaidSourceFromPre(children: unknown): string | null {
+  const child = Array.isArray(children) && children.length === 1 ? children[0] : children;
+  if (!isValidElement(child)) return null;
+
+  const props = child.props as { className?: unknown; children?: unknown };
+  const className = typeof props.className === "string" ? props.className : "";
+  const match = /(?:^|\s)language-(\w+)(?:\s|$)/.exec(className);
+  if (!match || match[1] !== "mermaid") return null;
+
+  return String(props.children ?? "").trimEnd();
 }
 
 type MarkdownRenderBlock =
@@ -230,19 +289,46 @@ function extractHeadingText(node: unknown): string {
 }
 
 function MermaidBlock({ source }: { source: string }) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const [state, setState] = useState<"idle" | "rendered" | "error">("idle");
+  const { t } = useI18n();
+  const theme = currentMermaidTheme();
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    panX: number;
+    panY: number;
+  } | null>(null);
+  const [state, setState] = useState<"idle" | "rendered" | "error">(
+    () => (mermaidSvgCache.has(mermaidCacheKey(source, theme)) ? "rendered" : "idle"),
+  );
   const [errMsg, setErrMsg] = useState<string>("");
+  const [svg, setSvg] = useState<string>(() => mermaidSvgCache.get(mermaidCacheKey(source, theme)) ?? "");
+  const [active, setActive] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [scale, setScale] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      ensureMermaid();
+      const renderTheme = ensureMermaid();
+      const cacheKey = mermaidCacheKey(source, renderTheme);
+      const cached = mermaidSvgCache.get(cacheKey);
+      setState(cached ? "rendered" : "idle");
+      setErrMsg("");
+      setSvg(cached ?? "");
       try {
-        const id = `mermaid-${Math.random().toString(36).slice(2, 10)}`;
-        const { svg } = await mermaid.render(id, source);
-        if (cancelled || !ref.current) return;
-        ref.current.innerHTML = svg;
+        await queueMermaidRender(async () => {
+          if (cancelled) return;
+          const id = `pindoc-mermaid-${Date.now()}-${++mermaidRenderCounter}`;
+          const rendered = await mermaid.render(id, source);
+          mermaidSvgCache.set(cacheKey, rendered.svg);
+          if (!cancelled) {
+            setSvg(rendered.svg);
+          }
+        });
+        if (cancelled) return;
         setState("rendered");
       } catch (err) {
         if (cancelled) return;
@@ -253,7 +339,84 @@ function MermaidBlock({ source }: { source: string }) {
     return () => {
       cancelled = true;
     };
+  }, [source, theme]);
+
+  useEffect(() => {
+    setActive(false);
+    setScale(1);
+    setPan({ x: 0, y: 0 });
+    dragRef.current = null;
   }, [source]);
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setFullscreen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [fullscreen]);
+
+  function resetView() {
+    setScale(1);
+    setPan({ x: 0, y: 0 });
+  }
+
+  function zoomAt(clientX: number, clientY: number, nextScale: number) {
+    const viewport = viewportRef.current;
+    const rect = viewport?.getBoundingClientRect();
+    const clamped = Math.min(4, Math.max(0.4, nextScale));
+    if (!rect) {
+      setScale(clamped);
+      return;
+    }
+    const originX = clientX - rect.left;
+    const originY = clientY - rect.top;
+    const ratio = clamped / scale;
+    setPan({
+      x: originX - (originX - pan.x) * ratio,
+      y: originY - (originY - pan.y) * ratio,
+    });
+    setScale(clamped);
+  }
+
+  function handleWheel(e: WheelEvent<HTMLDivElement>) {
+    if (!active && !e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    setActive(true);
+    const nextScale = scale * (e.deltaY < 0 ? 1.12 : 0.88);
+    zoomAt(e.clientX, e.clientY, nextScale);
+  }
+
+  function handlePointerDown(e: PointerEvent<HTMLDivElement>) {
+    if (e.button !== 0) return;
+    setActive(true);
+    dragRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      panX: pan.x,
+      panY: pan.y,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function handlePointerMove(e: PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    setPan({
+      x: drag.panX + e.clientX - drag.startX,
+      y: drag.panY + e.clientY - drag.startY,
+    });
+  }
+
+  function stopDrag(e: PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (drag?.pointerId === e.pointerId) {
+      dragRef.current = null;
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  }
 
   if (state === "error") {
     return (
@@ -275,18 +438,84 @@ function MermaidBlock({ source }: { source: string }) {
     );
   }
 
+  const rootClass = [
+    "mermaid-diagram",
+    active ? "is-active" : "",
+    fullscreen ? "is-fullscreen" : "",
+  ].filter(Boolean).join(" ");
+
   return (
-    <div
-      ref={ref}
-      className="mermaid-diagram"
-      style={{
-        background: "var(--bg-1)",
-        border: "1px solid var(--border)",
-        borderRadius: "var(--r-3)",
-        padding: "16px",
-        margin: "16px 0",
-        overflowX: "auto",
-      }}
-    />
+    <figure className={rootClass}>
+      <div className="mermaid-diagram__toolbar" aria-label={t("reader.mermaid_toolbar")}>
+        <button
+          type="button"
+          aria-label={t("reader.mermaid_zoom_in")}
+          title={t("reader.mermaid_zoom_in")}
+          onClick={() => {
+            setActive(true);
+            zoomAt(
+              (viewportRef.current?.getBoundingClientRect().left ?? 0) +
+                (viewportRef.current?.clientWidth ?? 0) / 2,
+              (viewportRef.current?.getBoundingClientRect().top ?? 0) +
+                (viewportRef.current?.clientHeight ?? 0) / 2,
+              scale * 1.2,
+            );
+          }}
+        >
+          <ZoomIn className="lucide" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          aria-label={t("reader.mermaid_zoom_out")}
+          title={t("reader.mermaid_zoom_out")}
+          onClick={() => {
+            setActive(true);
+            zoomAt(
+              (viewportRef.current?.getBoundingClientRect().left ?? 0) +
+                (viewportRef.current?.clientWidth ?? 0) / 2,
+              (viewportRef.current?.getBoundingClientRect().top ?? 0) +
+                (viewportRef.current?.clientHeight ?? 0) / 2,
+              scale * 0.8,
+            );
+          }}
+        >
+          <ZoomOut className="lucide" aria-hidden="true" />
+        </button>
+        <button type="button" aria-label={t("reader.mermaid_reset")} title={t("reader.mermaid_reset")} onClick={resetView}>
+          <RotateCcw className="lucide" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          aria-label={fullscreen ? t("reader.mermaid_exit_fullscreen") : t("reader.mermaid_fullscreen")}
+          title={fullscreen ? t("reader.mermaid_exit_fullscreen") : t("reader.mermaid_fullscreen")}
+          onClick={() => setFullscreen((v) => !v)}
+        >
+          {fullscreen ? (
+            <Minimize2 className="lucide" aria-hidden="true" />
+          ) : (
+            <Maximize2 className="lucide" aria-hidden="true" />
+          )}
+        </button>
+      </div>
+      <div
+        ref={viewportRef}
+        className="mermaid-diagram__viewport"
+        tabIndex={0}
+        aria-label={t("reader.mermaid_viewport")}
+        onClick={() => setActive(true)}
+        onWheel={handleWheel}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={stopDrag}
+        onPointerCancel={stopDrag}
+      >
+        {state === "idle" && <div className="mermaid-diagram__status">{t("reader.mermaid_rendering")}</div>}
+        <div
+          className="mermaid-diagram__canvas"
+          style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}
+          dangerouslySetInnerHTML={{ __html: svg }}
+        />
+      </div>
+    </figure>
   );
 }

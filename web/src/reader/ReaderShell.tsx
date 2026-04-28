@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
-import { PanelRightOpen, X } from "lucide-react";
+import { Bot, PanelRightOpen, UserRound, X } from "lucide-react";
 import type { Aggregate } from "./useReaderData";
 import { api, type Artifact, type ArtifactRef, type Area } from "../api/client";
 import { useI18n } from "../i18n";
@@ -1548,6 +1548,11 @@ function TaskCard({
   const areaLabel = areaNameBySlug.get(a.area_slug) ?? localizedAreaName(t, a.area_slug, a.area_slug);
   const detailHref = `/p/${projectSlug}/wiki/${a.slug}`;
   const selected = isActive || isSelected;
+  const assigneeLabel = taskActorLabel(a.task_meta?.assignee);
+  const requesterLabel = requesterActorLabel(a);
+  const showRequester =
+    requesterLabel &&
+    actorKey(requesterLabel) !== actorKey(assigneeLabel);
   return (
     <article
       tabIndex={0}
@@ -1606,12 +1611,53 @@ function TaskCard({
         </Link>
       </Tooltip>
       <div className="task-card__foot">
-        {a.task_meta?.assignee && <span>{a.task_meta.assignee}</span>}
-        {a.task_meta?.due_at && (
-          <span>~{new Date(a.task_meta.due_at).toLocaleDateString()}</span>
-        )}
-        <span>{new Date(a.updated_at).toLocaleDateString()}</span>
+        <div className="task-card__actors">
+          {assigneeLabel && (
+            <Tooltip content={t("tasks.card_agent_hint", assigneeLabel)}>
+              <span className="task-card__actor task-card__actor--agent">
+                <Bot className="lucide" aria-hidden="true" />
+                <span>{assigneeLabel}</span>
+              </span>
+            </Tooltip>
+          )}
+          {showRequester && (
+            <Tooltip content={t("tasks.card_requester_hint", requesterLabel)}>
+              <span className="task-card__actor task-card__actor--requester">
+                <UserRound className="lucide" aria-hidden="true" />
+                <span>{requesterLabel}</span>
+              </span>
+            </Tooltip>
+          )}
+        </div>
+        <div className="task-card__dates">
+          {a.task_meta?.due_at && (
+            <span>~{new Date(a.task_meta.due_at).toLocaleDateString()}</span>
+          )}
+          <span>{new Date(a.updated_at).toLocaleDateString()}</span>
+        </div>
       </div>
     </article>
   );
+}
+
+function taskActorLabel(value: string | undefined): string {
+  return value?.trim() ?? "";
+}
+
+function requesterActorLabel(a: ArtifactRef): string {
+  const user = a.author_user;
+  const raw =
+    user?.github_handle?.trim() ||
+    user?.display_name?.trim() ||
+    a.author_id.trim();
+  if (!raw) return "";
+  return raw.startsWith("@") ? raw : `@${raw}`;
+}
+
+function actorKey(value: string | undefined): string {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^@/, "")
+    .replace(/^agent:/, "");
 }
