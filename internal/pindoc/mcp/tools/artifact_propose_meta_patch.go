@@ -294,17 +294,24 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 	if hasArtifactMeta {
 		metaOut = &resolvedUpdateMeta
 	}
+	warnings := sortWarningsBySeverity(acceptanceUncheckedNudgeWarnings(currentType, currentBody, in.CommitMsg))
+	severities := make([]string, len(warnings))
+	for i, w := range warnings {
+		severities[i] = warningSeverity(w)
+	}
 
 	return nil, artifactProposeOutput{
-		Status:         "accepted",
-		ArtifactID:     artifactID,
-		Slug:           currentSlug,
-		AgentRef:       "pindoc://" + currentSlug,
-		HumanURL:       HumanURL(scope.ProjectSlug, scope.ProjectLocale, currentSlug),
-		HumanURLAbs:    AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, currentSlug),
-		Created:        false,
-		RevisionNumber: newRev,
-		ArtifactMeta:   metaOut,
+		Status:            "accepted",
+		ArtifactID:        artifactID,
+		Slug:              currentSlug,
+		AgentRef:          "pindoc://" + currentSlug,
+		HumanURL:          HumanURL(scope.ProjectSlug, scope.ProjectLocale, currentSlug),
+		HumanURLAbs:       AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, currentSlug),
+		Created:           false,
+		RevisionNumber:    newRev,
+		Warnings:          warnings,
+		WarningSeverities: severities,
+		ArtifactMeta:      metaOut,
 	}, nil
 }
 

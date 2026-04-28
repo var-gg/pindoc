@@ -78,6 +78,19 @@ type artifactReadOutput struct {
 	// whether this artifact is usable as-is, which is the same question on
 	// every view. Empty object when the row predates migration 0012.
 	ArtifactMeta ResolvedArtifactMeta `json:"artifact_meta"`
+
+	// TaskAttention is an agent-only lifecycle reminder for open Task
+	// artifacts. It is deliberately carried out-of-band from body_markdown
+	// so retrieval reads and human Reader views do not accumulate prompt
+	// noise. Server-side gates below decide whether it appears at all.
+	TaskAttention *TaskAttention `json:"task_attention,omitempty"`
+}
+
+type TaskAttention struct {
+	Code      string         `json:"code"`
+	Message   string         `json:"message"`
+	NextTools []NextToolHint `json:"next_tools,omitempty"`
+	Level     string         `json:"level"`
 }
 
 // PinRef mirrors artifact_pins rows. Empty repo defaults to "origin" in
@@ -120,7 +133,7 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.read",
-			Description: "Fetch an artifact by UUID, slug, or share URL, including /p/{project}/wiki/{slug} paths and their absolute URLs. Legacy /p/{project}/{locale}/wiki/{slug} paths are accepted. view=brief returns title/summary/pins/stale without the full body; view=continuation adds recent revisions and typed edges; view=full (default) returns everything.",
+			Description: "Fetch an artifact by UUID, slug, or share URL, including /p/{project}/wiki/{slug} paths and their absolute URLs. Legacy /p/{project}/{locale}/wiki/{slug} paths are accepted. view=brief returns title/summary/pins/stale without the full body; view=continuation adds recent revisions and typed edges; view=full (default) returns everything. For open Task artifacts, full/continuation reads may include task_attention only when the caller is the assignee or latest revision author.",
 		},
 		func(ctx context.Context, p *auth.Principal, in artifactReadInput) (*sdk.CallToolResult, artifactReadOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -146,7 +159,8 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			var out artifactReadOutput
 			var desc, authorVer, superseded *string
 			var publishedAt *time.Time
-			var metaRaw []byte
+			var metaRaw, taskMetaRaw []byte
+			var lastRevisionAuthor string
 			err = deps.DB.QueryRow(ctx, `
 				SELECT
 					a.id::text,
@@ -168,7 +182,15 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 					a.created_at,
 					a.updated_at,
 					a.published_at,
-					a.artifact_meta
+					a.artifact_meta,
+					COALESCE(a.task_meta, '{}'::jsonb),
+					COALESCE((
+						SELECT r.author_id
+						FROM artifact_revisions r
+						WHERE r.artifact_id = a.id
+						ORDER BY r.revision_number DESC
+						LIMIT 1
+					), a.author_id)
 				FROM artifacts a
 				JOIN projects proj ON proj.id = a.project_id
 				JOIN areas    area ON area.id = a.area_id
@@ -181,6 +203,7 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 				&out.Completeness, &out.Status, &out.ReviewState,
 				&out.AuthorKind, &out.AuthorID, &authorVer, &superseded,
 				&out.CreatedAt, &out.UpdatedAt, &publishedAt, &metaRaw,
+				&taskMetaRaw, &lastRevisionAuthor,
 			)
 			_ = desc // reserved; project.description not part of read response
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -208,6 +231,18 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			out.HumanURL = HumanURL(out.ProjectSlug, scope.ProjectLocale, out.Slug)
 			out.HumanURLAbs = AbsHumanURL(deps.Settings, out.ProjectSlug, scope.ProjectLocale, out.Slug)
 			out.View = view
+			taskStatus, taskAssignee := taskAttentionTaskMetaFields(taskMetaRaw)
+			out.TaskAttention = buildTaskAttention(
+				out.Type,
+				taskStatus,
+				taskAssignee,
+				lastRevisionAuthor,
+				p,
+				view,
+				out.BodyLocale,
+				out.ProjectSlug,
+				out.Slug,
+			)
 
 			// view=brief / continuation: drop the heavy body, add summary.
 			if view == "brief" || view == "continuation" {
@@ -249,6 +284,113 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			return nil, out, nil
 		},
 	)
+}
+
+func taskAttentionTaskMetaFields(raw []byte) (status, assignee string) {
+	if len(raw) == 0 {
+		return "", ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return "", ""
+	}
+	if s, ok := m["status"].(string); ok {
+		status = strings.TrimSpace(s)
+	}
+	if a, ok := m["assignee"].(string); ok {
+		assignee = strings.TrimSpace(a)
+	}
+	return status, assignee
+}
+
+func buildTaskAttention(artifactType, taskStatus, taskAssignee, lastRevisionAuthor string, p *auth.Principal, view, locale, projectSlug, slug string) *TaskAttention {
+	if artifactType != "Task" {
+		return nil
+	}
+	if strings.EqualFold(strings.TrimSpace(view), "brief") {
+		return nil
+	}
+	status := strings.TrimSpace(strings.ToLower(taskStatus))
+	if status == "" {
+		status = "open"
+	}
+	switch status {
+	case "claimed_done", "verified", "blocked", "cancelled":
+		return nil
+	}
+
+	caller := taskAttentionCallerID(p)
+	if taskAttentionHumanCaller(caller) {
+		return nil
+	}
+	if !taskAttentionCallerMatches(caller, lastRevisionAuthor) &&
+		!taskAttentionCallerMatches(caller, taskAssignee) {
+		return nil
+	}
+
+	return &TaskAttention{
+		Code:    "task_still_open",
+		Message: taskAttentionMessage(locale),
+		Level:   "info",
+		NextTools: []NextToolHint{
+			{
+				Tool: "pindoc.artifact.propose",
+				Args: map[string]any{
+					"project_slug": projectSlug,
+					"update_of":    "pindoc://" + slug,
+					"shape":        string(ShapeAcceptanceTransition),
+				},
+				Reason: "update acceptance checks",
+			},
+			{
+				Tool: "pindoc.artifact.propose",
+				Args: map[string]any{
+					"project_slug": projectSlug,
+					"update_of":    "pindoc://" + slug,
+					"task_meta": map[string]any{
+						"status": "claimed_done",
+					},
+				},
+				Reason: "move Task lifecycle after acceptance is complete",
+			},
+		},
+	}
+}
+
+func taskAttentionCallerID(p *auth.Principal) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(p.AgentID)
+}
+
+func taskAttentionHumanCaller(caller string) bool {
+	caller = strings.TrimSpace(caller)
+	return caller == "" || strings.HasPrefix(caller, "user:") || strings.HasPrefix(caller, "@")
+}
+
+func taskAttentionCallerMatches(caller, candidate string) bool {
+	caller = strings.TrimSpace(caller)
+	candidate = strings.TrimSpace(candidate)
+	if caller == "" || candidate == "" {
+		return false
+	}
+	if caller == candidate {
+		return true
+	}
+	return stripAgentPrefix(caller) == stripAgentPrefix(candidate)
+}
+
+func stripAgentPrefix(id string) string {
+	id = strings.TrimSpace(id)
+	return strings.TrimPrefix(id, "agent:")
+}
+
+func taskAttentionMessage(locale string) string {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "ko") {
+		return "이 Task는 status=open. 작업이 끝났으면 acceptance 체크를 갱신하고 status를 claimed_done으로 옮기세요."
+	}
+	return "This Task is still open. If you're done, update the acceptance checks and move status to claimed_done."
 }
 
 // summarizeBody returns up to ~240 chars, preferring the first paragraph

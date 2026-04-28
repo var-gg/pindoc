@@ -120,3 +120,115 @@ func TestArtifactReadNotFoundErrorHintsForShareURL(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildTaskAttentionNegativeTypeGateCoversNonTaskTypes(t *testing.T) {
+	nonTaskTypes := []string{
+		"Analysis",
+		"Decision",
+		"Glossary",
+		"Feature",
+		"APIEndpoint",
+		"Screen",
+		"DataModel",
+		"Debug",
+		"Flow",
+		"TC",
+		"VerificationReport",
+	}
+	for _, artifactType := range nonTaskTypes {
+		t.Run(artifactType, func(t *testing.T) {
+			got := buildTaskAttention(
+				artifactType,
+				"open",
+				"agent:codex",
+				"codex",
+				&auth.Principal{AgentID: "codex"},
+				"full",
+				"ko",
+				"pindoc",
+				"some-artifact",
+			)
+			if got != nil {
+				t.Fatalf("type=%s should not emit task_attention: %+v", artifactType, got)
+			}
+		})
+	}
+}
+
+func TestBuildTaskAttentionGates(t *testing.T) {
+	basePrincipal := &auth.Principal{AgentID: "codex"}
+
+	t.Run("assignee affinity positive emits korean copy", func(t *testing.T) {
+		got := buildTaskAttention("Task", "open", "agent:codex", "other-agent", basePrincipal, "full", "ko", "pindoc", "task-a")
+		if got == nil {
+			t.Fatal("expected task_attention")
+		}
+		if got.Code != "task_still_open" || got.Level != "info" {
+			t.Fatalf("unexpected code/level: %+v", got)
+		}
+		want := "이 Task는 status=open. 작업이 끝났으면 acceptance 체크를 갱신하고 status를 claimed_done으로 옮기세요."
+		if got.Message != want {
+			t.Fatalf("message = %q; want %q", got.Message, want)
+		}
+		if len(got.NextTools) != 2 ||
+			got.NextTools[0].Tool != "pindoc.artifact.propose" ||
+			got.NextTools[1].Tool != "pindoc.artifact.propose" {
+			t.Fatalf("unexpected next_tools: %+v", got.NextTools)
+		}
+	})
+
+	t.Run("latest revision author affinity positive emits english copy", func(t *testing.T) {
+		got := buildTaskAttention("Task", "open", "agent:other", "codex", basePrincipal, "continuation", "en", "pindoc", "task-a")
+		if got == nil {
+			t.Fatal("expected task_attention")
+		}
+		want := "This Task is still open. If you're done, update the acceptance checks and move status to claimed_done."
+		if got.Message != want {
+			t.Fatalf("message = %q; want %q", got.Message, want)
+		}
+	})
+
+	t.Run("different caller has no attention", func(t *testing.T) {
+		got := buildTaskAttention("Task", "open", "agent:claude-code", "claude-code", basePrincipal, "full", "ko", "pindoc", "task-a")
+		if got != nil {
+			t.Fatalf("different caller should not emit task_attention: %+v", got)
+		}
+	})
+
+	t.Run("brief view has no attention", func(t *testing.T) {
+		got := buildTaskAttention("Task", "open", "agent:codex", "other-agent", basePrincipal, "brief", "ko", "pindoc", "task-a")
+		if got != nil {
+			t.Fatalf("brief view should not emit task_attention: %+v", got)
+		}
+	})
+
+	for _, status := range []string{"claimed_done", "verified", "blocked", "cancelled"} {
+		t.Run("terminal status "+status, func(t *testing.T) {
+			got := buildTaskAttention("Task", status, "agent:codex", "other-agent", basePrincipal, "full", "ko", "pindoc", "task-a")
+			if got != nil {
+				t.Fatalf("status=%s should not emit task_attention: %+v", status, got)
+			}
+		})
+	}
+
+	for _, caller := range []string{"", "user:alice", "@alice"} {
+		t.Run("human caller "+caller, func(t *testing.T) {
+			got := buildTaskAttention("Task", "open", caller, caller, &auth.Principal{AgentID: caller}, "full", "ko", "pindoc", "task-a")
+			if got != nil {
+				t.Fatalf("human caller=%q should not emit task_attention: %+v", caller, got)
+			}
+		})
+	}
+}
+
+func TestTaskAttentionTaskMetaFields(t *testing.T) {
+	status, assignee := taskAttentionTaskMetaFields([]byte(`{"status":" open ","assignee":" agent:codex "}`))
+	if status != "open" || assignee != "agent:codex" {
+		t.Fatalf("status/assignee = %q/%q", status, assignee)
+	}
+
+	status, assignee = taskAttentionTaskMetaFields([]byte(`{malformed`))
+	if status != "" || assignee != "" {
+		t.Fatalf("malformed task_meta should return empty fields, got %q/%q", status, assignee)
+	}
+}

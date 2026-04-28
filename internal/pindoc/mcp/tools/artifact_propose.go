@@ -248,6 +248,10 @@ var validTaskPriorities = map[string]struct{}{
 	"p0": {}, "p1": {}, "p2": {}, "p3": {},
 }
 
+const warningAcceptanceUnchecked = "acceptance_unchecked"
+
+var closeSuggestiveCommitWordRe = regexp.MustCompile(`[a-z]+`)
+
 // ArtifactMetaInput is the agent-facing shape for epistemic axes. Every
 // field is optional; resolveArtifactMeta fills defaults based on pins,
 // update path, and body heuristics.
@@ -1502,6 +1506,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	// types that carry a canonical truth claim (Debug, Decision, Analysis)
 	// and require fresh evidence when that section's content shifts.
 	warnings := updatePathWarnings(ctx, deps, scope.ProjectSlug, in)
+	warnings = append(warnings, acceptanceUncheckedNudgeWarnings(currentType, in.BodyMarkdown, in.CommitMsg)...)
 	warnings = append(warnings, decisionSubjectAreaWarnings(in)...)
 	// Body-patch warnings bubble up here so PATCH_NOOP etc. sit alongside
 	// canonical-rewrite / source-type advisories instead of a separate
@@ -1576,6 +1581,36 @@ func updatePathWarnings(ctx context.Context, deps Deps, projectSlug string, in a
 	out = append(out, requiredH2WarningsFor(ctx, deps, projectSlug, in.BodyMarkdown, in.Type)...)
 	out = append(out, sectionDuplicatesEdgesWarnings(in.BodyMarkdown)...)
 	return out
+}
+
+func acceptanceUncheckedNudgeWarnings(artifactType, body, commitMsg string) []string {
+	if artifactType != "Task" || !commitMsgSuggestsClose(commitMsg) {
+		return nil
+	}
+	resolved, _ := countAcceptanceCheckboxes(body)
+	if resolved == 0 {
+		return []string{warningAcceptanceUnchecked}
+	}
+	return nil
+}
+
+func commitMsgSuggestsClose(commitMsg string) bool {
+	msg := strings.ToLower(strings.TrimSpace(commitMsg))
+	if msg == "" {
+		return false
+	}
+	for _, phrase := range []string{"closes pindoc://", "완료", "해결"} {
+		if strings.Contains(msg, phrase) {
+			return true
+		}
+	}
+	for _, word := range closeSuggestiveCommitWordRe.FindAllString(msg, -1) {
+		switch word {
+		case "fix", "resolve", "close":
+			return true
+		}
+	}
+	return false
 }
 
 // projectTitleJargon returns the operator-supplied jargon set that
