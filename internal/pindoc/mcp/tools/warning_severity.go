@@ -47,8 +47,10 @@ var warningSeverityCatalog = map[string]string{
 	"DECISION_AREA_MUST_BE_SUBJECT":  SeverityWarn,
 	"MISSING_H2":                     SeverityWarn,
 	"BODY_HAS_H1_REDUNDANT":          SeverityWarn,
-	"TITLE_LONG":                     SeverityWarn,
-	"TITLE_VERY_LONG":                SeverityWarn,
+	"TITLE_TOO_SHORT":                SeverityWarn,
+	"TITLE_TOO_LONG":                 SeverityWarn,
+	"TITLE_GENERIC_TOKENS":           SeverityWarn,
+	"SLUG_VERBOSE":                   SeverityWarn,
 	"PIN_PATH_NONEXISTENT":           SeverityWarn,
 	"PIN_PATH_OUTSIDE_REPO":          SeverityWarn,
 	"SECTION_DUPLICATES_EDGES":       SeverityWarn,
@@ -56,7 +58,6 @@ var warningSeverityCatalog = map[string]string{
 
 	// INFO — pointer / reminder.
 	"RECOMMEND_READ_BEFORE_CREATE": SeverityInfo,
-	"SLUG_VERBOSE":                 SeverityInfo,
 }
 
 // warningSeverity resolves the severity for one warning code. Handles

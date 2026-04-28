@@ -671,8 +671,9 @@ written differently for each:
 
 ### What to include
 
-- title: action-verb phrased ("Add retry backoff to payment gateway",
-  "Investigate session timeout hypothesis"). Avoid noun-only titles.
+- title: see "Title quality" below — locale-agnostic META rules + the
+  locale-specific length / jargon set lives in the embedded titleguide
+  baseline (extensible per CONTRIBUTING_LOCALE.md).
 - body: follow _template_task structure — 목적/범위/분석 요약/TODO
   (acceptance criteria as checkbox list)/리소스/TC·DoD/Open issues.
 - relates_to: attach the parent Decision/Analysis/Debug so the Task
@@ -762,15 +763,43 @@ context.for_task return them unconditionally.
 ## Artifact hygiene
 
 - Body language: %s.
-- Title: concise and unique. The exact-title conflict check will reject
-  duplicates. If your proposal matches an existing artifact, call
-  pindoc.artifact.read on the existing one and either supersede it or
-  pick a more specific title.
 - Long bodies: prefer H2/H3 section structure. The embedding layer
   chunks on heading boundaries, so well-structured markdown becomes
   better search results for free.
 - Code references: use relative paths or full GitHub blob URLs with
   line ranges. The agent at the other end of the graph can follow these.
+
+## Title quality (META rules — apply across every locale)
+
+These rules govern any artifact title regardless of language. The
+locale-specific knobs (length bounds, jargon token sets) live as DATA
+in the titleguide package (internal/pindoc/titleguide/locale_data.go)
+plus optional operator overrides — adding a locale means contributing
+a JSON-shaped entry there, not editing this PINDOC.md (see
+docs/CONTRIBUTING_LOCALE.md).
+
+- Specific over generic. The title is the primary search key six months
+  from now; an unfamiliar reader should be able to recognise the artifact
+  from the title alone. Avoid sentence-fillers ("audit", "review",
+  "various", "general", "기타", "처리", "내용") — the embedded baseline
+  flags many of these as TITLE_GENERIC_TOKENS. Project-specific jargon
+  ("Layer N", "Phase D") may be added to the override set.
+- Distinctive keywords up front. Put the noun the artifact is *about*
+  near the start. Embedding retrieval gives early tokens stronger
+  weight, and Cmd+K matches prefixes faster.
+- Avoid duplicating Type. The Type chip already shows "Task / Decision",
+  so titles starting with "Task: …" repeat. Skip the prefix.
+- Keep length in band. The locale baseline emits TITLE_TOO_SHORT /
+  TITLE_TOO_LONG outside its band; treat these as warn-level — fix
+  before commit unless the title is genuinely irreducible.
+- Unique within the project. The exact-title conflict check rejects
+  duplicates. If your proposal matches an existing artifact, call
+  pindoc.artifact.read on it and either supersede it or pick a more
+  specific title.
+
+When propose returns TITLE_GENERIC_TOKENS:tok1,tok2, edit the named
+tokens before retrying — the suffix tells you exactly which substrings
+tripped the gate.
 
 ## Markdown rendering contract
 

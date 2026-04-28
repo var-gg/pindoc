@@ -19,10 +19,18 @@ func TestWarningSeverity(t *testing.T) {
 		"CONSENT_REQUIRED_FOR_USER_CHAT":     SeverityWarn,
 		"SOURCE_TYPE_UNCLASSIFIED":           SeverityWarn,
 		"BODY_HAS_H1_REDUNDANT":              SeverityWarn,
-		"TITLE_LONG":                         SeverityWarn,
+		"TITLE_TOO_SHORT":                    SeverityWarn,
+		"TITLE_TOO_LONG":                     SeverityWarn,
+		"TITLE_GENERIC_TOKENS":               SeverityWarn,
 		"SECTION_DUPLICATES_EDGES":           SeverityWarn,
+		"SLUG_VERBOSE":                       SeverityWarn,
 		"RECOMMEND_READ_BEFORE_CREATE":       SeverityInfo,
-		"SLUG_VERBOSE":                       SeverityInfo,
+
+		// prefix match — locale-suffixed TITLE_TOO_LONG:60_runes
+		// should still resolve via the base code, same as the
+		// CANONICAL_REWRITE prefix case below.
+		"TITLE_TOO_LONG:60_runes":      SeverityWarn,
+		"TITLE_GENERIC_TOKENS:기타,처리": SeverityWarn,
 
 		// prefix match — CANONICAL_REWRITE_WITHOUT_EVIDENCE:<sections>
 		// should still resolve via the base code.

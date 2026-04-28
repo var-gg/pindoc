@@ -22,6 +22,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/i18n"
 	"github.com/var-gg/pindoc/internal/pindoc/policy"
 	"github.com/var-gg/pindoc/internal/pindoc/receipts"
+	"github.com/var-gg/pindoc/internal/pindoc/titleguide"
 )
 
 // ValidArtifactTypes are the types Phase 2 accepts. Tier A (7) + Tier B
@@ -976,7 +977,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			warnings := createWarnings(ctx, deps, projectID, in.Title, in.BodyMarkdown)
 			warnings = append(warnings, commitMsgWarnings...)
 			warnings = append(warnings, pinPathWarnings(deps, in.Pins)...)
-			warnings = append(warnings, titleLengthWarnings(in.Title)...)
+			warnings = append(warnings, titleQualityWarnings(in.Title, in.BodyLocale, projectTitleJargon(deps))...)
 			warnings = append(warnings, bodyH1Warnings(in.BodyMarkdown)...)
 			warnings = append(warnings, requiredH2WarningsFor(ctx, deps, scope.ProjectSlug, in.BodyMarkdown, in.Type)...)
 			warnings = append(warnings, sectionDuplicatesEdgesWarnings(in.BodyMarkdown)...)
@@ -1570,11 +1571,23 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 func updatePathWarnings(ctx context.Context, deps Deps, projectSlug string, in artifactProposeInput) []string {
 	var out []string
 	out = append(out, pinPathWarnings(deps, in.Pins)...)
-	out = append(out, titleLengthWarnings(in.Title)...)
+	out = append(out, titleQualityWarnings(in.Title, in.BodyLocale, projectTitleJargon(deps))...)
 	out = append(out, bodyH1Warnings(in.BodyMarkdown)...)
 	out = append(out, requiredH2WarningsFor(ctx, deps, projectSlug, in.BodyMarkdown, in.Type)...)
 	out = append(out, sectionDuplicatesEdgesWarnings(in.BodyMarkdown)...)
 	return out
+}
+
+// projectTitleJargon returns the operator-supplied jargon set that
+// extends the embedded locale baseline. Today the override path is not
+// yet wired into server_settings — this returns nil and the embedded
+// LocaleData jargon set is the only signal. The signature is in place
+// so the follow-up that lands `server_settings.title_jargon_tokens`
+// (and eventually `project_settings`) flips a single helper without
+// touching every call site. See docs/CONTRIBUTING_LOCALE.md for the
+// extensibility contract this anchors.
+func projectTitleJargon(_ Deps) []string {
+	return nil
 }
 
 // embedderInfo returns a pointer-typed EmbedderInfo ready for the propose
@@ -2012,26 +2025,32 @@ func slugify(s string) string {
 	return s
 }
 
-const slugBrevityThresholdRunes = 25
-
+// slugBrevityAdvisory was a 25-rune fixed gate before the 2026-04-28
+// title-guide locale split. The threshold now comes from
+// titleguide.SlugVerboseThreshold(body_locale) so a verbose-slug
+// warning fires at a band proportional to the title length the locale
+// allows. SLUG_VERBOSE was promoted from info → warn in the same pass
+// because dogfood data showed agents (incl. this one) silently shipping
+// slugs the info-tier severity made too easy to ignore.
 func slugBrevityAdvisory(in artifactProposeInput, finalSlug string) ([]string, []string) {
 	if strings.TrimSpace(in.Slug) != "" {
 		return nil, nil
 	}
+	threshold := titleguide.SlugVerboseThreshold(in.BodyLocale)
 	n := utf8.RuneCountInString(finalSlug)
-	if n < slugBrevityThresholdRunes {
+	if n < threshold {
 		return nil, nil
 	}
 	actions := []string{
-		fmt.Sprintf("SLUG_VERBOSE: auto-generated slug %q is %d runes; consider passing an explicit shorter slug.", finalSlug, n),
+		fmt.Sprintf("SLUG_VERBOSE: auto-generated slug %q is %d runes (locale=%s threshold=%d); pass an explicit shorter slug.", finalSlug, n, strings.TrimSpace(in.BodyLocale), threshold),
 	}
-	for _, candidate := range conciseSlugCandidates(in.Type, in.Title, finalSlug) {
+	for _, candidate := range conciseSlugCandidates(in.Type, in.Title, finalSlug, threshold) {
 		actions = append(actions, fmt.Sprintf("Candidate explicit slug: `%s`", candidate))
 	}
 	return []string{"SLUG_VERBOSE"}, actions
 }
 
-func conciseSlugCandidates(artType, title, finalSlug string) []string {
+func conciseSlugCandidates(artType, title, finalSlug string, threshold int) []string {
 	prefix := slugify(artType)
 	if prefix == "" {
 		prefix = "artifact"
@@ -2049,7 +2068,7 @@ func conciseSlugCandidates(artType, title, finalSlug string) []string {
 			return
 		}
 		candidate := prefix + "-" + strings.Join(parts, "-")
-		candidate = trimSlugRunes(candidate, slugBrevityThresholdRunes)
+		candidate = trimSlugRunes(candidate, threshold)
 		if candidate == "" || candidate == finalSlug {
 			return
 		}
@@ -3154,17 +3173,21 @@ func pinPathWarnings(deps Deps, pins []ArtifactPinInput) []string {
 	return out
 }
 
-// titleLengthWarnings flags title rune count outside the human-readable
-// band (Decision decision-title-heading-rule-preflight). rune-based so the
-// gate is language-neutral — 한글/영문/CJK/아랍 동등. Warning-level only.
-func titleLengthWarnings(title string) []string {
-	n := len([]rune(strings.TrimSpace(title)))
-	var out []string
-	if n < 15 {
-		out = append(out, fmt.Sprintf("TITLE_TOO_SHORT:%d_runes", n))
-	}
-	if n > 80 {
-		out = append(out, fmt.Sprintf("TITLE_TOO_LONG:%d_runes", n))
+// titleQualityWarnings runs the locale-aware title evaluation defined in
+// the titleguide package — length bounds + jargon-token detection. The
+// `decision-title-heading-rule-preflight` decision used to live inline
+// here as a fixed 15/80 band; 2026-04-28 dogfood split the language-
+// neutral META rules from the per-locale DATA so adding a new locale
+// (ja, etc.) is a JSON-shaped contribution rather than a Go rewrite.
+//
+// `bodyLocale` should be the artifact's body_locale; empty falls through
+// to the embedded en baseline. `extraJargon` is the project-side override
+// (instance settings → eventually project_settings).
+func titleQualityWarnings(title, bodyLocale string, extraJargon []string) []string {
+	findings := titleguide.EvaluateTitle(title, bodyLocale, titleguide.ProjectOverride{ExtraJargon: extraJargon})
+	out := make([]string, 0, len(findings))
+	for _, f := range findings {
+		out = append(out, f.Code)
 	}
 	return out
 }
