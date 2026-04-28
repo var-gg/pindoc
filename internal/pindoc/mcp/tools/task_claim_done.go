@@ -12,6 +12,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
+	pgit "github.com/var-gg/pindoc/internal/pindoc/git"
 )
 
 // taskClaimDoneInput is the agent-facing shape for pindoc.task.claim_done.
@@ -44,6 +45,21 @@ type taskClaimDoneInput struct {
 	// AuthorVersion is the model/client version tag stored alongside the
 	// revision (e.g. "opus-4.7").
 	AuthorVersion string `json:"author_version,omitempty" jsonschema:"e.g. 'opus-4.7'"`
+
+	// CommitSHA is an optional commit hash that proves this Task's
+	// implementation. Recorded in shape_payload (claim_done lane) and
+	// prefixed onto commit_msg as "[<short>] ..." so revision history
+	// shows the implementation source at a glance. Length 7-64,
+	// hex-only; empty / whitespace is treated as "no commit attached".
+	CommitSHA string `json:"commit_sha,omitempty" jsonschema:"optional 7-64 char hex commit hash that proves implementation; recorded on the revision and prefixed onto commit_msg"`
+
+	// Pins attaches structured implementation evidence to the artifact.
+	// Same shape as artifact.propose pins[]. Each pin lands in
+	// artifact_pins so the Reader Sidecar references panel renders it
+	// without any extra hop. Duplicates against existing pins are
+	// silently skipped (warnings carry PIN_DUPLICATE_SKIPPED:<path>) so
+	// claim_done stays idempotent on retry.
+	Pins []ArtifactPinInput `json:"pins,omitempty" jsonschema:"optional implementation evidence; same shape as artifact.propose pins[] — duplicates are skipped silently"`
 }
 
 type taskClaimDoneOutput struct {
@@ -61,9 +77,12 @@ type taskClaimDoneOutput struct {
 	RevisionNumber         int    `json:"revision_number,omitempty"`
 	HumanURL               string `json:"human_url,omitempty"`
 	HumanURLAbs            string `json:"human_url_abs,omitempty"`
-	ChangedAcceptanceCount int    `json:"changed_acceptance_count"`
-	PrevStatus             string `json:"prev_status,omitempty"`
-	NewStatus              string `json:"new_status,omitempty"`
+	ChangedAcceptanceCount int      `json:"changed_acceptance_count"`
+	PrevStatus             string   `json:"prev_status,omitempty"`
+	NewStatus              string   `json:"new_status,omitempty"`
+	CommitSHA              string   `json:"commit_sha,omitempty"`
+	PinsStored             int      `json:"pins_stored"`
+	Warnings               []string `json:"warnings,omitempty"`
 }
 
 // RegisterTaskClaimDone wires pindoc.task.claim_done. The handler resolves
@@ -78,7 +97,7 @@ func RegisterTaskClaimDone(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.task.claim_done",
-			Description: "Mark a Task implementation complete. Toggles every unchecked acceptance item ('- [ ]') to '[x]' and sets task_meta.status='claimed_done' in one atomic revision. Already-resolved markers ([x]/[~]/[-]) are preserved — partial / deferred judgment calls are not overwritten. Bypasses search_receipt gating (operational metadata lane). Reason is optional (stored as commit_msg). Use pindoc.artifact.verify to move from claimed_done → verified.",
+			Description: "Mark a Task implementation complete. Toggles every unchecked acceptance item ('- [ ]') to '[x]' and sets task_meta.status='claimed_done' in one atomic revision. Already-resolved markers ([x]/[~]/[-]) are preserved — partial / deferred judgment calls are not overwritten. Bypasses search_receipt gating (operational metadata lane). When the Task involved code/doc/config changes, pass commit_sha (7-64 hex chars, prefixed onto commit_msg as '[<short>] ...') and/or pins[] (same shape as artifact.propose pins[]) so the Reader references panel renders the implementation source without an add_pin round-trip; duplicate pins are silently skipped. Reason is optional (stored as commit_msg). Use pindoc.artifact.verify to move from claimed_done → verified.",
 		},
 		func(ctx context.Context, p *auth.Principal, in taskClaimDoneInput) (*sdk.CallToolResult, taskClaimDoneOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -136,6 +155,30 @@ func claimOneTaskDone(
 				Checklist: []string{fmt.Sprintf("reason must be %d-%d runes (got %d)", reasonMinLen, reasonMaxLen, runeCount)},
 			}, nil
 		}
+	}
+
+	// Evidence args (commit_sha, pins[]) are validated up-front so a
+	// malformed pin path or a paste-error commit hash doesn't slip into
+	// the transaction. Both are optional — empty input means "claim_done
+	// without structured evidence", which is still a valid call (e.g.
+	// doc-only or decision-only Tasks).
+	commitSHA, sCode, sMsg := validateClaimDoneCommitSHA(in.CommitSHA)
+	if sCode != "" {
+		return taskClaimDoneOutput{
+			Status:    "not_ready",
+			ErrorCode: sCode,
+			Failed:    []string{sCode},
+			Checklist: []string{sMsg},
+		}, nil
+	}
+	pinsValidated, pCode, pMsg := validateClaimDonePins(in.Pins)
+	if pCode != "" {
+		return taskClaimDoneOutput{
+			Status:    "not_ready",
+			ErrorCode: pCode,
+			Failed:    []string{pCode},
+			Checklist: []string{pMsg},
+		}, nil
 	}
 
 	var (
@@ -232,6 +275,7 @@ func claimOneTaskDone(
 			commitMsg = "claim_done: status → claimed_done"
 		}
 	}
+	commitMsg = prefixClaimDoneCommitMsg(commitMsg, commitSHA)
 
 	effAuthorID := strings.TrimSpace(in.AuthorID)
 	if effAuthorID == "" && p != nil {
@@ -246,15 +290,19 @@ func claimOneTaskDone(
 	// only knows the four legacy values. The kind=claim_done marker lets
 	// future analytics / Reader Trust Card pick claim_done revisions out
 	// of the body_patch bucket without a schema change.
+	//
+	// commit_sha and pins_stored land here so revision history alone
+	// (no extra join on artifact_pins) tells the Reader which revision
+	// attached which evidence — pins_stored is filled in after the
+	// transaction-time dedup, not from len(pinsValidated).
 	shapePayload := map[string]any{
 		"kind":                     "claim_done",
 		"changed_acceptance_count": changedCount,
 		"prev_status":              prevStatus,
 		"new_status":               "claimed_done",
 	}
-	shapePayloadJSON, err := json.Marshal(shapePayload)
-	if err != nil {
-		return taskClaimDoneOutput{}, fmt.Errorf("marshal shape_payload: %w", err)
+	if commitSHA != "" {
+		shapePayload["commit_sha"] = commitSHA
 	}
 
 	tx, err := deps.DB.Begin(ctx)
@@ -262,6 +310,49 @@ func claimOneTaskDone(
 		return taskClaimDoneOutput{}, fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Pin attachment runs *inside* the transaction so artifact_pins,
+	// artifact_revisions, and the events row commit or roll back
+	// together. Duplicates against existing pins are skipped silently
+	// (PIN_DUPLICATE_SKIPPED:<path> warning) — claim_done must be
+	// idempotent on retry, unlike artifact.add_pin which rejects dups
+	// to surface accidental re-adds.
+	pinsStored := 0
+	pinWarnings := []string{}
+	if len(pinsValidated) > 0 {
+		nonDup := make([]ArtifactPinInput, 0, len(pinsValidated))
+		for _, pin := range pinsValidated {
+			resolvedRepoID, _, rerr := pgit.ResolvePinRepoID(ctx, tx, projectID, pin.RepoID, pin.Repo, pin.Path, deps.RepoRoot)
+			if rerr != nil {
+				return taskClaimDoneOutput{}, fmt.Errorf("resolve claim_done pin repo: %w", rerr)
+			}
+			if resolvedRepoID != "" {
+				pin.RepoID = resolvedRepoID
+			}
+			dup, derr := pinDuplicateExists(ctx, tx, artifactID, resolvedRepoID, pin)
+			if derr != nil {
+				return taskClaimDoneOutput{}, fmt.Errorf("check claim_done pin duplicate: %w", derr)
+			}
+			if dup {
+				pinWarnings = append(pinWarnings, "PIN_DUPLICATE_SKIPPED:"+pin.Path)
+				continue
+			}
+			nonDup = append(nonDup, pin)
+		}
+		stored, repoWarnings, ierr := insertPins(ctx, tx, projectID, artifactID, nonDup, deps.RepoRoot)
+		if ierr != nil {
+			return taskClaimDoneOutput{}, ierr
+		}
+		pinsStored = stored
+		pinWarnings = append(pinWarnings, repoWarnings...)
+	}
+	if pinsStored > 0 {
+		shapePayload["pins_stored"] = pinsStored
+	}
+	shapePayloadJSON, err := json.Marshal(shapePayload)
+	if err != nil {
+		return taskClaimDoneOutput{}, fmt.Errorf("marshal shape_payload: %w", err)
+	}
 
 	newRev := lastRev + 1
 
@@ -335,9 +426,11 @@ func claimOneTaskDone(
 			'author_id',                $5::text,
 			'commit_msg',               $6::text,
 			'changed_acceptance_count', $7::int,
-			'prev_status',              $8::text
+			'prev_status',              $8::text,
+			'commit_sha',               NULLIF($9::text, ''),
+			'pins_stored',              $10::int
 		))
-	`, projectID, artifactID, newRev, currentSlug, effAuthorID, commitMsg, changedCount, prevStatus); err != nil {
+	`, projectID, artifactID, newRev, currentSlug, effAuthorID, commitMsg, changedCount, prevStatus, commitSHA, pinsStored); err != nil {
 		return taskClaimDoneOutput{}, fmt.Errorf("emit task_claimed_done event: %w", err)
 	}
 
@@ -345,6 +438,10 @@ func claimOneTaskDone(
 		return taskClaimDoneOutput{}, fmt.Errorf("commit task.claim_done: %w", err)
 	}
 
+	var outWarnings []string
+	if len(pinWarnings) > 0 {
+		outWarnings = pinWarnings
+	}
 	return taskClaimDoneOutput{
 		Status:                 "accepted",
 		ArtifactID:             artifactID,
@@ -356,7 +453,74 @@ func claimOneTaskDone(
 		ChangedAcceptanceCount: changedCount,
 		PrevStatus:             prevStatus,
 		NewStatus:              "claimed_done",
+		CommitSHA:              commitSHA,
+		PinsStored:             pinsStored,
+		Warnings:               outWarnings,
 	}, nil
+}
+
+// validateClaimDoneCommitSHA normalises and length/charset-checks the
+// optional commit_sha argument. Empty / whitespace-only input returns
+// ("", "", "") so callers can treat "no commit attached" the same as the
+// pre-extension contract. Bad input returns the trimmed value plus a
+// stable error code so the handler can short-circuit to not_ready.
+//
+// We accept 7-64 hex chars: 7 covers `git rev-parse --short`, 40 covers
+// SHA-1, 64 covers SHA-256 (git's future objformat). Anything outside
+// that band is almost certainly a paste error.
+func validateClaimDoneCommitSHA(raw string) (string, string, string) {
+	v := strings.TrimSpace(raw)
+	if v == "" {
+		return "", "", ""
+	}
+	runeLen := utf8.RuneCountInString(v)
+	if runeLen < 7 || runeLen > 64 {
+		return v, "CLAIM_DONE_COMMIT_SHA_LENGTH_INVALID",
+			fmt.Sprintf("commit_sha must be 7-64 chars (got %d)", runeLen)
+	}
+	for _, r := range v {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return v, "CLAIM_DONE_COMMIT_SHA_FORMAT_INVALID",
+				"commit_sha must be hex (0-9 / a-f / A-F)"
+		}
+	}
+	return v, "", ""
+}
+
+// prefixClaimDoneCommitMsg prepends "[<short>] " to commitMsg when
+// commitSHA is non-empty. Short SHA is the first 8 hex chars (or the
+// full SHA when shorter). When commitSHA is empty the message is
+// returned unchanged so callers can pass it through unconditionally.
+func prefixClaimDoneCommitMsg(commitMsg, commitSHA string) string {
+	if commitSHA == "" {
+		return commitMsg
+	}
+	short := commitSHA
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	return fmt.Sprintf("[%s] %s", short, commitMsg)
+}
+
+// validateClaimDonePins runs the same path/url/line-range checks as
+// artifact.add_pin's normalizeAddPinInput across the whole pins[]
+// array, normalising kinds in place. Returns the first failing index
+// + a stable error code so the handler can surface it without a
+// half-applied state. nil / empty input returns (nil, "", "").
+func validateClaimDonePins(pins []ArtifactPinInput) ([]ArtifactPinInput, string, string) {
+	if len(pins) == 0 {
+		return nil, "", ""
+	}
+	out := make([]ArtifactPinInput, len(pins))
+	copy(out, pins)
+	for i := range out {
+		normalised, code, msg := normalizeAddPinInput(out[i])
+		if code != "" {
+			return nil, "CLAIM_DONE_PIN_INVALID:" + code, fmt.Sprintf("pins[%d]: %s", i, msg)
+		}
+		out[i] = normalised
+	}
+	return out, "", ""
 }
 
 // markUncheckedAsDone returns (newBody, changedCount). Walks every 4-state
