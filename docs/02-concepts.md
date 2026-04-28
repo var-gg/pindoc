@@ -200,7 +200,7 @@ URL → `pindoc.artifact.read(url)` fetch 시 받는 번들: `{ artifact, neighb
 | **L1 Reading raw** | `read_events` (raw fact) | 한 세션의 dwell·scroll·idle | Reader가 페이지를 본 매 순간 (route / hidden / beforeunload) flush |
 | **L2 Read state** | `artifact_read_states` view + `readstate.Classify` | per-(artifact, user) 분류: `unseen` / `glanced` / `read` / `deeply_read`. `completion_pct = min(active_sec/expected_sec, 1) × scroll_max`, expected_sec은 본문 글자수 ÷ locale별 reading speed (ko 600 chars/min, en 1250 chars/min, 최소 10초 floor). 임계 read≥0.5 / deeply_read≥0.8 | L1 INSERT 시 view가 자동 재계산 |
 | **L3 Acknowledgement** | `reader_watermarks` | 사용자가 Today stream을 검토했다는 명시적 신호. project-level | Today viewport observer (1.5초 dwell) 또는 명시 "모두 읽음" 버튼만. **L1 / L2는 L3을 건드리지 않는다.** |
-| **L4 Verification** | `artifact_meta.verification_state` | AI 변경에 대한 정합 검증. `unverified` / `partially_verified` / `verified` | 명시 verify 호출 (`pindoc.artifact.verify`)만. Read state는 input signal이지 자동 transition이 아니다. |
+| **L4 Verification** | `artifact_meta.verification_state` | AI 변경에 대한 정합 검증. `unverified` / `partially_verified` / `verified` | 근거 pin과 함께 `artifact.propose`로 명시 갱신한다. Read state는 input signal이지 자동 transition이 아니다. |
 
 연결:
 - **MCP `pindoc.artifact.read_state`** — L2 노출. agent가 "사람이 이 artifact를 읽었나?" 조회해 L4 promotion 판단의 입력으로 사용.

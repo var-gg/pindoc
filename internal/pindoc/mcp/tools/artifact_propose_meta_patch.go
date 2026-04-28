@@ -57,10 +57,10 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 	}
 
 	// Task status transitions are reserved for pindoc.task.transition /
-	// pindoc.artifact.verify. meta_patch is the operational-metadata lane
+	// task-specific lifecycle tools. meta_patch is the operational-metadata lane
 	// (Decision agent-only-write-분할) — keeping status gates out of this
 	// path prevents the UI-facing endpoint from bypassing the acceptance-
-	// checklist check or the Implementer ≠ Verifier invariant.
+	// checklist check.
 	if in.TaskMeta != nil && strings.TrimSpace(in.TaskMeta.Status) != "" {
 		return nil, artifactProposeOutput{
 			Status:          "not_ready",

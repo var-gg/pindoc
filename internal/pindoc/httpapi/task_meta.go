@@ -33,8 +33,7 @@ func sha256HexOf(s string) string {
 // bridge the Reader's TaskControls component hits — it mirrors the
 // server contract of pindoc.artifact.propose(shape=body_patch +
 // task_meta.status) for status and shape=meta_patch for assignee /
-// priority / due_at. `verified` still belongs to pindoc.artifact.verify,
-// and `claimed_done` keeps the acceptance-completion gate.
+// priority / due_at. `claimed_done` keeps the acceptance-completion gate.
 //
 // Why not let TaskControls call MCP directly: the Reader is a browser
 // context that can't speak stdio JSON-RPC to a local MCP subprocess.
@@ -144,8 +143,8 @@ func countTaskAcceptanceResolution(body string) (resolved, total int) {
 //     changes rails render the revision
 //
 // Status is allowed for open / claimed_done / blocked / cancelled only.
-// verified remains verify-tool only, and claimed_done is rejected unless
-// the current body has no unresolved acceptance checkboxes.
+// claimed_done is rejected unless the current body has no unresolved
+// acceptance checkboxes.
 func (d Deps) handleTaskMetaPatch(w http.ResponseWriter, r *http.Request) {
 	// task_meta is the operational-metadata write lane (Decision
 	// agent-only-write-분할). Authorization rides on the resolved
@@ -277,11 +276,8 @@ func (d Deps) applyTaskMetaPatch(
 	if in.Status != nil {
 		v := strings.TrimSpace(*in.Status)
 		if v != "" {
-			if v == "verified" {
-				return zero, newTaskMetaApplyError(http.StatusBadRequest, "VER_VIA_VERIFY_TOOL_ONLY", "status=verified must be set via pindoc.artifact.verify", "status")
-			}
 			if _, ok := validTaskStatuses[v]; !ok {
-				return zero, newTaskMetaApplyError(http.StatusBadRequest, "TASK_STATUS_INVALID", "status must be one of open | claimed_done | blocked | cancelled; verified is verify-tool only", "status")
+				return zero, newTaskMetaApplyError(http.StatusBadRequest, "TASK_STATUS_INVALID", "status must be one of open | claimed_done | blocked | cancelled", "status")
 			}
 			if v == "claimed_done" {
 				statusNeedsAcceptanceGate = true

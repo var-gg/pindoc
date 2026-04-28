@@ -20,7 +20,7 @@ function assertEntryComplete(entry: VisualEntry, path: string): void {
 }
 
 function testTokenCounts(): void {
-  assertEqual(Object.keys(visualLanguage.types).length, 12, "Type token count");
+  assertEqual(Object.keys(visualLanguage.types).length, 11, "Type token count");
   assertEqual(Object.keys(visualLanguage.areas).length, 14, "Area token count");
   assertEqual(Object.keys(visualLanguage.relations).length, 5, "Relation token count");
   assertEqual(Object.keys(visualLanguage.pins).length, 6, "Pin token count");

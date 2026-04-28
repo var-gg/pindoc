@@ -4,7 +4,7 @@ export const TASK_REVIEW_BACKLOG_THRESHOLD = 50;
 export const TASK_REVIEW_INITIAL_LIMIT = 12;
 export const TASK_DEFAULT_PAGE_SIZE = 50;
 
-const TASK_STATUS_COLUMNS = ["open", "claimed_done", "verified", "blocked", "cancelled"] as const;
+const TASK_STATUS_COLUMNS = ["open", "claimed_done", "blocked", "cancelled"] as const;
 const PRIORITY_RANK: Record<string, number> = {
   p0: 0,
   p1: 1,
@@ -17,7 +17,6 @@ export type TaskBoardSummary = {
   open: number;
   blocked: number;
   recentDone: number;
-  verified: number;
 };
 
 export function groupTasksByStatus(list: ArtifactRef[]): Map<string, ArtifactRef[]> {
@@ -78,13 +77,11 @@ export function taskBoardSummary(groups: Map<string, ArtifactRef[]>): TaskBoardS
   const reviewQueue = groups.get("claimed_done")?.length ?? 0;
   const open = (groups.get("open")?.length ?? 0) + (groups.get("no_status")?.length ?? 0);
   const blocked = groups.get("blocked")?.length ?? 0;
-  const verified = groups.get("verified")?.length ?? 0;
   return {
     reviewQueue,
     open,
     blocked,
-    recentDone: reviewQueue + verified,
-    verified,
+    recentDone: reviewQueue,
   };
 }
 

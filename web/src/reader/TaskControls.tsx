@@ -1,8 +1,7 @@
 // TaskControls renders the operational-metadata edit lane for Task
 // artifacts — the visible half of Decision agent-only-write-분할. Status
-// is editable for open / claimed_done / blocked / cancelled; verified
-// stays read-only because only pindoc.artifact.verify can set it. The
-// server re-checks the claimed_done acceptance gate.
+// is editable for open / claimed_done / blocked / cancelled. The server
+// re-checks the claimed_done acceptance gate.
 //
 // Edit contract:
 //   - only renders when detail.type === "Task"
@@ -62,6 +61,10 @@ type Priority = (typeof PRIORITIES)[number];
 const EDITABLE_STATUSES = ["open", "claimed_done", "blocked", "cancelled"] as const;
 type EditableStatus = (typeof EDITABLE_STATUSES)[number];
 
+function editableTaskStatus(status: string | undefined): EditableStatus | "" {
+  return EDITABLE_STATUSES.includes(status as EditableStatus) ? (status as EditableStatus) : "";
+}
+
 // M1 has no /api/user/current endpoint, so edits are attributed to a
 // stable web-originated identity. When V1.5 ships the user-identity
 // endpoint this becomes dynamic.
@@ -119,9 +122,7 @@ export function TaskControls({ projectSlug, detail, providers, bindAddr: _bindAd
 
   const [assignee, setAssignee] = useState<string>(taskMeta.assignee ?? "");
   const [priority, setPriority] = useState<Priority | "">((taskMeta.priority as Priority | undefined) ?? "");
-  const [status, setStatus] = useState<EditableStatus | "verified" | "">(
-    (taskMeta.status as EditableStatus | "verified" | undefined) ?? "",
-  );
+  const [status, setStatus] = useState<EditableStatus | "">(editableTaskStatus(taskMeta.status));
   const [dueAt, setDueAt] = useState<string>(() => toDatetimeLocal(taskMeta.due_at));
   const [saving, setSaving] = useState(false);
   const [errorCode, setErrorCode] = useState<string | null>(null);
@@ -146,7 +147,7 @@ export function TaskControls({ projectSlug, detail, providers, bindAddr: _bindAd
   useEffect(() => {
     setAssignee(taskMeta.assignee ?? "");
     setPriority((taskMeta.priority as Priority | undefined) ?? "");
-    setStatus((taskMeta.status as EditableStatus | "verified" | undefined) ?? "");
+    setStatus(editableTaskStatus(taskMeta.status));
     setDueAt(toDatetimeLocal(taskMeta.due_at));
     setErrorCode(null);
     setErrorMsg(null);
@@ -230,7 +231,7 @@ export function TaskControls({ projectSlug, detail, providers, bindAddr: _bindAd
     };
     const trimmedAssignee = assignee.trim();
     const assigneeChanged = trimmedAssignee !== (taskMeta.assignee ?? "").trim();
-    if (status && status !== "verified" && status !== taskMeta.status) {
+    if (status && status !== taskMeta.status) {
       input.status = status;
     }
     if (priority && priority !== taskMeta.priority) {
@@ -289,10 +290,10 @@ export function TaskControls({ projectSlug, detail, providers, bindAddr: _bindAd
         <span style={{ fontSize: 11, color: "var(--fg-3)", minWidth: 58 }}>
           {t("task_controls.status")}
         </span>
-        <Tooltip content={status === "verified" ? t("task_controls.status_verified_readonly") : undefined}>
+        <Tooltip content={undefined}>
           <select
             value={status}
-            disabled={readOnly || saving || status === "verified"}
+            disabled={readOnly || saving}
             onChange={(e) => {
               const v = e.target.value as EditableStatus;
               setStatus(v);
@@ -310,7 +311,6 @@ export function TaskControls({ projectSlug, detail, providers, bindAddr: _bindAd
             }}
           >
             {status === "" && <option value="">{t("tasks.col_no_status")}</option>}
-            {status === "verified" && <option value="verified">{t("tasks.col_verified")}</option>}
             {EDITABLE_STATUSES.map((s) => (
               <option key={s} value={s}>
                 {taskStatusLabel(s, t)}

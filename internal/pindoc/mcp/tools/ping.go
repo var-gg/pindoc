@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -47,10 +48,13 @@ type pingOutput struct {
 	ReconcileCandidates   []ReconcileCandidate `json:"reconcile_candidates,omitempty"`
 	ReconcileSummary      *ReconcileSummary    `json:"reconcile_summary,omitempty"`
 	HarnessDriftHint      *HarnessDriftHint    `json:"harness_drift_hint,omitempty"`
+	HarnessDriftHints     []HarnessDriftHint   `json:"harness_drift_hints,omitempty"`
+	HarnessBlocked        bool                 `json:"harness_blocked,omitempty"`
 }
 
 type HarnessDriftHint struct {
 	Detected            bool   `json:"detected"`
+	Severity            string `json:"severity,omitempty"`
 	SuggestedCall       string `json:"suggested_call"`
 	Reason              string `json:"reason,omitempty"`
 	Path                string `json:"path,omitempty"`
@@ -65,7 +69,6 @@ type PingProjectSummary struct {
 	ArtifactsCount       int    `json:"artifacts_count"`
 	OpenTaskCount        int    `json:"open_task_count"`
 	ClaimedDoneTaskCount int    `json:"claimed_done_task_count"`
-	VerifiedTaskCount    int    `json:"verified_task_count"`
 	BlockedTaskCount     int    `json:"blocked_task_count"`
 	CancelledTaskCount   int    `json:"cancelled_task_count"`
 }
@@ -102,7 +105,14 @@ func RegisterPing(server *sdk.Server, deps Deps) {
 				projectSlug = strings.TrimSpace(deps.DefaultProjectSlug)
 			}
 			if strings.TrimSpace(in.WorkingDirectory) != "" {
-				out.HarnessDriftHint = detectHarnessDrift(in.WorkingDirectory, projectSlug)
+				hints := detectHarnessDrifts(in.WorkingDirectory, projectSlug)
+				if len(hints) > 0 {
+					out.HarnessDriftHints = hints
+					out.HarnessDriftHint = &out.HarnessDriftHints[0]
+					out.HarnessBlocked = harnessDriftBlocked(hints)
+				} else {
+					out.HarnessDriftHint = detectHarnessDrift(in.WorkingDirectory, projectSlug)
+				}
 			}
 			if projectSlug != "" && deps.DB != nil {
 				scope, err := auth.ResolveProject(ctx, deps.DB, p, projectSlug)
@@ -161,7 +171,6 @@ func pingProjectSummary(ctx context.Context, deps Deps, projectSlug string) (Pin
 			(SELECT count(*)::int FROM artifacts a JOIN projects p ON p.id = a.project_id WHERE p.slug = $1 AND a.status <> 'archived' AND a.status <> 'superseded'),
 			(SELECT count(*)::int FROM artifacts a JOIN projects p ON p.id = a.project_id WHERE p.slug = $1 AND a.type = 'Task' AND a.status <> 'archived' AND a.status <> 'superseded' AND COALESCE(NULLIF(a.task_meta->>'status', ''), 'open') = 'open'),
 			(SELECT count(*)::int FROM artifacts a JOIN projects p ON p.id = a.project_id WHERE p.slug = $1 AND a.type = 'Task' AND a.status <> 'archived' AND a.status <> 'superseded' AND a.task_meta->>'status' = 'claimed_done'),
-			(SELECT count(*)::int FROM artifacts a JOIN projects p ON p.id = a.project_id WHERE p.slug = $1 AND a.type = 'Task' AND a.status <> 'archived' AND a.status <> 'superseded' AND a.task_meta->>'status' = 'verified'),
 			(SELECT count(*)::int FROM artifacts a JOIN projects p ON p.id = a.project_id WHERE p.slug = $1 AND a.type = 'Task' AND a.status <> 'archived' AND a.status <> 'superseded' AND a.task_meta->>'status' = 'blocked'),
 			(SELECT count(*)::int FROM artifacts a JOIN projects p ON p.id = a.project_id WHERE p.slug = $1 AND a.type = 'Task' AND a.status <> 'archived' AND a.status <> 'superseded' AND a.task_meta->>'status' = 'cancelled')
 	`, projectSlug).Scan(
@@ -169,7 +178,6 @@ func pingProjectSummary(ctx context.Context, deps Deps, projectSlug string) (Pin
 		&out.ArtifactsCount,
 		&out.OpenTaskCount,
 		&out.ClaimedDoneTaskCount,
-		&out.VerifiedTaskCount,
 		&out.BlockedTaskCount,
 		&out.CancelledTaskCount,
 	)
@@ -177,6 +185,7 @@ func pingProjectSummary(ctx context.Context, deps Deps, projectSlug string) (Pin
 }
 
 func detectHarnessDrift(workingDirectory, expectedProjectSlug string) *HarnessDriftHint {
+	hints := detectHarnessDrifts(workingDirectory, expectedProjectSlug)
 	path := filepath.Join(strings.TrimSpace(workingDirectory), "PINDOC.md")
 	hint := &HarnessDriftHint{
 		Detected:            false,
@@ -184,31 +193,87 @@ func detectHarnessDrift(workingDirectory, expectedProjectSlug string) *HarnessDr
 		Path:                path,
 		ExpectedProjectSlug: strings.TrimSpace(expectedProjectSlug),
 	}
-	body, err := os.ReadFile(path)
-	if err != nil {
-		hint.Detected = true
-		if os.IsNotExist(err) {
-			hint.Reason = "PINDOC.md is missing in the workspace root."
-		} else {
-			hint.Reason = fmt.Sprintf("PINDOC.md could not be read: %v", err)
-		}
-		return hint
+	if len(hints) > 0 {
+		return &hints[0]
 	}
-	meta := parsePindocFrontmatter(string(body))
-	hint.FoundProjectSlug = meta["project_slug"]
-	hint.SchemaVersion = meta["schema_version"]
-	switch {
-	case strings.TrimSpace(hint.FoundProjectSlug) == "":
-		hint.Detected = true
-		hint.Reason = "PINDOC.md frontmatter is missing project_slug."
-	case hint.ExpectedProjectSlug != "" && hint.FoundProjectSlug != hint.ExpectedProjectSlug:
-		hint.Detected = true
-		hint.Reason = fmt.Sprintf("PINDOC.md project_slug=%q does not match expected project_slug=%q.", hint.FoundProjectSlug, hint.ExpectedProjectSlug)
-	case strings.TrimSpace(hint.SchemaVersion) == "":
-		hint.Detected = true
-		hint.Reason = "PINDOC.md frontmatter is missing schema_version."
+	body, err := os.ReadFile(path)
+	if err == nil {
+		meta := parsePindocFrontmatter(string(body))
+		hint.FoundProjectSlug = meta["project_slug"]
+		hint.SchemaVersion = meta["schema_version"]
 	}
 	return hint
+}
+
+func detectHarnessDrifts(workingDirectory, expectedProjectSlug string) []HarnessDriftHint {
+	path := filepath.Join(strings.TrimSpace(workingDirectory), "PINDOC.md")
+	base := HarnessDriftHint{
+		Detected:            true,
+		SuggestedCall:       "pindoc.harness.install",
+		Path:                path,
+		ExpectedProjectSlug: strings.TrimSpace(expectedProjectSlug),
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		hint := base
+		if os.IsNotExist(err) {
+			hint.Reason = "PINDOC.md is missing in the workspace root."
+			hint.Severity = "info"
+		} else {
+			hint.Reason = fmt.Sprintf("PINDOC.md could not be read: %v", err)
+			hint.Severity = "warning"
+		}
+		return []HarnessDriftHint{hint}
+	}
+	meta := parsePindocFrontmatter(string(body))
+	foundProjectSlug := meta["project_slug"]
+	schemaVersion := meta["schema_version"]
+	mk := func(severity, reason string) HarnessDriftHint {
+		hint := base
+		hint.Severity = severity
+		hint.Reason = reason
+		hint.FoundProjectSlug = foundProjectSlug
+		hint.SchemaVersion = schemaVersion
+		return hint
+	}
+	var hints []HarnessDriftHint
+	switch {
+	case strings.TrimSpace(foundProjectSlug) == "":
+		hints = append(hints, mk("warning", "PINDOC.md frontmatter is missing project_slug."))
+	case base.ExpectedProjectSlug != "" && foundProjectSlug != base.ExpectedProjectSlug:
+		hints = append(hints, mk("blocking", fmt.Sprintf("PINDOC.md project_slug=%q does not match expected project_slug=%q.", foundProjectSlug, base.ExpectedProjectSlug)))
+	}
+	if strings.TrimSpace(schemaVersion) == "" {
+		hints = append(hints, mk("info", "PINDOC.md frontmatter is missing schema_version."))
+	}
+	sortHarnessDriftHints(hints)
+	return hints
+}
+
+func harnessDriftBlocked(hints []HarnessDriftHint) bool {
+	for _, hint := range hints {
+		if hint.Severity == "blocking" {
+			return true
+		}
+	}
+	return false
+}
+
+func sortHarnessDriftHints(hints []HarnessDriftHint) {
+	sort.SliceStable(hints, func(i, j int) bool {
+		return harnessDriftSeverityRank(hints[i].Severity) < harnessDriftSeverityRank(hints[j].Severity)
+	})
+}
+
+func harnessDriftSeverityRank(severity string) int {
+	switch severity {
+	case "blocking":
+		return 0
+	case "warning":
+		return 1
+	default:
+		return 2
+	}
 }
 
 func parsePindocFrontmatter(body string) map[string]string {

@@ -195,8 +195,8 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	// Operational metadata edit — the one write surface the HTTP API
 	// exposes. Scope is locked to task_meta.status / assignee / priority /
 	// due_at / parent_slug per Decision agent-only-write-분할. The server
-	// still gates status transitions here: verified remains verify-tool only
-	// and claimed_done requires acceptance completion.
+	// still gates status transitions here: claimed_done requires acceptance
+	// completion.
 	mux.HandleFunc("POST /api/p/{project}/artifacts/{idOrSlug}/task-meta", d.handleTaskMetaPatch)
 	mux.HandleFunc("POST /api/p/{project}/artifacts/{idOrSlug}/task-assign", d.handleTaskAssign)
 

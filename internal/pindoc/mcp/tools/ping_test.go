@@ -39,6 +39,9 @@ func TestDetectHarnessDrift(t *testing.T) {
 		if hint.SuggestedCall != "pindoc.harness.install" {
 			t.Fatalf("suggested_call = %q", hint.SuggestedCall)
 		}
+		if hint.Severity != "info" {
+			t.Fatalf("missing PINDOC.md severity = %q, want info", hint.Severity)
+		}
 	})
 
 	t.Run("matching frontmatter", func(t *testing.T) {
@@ -60,6 +63,9 @@ func TestDetectHarnessDrift(t *testing.T) {
 		if !strings.Contains(hint.Reason, "expected project_slug") {
 			t.Fatalf("mismatch reason should mention expected project_slug: %q", hint.Reason)
 		}
+		if hint.Severity != "blocking" {
+			t.Fatalf("mismatch severity = %q, want blocking", hint.Severity)
+		}
 	})
 
 	t.Run("missing schema version", func(t *testing.T) {
@@ -70,6 +76,21 @@ func TestDetectHarnessDrift(t *testing.T) {
 			t.Fatalf("missing schema_version should be detected: %+v", hint)
 		}
 	})
+}
+
+func TestDetectHarnessDriftsSortsSeverity(t *testing.T) {
+	dir := t.TempDir()
+	writeTestPindoc(t, dir, "project_slug: other\n")
+	hints := detectHarnessDrifts(dir, "pindoc")
+	if len(hints) != 2 {
+		t.Fatalf("hints len = %d, want 2: %+v", len(hints), hints)
+	}
+	if hints[0].Severity != "blocking" || hints[1].Severity != "info" {
+		t.Fatalf("severity order = %q, %q; want blocking, info", hints[0].Severity, hints[1].Severity)
+	}
+	if !harnessDriftBlocked(hints) {
+		t.Fatalf("blocking hint should set harness_blocked")
+	}
 }
 
 func writeTestPindoc(t *testing.T, dir, frontmatter string) {

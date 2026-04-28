@@ -218,7 +218,7 @@ OAuth를 거친다. 4-mode "협업 모드 전환" 흐름은 폐기됐다.
 
 Tasks Surface 는 필터 적용 상태를 본문 상단에서 다시 선언한다. `Type=Task` 는 고정 chip 으로 보여 주고 Area 필터는 해제 가능한 chip 으로 표시한다. 필터 때문에 칸반 컬럼이나 전체 결과가 비면 "현재 필터에는 없음"과 "전체에는 몇 건 있음"을 함께 보여 주며, chip의 해제 버튼 또는 `Esc` 로 즉시 전체 scope 로 되돌아가게 한다. 이렇게 sidebar 선택 음영만으로 필터를 암시하지 않고, Task 탭 제목도 `Task · <scope> · 대기 N / 전체 M` 형태로 현재 scope 와 count 를 자기선언한다.
 
-Tasks 칸반 카드는 dual-action으로 동작한다. 카드 body 클릭은 URL을 바꾸지 않고 우측 Inspector를 채워 status, priority, assignee, due date 같은 operational metadata를 제자리 편집하게 한다. 제목 클릭, `Enter`, double-click은 전체 Wiki 상세로 진입한다. `↑`/`↓`는 현재 필터 내 카드 선택을 이동하며, 선택이 없을 때 우측 패널은 "카드를 클릭하면 Inspector가 채워집니다" empty state를 보여 준다. Status 편집은 `open` / `claimed_done` / `blocked` / `cancelled`만 허용하고, `verified`는 VerificationReport + verify tool 경유 원칙을 유지한다.
+Tasks 칸반 카드는 dual-action으로 동작한다. 카드 body 클릭은 URL을 바꾸지 않고 우측 Inspector를 채워 status, priority, assignee, due date 같은 operational metadata를 제자리 편집하게 한다. 제목 클릭, `Enter`, double-click은 전체 Wiki 상세로 진입한다. `↑`/`↓`는 현재 필터 내 카드 선택을 이동하며, 선택이 없을 때 우측 패널은 "카드를 클릭하면 Inspector가 채워집니다" empty state를 보여 준다. Status 편집은 `open` / `claimed_done` / `blocked` / `cancelled`만 허용한다.
 
 Wiki 상세 Surface 에서 Area 선택은 본문을 닫는 필터가 아니라 **상세 scope** 로 live-bind 된다. 사용자가 상세 화면에서 Area 트리의 다른 항목을 클릭하면 article은 유지하고 상단 scope bar만 새 Area path로 갱신한다. 현재 artifact가 그 Area에 속하면 `[` / `]` 또는 `이전` / `다음` 버튼으로 같은 Area의 sibling artifact를 `updated_at desc` 순서로 순회한다. 현재 artifact가 선택된 Area 밖이면 sibling nav를 비활성화하고 "해당 area 목록 보기" CTA로 목록 전환을 명시한다.
 

@@ -35,7 +35,6 @@ var RegisteredTools = []string{
 	"pindoc.artifact.revisions",
 	"pindoc.artifact.diff",
 	"pindoc.artifact.summary_since",
-	"pindoc.artifact.verify",
 	"pindoc.artifact.read_state",
 	"pindoc.user.current",
 	"pindoc.user.update",

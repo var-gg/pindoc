@@ -241,41 +241,36 @@ AgentAttempt {
 }
 ```
 
-### Task 상태 머신 (v2, migration 0013)
+### Task 상태 머신 (v3, migration 0045)
 
 ```
-           ┌─────────────────────────────────────────┐
-           ▼                                         │
-open ──▶ claimed_done ──(pindoc.artifact.verify)──▶ verified
- │                                                   │
- └──▶ blocked    ──▶ cancelled    ──▶ archived ◀─────┘
+           ┌────────────────────────────┐
+           ▼                            │
+open ──▶ claimed_done ──▶ archived ◀────┘
+ │
+ └──▶ blocked    ──▶ cancelled
 ```
 
-AI-agent 운영 모델로 재설계된 상태머신. 기존 `todo | in_progress | done`는 한 사람이 며칠 단위로 Task를 잡고 있는 가정에서 나왔지만, agent는 수 분 만에 전 사이클을 돈다. 'in_progress'는 깜빡이다 사라지는 상태라 의미를 잃고, 'done'은 과도 확신 경향의 LLM이 쉽게 주장한다. v2는 두 가지 원칙으로 단순화한다:
+AI-agent 운영 모델로 재설계된 상태머신. 기존 `todo | in_progress | done`는 한 사람이 며칠 단위로 Task를 잡고 있는 가정에서 나왔지만, agent는 수 분 만에 전 사이클을 돈다. 'in_progress'는 깜빡이다 사라지는 상태라 의미를 잃고, 별도 `verified` lane은 검증 report와 Task queue를 이중화했다. v3는 Task lifecycle을 `claimed_done`에서 정착시키고, 검증 성격의 근거는 `artifact_meta.verification_state`와 pins로 표현한다.
 
-1. **Implementer ≠ Verifier**: Task를 구현한 agent는 스스로 검증할 수 없다. `verified` 전이는 오직 `pindoc.artifact.verify`를 통해서만 가능하며, 서버가 revision author_id ≠ verifier agent_id를 확인한다.
-2. **사람은 상태 머신 밖**: 사용자가 Verify 버튼을 누르는 경로를 만들지 않는다. 사용자는 필요하면 다른 agent 세션(다른 모델 권장)을 spawn해 재검을 시키는 orchestrator.
+1. **Task queue는 작업 상태만 표현**: 열린 일, 완료 주장, 차단, 취소만 Task board가 다룬다.
+2. **검증은 evidence axis**: 코드 pin, TC, `artifact_meta.verification_state`가 검증 신호를 담당하고 Task status enum을 늘리지 않는다.
 
 **전이 규칙**:
 
-- `open → claimed_done`: implementer agent가 `artifact.propose` + `update_of` + `task_meta.status='claimed_done'`. 서버 체크: 본문의 acceptance checkbox 전부 체크(`CLAIMED_DONE_INCOMPLETE` 아니면 reject). 체크박스 없는 body는 건너뜀(모든 Task가 checklist 형태는 아니라).
-- `claimed_done → verified`: 오직 `pindoc.artifact.verify` 툴에서만 가능. 다른 agent가 `VerificationReport` (Tier A 신규 타입)를 먼저 발행한 뒤 이 툴을 호출한다. 서버 체크: Task 현재 status=claimed_done, VerificationReport type 일치, verifier agent_id ≠ Task revision 작성자들. 성공 시 `artifact_edges(relation='verified_by')` + `events(kind='artifact.verified')` 기록.
-- `artifact.propose`로 `task_meta.status='verified'` 직접 전이 시도 → `VER_VIA_VERIFY_TOOL_ONLY` reject. Self-verification 불가.
+- `open → claimed_done`: implementer agent가 `pindoc.task.claim_done`을 호출한다. 서버는 본문의 unchecked acceptance checkbox를 `[x]`로 바꾸고 `task_meta.status='claimed_done'`을 같은 revision에 기록한다. `commit_sha`만 넘기면 commit diff에서 references pin을 자동 생성한다.
+- `artifact.propose`로 `task_meta.status='verified'` 직접 전이 시도 → `TASK_STATUS_INVALID` reject.
 - `* → blocked / cancelled`: 어느 agent나 이유와 함께 전이 가능.
 - `* → archived`: sensitive_op (기존 규칙 유지).
-- `verified → open`: 허용되지만 이 전이는 `VerificationReport`의 supersede 체인을 통해 일어난다 — 후속 verifier가 새 report를 filed하고 기존 것을 superseded로 표시하면 파생되는 결과.
 
 **운영 guardrail**: Reader의 Task 대기열은 `task_meta.status`가 없거나 `open`인
 row다. Agent가 "열린 Task가 없다"고 말하기 전에는 `pindoc.task.queue`
-기본 호출의 `pending_count == 0`을 확인해야 한다. `pindoc.scope.in_flight`는
+기본 호출의 `pending_count == 0`을 확인해야 한다. 새 클라이언트는
+`assignee_filtered_count`와 `project_total_count`를 구분해 읽는다. `pindoc.scope.in_flight`는
 acceptance checkbox(`[ ]` / `[~]`) 조회 도구라 이 lifecycle queue를 대체하지
 않는다.
 
-**VerificationReport artifact** (Tier A, migration 0013): type="VerificationReport"로 `artifact.propose`로 생성. body에 판정 키워드(`pass` / `partial` / `fail` / `합격` / `부분` / `불합격`) 중 하나 필수(`VER_NO_VERDICT`). `artifact.verify`에서 이 slug를 `report_id_or_slug`로 참조해 Task에 연결.
-
 **남은 질문** (후속):
-- VerificationReport의 verdict가 `partial`일 때 Task는 `claimed_done`에 머무는가, 별개 상태? 초기 구현은 임의로 `verified`로 올라가지만 dogfood 관찰 후 조정.
-- Verifier agent의 모델 다양성을 서버가 요구할지(Opus 구현→ Sonnet/Haiku 검증 강제). 현재는 agent_id 달라야만 하는 제약.
 - trivial Task의 `self_attested` opt-out은 도입 보류(M1.x 범위 밖).
 
 ### Task 전용 Pre-flight

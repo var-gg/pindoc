@@ -19,9 +19,9 @@ func TestNormalizeTaskQueueStatusFilter(t *testing.T) {
 		{"missing", taskStatusMissing, true},
 		{"missing_status", taskStatusMissing, true},
 		{"claimed_done", "claimed_done", true},
-		{"verified", "verified", true},
 		{"blocked", "blocked", true},
 		{"cancelled", "cancelled", true},
+		{"verified", "", false},
 		{"done", "", false},
 		{"in_progress", "", false},
 	}
@@ -115,20 +115,23 @@ func TestTaskQueueWarnings(t *testing.T) {
 }
 
 // TestApplyTaskQueueCompact pins the omit-on-compact contract: project-
-// wide aggregate maps go to nil so json encoding skips them, while items
+// aggregate maps go to nil so json encoding skips them, while items
 // + totals + notice survive. Default (compact=false) leaves every field
 // alone — backward-compat for existing callers.
 func TestApplyTaskQueueCompact(t *testing.T) {
 	mkOut := func() taskQueueOutput {
 		return taskQueueOutput{
-			SourceSemantics: taskQueueSemantics,
-			StatusFilter:    "pending",
-			TotalCount:      10,
-			PendingCount:    7,
-			StatusCounts:    map[string]int{"open": 5, taskStatusMissing: 2, "claimed_done": 3},
-			AreaCounts:      map[string]int{"ui": 4, "mcp": 6},
-			PriorityCounts:  map[string]int{"p2": 3},
-			WarningCounts:   map[string]int{"TASK_STATUS_MISSING": 2},
+			SourceSemantics:       taskQueueSemantics,
+			StatusFilter:          "pending",
+			AssigneeFilteredCount: 10,
+			ProjectTotalCount:     100,
+			TotalCount:            10,
+			PendingCount:          7,
+			CountDeprecationNote:  "legacy",
+			StatusCounts:          map[string]int{"open": 5, taskStatusMissing: 2, "claimed_done": 3},
+			AreaCounts:            map[string]int{"ui": 4, "mcp": 6},
+			PriorityCounts:        map[string]int{"p2": 3},
+			WarningCounts:         map[string]int{"TASK_STATUS_MISSING": 2},
 			Items: []taskQueueItem{
 				{ArtifactID: "id-1", Slug: "task-a", Title: "A"},
 			},
@@ -156,8 +159,8 @@ func TestApplyTaskQueueCompact(t *testing.T) {
 		if out.StatusCounts != nil || out.AreaCounts != nil || out.PriorityCounts != nil || out.WarningCounts != nil {
 			t.Fatalf("compact must drop status/area/priority/warning maps; got %+v", out)
 		}
-		if out.TotalCount != 10 || out.PendingCount != 7 {
-			t.Fatalf("compact must preserve totals; got total=%d pending=%d", out.TotalCount, out.PendingCount)
+		if out.TotalCount != 10 || out.PendingCount != 7 || out.AssigneeFilteredCount != 10 || out.ProjectTotalCount != 100 {
+			t.Fatalf("compact must preserve totals; got total=%d pending=%d assignee=%d project=%d", out.TotalCount, out.PendingCount, out.AssigneeFilteredCount, out.ProjectTotalCount)
 		}
 		if len(out.Items) != 1 {
 			t.Fatalf("compact must preserve items; got %d", len(out.Items))
@@ -174,7 +177,7 @@ func TestApplyTaskQueueCompact(t *testing.T) {
 				t.Fatalf("compact JSON must not contain %s; got %s", omitted, body)
 			}
 		}
-		for _, kept := range []string{`"total_count":10`, `"pending_count":7`, `"compact":true`} {
+		for _, kept := range []string{`"total_count":10`, `"pending_count":7`, `"assignee_filtered_count":10`, `"project_total_count":100`, `"compact":true`} {
 			if !strings.Contains(body, kept) {
 				t.Fatalf("compact JSON missing %s; got %s", kept, body)
 			}

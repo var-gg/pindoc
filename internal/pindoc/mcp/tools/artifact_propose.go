@@ -35,13 +35,6 @@ var validArtifactTypes = map[string]struct{}{
 	// Tier A core
 	"Decision": {}, "Analysis": {}, "Debug": {}, "Flow": {},
 	"Task": {}, "TC": {}, "Glossary": {},
-	// Tier A — task verification (migration 0013).
-	// A VerificationReport is a typed artifact a *verifier* agent files to
-	// move a Task from claimed_done → verified via pindoc.artifact.verify.
-	// Kept as a first-class type (rather than task_meta subfield) so re-
-	// verification chains flow naturally through supersede and the Reader
-	// can surface the report as its own document.
-	"VerificationReport": {},
 	// Tier B Web SaaS
 	"Feature": {}, "APIEndpoint": {}, "Screen": {}, "DataModel": {},
 }
@@ -244,24 +237,17 @@ func normalizePinInputs(pins []ArtifactPinInput) {
 // TaskMetaInput is the agent-facing shape for a Task artifact's tracker
 // dimensions. Every field is optional; the server stores what's provided.
 type TaskMetaInput struct {
-	// Status is the Task lifecycle v2 enum (migration 0013). Agents set
-	// `claimed_done` themselves once acceptance criteria land, but
-	// `verified` is controlled exclusively by pindoc.artifact.verify —
-	// direct transitions via artifact.propose are rejected (VER_VIA_VERIFY_TOOL_ONLY).
-	Status     string `json:"status,omitempty" jsonschema:"open | claimed_done | verified | blocked | cancelled (set via pindoc.artifact.verify, not here)"`
+	// Status is the Task lifecycle enum. `claimed_done` is the settled
+	// completion state after acceptance criteria land.
+	Status     string `json:"status,omitempty" jsonschema:"open | claimed_done | blocked | cancelled"`
 	Priority   string `json:"priority,omitempty" jsonschema:"p0 | p1 | p2 | p3"`
 	Assignee   string `json:"assignee,omitempty"`
 	DueAt      string `json:"due_at,omitempty" jsonschema:"RFC3339 timestamp"`
 	ParentSlug string `json:"parent_slug,omitempty" jsonschema:"slug of parent Task artifact"`
 }
 
-// validTaskStatuses was rebuilt in migration 0013 around a two-phase
-// completion model: agent self-attests claimed_done, then a *different*
-// agent files a VerificationReport to reach verified. See
-// docs/04-data-model.md (Task status v2 section).
 var validTaskStatuses = map[string]struct{}{
-	"open": {}, "claimed_done": {}, "verified": {},
-	"blocked": {}, "cancelled": {},
+	"open": {}, "claimed_done": {}, "blocked": {}, "cancelled": {},
 }
 var validTaskPriorities = map[string]struct{}{
 	"p0": {}, "p1": {}, "p2": {}, "p3": {},
@@ -1912,20 +1898,6 @@ func preflight(ctx context.Context, deps Deps, projectSlug string, in *artifactP
 		if !bodyContainsAnyKeyword(in.BodyMarkdown, resolutionKeywords) {
 			push(i18n.T(lang, "preflight.debug_no_resolution"), "DBG_NO_RESOLUTION")
 		}
-	case "VerificationReport":
-		// Migration 0013: VerificationReport artifacts must carry an explicit
-		// pass/partial/fail judgement so the downstream verify tool can
-		// parse the final verdict without re-running LLM classification.
-		// Keyword check is structural-minimum only; richer verdict schema
-		// (json body_json column or body_markdown structured section) is a
-		// V1.x follow-up.
-		lower := strings.ToLower(in.BodyMarkdown)
-		hasVerdict := strings.Contains(lower, "pass") || strings.Contains(lower, "partial") ||
-			strings.Contains(lower, "fail") || strings.Contains(lower, "합격") ||
-			strings.Contains(lower, "부분") || strings.Contains(lower, "불합격")
-		if !hasVerdict {
-			push(i18n.T(lang, "preflight.verify_no_verdict"), "VER_NO_VERDICT")
-		}
 	}
 
 	// Phase 11a + 15c: shape-check pins + relates_to. Hard-blocks only on
@@ -1998,16 +1970,6 @@ func preflight(ctx context.Context, deps Deps, projectSlug string, in *artifactP
 		if s := strings.TrimSpace(tm.Status); s != "" {
 			if _, ok := validTaskStatuses[s]; !ok {
 				push(fmt.Sprintf(i18n.T(lang, "preflight.task_status_invalid"), tm.Status), "TASK_STATUS_INVALID")
-			}
-			// Task lifecycle v2 (migration 0013): `verified` is reserved
-			// for pindoc.artifact.verify. Propose path can only set
-			// open / claimed_done / blocked / cancelled. Direct
-			// transition to verified is rejected so a single agent
-			// cannot ship self-verification in one call — the
-			// Implementer ≠ Verifier invariant is structurally enforced,
-			// not prompt-guided.
-			if s == "verified" {
-				push(i18n.T(lang, "preflight.verified_via_verify_tool_only"), "VER_VIA_VERIFY_TOOL_ONLY")
 			}
 			// `claimed_done` requires acceptance checkboxes to be 100%
 			// checked. Minimum evidence gate so agents cannot flip status
@@ -2469,7 +2431,7 @@ func patchFieldsFor(code string) []string {
 		return []string{"body_markdown", "body_patch", "shape"}
 	case "META_PATCH_EMPTY":
 		return []string{"tags", "completeness", "task_meta", "artifact_meta"}
-	case "TASK_STATUS_VIA_TRANSITION_TOOL", "VER_VIA_VERIFY_TOOL_ONLY":
+	case "TASK_STATUS_VIA_TRANSITION_TOOL":
 		return []string{"task_meta.status"}
 	case "ACCEPT_TRANSITION_REQUIRED",
 		"ACCEPT_TRANSITION_INDEX_REQUIRED",

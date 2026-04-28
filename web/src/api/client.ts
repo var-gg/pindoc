@@ -118,11 +118,9 @@ export type Area = {
 };
 
 export type TaskMeta = {
-  // Task lifecycle v2 (migration 0013). `verified` is reserved for
-  // pindoc.artifact.verify — direct transition via artifact.propose is
-  // rejected server-side (VER_VIA_VERIFY_TOOL_ONLY). `claimed_done`
+  // Task lifecycle. `claimed_done` is the settled completion state and
   // requires 100% acceptance checkboxes.
-  status?: "open" | "claimed_done" | "verified" | "blocked" | "cancelled";
+  status?: "open" | "claimed_done" | "blocked" | "cancelled";
   priority?: "p0" | "p1" | "p2" | "p3";
   assignee?: string;
   due_at?: string;
@@ -632,8 +630,7 @@ export function projectListPath(options: ProjectListOptions = {}): string {
 // ships to POST /api/p/{project}/artifacts/{idOrSlug}/task-meta. Fields
 // map 1:1 onto the server taskMetaPatchRequest — status / assignee /
 // priority / due_at / parent_slug are the operational-metadata axes the
-// Decision permits. `verified` remains verify-tool only server-side.
-// `null` is never emitted by the current UI (clearing a field needs a
+// Decision permits. `null` is never emitted by the current UI (clearing a field needs a
 // separate design pass); every `undefined` field is omitted from the wire
 // payload.
 export type TaskMetaPatchInput = {

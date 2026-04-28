@@ -29,7 +29,7 @@ type taskQueueInput struct {
 	// Status selects the task lifecycle bucket to return. The default
 	// "pending" intentionally matches the Reader header count:
 	// task_meta.status missing OR task_meta.status == "open".
-	Status string `json:"status,omitempty" jsonschema:"pending (default = open + missing_status) | all | open | missing_status | missing | claimed_done | verified | blocked | cancelled"`
+	Status string `json:"status,omitempty" jsonschema:"pending (default = open + missing_status) | all | open | missing_status | missing | claimed_done | blocked | cancelled"`
 
 	AreaSlug string `json:"area_slug,omitempty" jsonschema:"optional - restrict to one area slug"`
 	Priority string `json:"priority,omitempty" jsonschema:"optional - p0 | p1 | p2 | p3"`
@@ -39,12 +39,12 @@ type taskQueueInput struct {
 	// computed across every matching Task before the item limit is applied.
 	Limit int `json:"limit,omitempty" jsonschema:"default 50, max 500"`
 
-	// Compact omits the project-wide aggregate fields (status_counts,
+	// Compact omits the aggregate fields (status_counts,
 	// area_counts, priority_counts, warning_counts) from the response so
 	// callers viewing "what is on my plate" do not have to scroll past
-	// project-wide noise. Items, totals, and notice are still returned.
+	// breakdowns. Items, totals, and notice are still returned.
 	// Decision mcp-dx-외부-리뷰-codex-1차-피드백-6항목 발견 5.
-	Compact bool `json:"compact,omitempty" jsonschema:"omit project-wide aggregate counts (status_counts/area_counts/priority_counts/warning_counts) — items+total preserved"`
+	Compact bool `json:"compact,omitempty" jsonschema:"omit aggregate counts (status_counts/area_counts/priority_counts/warning_counts) — items+counts preserved"`
 }
 
 type taskQueueItem struct {
@@ -76,11 +76,16 @@ type taskQueueOutput struct {
 	SourceSemantics string `json:"source_semantics"`
 	StatusFilter    string `json:"status_filter"`
 
-	// Counts are computed after area / priority / assignee filters and
-	// before status filtering. This lets agents see "pending 13 / total
-	// 69" while asking for just one bucket of Items.
-	TotalCount     int            `json:"total_count"`
-	PendingCount   int            `json:"pending_count"`
+	// AssigneeFilteredCount is computed after area / priority /
+	// assignee filters and before status filtering. ProjectTotalCount is
+	// the unfiltered active Task count for the project. The legacy
+	// total_count / pending_count fields remain for old clients.
+	AssigneeFilteredCount int    `json:"assignee_filtered_count"`
+	ProjectTotalCount     int    `json:"project_total_count"`
+	TotalCount            int    `json:"total_count"`
+	PendingCount          int    `json:"pending_count"`
+	CountDeprecationNote  string `json:"count_deprecation_notice,omitempty"`
+
 	StatusCounts   map[string]int `json:"status_counts,omitempty"`
 	AreaCounts     map[string]int `json:"area_counts,omitempty"`
 	PriorityCounts map[string]int `json:"priority_counts,omitempty"`
@@ -113,7 +118,10 @@ canonical MCP pre-flight before saying "the Task queue is done"; it is
 not the same as pindoc.scope.in_flight, which lists unresolved acceptance
 checkboxes. When the caller is an agent querying its own assignee queue,
 the response may include attention for Tasks idle longer than
-PINDOC_STUCK_THRESHOLD_HOURS (default 24).
+PINDOC_STUCK_THRESHOLD_HOURS (default 24). Count fields are explicit:
+assignee_filtered_count is after optional area/priority/assignee filters,
+while project_total_count is the active Task total for the whole project.
+Legacy total_count and pending_count remain for backward compatibility.
 `),
 		},
 		func(ctx context.Context, p *auth.Principal, in taskQueueInput) (*sdk.CallToolResult, taskQueueOutput, error) {
@@ -123,7 +131,7 @@ PINDOC_STUCK_THRESHOLD_HOURS (default 24).
 			}
 			statusFilter, ok := normalizeTaskQueueStatusFilter(in.Status)
 			if !ok {
-				return nil, taskQueueOutput{}, fmt.Errorf("status must be one of: pending | all | open | missing_status | missing | claimed_done | verified | blocked | cancelled")
+				return nil, taskQueueOutput{}, fmt.Errorf("status must be one of: pending | all | open | missing_status | missing | claimed_done | blocked | cancelled")
 			}
 			priority := strings.TrimSpace(strings.ToLower(in.Priority))
 			if priority != "" {
@@ -140,6 +148,20 @@ PINDOC_STUCK_THRESHOLD_HOURS (default 24).
 				limit = taskQueueMaxLimit
 			}
 
+			var projectTotalCount int
+			if err := deps.DB.QueryRow(ctx, `
+				SELECT count(*)::int
+				  FROM artifacts a
+				  JOIN projects p ON p.id = a.project_id
+				 WHERE p.slug = $1
+				   AND a.type = 'Task'
+				   AND a.status <> 'archived'
+				   AND a.status <> 'superseded'
+				   AND NOT starts_with(a.slug, '_template_')
+			`, scope.ProjectSlug).Scan(&projectTotalCount); err != nil {
+				return nil, taskQueueOutput{}, fmt.Errorf("task.queue project total: %w", err)
+			}
+
 			rows, err := deps.DB.Query(ctx, `
 				SELECT a.id::text, a.slug, a.title, ar.slug, a.updated_at,
 				       a.body_markdown,
@@ -154,6 +176,7 @@ PINDOC_STUCK_THRESHOLD_HOURS (default 24).
 				WHERE p.slug = $1
 				  AND a.type = 'Task'
 				  AND a.status <> 'archived'
+				  AND a.status <> 'superseded'
 				  AND NOT starts_with(a.slug, '_template_')
 				  AND ($2::text = '' OR ar.slug = $2)
 				  AND ($3::text = '' OR a.task_meta->>'priority' = $3)
@@ -222,17 +245,20 @@ PINDOC_STUCK_THRESHOLD_HOURS (default 24).
 			}
 
 			out := taskQueueOutput{
-				SourceSemantics: taskQueueSemantics,
-				StatusFilter:    statusFilter,
-				TotalCount:      total,
-				PendingCount:    statusCounts["open"] + statusCounts[taskStatusMissing],
-				StatusCounts:    statusCounts,
-				AreaCounts:      areaCounts,
-				PriorityCounts:  priorityCounts,
-				WarningCounts:   warningCounts,
-				Items:           items,
-				Truncated:       truncated,
-				Notice:          taskQueueNotice(),
+				SourceSemantics:       taskQueueSemantics,
+				StatusFilter:          statusFilter,
+				AssigneeFilteredCount: total,
+				ProjectTotalCount:     projectTotalCount,
+				TotalCount:            total,
+				PendingCount:          statusCounts["open"] + statusCounts[taskStatusMissing],
+				CountDeprecationNote:  "total_count is kept as an alias for assignee_filtered_count; prefer assignee_filtered_count and project_total_count for new clients.",
+				StatusCounts:          statusCounts,
+				AreaCounts:            areaCounts,
+				PriorityCounts:        priorityCounts,
+				WarningCounts:         warningCounts,
+				Items:                 items,
+				Truncated:             truncated,
+				Notice:                taskQueueNotice(),
 			}
 			out.Attention = buildTaskQueueAttention(ctx, deps, p, scope.ProjectSlug, strings.TrimSpace(in.Assignee), deps.UserLanguage)
 			applyTaskQueueCompact(&out, in.Compact)
@@ -250,7 +276,7 @@ func normalizeTaskQueueStatusFilter(raw string) (string, bool) {
 		return taskStatusMissing, true
 	}
 	switch s {
-	case "pending", "all", "open", taskStatusMissing, "claimed_done", "verified", "blocked", "cancelled":
+	case "pending", "all", "open", taskStatusMissing, "claimed_done", "blocked", "cancelled":
 		return s, true
 	default:
 		return "", false
@@ -295,7 +321,6 @@ func newTaskStatusCounts() map[string]int {
 	return map[string]int{
 		"open":            0,
 		"claimed_done":    0,
-		"verified":        0,
 		"blocked":         0,
 		"cancelled":       0,
 		taskStatusMissing: 0,
@@ -321,7 +346,7 @@ func taskQueueNotice() string {
 	return "Reader parity: pending means task_meta.status is missing or open. Acceptance-complete open Tasks are transient reconcile candidates; pindoc.ping auto-transitions them to claimed_done. Use pindoc.scope.in_flight for unresolved [ ]/[~] checklist items."
 }
 
-// applyTaskQueueCompact drops the project-wide aggregate maps when the
+// applyTaskQueueCompact drops the aggregate maps when the
 // caller asked for the compact view. Totals (TotalCount / PendingCount)
 // are computed before this fires so they stay honest — the user sees
 // "12 pending of 47 total" without scrolling past per-area / per-status

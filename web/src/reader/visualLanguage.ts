@@ -38,7 +38,6 @@ export const visualLanguage = {
     apiendpoint: typeEntry("APIEndpoint", "apiendpoint", "Code2", "--type-apiendpoint", "API endpoint", "API 엔드포인트", "HTTP/API contract, request shape, and response shape.", "HTTP/API 계약, 요청 형태, 응답 형태."),
     screen: typeEntry("Screen", "screen", "Monitor", "--type-screen", "Screen", "화면", "User-facing UI surface and state model.", "사용자에게 보이는 UI surface와 상태 모델."),
     datamodel: typeEntry("DataModel", "datamodel", "Database", "--type-datamodel", "Data model", "데이터 모델", "Entity, field, relation, and storage structure.", "엔티티, 필드, 관계, 저장 구조."),
-    verificationreport: typeEntry("VerificationReport", "verificationreport", "ShieldCheck", "--type-verificationreport", "Verification report", "검증 보고서", "Verifier result attached to a task completion claim.", "task 완료 주장에 붙는 verifier 판정."),
   },
   areas: {
     strategy: areaEntry("Target", "--area-strategy", "Strategy", "전략", "Direction, goals, scope, roadmap, and product bets.", "방향, 목표, scope, roadmap, 제품 가설.", true, null),

@@ -209,8 +209,6 @@ function taskStatusLabel(value: string, t: TFn): string {
       return t("reader.filter_value_task_open");
     case "claimed_done":
       return t("trust.task.claimed_done.label");
-    case "verified":
-      return t("trust.task.verified.label");
     case "blocked":
       return t("trust.task.blocked.label");
     case "cancelled":

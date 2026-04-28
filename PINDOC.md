@@ -35,9 +35,8 @@ Before starting non-trivial work:
 
 - Keep Task body acceptance checkboxes and `task_meta.status` consistent.
 - Mark acceptance items with `pindoc.artifact.propose(shape="acceptance_transition")`.
-- Leave `task_meta.status="open"` while implementation or verification is incomplete.
+- Leave `task_meta.status="open"` while implementation or validation is incomplete.
 - Move to `claimed_done` only after all in-scope acceptance criteria are done and validation has been attempted.
-- Do not mark `verified` directly. A separate verifier must create a `VerificationReport` and call `pindoc.artifact.verify`.
 - If a validation step is blocked by local environment, mark the acceptance item `[~]` with a concrete reason instead of claiming full completion.
 
 ## Section 12 - Task lifecycle (chip / parallel work)
@@ -64,11 +63,11 @@ When this project's agent spawns a worktree-based chip / parallel sub-session:
 ### After chip merge to main
 
 - The orchestrating agent, or the chip on exit, calls
-  `pindoc.artifact.propose(update_of=<task>, task_meta={status:"claimed_done"})`
-  after all acceptance checkboxes are ticked or explicitly deferred.
+  `pindoc.task.claim_done(slug_or_id=<task>, commit_sha=<sha>)`
+  after all acceptance checkboxes are ticked or explicitly deferred. Passing
+  `commit_sha` lets the server auto-pin implementation references from the
+  commit diff.
 - Include validation notes in the Task revision or final handoff.
-- Optional: a separate verifier agent posts a `VerificationReport` and calls
-  `pindoc.artifact.verify` for the `verified` state.
 
 ### If interrupted / abandoned
 

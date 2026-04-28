@@ -112,8 +112,6 @@ function shortTypeLabel(type: string): string {
       return "API";
     case "DataModel":
       return "DM";
-    case "VerificationReport":
-      return "VR";
     case "TC":
       return "TC";
     default:

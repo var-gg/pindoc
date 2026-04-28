@@ -42,13 +42,12 @@ function testReviewQueueSummaryAndLimit(): void {
     ...items,
     task("open", "open", "p2", 60),
     task("blocked", "blocked", "p1", 61),
-    task("verified", "verified", "p3", 62),
   ]);
   const summary = taskBoardSummary(groups);
   assertEqual(summary.reviewQueue, 55, "claimed_done count becomes verification queue");
   assertEqual(summary.open, 1, "open count");
   assertEqual(summary.blocked, 1, "blocked count");
-  assertEqual(summary.recentDone, 56, "recent completion combines review queue and verified");
+  assertEqual(summary.recentDone, 55, "recent completion follows claimed_done");
   assertEqual(taskColumnInitialLimit("claimed_done", 55), TASK_REVIEW_INITIAL_LIMIT, "large review queue initial limit");
 
   const visible = visibleTaskGroups(groups, {});

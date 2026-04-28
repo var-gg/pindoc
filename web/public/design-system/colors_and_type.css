@@ -161,10 +161,6 @@
   --type-datamodel-bg:     oklch(95% 0.03 260);
   --type-datamodel-border: oklch(84% 0.07 260);
 
-  --type-verificationreport:        oklch(44% 0.13 160); /* emerald — verified */
-  --type-verificationreport-bg:     oklch(95% 0.05 165);
-  --type-verificationreport-border: oklch(82% 0.09 160);
-
   --type-default:         oklch(45% 0.012 265);  /* neutral fallback */
   --type-default-bg:      oklch(95% 0.004 80);
   --type-default-border:  oklch(88% 0.005 80);
@@ -207,9 +203,9 @@
   --meta-confidence:   var(--type-decision);
   --meta-audience:     var(--area-governance);
   --meta-context:      var(--area-context);
-  --meta-verification: var(--type-verificationreport);
+  --meta-verification: var(--area-governance);
 
-  --quick-verify:     var(--type-verificationreport);
+  --quick-verify:     var(--area-governance);
   --quick-update:     var(--type-feature);
   --quick-copy-link:  var(--type-analysis);
   --quick-agent-ref:  var(--area-system);
@@ -427,10 +423,6 @@
   --type-datamodel-bg:     oklch(22% 0.04 260);
   --type-datamodel-border: oklch(32% 0.07 260);
 
-  --type-verificationreport:        oklch(76% 0.14 160);
-  --type-verificationreport-bg:     oklch(22% 0.05 160);
-  --type-verificationreport-border: oklch(32% 0.08 160);
-
   --type-default:         oklch(62% 0.010 265);
   --type-default-bg:      oklch(22% 0.009 265);
   --type-default-border:  oklch(30% 0.010 265);
@@ -468,9 +460,9 @@
   --meta-confidence:   var(--type-decision);
   --meta-audience:     var(--area-governance);
   --meta-context:      var(--area-context);
-  --meta-verification: var(--type-verificationreport);
+  --meta-verification: var(--area-governance);
 
-  --quick-verify:     var(--type-verificationreport);
+  --quick-verify:     var(--area-governance);
   --quick-update:     var(--type-feature);
   --quick-copy-link:  var(--type-analysis);
   --quick-agent-ref:  var(--area-system);

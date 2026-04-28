@@ -1014,10 +1014,9 @@ function Body({
 // drag-drop is out of scope; Pindoc's write model is agent-only, and
 // users should request status transitions via agent, not mouse.
 //
-// Migration 0013 replaced the Jira-style todo/in_progress/done/blocked/
-// cancelled enum with a two-phase completion lifecycle: open → claimed_done
-// (implementer self-attest) → verified (different agent files a
-// VerificationReport). Cancelled and blocked remain as lateral states.
+// Migration 0045 replaces the Jira-style todo/in_progress/done/blocked/
+// cancelled enum with a completion lifecycle: open → claimed_done.
+// Cancelled and blocked remain as lateral states.
 // Each column header carries a status-pill variant — the CSS sits in
 // reader.css and the visual language follows the design system kit
 // `ui_kits/reader/tasks.html`. `pill` is the status-pill modifier class
@@ -1030,8 +1029,7 @@ type TaskColumnSpec = {
 };
 const TASK_COLUMNS: TaskColumnSpec[] = [
   { id: "open", labelKey: "tasks.col_open", pill: "todo" },
-  { id: "claimed_done", labelKey: "tasks.col_claimed_done", pill: "in_progress" },
-  { id: "verified", labelKey: "tasks.col_verified", pill: "done" },
+  { id: "claimed_done", labelKey: "tasks.col_claimed_done", pill: "done" },
   { id: "blocked", labelKey: "tasks.col_blocked", pill: "blocked" },
   { id: "cancelled", labelKey: "tasks.col_cancelled", pill: "archived" },
 ];
@@ -1304,7 +1302,7 @@ function TaskBacklogSummary({ summary }: { summary: TaskBoardSummary }) {
         tone="done"
         label={t("tasks.summary_recent_done")}
         value={summary.recentDone}
-        hint={summary.verified === 0 ? t("tasks.summary_verified_zero_hint") : t("tasks.summary_recent_done_hint")}
+        hint={t("tasks.summary_recent_done_hint")}
       />
     </section>
   );
@@ -1504,11 +1502,6 @@ function TaskColumn({
               <button type="button" className="task-clear-filter task-clear-filter--compact" onClick={onClearFilters}>
                 {t("tasks.clear_filters")}
               </button>
-            </div>
-          ) : columnId === "verified" ? (
-            <div className="kanban-col__empty kanban-col__empty--action">
-              <strong>{t("tasks.verified_empty_title")}</strong>
-              <span>{t("tasks.verified_empty_hint")}</span>
             </div>
           ) : (
             <div className="kanban-col__empty">—</div>

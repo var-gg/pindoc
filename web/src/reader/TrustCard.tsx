@@ -13,8 +13,7 @@ type Props = {
   meta?: ArtifactMeta;
   pins?: PinRef[];
   // taskStatus surfaces the Task lifecycle v2 state (migration 0013) as
-  // a dedicated chip: claimed_done shows as "unverified work" tone, and
-  // verified shows as "agent-verified" neutral tone. Non-Task artifacts
+  // a dedicated chip: claimed_done shows completed work tone. Non-Task artifacts
   // pass undefined and the chip is skipped.
   taskStatus?: TaskMeta["status"];
   // recentWarnings are events.artifact.warning_raised rows served by
@@ -272,16 +271,6 @@ function taskStatusChip(status: TaskMeta["status"], t: TFn): Chip | null {
           tone: "warning",
           title: t("trust.task.claimed_done.tip"),
           filter: { key: "task_status", value: "claimed_done", label },
-        };
-      }
-    case "verified":
-      {
-        const label = t("trust.task.verified.label");
-        return {
-          label,
-          tone: "neutral",
-          title: t("trust.task.verified.tip"),
-          filter: { key: "task_status", value: "verified", label },
         };
       }
     case "blocked":

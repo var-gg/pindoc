@@ -1101,7 +1101,6 @@
 .mini-graph__node--apiendpoint { --mini-node-bg: var(--type-apiendpoint-bg); --mini-node-fg: var(--type-apiendpoint); --mini-node-border: var(--type-apiendpoint-border); }
 .mini-graph__node--screen { --mini-node-bg: var(--type-screen-bg); --mini-node-fg: var(--type-screen); --mini-node-border: var(--type-screen-border); }
 .mini-graph__node--datamodel { --mini-node-bg: var(--type-datamodel-bg); --mini-node-fg: var(--type-datamodel); --mini-node-border: var(--type-datamodel-border); }
-.mini-graph__node--verificationreport { --mini-node-bg: var(--type-verificationreport-bg); --mini-node-fg: var(--type-verificationreport); --mini-node-border: var(--type-verificationreport-border); }
 .mini-graph__more {
   position: absolute;
   right: 8px;
@@ -2445,7 +2444,6 @@
 .graph-canvas__node--apiendpoint { --graph-node-bg: var(--type-apiendpoint-bg); --graph-node-fg: var(--type-apiendpoint); --graph-node-border: var(--type-apiendpoint-border); }
 .graph-canvas__node--screen { --graph-node-bg: var(--type-screen-bg); --graph-node-fg: var(--type-screen); --graph-node-border: var(--type-screen-border); }
 .graph-canvas__node--datamodel { --graph-node-bg: var(--type-datamodel-bg); --graph-node-fg: var(--type-datamodel); --graph-node-border: var(--type-datamodel-border); }
-.graph-canvas__node--verificationreport { --graph-node-bg: var(--type-verificationreport-bg); --graph-node-fg: var(--type-verificationreport); --graph-node-border: var(--type-verificationreport-border); }
 
 /* --------------------------------------------------------------- *
  * Focus-Orbit graph surface (Task graph-surface-focus-orbit-       *
@@ -3424,13 +3422,11 @@
  * cleanly. Tokens live in colors_and_type.css (globally imported
  * via index.html) — do not redefine here.
  *
- * Status-pill ↔ Task lifecycle v2 mapping (migration 0013):
+ * Status-pill ↔ Task lifecycle v3 mapping (migration 0045):
  *   open          → status-pill--todo        (draft amber tone)
- *   claimed_done  → status-pill--in_progress (task-prog indigo + pulse)
- *   verified      → status-pill--done        (live emerald)
+ *   claimed_done  → status-pill--done        (settled completion)
  *   blocked       → status-pill--blocked     (prio-p0 red — warning)
  *   cancelled     → status-pill--archived    (archived neutral)
- * Pulse on claimed_done signals "verifier action pending."
  * =========================================================== */
 
 .task-board-head {
@@ -3971,7 +3967,6 @@
 .type-chip--apiendpoint        { background: var(--type-apiendpoint-bg);        color: var(--type-apiendpoint);        border-color: var(--type-apiendpoint-border); }
 .type-chip--screen             { background: var(--type-screen-bg);             color: var(--type-screen);             border-color: var(--type-screen-border); }
 .type-chip--datamodel          { background: var(--type-datamodel-bg);          color: var(--type-datamodel);          border-color: var(--type-datamodel-border); }
-.type-chip--verificationreport { background: var(--type-verificationreport-bg); color: var(--type-verificationreport); border-color: var(--type-verificationreport-border); }
 
 /* ===========================================================
  * Reader TOC — Task reader-toc-into-sidecar

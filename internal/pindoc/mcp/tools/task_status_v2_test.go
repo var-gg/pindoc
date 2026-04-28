@@ -86,8 +86,7 @@ func TestCountAcceptanceCheckboxes(t *testing.T) {
 
 // TestPreflightTaskStatusV2Transitions covers the three new status-related
 // preflight rules (migration 0013):
-//   - task_meta.status='verified' via artifact.propose → rejected
-//     (VER_VIA_VERIFY_TOOL_ONLY)
+//   - task_meta.status='verified' via artifact.propose → rejected by enum
 //   - task_meta.status='claimed_done' with unchecked acceptance boxes →
 //     rejected (CLAIMED_DONE_INCOMPLETE)
 //   - task_meta.status='claimed_done' with all boxes checked → clean
@@ -104,7 +103,7 @@ mark complete
 - [x] step one
 - [ ] step two`
 
-	t.Run("verified via propose is rejected", func(t *testing.T) {
+	t.Run("verified status is rejected by enum", func(t *testing.T) {
 		in := artifactProposeInput{
 			Type:         "Task",
 			Title:        "t",
@@ -114,8 +113,8 @@ mark complete
 			TaskMeta:     &TaskMetaInput{Status: "verified"},
 		}
 		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
-		if !containsCode(failed, "VER_VIA_VERIFY_TOOL_ONLY") {
-			t.Fatalf("expected VER_VIA_VERIFY_TOOL_ONLY in failed=%v", failed)
+		if !containsCode(failed, "TASK_STATUS_INVALID") {
+			t.Fatalf("expected TASK_STATUS_INVALID in failed=%v", failed)
 		}
 	})
 
@@ -144,13 +143,13 @@ mark complete
 			TaskMeta:     &TaskMetaInput{Status: "claimed_done"},
 		}
 		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
-		if containsCode(failed, "CLAIMED_DONE_INCOMPLETE") || containsCode(failed, "VER_VIA_VERIFY_TOOL_ONLY") {
+		if containsCode(failed, "CLAIMED_DONE_INCOMPLETE") || containsCode(failed, "TASK_STATUS_INVALID") {
 			t.Fatalf("claimed_done with complete checkboxes should pass status gates, got failed=%v", failed)
 		}
 	})
 
 	t.Run("legacy 'done' string is rejected by enum", func(t *testing.T) {
-		// Migration 0013 retired 'done' in favour of claimed_done/verified.
+		// Migration 0013 retired 'done' in favour of claimed_done.
 		// preflight should trip TASK_STATUS_INVALID so clients noticing the
 		// error update their strings.
 		in := artifactProposeInput{
@@ -325,54 +324,6 @@ func TestHasExplicitMetadataUpdate(t *testing.T) {
 	if !hasExplicitMetadataUpdate(artifactProposeInput{Tags: []string{}}) {
 		t.Fatal("explicit tags update must count as metadata change")
 	}
-}
-
-// TestPreflightVerificationReport asserts the verdict-keyword rule fires
-// when the VerificationReport body does not explicitly declare pass /
-// partial / fail (or Korean equivalents). Without the verdict a downstream
-// verify tool cannot parse the result.
-func TestPreflightVerificationReport(t *testing.T) {
-	t.Run("body with no verdict is rejected", func(t *testing.T) {
-		in := artifactProposeInput{
-			Type:         "VerificationReport",
-			Title:        "verify report",
-			BodyMarkdown: "## Evidence\nlooked at some code",
-			AreaSlug:     "misc",
-			AuthorID:     "verifier",
-		}
-		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
-		if !containsCode(failed, "VER_NO_VERDICT") {
-			t.Fatalf("expected VER_NO_VERDICT, got %v", failed)
-		}
-	})
-
-	t.Run("body with pass verdict passes", func(t *testing.T) {
-		in := artifactProposeInput{
-			Type:         "VerificationReport",
-			Title:        "verify report",
-			BodyMarkdown: "## Verdict\npass\n",
-			AreaSlug:     "misc",
-			AuthorID:     "verifier",
-		}
-		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
-		if containsCode(failed, "VER_NO_VERDICT") {
-			t.Fatalf("verdict keyword present but gate fired: %v", failed)
-		}
-	})
-
-	t.Run("korean verdict keyword accepted", func(t *testing.T) {
-		in := artifactProposeInput{
-			Type:         "VerificationReport",
-			Title:        "verify report",
-			BodyMarkdown: "## 판정\n합격",
-			AreaSlug:     "misc",
-			AuthorID:     "verifier",
-		}
-		_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
-		if containsCode(failed, "VER_NO_VERDICT") {
-			t.Fatalf("korean verdict present but gate fired: %v", failed)
-		}
-	})
 }
 
 func containsCode(list []string, code string) bool {

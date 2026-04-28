@@ -3,6 +3,8 @@ package tools
 import (
 	"strings"
 	"testing"
+
+	pgit "github.com/var-gg/pindoc/internal/pindoc/git"
 )
 
 // TestMarkUncheckedAsDone covers the body rewrite half of pindoc.task.claim_done.
@@ -151,6 +153,27 @@ func TestPrefixClaimDoneCommitMsg(t *testing.T) {
 				t.Fatalf("prefix = %q; want %q", got, c.want)
 			}
 		})
+	}
+}
+
+func TestClaimDoneAutoPinsFromChangedFiles(t *testing.T) {
+	files := []pgit.ChangedFile{
+		{Path: "internal/pindoc/mcp/tools/task_claim_done.go"},
+		{Path: "web/src/api/client.ts"},
+		{Path: "docs/notes.md"},
+	}
+	pins, warnings := claimDoneAutoPinsFromChangedFiles(files, "abc1234", pgit.Repo{ID: "repo-1", Name: "origin"}, 2)
+	if len(pins) != 2 {
+		t.Fatalf("pins len = %d, want 2", len(pins))
+	}
+	if pins[0].Path != files[0].Path || pins[0].CommitSHA != "abc1234" || pins[0].RepoID != "repo-1" {
+		t.Fatalf("first autopin wrong: %+v", pins[0])
+	}
+	if pins[0].Kind != "code" || pins[1].Kind != "code" {
+		t.Fatalf("expected code kinds, got %+v", pins)
+	}
+	if len(warnings) != 1 || warnings[0] != "PINS_AUTOPIN_TRUNCATED:1" {
+		t.Fatalf("warnings = %v, want truncation warning", warnings)
 	}
 }
 

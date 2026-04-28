@@ -65,10 +65,6 @@ func TestPatchFieldsForMetaPatch(t *testing.T) {
 	if !reflect.DeepEqual(got, wantStatus) {
 		t.Fatalf("TASK_STATUS_VIA_TRANSITION_TOOL patchable=%v want=%v", got, wantStatus)
 	}
-	got = patchFieldsFor("VER_VIA_VERIFY_TOOL_ONLY")
-	if !reflect.DeepEqual(got, wantStatus) {
-		t.Fatalf("VER_VIA_VERIFY_TOOL_ONLY patchable=%v want=%v", got, wantStatus)
-	}
 	got = patchFieldsFor("ASSIGNEE_INVALID")
 	wantAssignee := []string{"task_meta.assignee"}
 	if !reflect.DeepEqual(got, wantAssignee) {

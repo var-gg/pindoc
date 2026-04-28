@@ -316,7 +316,7 @@ func buildTaskAttention(artifactType, taskStatus, taskAssignee, lastRevisionAuth
 		status = "open"
 	}
 	switch status {
-	case "claimed_done", "verified", "blocked", "cancelled":
+	case "claimed_done", "blocked", "cancelled":
 		return nil
 	}
 

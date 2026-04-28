@@ -13,7 +13,10 @@ import (
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	pgit "github.com/var-gg/pindoc/internal/pindoc/git"
+	pinmodel "github.com/var-gg/pindoc/internal/pindoc/pins"
 )
+
+const claimDoneAutopinDefaultLimit = 20
 
 // taskClaimDoneInput is the agent-facing shape for pindoc.task.claim_done.
 // Atomic shortcut over the two halves of "I finished implementing this
@@ -47,11 +50,12 @@ type taskClaimDoneInput struct {
 	AuthorVersion string `json:"author_version,omitempty" jsonschema:"e.g. 'opus-4.7'"`
 
 	// CommitSHA is an optional commit hash that proves this Task's
-	// implementation. Recorded in shape_payload (claim_done lane) and
+	// implementation. Recorded in shape_payload (claim_done lane), used
+	// to auto-pin changed files from the commit diff when possible, and
 	// prefixed onto commit_msg as "[<short>] ..." so revision history
 	// shows the implementation source at a glance. Length 7-64,
 	// hex-only; empty / whitespace is treated as "no commit attached".
-	CommitSHA string `json:"commit_sha,omitempty" jsonschema:"optional 7-64 char hex commit hash that proves implementation; recorded on the revision and prefixed onto commit_msg"`
+	CommitSHA string `json:"commit_sha,omitempty" jsonschema:"optional 7-64 char hex commit hash that proves implementation; auto-pins changed files from the commit diff when possible"`
 
 	// Pins attaches structured implementation evidence to the artifact.
 	// Same shape as artifact.propose pins[]. Each pin lands in
@@ -71,17 +75,19 @@ type taskClaimDoneOutput struct {
 	SuggestedActions []string `json:"suggested_actions,omitempty"`
 
 	// Populated on accepted paths.
-	ArtifactID             string `json:"artifact_id,omitempty"`
-	Slug                   string `json:"slug,omitempty"`
-	AgentRef               string `json:"agent_ref,omitempty"`
-	RevisionNumber         int    `json:"revision_number,omitempty"`
-	HumanURL               string `json:"human_url,omitempty"`
-	HumanURLAbs            string `json:"human_url_abs,omitempty"`
+	ArtifactID             string   `json:"artifact_id,omitempty"`
+	Slug                   string   `json:"slug,omitempty"`
+	AgentRef               string   `json:"agent_ref,omitempty"`
+	RevisionNumber         int      `json:"revision_number,omitempty"`
+	HumanURL               string   `json:"human_url,omitempty"`
+	HumanURLAbs            string   `json:"human_url_abs,omitempty"`
 	ChangedAcceptanceCount int      `json:"changed_acceptance_count"`
 	PrevStatus             string   `json:"prev_status,omitempty"`
 	NewStatus              string   `json:"new_status,omitempty"`
 	CommitSHA              string   `json:"commit_sha,omitempty"`
 	PinsStored             int      `json:"pins_stored"`
+	PinsAutopinCount       int      `json:"pins_autopin_count"`
+	PinsExplicitCount      int      `json:"pins_explicit_count"`
 	Warnings               []string `json:"warnings,omitempty"`
 }
 
@@ -97,7 +103,7 @@ func RegisterTaskClaimDone(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.task.claim_done",
-			Description: "Mark a Task implementation complete. Toggles every unchecked acceptance item ('- [ ]') to '[x]' and sets task_meta.status='claimed_done' in one atomic revision. Already-resolved markers ([x]/[~]/[-]) are preserved — partial / deferred judgment calls are not overwritten. Bypasses search_receipt gating (operational metadata lane). When the Task involved code/doc/config changes, pass commit_sha (7-64 hex chars, prefixed onto commit_msg as '[<short>] ...') and/or pins[] (same shape as artifact.propose pins[]) so the Reader references panel renders the implementation source without an add_pin round-trip; duplicate pins are silently skipped. Reason is optional (stored as commit_msg). Use pindoc.artifact.verify to move from claimed_done → verified.",
+			Description: "Mark a Task implementation complete. Toggles every unchecked acceptance item ('- [ ]') to '[x]' and sets task_meta.status='claimed_done' in one atomic revision. Already-resolved markers ([x]/[~]/[-]) are preserved — partial / deferred judgment calls are not overwritten. Bypasses search_receipt gating (operational metadata lane). When the Task involved code/doc/config changes, pass commit_sha (7-64 hex chars, prefixed onto commit_msg as '[<short>] ...') to auto-pin changed files from the commit diff (default limit 20), and/or pins[] (same shape as artifact.propose pins[]) so the Reader references panel renders the implementation source without an add_pin round-trip; duplicate pins are silently skipped. Reason is optional (stored as commit_msg).",
 		},
 		func(ctx context.Context, p *auth.Principal, in taskClaimDoneInput) (*sdk.CallToolResult, taskClaimDoneOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -119,8 +125,7 @@ func RegisterTaskClaimDone(server *sdk.Server, deps Deps) {
 // should surface as 5xx-equivalent.
 //
 // The status guard rejects transitions from already-terminal states:
-//   - claimed_done → ALREADY_DONE (use artifact.verify next)
-//   - verified    → ALREADY_VERIFIED (reopen needs a fresh revision)
+//   - claimed_done → ALREADY_DONE
 //   - cancelled   → TASK_CANCELLED (caller must reopen first)
 //
 // open / blocked / nil status all proceed to the body+meta write.
@@ -238,17 +243,7 @@ func claimOneTaskDone(
 			Status:     "not_ready",
 			ErrorCode:  "CLAIM_DONE_ALREADY_DONE",
 			Failed:     []string{"CLAIM_DONE_ALREADY_DONE"},
-			Checklist:  []string{fmt.Sprintf("Task %q is already claimed_done; use pindoc.artifact.verify to move to verified", currentSlug)},
-			ArtifactID: artifactID,
-			Slug:       currentSlug,
-			PrevStatus: prevStatus,
-		}, nil
-	case "verified":
-		return taskClaimDoneOutput{
-			Status:     "not_ready",
-			ErrorCode:  "CLAIM_DONE_ALREADY_VERIFIED",
-			Failed:     []string{"CLAIM_DONE_ALREADY_VERIFIED"},
-			Checklist:  []string{fmt.Sprintf("Task %q is already verified; reopening requires a fresh revision via artifact.propose", currentSlug)},
+			Checklist:  []string{fmt.Sprintf("Task %q is already claimed_done; create a follow-up Task if more work remains", currentSlug)},
 			ArtifactID: artifactID,
 			Slug:       currentSlug,
 			PrevStatus: prevStatus,
@@ -305,6 +300,16 @@ func claimOneTaskDone(
 		shapePayload["commit_sha"] = commitSHA
 	}
 
+	autoPins, autoWarnings := buildClaimDoneAutoPins(ctx, deps, projectID, commitSHA, claimDoneAutopinDefaultLimit)
+	pinWarnings := append([]string{}, autoWarnings...)
+	pinSources := make([]claimDonePinWithSource, 0, len(pinsValidated)+len(autoPins))
+	for _, pin := range pinsValidated {
+		pinSources = append(pinSources, claimDonePinWithSource{Pin: pin, Source: claimDonePinSourceExplicit})
+	}
+	for _, pin := range autoPins {
+		pinSources = append(pinSources, claimDonePinWithSource{Pin: pin, Source: claimDonePinSourceAutopin})
+	}
+
 	tx, err := deps.DB.Begin(ctx)
 	if err != nil {
 		return taskClaimDoneOutput{}, fmt.Errorf("begin tx: %w", err)
@@ -317,11 +322,12 @@ func claimOneTaskDone(
 	// (PIN_DUPLICATE_SKIPPED:<path> warning) — claim_done must be
 	// idempotent on retry, unlike artifact.add_pin which rejects dups
 	// to surface accidental re-adds.
-	pinsStored := 0
-	pinWarnings := []string{}
-	if len(pinsValidated) > 0 {
-		nonDup := make([]ArtifactPinInput, 0, len(pinsValidated))
-		for _, pin := range pinsValidated {
+	pinsStored, pinsExplicitCount, pinsAutopinCount := 0, 0, 0
+	if len(pinSources) > 0 {
+		nonDup := make([]ArtifactPinInput, 0, len(pinSources))
+		seen := map[string]struct{}{}
+		for _, sourced := range pinSources {
+			pin := sourced.Pin
 			resolvedRepoID, _, rerr := pgit.ResolvePinRepoID(ctx, tx, projectID, pin.RepoID, pin.Repo, pin.Path, deps.RepoRoot)
 			if rerr != nil {
 				return taskClaimDoneOutput{}, fmt.Errorf("resolve claim_done pin repo: %w", rerr)
@@ -337,6 +343,17 @@ func claimOneTaskDone(
 				pinWarnings = append(pinWarnings, "PIN_DUPLICATE_SKIPPED:"+pin.Path)
 				continue
 			}
+			key := claimDonePinDedupeKey(resolvedRepoID, pin)
+			if _, ok := seen[key]; ok {
+				pinWarnings = append(pinWarnings, "PIN_DUPLICATE_SKIPPED:"+pin.Path)
+				continue
+			}
+			seen[key] = struct{}{}
+			if sourced.Source == claimDonePinSourceAutopin {
+				pinsAutopinCount++
+			} else {
+				pinsExplicitCount++
+			}
 			nonDup = append(nonDup, pin)
 		}
 		stored, repoWarnings, ierr := insertPins(ctx, tx, projectID, artifactID, nonDup, deps.RepoRoot)
@@ -349,6 +366,8 @@ func claimOneTaskDone(
 	if pinsStored > 0 {
 		shapePayload["pins_stored"] = pinsStored
 	}
+	shapePayload["pins_explicit_count"] = pinsExplicitCount
+	shapePayload["pins_autopin_count"] = pinsAutopinCount
 	shapePayloadJSON, err := json.Marshal(shapePayload)
 	if err != nil {
 		return taskClaimDoneOutput{}, fmt.Errorf("marshal shape_payload: %w", err)
@@ -428,9 +447,11 @@ func claimOneTaskDone(
 			'changed_acceptance_count', $7::int,
 			'prev_status',              $8::text,
 			'commit_sha',               NULLIF($9::text, ''),
-			'pins_stored',              $10::int
+			'pins_stored',              $10::int,
+			'pins_explicit_count',      $11::int,
+			'pins_autopin_count',       $12::int
 		))
-	`, projectID, artifactID, newRev, currentSlug, effAuthorID, commitMsg, changedCount, prevStatus, commitSHA, pinsStored); err != nil {
+	`, projectID, artifactID, newRev, currentSlug, effAuthorID, commitMsg, changedCount, prevStatus, commitSHA, pinsStored, pinsExplicitCount, pinsAutopinCount); err != nil {
 		return taskClaimDoneOutput{}, fmt.Errorf("emit task_claimed_done event: %w", err)
 	}
 
@@ -455,8 +476,20 @@ func claimOneTaskDone(
 		NewStatus:              "claimed_done",
 		CommitSHA:              commitSHA,
 		PinsStored:             pinsStored,
+		PinsExplicitCount:      pinsExplicitCount,
+		PinsAutopinCount:       pinsAutopinCount,
 		Warnings:               outWarnings,
 	}, nil
+}
+
+const (
+	claimDonePinSourceExplicit = "explicit"
+	claimDonePinSourceAutopin  = "autopin"
+)
+
+type claimDonePinWithSource struct {
+	Pin    ArtifactPinInput
+	Source string
 }
 
 // validateClaimDoneCommitSHA normalises and length/charset-checks the
@@ -500,6 +533,97 @@ func prefixClaimDoneCommitMsg(commitMsg, commitSHA string) string {
 		short = short[:8]
 	}
 	return fmt.Sprintf("[%s] %s", short, commitMsg)
+}
+
+func buildClaimDoneAutoPins(ctx context.Context, deps Deps, projectID, commitSHA string, limit int) ([]ArtifactPinInput, []string) {
+	if strings.TrimSpace(commitSHA) == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = claimDoneAutopinDefaultLimit
+	}
+	repos, err := pgit.LoadProjectRepos(ctx, deps.DB, projectID)
+	if err != nil {
+		return nil, []string{"PINS_AUTOPIN_UNAVAILABLE:repo_lookup_failed"}
+	}
+	if len(repos) == 0 && strings.TrimSpace(deps.RepoRoot) != "" {
+		repos = []pgit.Repo{{Name: "origin", LocalPaths: []string{deps.RepoRoot}}}
+	}
+	if len(repos) == 0 {
+		return nil, []string{"PINS_AUTOPIN_UNAVAILABLE:no_repo_registered"}
+	}
+
+	provider := pgit.LocalGitProvider{}
+	var lastWarning string
+	for _, repo := range repos {
+		if len(repo.LocalPaths) == 0 && strings.TrimSpace(deps.RepoRoot) != "" {
+			repo.LocalPaths = []string{deps.RepoRoot}
+		}
+		files, err := provider.ChangedFiles(ctx, repo, commitSHA)
+		if err == nil {
+			return claimDoneAutoPinsFromChangedFiles(files, commitSHA, repo, limit)
+		}
+		switch {
+		case errors.Is(err, pgit.ErrCommitNotFound):
+			lastWarning = "PINS_AUTOPIN_UNAVAILABLE:commit_not_found"
+		case errors.Is(err, pgit.ErrNoProviderForRepo):
+			lastWarning = "PINS_AUTOPIN_UNAVAILABLE:no_local_repo"
+		default:
+			lastWarning = "PINS_AUTOPIN_UNAVAILABLE:git_diff_failed"
+		}
+	}
+	if lastWarning == "" {
+		lastWarning = "PINS_AUTOPIN_UNAVAILABLE:git_diff_failed"
+	}
+	return nil, []string{lastWarning}
+}
+
+func claimDoneAutoPinsFromChangedFiles(files []pgit.ChangedFile, commitSHA string, repo pgit.Repo, limit int) ([]ArtifactPinInput, []string) {
+	if limit <= 0 {
+		limit = claimDoneAutopinDefaultLimit
+	}
+	out := make([]ArtifactPinInput, 0, min(len(files), limit))
+	warnings := []string{}
+	validFiles := 0
+	for _, file := range files {
+		path := strings.TrimSpace(file.Path)
+		if path == "" {
+			continue
+		}
+		validFiles++
+		if len(out) >= limit {
+			continue
+		}
+		out = append(out, ArtifactPinInput{
+			Kind:      pinmodel.NormalizeKind("", path),
+			RepoID:    strings.TrimSpace(repo.ID),
+			Repo:      strings.TrimSpace(repo.Name),
+			CommitSHA: commitSHA,
+			Path:      path,
+		})
+	}
+	if validFiles > len(out) {
+		warnings = append(warnings, fmt.Sprintf("PINS_AUTOPIN_TRUNCATED:%d", validFiles-len(out)))
+	}
+	return out, warnings
+}
+
+func claimDonePinDedupeKey(repoID string, pin ArtifactPinInput) string {
+	kind := pinmodel.NormalizeKind(pin.Kind, pin.Path)
+	var commit string
+	var linesStart, linesEnd int
+	if addPinUsesGitCoordinate(kind) {
+		commit = strings.TrimSpace(pin.CommitSHA)
+		linesStart = pin.LinesStart
+		linesEnd = pin.LinesEnd
+	}
+	return strings.Join([]string{
+		strings.TrimSpace(repoID),
+		commit,
+		strings.TrimSpace(pin.Path),
+		fmt.Sprint(linesStart),
+		fmt.Sprint(linesEnd),
+	}, "\x00")
 }
 
 // validateClaimDonePins runs the same path/url/line-range checks as

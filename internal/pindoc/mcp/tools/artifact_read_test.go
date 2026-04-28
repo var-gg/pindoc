@@ -133,7 +133,6 @@ func TestBuildTaskAttentionNegativeTypeGateCoversNonTaskTypes(t *testing.T) {
 		"Debug",
 		"Flow",
 		"TC",
-		"VerificationReport",
 	}
 	for _, artifactType := range nonTaskTypes {
 		t.Run(artifactType, func(t *testing.T) {
@@ -202,7 +201,7 @@ func TestBuildTaskAttentionGates(t *testing.T) {
 		}
 	})
 
-	for _, status := range []string{"claimed_done", "verified", "blocked", "cancelled"} {
+	for _, status := range []string{"claimed_done", "blocked", "cancelled"} {
 		t.Run("terminal status "+status, func(t *testing.T) {
 			got := buildTaskAttention("Task", status, "agent:codex", "other-agent", basePrincipal, "full", "ko", "pindoc", "task-a")
 			if got != nil {

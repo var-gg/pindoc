@@ -499,8 +499,7 @@ re-send the body. Already-resolved markers ([x]/[~]/[-]) are preserved.
 
 Use artifact.propose(shape="meta_patch") for other operational metadata
 fields such as priority or due_at unless a narrower task-specific tool
-exists. Verified state is the next stop after claimed_done and goes
-through pindoc.artifact.verify (verifier ≠ implementer invariant).
+exists.
 
 %s%s
 
@@ -935,10 +934,9 @@ When this project's agent spawns a worktree-based chip / parallel sub-session:
 
 ### After chip merge to main
 - Orchestrating agent (or chip on exit) calls
-  ` + "`pindoc.artifact.propose(update_of=<task>, task_meta={status: \"claimed_done\"})`" + `
-  with all Acceptance checkboxes ticked.
-- Optional: separate verifier agent posts VerificationReport + calls
-  ` + "`pindoc.artifact.verify`" + ` for ` + "`verified`" + ` state.
+  ` + "`pindoc.task.claim_done(slug_or_id=<task>, commit_sha=<sha>)`" + ` so
+  acceptance checkboxes, task_meta.status, and implementation references
+  land in one atomic revision.
 
 ### If interrupted / abandoned
 - Task stays open. Orchestrator decides: re-spawn / reassign / cancel.
