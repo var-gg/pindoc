@@ -46,10 +46,10 @@ type Deps struct {
 	// but canonical Reader URLs are /p/<slug>/...
 	DefaultProjectLocale string
 
-	Embedder      embed.Provider
-	Settings      *settings.Store
-	Telemetry     *telemetry.Store
-	OAuth         *pauth.OAuthService
+	Embedder  embed.Provider
+	Settings  *settings.Store
+	Telemetry *telemetry.Store
+	OAuth     *pauth.OAuthService
 	// Providers is the runtime IdP registry (`instance_providers`
 	// table). Nil-safe — admin endpoints respond 503 when the store
 	// hasn't been wired (test fixtures).
@@ -71,9 +71,10 @@ type Deps struct {
 	// (b) operator intent is loopback-only (cfg.IsLoopbackBind). See
 	// auth.HTTPDeps.TrustedSameHostProxy for the security envelope.
 	TrustedSameHostProxy bool
-	Version        string
-	BuildCommit    string
-	Summary        changegroup.SummaryConfig
+	Version              string
+	BuildCommit          string
+	RepoRoot             string
+	Summary              changegroup.SummaryConfig
 
 	// StartTime stamps when the daemon process began running. Surfaced
 	// via GET /health as uptime_sec so operators can spot-check that
@@ -182,6 +183,9 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/p/{project}/read-states", d.handleReadStates)
 	mux.HandleFunc("GET /api/p/{project}/artifacts/{idOrSlug}/read-state", d.handleArtifactReadState)
 	mux.HandleFunc("GET /api/p/{project}/export", d.handleProjectExport)
+	mux.HandleFunc("GET /api/p/{project}/git/changed-files", d.handleGitChangedFiles)
+	mux.HandleFunc("GET /api/p/{project}/git/blob", d.handleGitBlob)
+	mux.HandleFunc("GET /api/p/{project}/git/diff", d.handleGitDiff)
 
 	// Operational metadata edit — the one write surface the HTTP API
 	// exposes. Scope is locked to task_meta.status / assignee / priority /

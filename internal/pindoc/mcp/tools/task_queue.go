@@ -90,9 +90,10 @@ type taskQueueOutput struct {
 	// at a glance whether the omitted aggregates are intentional.
 	Compact bool `json:"compact,omitempty"`
 
-	Items     []taskQueueItem `json:"items"`
-	Truncated bool            `json:"truncated,omitempty"`
-	Notice    string          `json:"notice"`
+	Items     []taskQueueItem     `json:"items"`
+	Truncated bool                `json:"truncated,omitempty"`
+	Notice    string              `json:"notice"`
+	Attention *TaskQueueAttention `json:"attention,omitempty"`
 }
 
 // RegisterTaskQueue wires pindoc.task.queue. This is the MCP counterpart
@@ -110,7 +111,9 @@ Default status="pending" means task_meta.status is missing OR "open".
 Counts are grouped by task_meta.status, area, and priority. This is the
 canonical MCP pre-flight before saying "the Task queue is done"; it is
 not the same as pindoc.scope.in_flight, which lists unresolved acceptance
-checkboxes.
+checkboxes. When the caller is an agent querying its own assignee queue,
+the response may include attention for Tasks idle longer than
+PINDOC_STUCK_THRESHOLD_HOURS (default 24).
 `),
 		},
 		func(ctx context.Context, p *auth.Principal, in taskQueueInput) (*sdk.CallToolResult, taskQueueOutput, error) {
@@ -231,6 +234,7 @@ checkboxes.
 				Truncated:       truncated,
 				Notice:          taskQueueNotice(),
 			}
+			out.Attention = buildTaskQueueAttention(ctx, deps, p, scope.ProjectSlug, strings.TrimSpace(in.Assignee), deps.UserLanguage)
 			applyTaskQueueCompact(&out, in.Compact)
 			return nil, out, nil
 		},

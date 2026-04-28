@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -22,6 +23,8 @@ type ProjectRepoInput struct {
 	GitRemoteURL  string
 	Name          string
 	DefaultBranch string
+	LocalPaths    []string
+	URLs          []string
 }
 
 // NormalizeGitRemoteURL converts common Git remote shapes into the DB lookup
@@ -90,24 +93,37 @@ func AddProjectRepo(ctx context.Context, q repoQueryer, in ProjectRepoInput) (st
 	if branch == "" {
 		branch = "main"
 	}
+	urls := normalizeRepoStringSet(append([]string{normalized, strings.TrimSpace(in.GitRemoteURL)}, in.URLs...))
+	localPaths := normalizeRepoPathSet(in.LocalPaths)
 
 	var id string
 	if err := q.QueryRow(ctx, `
 		INSERT INTO project_repos (
-			project_id, git_remote_url, git_remote_url_original, name, default_branch
-		) VALUES ($1::uuid, $2, $3, $4, $5)
+			project_id, git_remote_url, git_remote_url_original, name, default_branch,
+			local_paths, urls
+		) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (project_id, git_remote_url) DO UPDATE SET
 			git_remote_url_original = EXCLUDED.git_remote_url_original,
 			name = EXCLUDED.name,
-			default_branch = EXCLUDED.default_branch
+			default_branch = EXCLUDED.default_branch,
+			local_paths = (
+				SELECT ARRAY(SELECT DISTINCT v FROM unnest(project_repos.local_paths || EXCLUDED.local_paths) AS v WHERE v <> '')
+			),
+			urls = (
+				SELECT ARRAY(SELECT DISTINCT v FROM unnest(project_repos.urls || EXCLUDED.urls) AS v WHERE v <> '')
+			)
 		RETURNING id::text
-	`, projectID, normalized, strings.TrimSpace(in.GitRemoteURL), name, branch).Scan(&id); err != nil {
+	`, projectID, normalized, strings.TrimSpace(in.GitRemoteURL), name, branch, localPaths, urls).Scan(&id); err != nil {
 		return "", fmt.Errorf("project repo insert: %w", err)
 	}
 	return id, nil
 }
 
 func EnsureDefaultProjectRepo(ctx context.Context, q repoQueryer, projectSlug, rawRemote string) error {
+	return EnsureDefaultProjectRepoWithLocalPath(ctx, q, projectSlug, rawRemote, "")
+}
+
+func EnsureDefaultProjectRepoWithLocalPath(ctx context.Context, q repoQueryer, projectSlug, rawRemote, localPath string) error {
 	if q == nil {
 		return nil
 	}
@@ -122,20 +138,29 @@ func EnsureDefaultProjectRepo(ctx context.Context, q repoQueryer, projectSlug, r
 	if normalized == "" {
 		return nil
 	}
+	localPaths := normalizeRepoPathSet([]string{localPath})
+	urls := normalizeRepoStringSet([]string{normalized, strings.TrimSpace(rawRemote)})
 	var id string
 	err = q.QueryRow(ctx, `
 		INSERT INTO project_repos (
-			project_id, git_remote_url, git_remote_url_original, name, default_branch
+			project_id, git_remote_url, git_remote_url_original, name, default_branch,
+			local_paths, urls
 		)
-		SELECT p.id, $2, $3, 'origin', 'main'
+		SELECT p.id, $2, $3, 'origin', 'main', $4, $5
 		  FROM projects p
 		 WHERE p.slug = $1
-		   AND NOT EXISTS (
-			 SELECT 1 FROM project_repos pr WHERE pr.project_id = p.id
-		   )
-		ON CONFLICT (project_id, git_remote_url) DO NOTHING
+		ON CONFLICT (project_id, git_remote_url) DO UPDATE SET
+			git_remote_url_original = EXCLUDED.git_remote_url_original,
+			name = EXCLUDED.name,
+			default_branch = EXCLUDED.default_branch,
+			local_paths = (
+				SELECT ARRAY(SELECT DISTINCT v FROM unnest(project_repos.local_paths || EXCLUDED.local_paths) AS v WHERE v <> '')
+			),
+			urls = (
+				SELECT ARRAY(SELECT DISTINCT v FROM unnest(project_repos.urls || EXCLUDED.urls) AS v WHERE v <> '')
+			)
 		RETURNING id::text
-	`, projectSlug, normalized, strings.TrimSpace(rawRemote)).Scan(&id)
+	`, projectSlug, normalized, strings.TrimSpace(rawRemote), localPaths, urls).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -175,7 +200,7 @@ func GitRemoteURLFromWorkdir(ctx context.Context, workdir string) (string, error
 	if workdir == "" {
 		workdir = "."
 	}
-	out, err := exec.CommandContext(ctx, "git", "-C", workdir, "remote", "get-url", "origin").Output()
+	out, err := exec.CommandContext(ctx, "git", "-c", "safe.directory=*", "-C", workdir, "remote", "get-url", "origin").Output()
 	if err != nil {
 		return "", err
 	}
@@ -194,8 +219,44 @@ func BootstrapDefaultProjectRepoFromWorkdir(ctx context.Context, q repoQueryer, 
 	if normalized == "" {
 		return "", nil
 	}
-	if err := EnsureDefaultProjectRepo(ctx, q, projectSlug, raw); err != nil {
+	localPath := strings.TrimSpace(workdir)
+	if localPath == "" {
+		localPath = "."
+	}
+	if abs, err := filepath.Abs(localPath); err == nil {
+		localPath = abs
+	}
+	if err := EnsureDefaultProjectRepoWithLocalPath(ctx, q, projectSlug, raw, localPath); err != nil {
 		return "", err
 	}
 	return normalized, nil
+}
+
+func normalizeRepoStringSet(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
+func normalizeRepoPathSet(in []string) []string {
+	var cleaned []string
+	for _, p := range in {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
+		cleaned = append(cleaned, filepath.Clean(p))
+	}
+	return normalizeRepoStringSet(cleaned)
 }

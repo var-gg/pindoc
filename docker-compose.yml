@@ -86,10 +86,12 @@ services:
       PINDOC_EMBED_PREFIX_DOCUMENT: ${PINDOC_COMPOSE_EMBED_PREFIX_DOCUMENT:-}
       PINDOC_EMBED_MODEL_DIR: /var/lib/pindoc/cache/models/embeddinggemma-300m
       PINDOC_EMBED_RUNTIME_DIR: /var/lib/pindoc/cache/runtime
+      PINDOC_REPO_ROOT: ${PINDOC_REPO_ROOT:-/workspace/pindoc}
     ports:
       - "127.0.0.1:${PINDOC_DAEMON_PORT:-5830}:5830"
     volumes:
       - pindoc_cache:/var/lib/pindoc/cache
+      - .:/workspace/pindoc:ro
     depends_on:
       db:
         condition: service_healthy

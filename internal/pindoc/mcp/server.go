@@ -161,6 +161,8 @@ func NewServer(opts Options) (*Server, error) {
 
 	// Phase 2.3 write-side + Phase 3 retrieval.
 	tools.RegisterArtifactPropose(s, deps)
+	tools.RegisterArtifactWordingFix(s, deps)
+	tools.RegisterArtifactAddPin(s, deps)
 	tools.RegisterHarnessInstall(s, deps)
 	tools.RegisterArtifactSearch(s, deps)
 	tools.RegisterContextForTask(s, deps)

@@ -159,9 +159,10 @@ export type SourceSessionRef = {
 
 // PinRef mirrors artifact_pins rows for the Reader Sidecar. repo defaults
 // to "origin" in the DB, commit_sha + line range only meaningful on
-// kind="code".
+// repo_id is the canonical project_repos coordinate when available.
 export type PinRef = {
-  kind: "code" | "resource" | "url";
+  kind: "code" | "doc" | "config" | "asset" | "resource" | "url";
+  repo_id?: string;
   repo?: string;
   commit_sha?: string;
   path: string;

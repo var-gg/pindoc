@@ -196,6 +196,9 @@
   --relation-translation-of: var(--type-glossary);
 
   --pin-code:     var(--type-apiendpoint);
+  --pin-doc:      var(--type-glossary);
+  --pin-config:   var(--type-datamodel);
+  --pin-asset:    var(--type-screen);
   --pin-resource: var(--type-feature);
   --pin-url:      var(--type-analysis);
 
@@ -454,6 +457,9 @@
   --relation-translation-of: var(--type-glossary);
 
   --pin-code:     var(--type-apiendpoint);
+  --pin-doc:      var(--type-glossary);
+  --pin-config:   var(--type-datamodel);
+  --pin-asset:    var(--type-screen);
   --pin-resource: var(--type-feature);
   --pin-url:      var(--type-analysis);
 

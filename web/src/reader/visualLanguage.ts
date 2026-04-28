@@ -65,6 +65,9 @@ export const visualLanguage = {
   },
   pins: {
     code: pinEntry("Code2", "--pin-code", "Code", "코드", "Repository file, commit, or line-range evidence.", "repository 파일, commit, line-range 근거."),
+    doc: pinEntry("FileText", "--pin-doc", "Doc", "문서", "Markdown, text, README, changelog, or license evidence.", "Markdown, 텍스트, README, changelog, license 근거."),
+    config: pinEntry("Settings2", "--pin-config", "Config", "설정", "Configuration file such as JSON, YAML, env, Dockerfile, or build config.", "JSON, YAML, env, Dockerfile, build config 같은 설정 파일."),
+    asset: pinEntry("Image", "--pin-asset", "Asset", "에셋", "Image, PDF, media, font, or other binary/design asset.", "이미지, PDF, media, font 또는 binary/design 에셋."),
     resource: pinEntry("Package", "--pin-resource", "Resource", "리소스", "Typed internal resource reference.", "타입이 있는 내부 resource 참조."),
     url: pinEntry("ExternalLink", "--pin-url", "URL", "URL", "External web link or source URL.", "외부 web link 또는 출처 URL."),
   },

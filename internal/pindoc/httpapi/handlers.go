@@ -650,6 +650,7 @@ type edgeRef struct {
 // stays compact on resource/url pins that don't carry line ranges.
 type pinRow struct {
 	Kind       string `json:"kind"`
+	RepoID     string `json:"repo_id,omitempty"`
 	Repo       string `json:"repo,omitempty"`
 	CommitSHA  string `json:"commit_sha,omitempty"`
 	Path       string `json:"path"`
@@ -809,7 +810,7 @@ func (d Deps) loadRecentWarnings(ctx context.Context, artifactID string) ([]rece
 // lands on the most likely evidence type without extra clicks.
 func (d Deps) loadArtifactPins(ctx context.Context, artifactID string) ([]pinRow, error) {
 	rows, err := d.DB.Query(ctx, `
-		SELECT kind, repo, commit_sha, path, lines_start, lines_end
+		SELECT kind, repo_id::text, repo, commit_sha, path, lines_start, lines_end
 		FROM artifact_pins
 		WHERE artifact_id = $1
 		ORDER BY id
@@ -821,10 +822,13 @@ func (d Deps) loadArtifactPins(ctx context.Context, artifactID string) ([]pinRow
 	var out []pinRow
 	for rows.Next() {
 		var p pinRow
-		var commitSHA *string
+		var repoID, commitSHA *string
 		var ls, le *int
-		if err := rows.Scan(&p.Kind, &p.Repo, &commitSHA, &p.Path, &ls, &le); err != nil {
+		if err := rows.Scan(&p.Kind, &repoID, &p.Repo, &commitSHA, &p.Path, &ls, &le); err != nil {
 			return nil, err
+		}
+		if repoID != nil {
+			p.RepoID = *repoID
 		}
 		if commitSHA != nil {
 			p.CommitSHA = *commitSHA

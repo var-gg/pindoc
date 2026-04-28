@@ -95,10 +95,11 @@ type TaskAttention struct {
 
 // PinRef mirrors artifact_pins rows. Empty repo defaults to "origin" in
 // the migration, so we always have a non-empty value here. Kind is
-// "code" | "resource" | "url" (Phase 15c); repo/commit_sha/lines_* are
-// only meaningful on kind="code".
+// "code" | "doc" | "config" | "asset" | "resource" | "url"; repo_id is
+// the canonical project_repos coordinate when the server can resolve it.
 type PinRef struct {
 	Kind       string `json:"kind"`
+	RepoID     string `json:"repo_id,omitempty"`
 	Repo       string `json:"repo,omitempty"`
 	CommitSHA  string `json:"commit_sha,omitempty"`
 	Path       string `json:"path"`
@@ -421,7 +422,7 @@ func summarizeBody(body string) string {
 
 func loadPins(ctx context.Context, deps Deps, artifactID string) ([]PinRef, error) {
 	rows, err := deps.DB.Query(ctx, `
-		SELECT kind, repo, commit_sha, path, lines_start, lines_end
+		SELECT kind, repo_id::text, repo, commit_sha, path, lines_start, lines_end
 		FROM artifact_pins
 		WHERE artifact_id = $1
 		ORDER BY id
@@ -434,10 +435,13 @@ func loadPins(ctx context.Context, deps Deps, artifactID string) ([]PinRef, erro
 	var out []PinRef
 	for rows.Next() {
 		var p PinRef
-		var commitSHA *string
+		var repoID, commitSHA *string
 		var linesStart, linesEnd *int
-		if err := rows.Scan(&p.Kind, &p.Repo, &commitSHA, &p.Path, &linesStart, &linesEnd); err != nil {
+		if err := rows.Scan(&p.Kind, &repoID, &p.Repo, &commitSHA, &p.Path, &linesStart, &linesEnd); err != nil {
 			return nil, err
+		}
+		if repoID != nil {
+			p.RepoID = *repoID
 		}
 		if commitSHA != nil {
 			p.CommitSHA = *commitSHA

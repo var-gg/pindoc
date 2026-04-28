@@ -27,6 +27,8 @@ var RegisteredTools = []string{
 	"pindoc.artifact.read",
 	"pindoc.artifact.translate",
 	"pindoc.artifact.propose",
+	"pindoc.artifact.wording_fix",
+	"pindoc.artifact.add_pin",
 	"pindoc.harness.install",
 	"pindoc.artifact.search",
 	"pindoc.context.for_task",

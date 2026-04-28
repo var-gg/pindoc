@@ -19,7 +19,9 @@ import (
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
+	pgit "github.com/var-gg/pindoc/internal/pindoc/git"
 	"github.com/var-gg/pindoc/internal/pindoc/i18n"
+	pinmodel "github.com/var-gg/pindoc/internal/pindoc/pins"
 	"github.com/var-gg/pindoc/internal/pindoc/policy"
 	"github.com/var-gg/pindoc/internal/pindoc/receipts"
 	"github.com/var-gg/pindoc/internal/pindoc/titleguide"
@@ -181,6 +183,18 @@ type artifactProposeInput struct {
 	// gate because reading/targeting an existing artifact is already
 	// proof of context.
 	Basis *artifactProposeBasis `json:"basis,omitempty"`
+
+	// WordingFix is set by the pindoc.artifact.wording_fix shortcut. It is
+	// not part of the public artifact.propose schema; it lets the shared
+	// update path suppress canonical rewrite warnings for narrow wording
+	// patches.
+	WordingFix bool `json:"-"`
+
+	// AddPin is set by the pindoc.artifact.add_pin shortcut. It is not part
+	// of the public artifact.propose schema; it documents that the mutation
+	// is a narrow pin-only operation and keeps canonical rewrite detection
+	// from treating the lane as an evidence-free body rewrite.
+	AddPin bool `json:"-"`
 }
 
 type artifactProposeBasis struct {
@@ -199,18 +213,21 @@ type artifactProposeBasis struct {
 // ArtifactPinInput is the agent-facing shape for a single pin. `path` is
 // always mandatory (DB CHECK); the other fields depend on `kind`:
 //
-//	kind="code" (default) — repo, commit_sha, path (file path),
+//	kind="code" (default) — repo_id/repo, commit_sha, path (file path),
 //	                        lines_start/lines_end. Phase 11a original.
-//	kind="resource"       — path holds a typed resource reference like
-//	                        "aws:vpc:vpc-0c6bff25" or "k8s:ns:pod-123";
-//	                        repo/commit/lines are ignored.
+//	kind="doc"            — markdown/text docs and README/CHANGELOG-like paths.
+//	kind="config"         — JSON/YAML/TOML/Dockerfile/env/config paths.
+//	kind="asset"          — image/PDF/media/font paths.
+//	kind="resource"       — legacy typed resource references; preserved for
+//	                        compatibility with existing callers.
 //	kind="url"            — path holds an absolute URL ("https://…");
 //	                        repo/commit/lines are ignored.
 //
-// Agents that don't set kind get "code" — preserves all Phase 11a call
-// sites without rewrite.
+// Agents that don't set kind get a server-inferred value from path. Go/TS/Py
+// and other source paths still fall back to code.
 type ArtifactPinInput struct {
-	Kind       string `json:"kind,omitempty" jsonschema:"one of code | resource | url; default code"`
+	Kind       string `json:"kind,omitempty" jsonschema:"one of code | doc | config | asset | resource | url; omitted kind is inferred from path"`
+	RepoID     string `json:"repo_id,omitempty" jsonschema:"canonical project_repos.id; optional, server auto-maps when omitted"`
 	Repo       string `json:"repo,omitempty" jsonschema:"'origin' default; named remote when multi-repo; code kind only"`
 	CommitSHA  string `json:"commit_sha,omitempty" jsonschema:"code kind only"`
 	Path       string `json:"path" jsonschema:"code: file path; resource: typed resource ref; url: absolute URL"`
@@ -218,8 +235,10 @@ type ArtifactPinInput struct {
 	LinesEnd   int    `json:"lines_end,omitempty" jsonschema:"code kind only"`
 }
 
-var validPinKinds = map[string]struct{}{
-	"code": {}, "resource": {}, "url": {},
+func normalizePinInputs(pins []ArtifactPinInput) {
+	for i := range pins {
+		pins[i].Kind = pinmodel.NormalizeKind(pins[i].Kind, pins[i].Path)
+	}
 }
 
 // TaskMetaInput is the agent-facing shape for a Task artifact's tracker
@@ -482,6 +501,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			// this so existing task_meta is preserved unless the caller
 			// explicitly patches it.
 			applyTaskCreateDefaults(&in)
+			normalizePinInputs(in.Pins)
 
 			// --- Pre-flight ----------------------------------------------
 			lang := deps.UserLanguage
@@ -926,7 +946,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			}
 
 			// --- pins ---------------------------------------------------
-			pinsStored, err := insertPins(ctx, tx, newID, in.Pins)
+			pinsStored, repoWarnings, err := insertPins(ctx, tx, projectID, newID, in.Pins, deps.RepoRoot)
 			if err != nil {
 				return nil, artifactProposeOutput{}, err
 			}
@@ -979,6 +999,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			}
 
 			warnings := createWarnings(ctx, deps, projectID, in.Title, in.BodyMarkdown)
+			warnings = append(warnings, repoWarnings...)
 			warnings = append(warnings, commitMsgWarnings...)
 			warnings = append(warnings, pinPathWarnings(deps, in.Pins)...)
 			warnings = append(warnings, titleQualityWarnings(in.Title, in.BodyLocale, projectTitleJargon(deps))...)
@@ -1482,7 +1503,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	if err != nil {
 		return nil, artifactProposeOutput{}, err
 	}
-	pinsStored, err := insertPins(ctx, tx, artifactID, in.Pins)
+	pinsStored, repoWarnings, err := insertPins(ctx, tx, projectID, artifactID, in.Pins, deps.RepoRoot)
 	if err != nil {
 		return nil, artifactProposeOutput{}, err
 	}
@@ -1506,6 +1527,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	// types that carry a canonical truth claim (Debug, Decision, Analysis)
 	// and require fresh evidence when that section's content shifts.
 	warnings := updatePathWarnings(ctx, deps, scope.ProjectSlug, in)
+	warnings = append(warnings, repoWarnings...)
 	warnings = append(warnings, acceptanceUncheckedNudgeWarnings(currentType, in.BodyMarkdown, in.CommitMsg)...)
 	warnings = append(warnings, decisionSubjectAreaWarnings(in)...)
 	// Body-patch warnings bubble up here so PATCH_NOOP etc. sit alongside
@@ -1524,7 +1546,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	// claim rewrite by construction, so skip the guard for that shape (D).
 	rewrittenSections := detectCanonicalClaimRewrite(currentBody, in.BodyMarkdown, currentType)
 	canonicalRewriteFlag := false
-	if len(rewrittenSections) > 0 && !hasEvidenceDelta(prevMeta, &in) && !isTemplateArtifact(currentSlug) && shape != ShapeAcceptanceTransition && shape != ShapeScopeDefer {
+	if len(rewrittenSections) > 0 && !hasEvidenceDelta(prevMeta, &in) && !isTemplateArtifact(currentSlug) && shape != ShapeAcceptanceTransition && shape != ShapeScopeDefer && !in.WordingFix && !in.AddPin {
 		canonicalRewriteFlag = true
 		warnings = append(warnings, "CANONICAL_REWRITE_WITHOUT_EVIDENCE:"+strings.Join(rewrittenSections, "+"))
 		suggested = []string{
@@ -1911,11 +1933,8 @@ func preflight(ctx context.Context, deps Deps, projectSlug string, in *artifactP
 	// Missing entirely = soft (future escalation NEED_PIN for code-linked
 	// types once search_receipt is in place).
 	for i, p := range in.Pins {
-		kind := strings.TrimSpace(p.Kind)
-		if kind == "" {
-			kind = "code"
-		}
-		if _, ok := validPinKinds[kind]; !ok {
+		kind := pinmodel.NormalizeKind(p.Kind, p.Path)
+		if !pinmodel.ValidKind(kind) {
 			push(fmt.Sprintf(i18n.T(lang, "preflight.pin_kind_invalid"), i, p.Kind), "PIN_KIND_INVALID")
 		}
 		if strings.TrimSpace(p.Path) == "" {
@@ -2574,35 +2593,44 @@ func resolveRelatesTo(ctx context.Context, tx pgx.Tx, projectSlug string, relate
 
 // insertPins writes each validated pin to artifact_pins. Returns how many
 // rows landed (caller echoes this in the output).
-func insertPins(ctx context.Context, tx pgx.Tx, artifactID string, pins []ArtifactPinInput) (int, error) {
+func insertPins(ctx context.Context, tx pgx.Tx, projectID, artifactID string, pins []ArtifactPinInput, repoRoot string) (int, []string, error) {
 	n := 0
+	var warnings []string
 	for _, p := range pins {
-		kind := strings.TrimSpace(p.Kind)
-		if kind == "" {
-			kind = "code"
-		}
+		kind := pinmodel.NormalizeKind(p.Kind, p.Path)
 		repo := strings.TrimSpace(p.Repo)
 		if repo == "" {
 			repo = "origin"
 		}
-		// Non-code kinds don't use line ranges or commit_sha; null them
-		// out so the row is consistent with the kind semantics.
+		repoID, repoMatched, err := pgit.ResolvePinRepoID(ctx, tx, projectID, p.RepoID, repo, p.Path, repoRoot)
+		if err != nil {
+			return n, warnings, fmt.Errorf("pin repo resolve: %w", err)
+		}
+		if !repoMatched && kind == "code" {
+			warnings = append(warnings, "RECOMMEND_REPO_REGISTRATION:"+strings.TrimSpace(p.Path))
+		}
+		var repoIDArg any
+		if repoID != "" {
+			repoIDArg = repoID
+		}
+		// Non-code/doc/config/asset kinds don't use line ranges or commit_sha;
+		// null them out so the row stays consistent with the kind semantics.
 		var commit any = nullIfEmpty(p.CommitSHA)
 		var linesStart any = nullIfZero(p.LinesStart)
 		var linesEnd any = nullIfZero(p.LinesEnd)
-		if kind != "code" {
+		if kind != "code" && kind != "doc" && kind != "config" && kind != "asset" {
 			commit, linesStart, linesEnd = nil, nil, nil
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO artifact_pins (artifact_id, kind, repo, commit_sha, path, lines_start, lines_end)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-		`, artifactID, kind, repo, commit, p.Path, linesStart, linesEnd,
+			INSERT INTO artifact_pins (artifact_id, kind, repo_id, repo, commit_sha, path, lines_start, lines_end)
+			VALUES ($1, $2, $3::uuid, $4, $5, $6, $7, $8)
+		`, artifactID, kind, repoIDArg, repo, commit, p.Path, linesStart, linesEnd,
 		); err != nil {
-			return n, fmt.Errorf("pin insert: %w", err)
+			return n, warnings, fmt.Errorf("pin insert: %w", err)
 		}
 		n++
 	}
-	return n, nil
+	return n, warnings, nil
 }
 
 // insertEdges writes artifact_edges rows for each resolved (target, relation)
@@ -2675,6 +2703,8 @@ func hasExplicitMetadataUpdate(in artifactProposeInput) bool {
 	return in.TaskMeta != nil ||
 		in.ArtifactMeta != nil ||
 		in.Tags != nil ||
+		len(in.Pins) > 0 ||
+		len(in.RelatesTo) > 0 ||
 		strings.TrimSpace(in.Completeness) != ""
 }
 
@@ -2782,10 +2812,7 @@ func resolveArtifactMeta(in *ArtifactMetaInput, pins []ArtifactPinInput, body st
 
 	hasCodePin := false
 	for _, p := range pins {
-		kind := strings.TrimSpace(p.Kind)
-		if kind == "" {
-			kind = "code"
-		}
+		kind := pinmodel.NormalizeKind(p.Kind, p.Path)
 		if kind == "code" {
 			hasCodePin = true
 			break
@@ -3172,7 +3199,7 @@ func createWarnings(ctx context.Context, deps Deps, projectID, title, body strin
 	return []string{"RECOMMEND_READ_BEFORE_CREATE"}
 }
 
-// pinPathWarnings checks every kind="code" pin path against the configured
+// pinPathWarnings checks every repo-backed pin path against the configured
 // repo root and returns one PIN_PATH_NOT_FOUND:<path> warning per miss.
 // No-op when deps.RepoRoot is empty (V1 default — the V1.5 git-pinner
 // takes over once it lands). Traversal-escape attempts (..) are rejected
@@ -3185,9 +3212,9 @@ func pinPathWarnings(deps Deps, pins []ArtifactPinInput) []string {
 	}
 	var out []string
 	for _, p := range pins {
-		kind := strings.TrimSpace(p.Kind)
-		if kind != "" && kind != "code" {
-			// Non-code kinds (resource, url) don't point at a local path.
+		kind := pinmodel.NormalizeKind(p.Kind, p.Path)
+		if kind == "resource" || kind == "url" {
+			// Resource/url kinds don't point at a local checkout path.
 			continue
 		}
 		path := strings.TrimSpace(p.Path)

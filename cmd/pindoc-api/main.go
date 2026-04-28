@@ -67,7 +67,7 @@ func main() {
 		logger.Error("db migrate", "err", err)
 		os.Exit(1)
 	}
-	if normalized, err := projects.BootstrapDefaultProjectRepoFromWorkdir(ctx, pool, cfg.ProjectSlug, ""); err != nil {
+	if normalized, err := projects.BootstrapDefaultProjectRepoFromWorkdir(ctx, pool, cfg.ProjectSlug, cfg.RepoRoot); err != nil {
 		logger.Info("default project repo bootstrap skipped", "project_slug", cfg.ProjectSlug, "err", err)
 	} else if normalized != "" {
 		logger.Info("default project repo bootstrap checked", "project_slug", cfg.ProjectSlug, "git_remote_url", normalized)
@@ -115,6 +115,7 @@ func main() {
 		Telemetry:            telemetryStore,
 		Version:              version,
 		BuildCommit:          commit,
+		RepoRoot:             cfg.RepoRoot,
 		StartTime:            startTime,
 	})
 

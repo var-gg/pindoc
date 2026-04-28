@@ -144,6 +144,8 @@ type contextForTaskOutput struct {
 	EmbedderUsed       EmbedderInfo               `json:"embedder_used"`
 	RecentChangeGroups []changegroup.CompactGroup `json:"recent_change_groups,omitempty"`
 	ApplicableRules    []ApplicableRule           `json:"applicable_rules"`
+	CallerInFlight     *CallerInFlightAttention   `json:"caller_in_flight,omitempty"`
+	PinCandidates      *PinCandidatesAttention    `json:"pin_candidates,omitempty"`
 }
 
 // candidateUpdateThreshold: landings under this cosine distance prompt an
@@ -197,7 +199,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.context.for_task",
-			Description: "Given a natural-language task description, return the 1–3 most relevant artifacts in this project. Call this at the start of any non-trivial task before grepping code or writing new artifacts. Tuning: smaller TopK than artifact.search because this optimises for first-hop precision, not recall.",
+			Description: "Given a natural-language task description, return the 1–3 most relevant artifacts in this project. Call this at the start of any non-trivial task before grepping code or writing new artifacts. Tuning: smaller TopK than artifact.search because this optimises for first-hop precision, not recall. Agent callers with open assigned Tasks may also receive caller_in_flight lifecycle attention, and agent callers with matching recent local Git commits may receive pin_candidates for propose(pins=[...]) or artifact.add_pin.",
 		},
 		func(ctx context.Context, p *auth.Principal, in contextForTaskInput) (*sdk.CallToolResult, contextForTaskOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -220,6 +222,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			if _, ok := validArtifactTypes[targetType]; !ok {
 				return nil, contextForTaskOutput{}, fmt.Errorf("target_type %q invalid; use a known artifact type", in.TargetType)
 			}
+			callerInFlight := buildCallerInFlightAttention(ctx, deps, p, scope.ProjectSlug, deps.UserLanguage)
 			ruleLimit := in.ApplicableRuleLimit
 			if ruleLimit <= 0 {
 				ruleLimit = 10
@@ -235,6 +238,8 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 					Notice:             "embedder not configured on this server; context.for_task disabled",
 					RecentChangeGroups: recentChangeGroups,
 					ApplicableRules:    applicableRules,
+					CallerInFlight:     callerInFlight,
+					PinCandidates:      buildPinCandidatesAttention(ctx, deps, p, scope, nil),
 				}, nil
 			}
 
@@ -294,6 +299,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 				Landings:           []ContextLanding{},
 				SuggestedAreas:     []AreaSuggestion{},
 				RecentChangeGroups: recentChangeGroups,
+				CallerInFlight:     callerInFlight,
 			}
 			now := time.Now()
 			for rows.Next() {
@@ -364,6 +370,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 				out.SuggestedAreas = suggestAreasForTaskDescription(in.TaskDescription, out.Landings, areaCounts)
 			}
 			out.ApplicableRules = loadApplicableRulesForContext(ctx, deps, scope.ProjectSlug, scope.ProjectLocale, applicableRuleTargetArea(in, out), targetType, ruleLimit)
+			out.PinCandidates = buildPinCandidatesAttention(ctx, deps, p, scope, out.Landings)
 			if deps.Receipts != nil {
 				// Phase E — bind the receipt to the landings' current head
 				// revisions. propose-time verifier flags drift instead of

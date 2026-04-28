@@ -309,3 +309,36 @@ func TestProjectReposMigrationContract(t *testing.T) {
 		}
 	}
 }
+
+func TestPinRepoIDAndKindVocabularyMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0043_pin_repo_id_and_kind_vocabulary.sql")
+	if err != nil {
+		t.Fatalf("read pin repo_id migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"ADD COLUMN IF NOT EXISTS local_paths TEXT[]",
+		"ADD COLUMN IF NOT EXISTS urls",
+		"ADD COLUMN IF NOT EXISTS repo_id UUID NULL REFERENCES project_repos(id) ON DELETE SET NULL",
+		"CREATE INDEX IF NOT EXISTS idx_artifact_pins_repo_id",
+		"CHECK (kind IN ('code', 'doc', 'config', 'asset', 'resource', 'url'))",
+		"UPDATE artifact_pins p",
+		"SET repo_id = pr.id",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("pin repo_id migration Up missing %q:\n%s", want, up)
+		}
+	}
+	for _, want := range []string{
+		"-- +goose Down",
+		"DROP INDEX IF EXISTS idx_artifact_pins_repo_id",
+		"DROP COLUMN IF EXISTS repo_id",
+		"DROP COLUMN IF EXISTS urls",
+		"DROP COLUMN IF EXISTS local_paths",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("pin repo_id migration Down missing %q", want)
+		}
+	}
+}

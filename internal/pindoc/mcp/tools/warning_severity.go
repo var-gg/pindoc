@@ -53,12 +53,17 @@ var warningSeverityCatalog = map[string]string{
 	"SLUG_VERBOSE":                   SeverityWarn,
 	"PIN_PATH_NONEXISTENT":           SeverityWarn,
 	"PIN_PATH_OUTSIDE_REPO":          SeverityWarn,
+	"PIN_PATH_NOT_FOUND":             SeverityWarn,
+	"PIN_PATH_REJECTED":              SeverityWarn,
+	"RECOMMEND_REPO_REGISTRATION":    SeverityWarn,
 	"SECTION_DUPLICATES_EDGES":       SeverityWarn,
 	"MISSING_COMMIT_MSG_ON_CREATE":   SeverityWarn,
 	"acceptance_unchecked":           SeverityWarn,
 
 	// INFO — pointer / reminder.
 	"RECOMMEND_READ_BEFORE_CREATE": SeverityInfo,
+	"WORDING_FIX_APPLIED":          SeverityInfo,
+	"ADD_PIN_APPLIED":              SeverityInfo,
 }
 
 // warningSeverity resolves the severity for one warning code. Handles

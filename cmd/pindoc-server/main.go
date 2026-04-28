@@ -117,7 +117,7 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("db ready", "migrations", "applied")
-	if normalized, err := projects.BootstrapDefaultProjectRepoFromWorkdir(ctx, pool, cfg.ProjectSlug, ""); err != nil {
+	if normalized, err := projects.BootstrapDefaultProjectRepoFromWorkdir(ctx, pool, cfg.ProjectSlug, cfg.RepoRoot); err != nil {
 		logger.Info("default project repo bootstrap skipped", "project_slug", cfg.ProjectSlug, "err", err)
 	} else if normalized != "" {
 		logger.Info("default project repo bootstrap checked", "project_slug", cfg.ProjectSlug, "git_remote_url", normalized)
@@ -325,6 +325,7 @@ func main() {
 			TrustedSameHostProxy: trustedProxy,
 			Version:              version,
 			BuildCommit:          commit,
+			RepoRoot:             cfg.RepoRoot,
 			StartTime:            startTime,
 			SPADistDir:           spaDist,
 		})
