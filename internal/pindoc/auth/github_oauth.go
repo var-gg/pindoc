@@ -217,6 +217,15 @@ func (s *OAuthService) handleGitHubCallback(w http.ResponseWriter, r *http.Reque
 	http.Redirect(w, r, returnTo, http.StatusFound)
 }
 
+func (s *OAuthService) handleLogout(w http.ResponseWriter, r *http.Request) {
+	gh := s.currentGitHub()
+	if gh != nil {
+		clearCookie(w, gh.cookie(githubSessionCookieName, "", -1))
+		clearCookie(w, gh.cookie(githubStateCookieName, "", -1))
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 type githubIdentity struct {
 	ProviderUID string
 	Login       string

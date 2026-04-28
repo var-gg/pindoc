@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router";
-import { Activity, AlignCenter, AlignJustify, CalendarDays, ChevronDown, CircleHelp, ExternalLink, FileText, Inbox, Maximize2, Menu, Moon, Search, Share2, Sun } from "lucide-react";
+import { Activity, AlignCenter, AlignJustify, CalendarDays, ChevronDown, CircleHelp, ExternalLink, FileText, Inbox, Languages, LogOut, Maximize2, Menu, Moon, Search, Share2, Sun, UserCircle } from "lucide-react";
 import type { ComponentType } from "react";
-import { api, type ProjectListItem } from "../api/client";
+import { api, type CurrentUserResp, type ProjectListItem } from "../api/client";
 import { useI18n, type Lang } from "../i18n";
 import type { Project } from "../api/client";
 import { InviteButton } from "../project/InviteButton";
@@ -14,6 +14,7 @@ import { visualIconComponent } from "./visualLanguageIcons";
 import { Tooltip } from "./Tooltip";
 import { canShowTelemetryNav, telemetryDebugEnabled } from "./opsAccess";
 import { paletteOpenAfterProjectSwitcherToggle, projectSwitcherOpenAfterPaletteChange } from "./overlayStack";
+import { isReaderDevSurfaceEnabled } from "../readerRoutes";
 
 type Props = {
   project: Project;
@@ -60,6 +61,7 @@ export function TopNav({
   const nextLang: Lang = lang === "ko" ? "en" : "ko";
   const baseRoute = `/p/${project.slug}`;
   const canInvite = project.current_role === "owner" && Boolean(onOpenInvite);
+  const showGraphSurface = isReaderDevSurfaceEnabled(location.search, import.meta.env.DEV);
   const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
   const opsDebug = telemetryDebugEnabled(
     location.search,
@@ -88,7 +90,7 @@ export function TopNav({
       <button className="nav__menu" aria-label="Open menu" onClick={onToggleMenu}>
         <Menu className="lucide" />
       </button>
-      <NavLink to="/design" className="nav__brand">
+      <NavLink to={`${baseRoute}/today`} className="nav__brand">
         <svg width="20" height="20" viewBox="0 0 32 32" fill="none" style={{ color: "var(--fg-0)", flexShrink: 0 }}>
           <rect x="5" y="7.5" width="19" height="21" rx="2.5" stroke="currentColor" strokeWidth="1.5" />
           <line x1="9" y1="17" x2="20" y2="17" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.55" />
@@ -118,10 +120,12 @@ export function TopNav({
           <span className="label">{t("nav.inbox")}</span>
           {inboxCount > 0 && <span className="count">{inboxCount}</span>}
         </NavLink>
-        <NavLink to={`${baseRoute}/graph`} className="nav__tab">
-          <Share2 className="lucide" />
-          <span className="label">{t("nav.graph")}</span>
-        </NavLink>
+        {showGraphSurface && (
+          <NavLink to={`${baseRoute}/graph${location.search || ""}`} className="nav__tab">
+            <Share2 className="lucide" />
+            <span className="label">{t("nav.graph")}</span>
+          </NavLink>
+        )}
         <NavLink to={`${baseRoute}/tasks`} className="nav__tab">
           <FileText className="lucide" />
           <span className="label">{t("nav.tasks")}</span>
@@ -163,10 +167,6 @@ export function TopNav({
         })}
       </div>
 
-      <button className="nav__lang" onClick={() => setLang(nextLang)} aria-label={t("lang.switch")}>
-        {lang === "ko" ? "KO" : "EN"}
-      </button>
-
       {showTelemetry && (
         <Tooltip content={t("nav.telemetry")}>
           <NavLink
@@ -179,23 +179,166 @@ export function TopNav({
         </Tooltip>
       )}
 
-      <button className="nav__theme" onClick={onToggleTheme} aria-label={t("nav.theme_toggle")}>
-        {theme === "dark" ? <Moon className="lucide" /> : <Sun className="lucide" />}
-      </button>
-
-      {/* Avatar placeholder — V1 self-host binds it to the GitHub OAuth
-          user; M1 has no auth yet, so the tooltip spells that out rather
-          than putting random project initials here. */}
-      <Tooltip content={t("nav.user_placeholder")}>
-        <div
-          className="nav__user"
-          style={{ opacity: 0.55 }}
-        >
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10 }}>—</span>
-        </div>
-      </Tooltip>
+      <UserProfileMenu
+        project={project}
+        theme={theme}
+        nextLang={nextLang}
+        onToggleTheme={onToggleTheme}
+        onChangeLang={setLang}
+      />
     </div>
   );
+}
+
+function UserProfileMenu({
+  project,
+  theme,
+  nextLang,
+  onToggleTheme,
+  onChangeLang,
+}: {
+  project: Project;
+  theme: Theme;
+  nextLang: Lang;
+  onToggleTheme: () => void;
+  onChangeLang: (next: Lang) => void;
+}) {
+  const { t, lang } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [current, setCurrent] = useState<CurrentUserResp | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.currentUser()
+      .then((resp) => {
+        if (!cancelled) setCurrent(resp);
+      })
+      .catch(() => {
+        if (!cancelled) setCurrent(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.slug]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClickAway(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    window.addEventListener("mousedown", onClickAway);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onClickAway);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const user = current?.user;
+  const authMode = current?.auth_mode ?? "unknown";
+  const name = user?.display_name || t("profile.fallback_name");
+  const email = user?.email || t("profile.fallback_email");
+  const initials = profileInitials(user?.display_name || user?.email || project.slug);
+  const canSignOut = authMode === "oauth_github";
+
+  async function handleSignOut() {
+    if (!canSignOut || signingOut) return;
+    setSigningOut(true);
+    try {
+      await api.signOut();
+      window.location.assign("/");
+    } finally {
+      setSigningOut(false);
+    }
+  }
+
+  return (
+    <div className="nav-profile" ref={ref}>
+      <Tooltip content={t("profile.open")}>
+        <button
+          type="button"
+          className="nav__user"
+          onClick={() => setOpen((v) => !v)}
+          aria-label={t("profile.open")}
+          aria-expanded={open}
+          aria-haspopup="dialog"
+        >
+          <span>{initials}</span>
+        </button>
+      </Tooltip>
+      {open && (
+        <div className="profile-menu" role="dialog" aria-label={t("profile.menu_label")}>
+          <div className="profile-menu__head">
+            <div className="profile-menu__avatar" aria-hidden>
+              <UserCircle className="lucide" />
+            </div>
+            <div className="profile-menu__identity">
+              <strong>{name}</strong>
+              <span>{email}</span>
+            </div>
+          </div>
+          <dl className="profile-menu__meta">
+            <div>
+              <dt>{t("profile.role")}</dt>
+              <dd>{t(`members_panel.role_${project.current_role || "viewer"}`)}</dd>
+            </div>
+            <div>
+              <dt>{t("profile.auth_mode")}</dt>
+              <dd>{t(`profile.auth_mode.${authMode}`)}</dd>
+            </div>
+          </dl>
+          <div className="profile-menu__actions">
+            <button
+              type="button"
+              className="profile-menu__action"
+              onClick={() => onChangeLang(nextLang)}
+            >
+              <Languages className="lucide" />
+              <span>{t("lang.switch")}</span>
+              <strong>{lang === "ko" ? "KO" : "EN"}</strong>
+            </button>
+            <button
+              type="button"
+              className="profile-menu__action"
+              onClick={onToggleTheme}
+            >
+              {theme === "dark" ? <Moon className="lucide" /> : <Sun className="lucide" />}
+              <span>{t("nav.theme_toggle")}</span>
+              <strong>{theme === "dark" ? t("profile.theme_dark") : t("profile.theme_light")}</strong>
+            </button>
+          </div>
+          {canSignOut ? (
+            <button
+              type="button"
+              className="profile-menu__signout"
+              onClick={handleSignOut}
+              disabled={signingOut}
+            >
+              <LogOut className="lucide" />
+              {signingOut ? t("profile.signing_out") : t("profile.sign_out")}
+            </button>
+          ) : (
+            <p className="profile-menu__hint">{t("profile.local_signout_hint")}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function profileInitials(seed: string): string {
+  const trimmed = seed.trim();
+  if (!trimmed) return "?";
+  const parts = trimmed.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  }
+  return trimmed.slice(0, 2).toUpperCase();
 }
 
 function HelpPopover({ surface }: { surface: SurfaceId }) {

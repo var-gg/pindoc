@@ -3,11 +3,13 @@ import { Loader2, ShieldCheck, Trash2, X } from "lucide-react";
 import {
   api,
   type ActiveInviteRow,
+  type InviteExtendTo,
   type MemberRow,
   type Project,
   type UserRef,
 } from "../api/client";
 import { useI18n } from "../i18n";
+import { canExtendInvite, INVITE_EXTEND_OPTIONS } from "./invitePolicy";
 
 // MembersPanel — Phase D permission management plane.
 //
@@ -131,6 +133,25 @@ export function MembersPanel({ project, refreshNonce = 0, users }: Props) {
     }
   }
 
+  async function handleExtend(tokenHash: string, extendTo: InviteExtendTo) {
+    if (pendingAction) return;
+    setActionError(null);
+    setPendingAction(`extend:${tokenHash}:${extendTo}`);
+    try {
+      await api.extendInvite(project.slug, tokenHash, extendTo);
+      reload();
+    } catch (e) {
+      const err = e as Error & { error_code?: string };
+      setActionError(
+        err.error_code
+          ? `${err.error_code}: ${err.message}`
+          : err.message,
+      );
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
   return (
     <section className="members-panel" aria-label={t("members_panel.label")}>
       {status.kind === "loading" && (
@@ -164,9 +185,11 @@ export function MembersPanel({ project, refreshNonce = 0, users }: Props) {
           {status.viewerRole === "owner" && (
             <InvitesSection
               invites={status.invites}
+              project={project}
               usersByID={usersByID}
               pendingAction={pendingAction}
               onRevoke={handleRevoke}
+              onExtend={handleExtend}
               t={t}
               lang={lang}
             />
@@ -263,19 +286,24 @@ function MembersSection({
 
 function InvitesSection({
   invites,
+  project,
   usersByID,
   pendingAction,
   onRevoke,
+  onExtend,
   t,
   lang,
 }: {
   invites: ActiveInviteRow[];
+  project: Project;
   usersByID: Map<string, UserRef>;
   pendingAction: string | null;
   onRevoke: (tokenHash: string) => void;
+  onExtend: (tokenHash: string, extendTo: InviteExtendTo) => void;
   t: (key: string, ...args: Array<string | number>) => string;
   lang: string;
 }) {
+  const [openTokenHash, setOpenTokenHash] = useState<string | null>(null);
   return (
     <div className="members-panel__group">
       <div className="members-panel__group-head">
@@ -286,42 +314,80 @@ function InvitesSection({
         <div className="members-panel__empty">{t("members_panel.invites_empty")}</div>
       ) : (
         <ul className="members-panel__list">
-          {invites.map((inv) => (
-            <li key={inv.token_hash} className="members-panel__row">
-              <div className="members-panel__row-main">
-                <span className="members-panel__row-name">
-                  {t(`members_panel.invite_role_${inv.role}`)}
-                </span>
-                <span className="members-panel__row-handle members-panel__row-token">
-                  {inv.token_hash.slice(0, 12)}…
-                </span>
-              </div>
-              <div className="members-panel__row-meta">
-                <span className="members-panel__row-time">
-                  {t("members_panel.invite_expires_at", formatExpiry(inv.expires_at, lang))}
-                </span>
-                {inv.issued_by_id && (
-                  <span className="members-panel__row-handle">
-                    {t("members_panel.invite_issued_by", inviterLabel(inv.issued_by_id, usersByID))}
+          {invites.map((inv) => {
+            const canExtend = canExtendInvite(project, inv.expires_at);
+            const open = openTokenHash === inv.token_hash;
+            return (
+              <li key={inv.token_hash} className="members-panel__row">
+                <div className="members-panel__row-main">
+                  <span className="members-panel__row-name">
+                    {t(`members_panel.invite_role_${inv.role}`)}
                   </span>
-                )}
-              </div>
-              <button
-                type="button"
-                className="members-panel__row-action members-panel__row-action--revoke"
-                onClick={() => onRevoke(inv.token_hash)}
-                disabled={pendingAction === `invite:${inv.token_hash}`}
-                aria-label={t("members_panel.revoke_aria", inv.token_hash.slice(0, 8))}
-              >
-                {pendingAction === `invite:${inv.token_hash}` ? (
-                  <Loader2 className="lucide members-panel__spinner" aria-hidden />
-                ) : (
-                  <X className="lucide" aria-hidden />
-                )}
-                <span>{t("members_panel.revoke")}</span>
-              </button>
-            </li>
-          ))}
+                  <span className="members-panel__row-handle members-panel__row-token">
+                    {inv.token_hash.slice(0, 12)}…
+                  </span>
+                </div>
+                <div className="members-panel__row-meta">
+                  <span className="members-panel__row-time">
+                    {t("members_panel.invite_expires_at", formatExpiry(inv.expires_at, lang, t))}
+                  </span>
+                  {inv.issued_by_id && (
+                    <span className="members-panel__row-handle">
+                      {t("members_panel.invite_issued_by", inviterLabel(inv.issued_by_id, usersByID))}
+                    </span>
+                  )}
+                </div>
+                <div className="members-panel__row-actions">
+                  {canExtend && (
+                    <div className="members-panel__extend-wrap">
+                      <button
+                        type="button"
+                        className="members-panel__row-action"
+                        onClick={() => setOpenTokenHash(open ? null : inv.token_hash)}
+                        disabled={pendingAction?.startsWith(`extend:${inv.token_hash}:`) === true}
+                        aria-label={t("members_panel.extend_aria", inv.token_hash.slice(0, 8))}
+                      >
+                        {pendingAction?.startsWith(`extend:${inv.token_hash}:`) === true ? (
+                          <Loader2 className="lucide members-panel__spinner" aria-hidden />
+                        ) : null}
+                        <span>{t("members_panel.extend")}</span>
+                      </button>
+                      {open && (
+                        <div className="members-panel__extend-menu">
+                          {INVITE_EXTEND_OPTIONS.map((option) => (
+                            <button
+                              key={option}
+                              type="button"
+                              onClick={() => {
+                                setOpenTokenHash(null);
+                                onExtend(inv.token_hash, option);
+                              }}
+                            >
+                              {t(`members_panel.extend_${extendOptionKey(option)}`)}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="members-panel__row-action members-panel__row-action--revoke"
+                    onClick={() => onRevoke(inv.token_hash)}
+                    disabled={pendingAction === `invite:${inv.token_hash}`}
+                    aria-label={t("members_panel.revoke_aria", inv.token_hash.slice(0, 8))}
+                  >
+                    {pendingAction === `invite:${inv.token_hash}` ? (
+                      <Loader2 className="lucide members-panel__spinner" aria-hidden />
+                    ) : (
+                      <X className="lucide" aria-hidden />
+                    )}
+                    <span>{t("members_panel.revoke")}</span>
+                  </button>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
@@ -364,7 +430,23 @@ function formatJoinedAt(
   return t("members_panel.joined_at", formatted);
 }
 
-function formatExpiry(raw: string, lang: string): string {
+function extendOptionKey(option: InviteExtendTo): string {
+  switch (option) {
+    case "+7d":
+      return "plus_7d";
+    case "+30d":
+      return "plus_30d";
+    case "permanent":
+      return "permanent";
+  }
+}
+
+function formatExpiry(
+  raw: string | null,
+  lang: string,
+  t: (key: string, ...args: Array<string | number>) => string,
+): string {
+  if (!raw) return t("members_panel.invite_expiry_permanent");
   const dt = new Date(raw);
   if (!Number.isFinite(dt.getTime())) return raw;
   return new Intl.DateTimeFormat(lang === "ko" ? "ko-KR" : "en-US", {

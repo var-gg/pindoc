@@ -14,16 +14,17 @@ import { ReaderShell } from "./reader/ReaderShell";
 import { SignupCompletePage } from "./signup/SignupCompletePage";
 import { SignupPage } from "./signup/SignupPage";
 import { EmptyState, SurfaceHeader } from "./reader/SurfacePrimitives";
-import { normalizeReaderSurfaceSegment, projectSurfacePath } from "./readerRoutes";
+import { isReaderDevSurfaceEnabled, normalizeReaderSurfaceSegment, projectSurfacePath } from "./readerRoutes";
 import { findSurface, previews, uiKits } from "./surfaces";
 
 export function App() {
   return (
     <PindocTooltipProvider>
       <Routes>
-        {/* Design-system scaffold. Lives at /design so the bare root can
-          canonical-redirect to a project-scoped URL. */}
-        <Route path="/design" element={<ShellLayout />}>
+        {/* Design-system scaffold. Production keeps it off normal user
+          paths; append ?dev=1 to inspect the handoff bundle without
+          exposing it through Reader chrome. */}
+        <Route path="/design" element={<DesignSurfaceGate />}>
           <Route index element={<Home />} />
           <Route path="preview/:slug" element={<EmbeddedPreview />} />
         </Route>
@@ -40,7 +41,7 @@ export function App() {
       <Route path="/p/:project/task/:slug" element={<ProjectSurfaceRedirect segment="task" />} />
       <Route path="/p/:project/tasks" element={<ReaderShell view="tasks" />} />
       <Route path="/p/:project/tasks/:slug" element={<ReaderShell view="tasks" />} />
-      <Route path="/p/:project/graph" element={<ReaderShell view="graph" />} />
+      <Route path="/p/:project/graph" element={<GraphSurfaceGate />} />
       <Route path="/p/:project/inbox" element={<ReaderShell view="inbox" />} />
       <Route path="/p/:project/git/:repoId/commit/:sha" element={<CommitDetailPage />} />
       <Route path="/p/:project/:surface" element={<ProjectSurfaceNotFound />} />
@@ -97,6 +98,22 @@ export function App() {
       </Routes>
     </PindocTooltipProvider>
   );
+}
+
+function DesignSurfaceGate() {
+  const location = useLocation();
+  if (isReaderDevSurfaceEnabled(location.search, import.meta.env.DEV)) {
+    return <ShellLayout />;
+  }
+  return <LegacyRedirect base="today" />;
+}
+
+function GraphSurfaceGate() {
+  const location = useLocation();
+  if (isReaderDevSurfaceEnabled(location.search, import.meta.env.DEV)) {
+    return <ReaderShell view="graph" />;
+  }
+  return <ProjectSurfaceNotFound surfaceOverride="graph" />;
 }
 
 function ProjectSurfaceRedirect({ segment }: { segment: string }) {

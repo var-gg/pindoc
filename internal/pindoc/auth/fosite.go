@@ -303,6 +303,7 @@ func (s *OAuthService) RegisterRoutes(mux *http.ServeMux) {
 	// require a daemon restart.
 	mux.HandleFunc("GET /auth/github/login", s.handleGitHubLogin)
 	mux.HandleFunc("GET /auth/github/callback", s.handleGitHubCallback)
+	mux.HandleFunc("POST /auth/logout", s.handleLogout)
 }
 
 func (s *OAuthService) handleProtectedResourceMetadata(w http.ResponseWriter, _ *http.Request) {

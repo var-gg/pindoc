@@ -49,12 +49,13 @@ export function SignupPage() {
   }, [invite]);
 
   const expiresAt = useMemo(() => {
+    if (info && !info.expires_at) return t("invite.expiry.permanent");
     if (!info?.expires_at) return "";
     return new Intl.DateTimeFormat(lang === "ko" ? "ko-KR" : "en-US", {
       dateStyle: "medium",
       timeStyle: "short",
     }).format(new Date(info.expires_at));
-  }, [info?.expires_at, lang]);
+  }, [info, lang, t]);
 
   const returnTo =
     requestedReturnTo !== "/"

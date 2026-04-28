@@ -138,6 +138,7 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	// so Reader TaskControls can offer a real assignee dropdown next to
 	// the agents aggregate (Decision agent-only-write-분할 AC).
 	mux.HandleFunc("GET /api/users", d.handleUserList)
+	mux.HandleFunc("GET /api/user/current", d.handleCurrentUser)
 
 	// Agent-era first-time identity flow. POST creates / rebinds the
 	// loopback principal's users.id row + sets server_settings.
@@ -177,6 +178,7 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/p/{project}/members", d.handleMembersList)
 	mux.HandleFunc("DELETE /api/p/{project}/members/{user_id}", d.handleMemberRemove)
 	mux.HandleFunc("GET /api/p/{project}/invites", d.handleInvitesList)
+	mux.HandleFunc("POST /api/p/{project}/invites/{token_hash}/extend", d.handleInviteExtend)
 	mux.HandleFunc("DELETE /api/p/{project}/invites/{token_hash}", d.handleInviteRevoke)
 	mux.HandleFunc("POST /api/p/{project}/read-mark", d.handleReadMark)
 	mux.HandleFunc("POST /api/p/{project}/read-events", d.handleReadEvent)

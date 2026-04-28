@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -46,11 +48,11 @@ type membersListResponse struct {
 }
 
 type inviteRowResponse struct {
-	TokenHash   string    `json:"token_hash"`
-	Role        string    `json:"role"`
-	IssuedByID  string    `json:"issued_by_id,omitempty"`
-	IssuedAt    time.Time `json:"issued_at"`
-	ExpiresAt   time.Time `json:"expires_at"`
+	TokenHash  string     `json:"token_hash"`
+	Role       string     `json:"role"`
+	IssuedByID string     `json:"issued_by_id,omitempty"`
+	IssuedAt   time.Time  `json:"issued_at"`
+	ExpiresAt  *time.Time `json:"expires_at"`
 }
 
 type invitesListResponse struct {
@@ -60,6 +62,10 @@ type invitesListResponse struct {
 
 type membersOpResponse struct {
 	Status string `json:"status"`
+}
+
+type inviteExtendRequest struct {
+	ExtendTo string `json:"extend_to"`
 }
 
 func (d Deps) handleMembersList(w http.ResponseWriter, r *http.Request) {
@@ -216,4 +222,75 @@ func (d Deps) handleInviteRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, membersOpResponse{Status: "revoked"})
+}
+
+func (d Deps) handleInviteExtend(w http.ResponseWriter, r *http.Request) {
+	if d.DB == nil {
+		writeInviteError(w, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "database pool not configured")
+		return
+	}
+	principal, ok := d.principalForInvite(w, r, false)
+	if !ok {
+		return
+	}
+	scope, err := pauth.ResolveProject(r.Context(), d.DB, principal, projectSlugFrom(r))
+	if err != nil {
+		d.writeProjectAuthError(w, err)
+		return
+	}
+	if scope.Role != pauth.RoleOwner {
+		writeInviteError(w, http.StatusForbidden, "PROJECT_OWNER_REQUIRED", "only project owners can extend invites")
+		return
+	}
+	tokenHash := strings.TrimSpace(r.PathValue("token_hash"))
+	if tokenHash == "" {
+		writeInviteError(w, http.StatusBadRequest, "INVITE_HASH_REQUIRED", "token_hash path segment is required")
+		return
+	}
+	var in inviteExtendRequest
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeInviteError(w, http.StatusBadRequest, "BAD_JSON", "could not parse request body as JSON")
+		return
+	}
+	rec, err := invites.Extend(r.Context(), d.DB, scope.ProjectID, tokenHash, in.ExtendTo, principal.UserID, time.Now().UTC())
+	if err != nil {
+		switch {
+		case errors.Is(err, invites.ErrTokenNotFound):
+			writeInviteError(w, http.StatusNotFound, "INVITE_TOKEN_NOT_FOUND", "invite token not found for this project")
+		case errors.Is(err, invites.ErrTokenInactive):
+			writeInviteError(w, http.StatusGone, "INVITE_TOKEN_INACTIVE", "invite token is expired or already consumed")
+		case errors.Is(err, invites.ErrExtendInvalid):
+			writeInviteError(w, http.StatusBadRequest, "INVITE_EXTEND_INVALID", "extend_to must be +7d, +30d, or permanent")
+		default:
+			writeInviteError(w, http.StatusInternalServerError, "INVITE_EXTEND_FAILED", "failed to extend invite")
+		}
+		return
+	}
+	if err := d.recordInviteAuditEvent(r.Context(), scope.ProjectID, "invite.extended", rec.TokenHash, rec.Role, in.ExtendTo, principal.UserID, rec.ExpiresAt); err != nil {
+		writeInviteError(w, http.StatusInternalServerError, "INVITE_AUDIT_FAILED", "failed to record invite audit event")
+		return
+	}
+	writeJSON(w, http.StatusOK, membersOpResponse{Status: "extended"})
+}
+
+func (d Deps) recordInviteAuditEvent(ctx context.Context, projectID, kind, tokenHash, role, action, actorUserID string, expiresAt *time.Time) error {
+	var actor any
+	if v := strings.TrimSpace(actorUserID); v != "" {
+		actor = v
+	}
+	var expiresAtArg any
+	if expiresAt != nil {
+		expiresAtArg = *expiresAt
+	}
+	_, err := d.DB.Exec(ctx, `
+		INSERT INTO events (project_id, kind, subject_id, payload)
+		VALUES ($1::uuid, $2, $3::uuid, jsonb_build_object(
+			'token_hash', $4::text,
+			'role',       $5::text,
+			'action',     $6::text,
+			'actor_id',   COALESCE($7::text, ''),
+			'expires_at', $8::timestamptz
+		))
+	`, projectID, kind, actor, tokenHash, role, action, actor, expiresAtArg)
+	return err
 }

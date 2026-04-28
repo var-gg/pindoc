@@ -228,6 +228,21 @@ type userRow struct {
 	Source       string `json:"source"`
 }
 
+type currentUserRow struct {
+	ID           string `json:"id"`
+	DisplayName  string `json:"display_name"`
+	Email        string `json:"email,omitempty"`
+	GithubHandle string `json:"github_handle,omitempty"`
+	Source       string `json:"source"`
+	AuthMode     string `json:"auth_mode"`
+}
+
+type currentUserResponse struct {
+	Status   string          `json:"status"`
+	AuthMode string          `json:"auth_mode"`
+	User     *currentUserRow `json:"user,omitempty"`
+}
+
 // handleUserList returns all rows in `users` ordered by display_name.
 // Unscoped on purpose — the users table is instance-wide (migration 0014).
 // Reader's TaskControls fetches this once per shell load to populate the
@@ -260,6 +275,59 @@ func (d Deps) handleUserList(w http.ResponseWriter, r *http.Request) {
 		out = append(out, u)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"users": out})
+}
+
+func (d Deps) handleCurrentUser(w http.ResponseWriter, r *http.Request) {
+	principal := d.principalForRequest(r)
+	if principal == nil {
+		writeJSON(w, http.StatusOK, currentUserResponse{
+			Status:   "not_authenticated",
+			AuthMode: "unknown",
+		})
+		return
+	}
+	authMode := "trusted_local"
+	if principal.Source == pauth.SourceOAuth {
+		authMode = "oauth_github"
+	}
+	if strings.TrimSpace(principal.UserID) == "" {
+		writeJSON(w, http.StatusOK, currentUserResponse{
+			Status:   "informational",
+			AuthMode: authMode,
+		})
+		return
+	}
+	var u currentUserRow
+	var email, github *string
+	err := d.DB.QueryRow(r.Context(), `
+		SELECT id::text, display_name, email, github_handle, source
+		  FROM users
+		 WHERE id = $1 AND deleted_at IS NULL
+	`, principal.UserID).Scan(&u.ID, &u.DisplayName, &email, &github, &u.Source)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeJSON(w, http.StatusOK, currentUserResponse{
+			Status:   "informational",
+			AuthMode: authMode,
+		})
+		return
+	}
+	if err != nil {
+		d.Logger.Error("current user", "err", err)
+		writeError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+	if email != nil {
+		u.Email = *email
+	}
+	if github != nil {
+		u.GithubHandle = *github
+	}
+	u.AuthMode = authMode
+	writeJSON(w, http.StatusOK, currentUserResponse{
+		Status:   "ok",
+		AuthMode: authMode,
+		User:     &u,
+	})
 }
 
 func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {

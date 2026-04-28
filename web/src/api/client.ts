@@ -290,8 +290,19 @@ export type AuthorUserRef = {
 export type UserRef = {
   id: string;
   display_name: string;
+  email?: string;
   github_handle?: string;
   source: "harness_install" | "pindoc_admin" | "github_oauth";
+};
+
+export type CurrentUser = UserRef & {
+  auth_mode: "trusted_local" | "oauth_github" | "unknown";
+};
+
+export type CurrentUserResp = {
+  status: "ok" | "informational" | "not_authenticated";
+  auth_mode: CurrentUser["auth_mode"];
+  user?: CurrentUser;
 };
 
 export type ArtifactRef = {
@@ -690,22 +701,25 @@ export type CreateProjectResp = {
 };
 
 export type InviteRole = "editor" | "viewer";
+export type InviteExpiryPolicy = "1d" | "7d" | "30d" | "permanent";
+export type InviteExtendTo = "+7d" | "+30d" | "permanent";
 
 export type InviteIssueInput = {
   role: InviteRole;
-  expires_in_hours: number;
+  expires_in_hours?: number;
+  expires_policy?: InviteExpiryPolicy;
 };
 
 export type InviteIssueResp = {
   invite_url: string;
-  expires_at: string;
+  expires_at: string | null;
 };
 
 export type InviteJoinInfo = {
   project_slug: string;
   project_name: string;
   role: InviteRole;
-  expires_at: string;
+  expires_at: string | null;
 };
 
 export type InviteError = {
@@ -790,7 +804,7 @@ export type ActiveInviteRow = {
   role: "editor" | "viewer";
   issued_by_id?: string;
   issued_at: string;
-  expires_at: string;
+  expires_at: string | null;
 };
 
 export type InvitesListResp = {
@@ -799,7 +813,7 @@ export type InvitesListResp = {
 };
 
 export type MembersOpResp = {
-  status: "removed" | "revoked";
+  status: "removed" | "revoked" | "extended";
 };
 
 export type MembersOpError = {
@@ -812,6 +826,17 @@ export const api = {
   config: () => j<ServerConfig>("/api/config"),
   projectList: (options?: ProjectListOptions) => j<ProjectListResp>(projectListPath(options)),
   users: () => j<{ users: UserRef[] }>("/api/users"),
+  currentUser: () => j<CurrentUserResp>("/api/user/current"),
+  signOut: async (): Promise<void> => {
+    const res = await fetch("/auth/logout", {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok && res.status !== 404) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`${res.status} ${res.statusText}: ${body.slice(0, 200)}`);
+    }
+  },
 
   // Project bootstrap (Decision project-bootstrap-canonical-flow-reader-
   // ui-first-class). The Reader's "+ New project" page calls this; the
@@ -1140,6 +1165,37 @@ export const api = {
     const res = await fetch(
       `${p(project)}/invites/${encodeURIComponent(tokenHash)}`,
       { method: "DELETE", headers: { Accept: "application/json" } },
+    );
+    if (!res.ok) {
+      let parsed: MembersOpError | null = null;
+      try {
+        parsed = (await res.json()) as MembersOpError;
+      } catch {
+        // fall through
+      }
+      const err = new Error(
+        parsed?.message ?? `${res.status} ${res.statusText}`,
+      ) as Error & Partial<MembersOpError>;
+      if (parsed) {
+        err.error_code = parsed.error_code;
+        err.message = parsed.message;
+      }
+      throw err;
+    }
+    return (await res.json()) as MembersOpResp;
+  },
+  extendInvite: async (
+    project: string,
+    tokenHash: string,
+    extendTo: InviteExtendTo,
+  ): Promise<MembersOpResp> => {
+    const res = await fetch(
+      `${p(project)}/invites/${encodeURIComponent(tokenHash)}/extend`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ extend_to: extendTo }),
+      },
     );
     if (!res.ok) {
       let parsed: MembersOpError | null = null;

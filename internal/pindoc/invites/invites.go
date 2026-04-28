@@ -26,6 +26,7 @@ var (
 	ErrTokenNotFound = errors.New("invites: token not found")
 	ErrTokenInactive = errors.New("invites: token expired or consumed")
 	ErrRoleInvalid   = errors.New("invites: role must be editor or viewer")
+	ErrExtendInvalid = errors.New("invites: extend_to must be +7d, +30d, or permanent")
 )
 
 // ListSummary is the read shape returned to the Reader UI for the
@@ -37,7 +38,7 @@ type ListSummary struct {
 	TokenHash  string
 	Role       string
 	IssuedByID string
-	ExpiresAt  time.Time
+	ExpiresAt  *time.Time
 	CreatedAt  time.Time
 	ConsumedAt *time.Time
 }
@@ -49,7 +50,7 @@ type Record struct {
 	ProjectName string
 	Role        string
 	IssuedBy    string
-	ExpiresAt   time.Time
+	ExpiresAt   *time.Time
 	ConsumedAt  *time.Time
 	ConsumedBy  string
 }
@@ -59,6 +60,7 @@ type IssueInput struct {
 	Role      string
 	IssuedBy  string
 	ExpiresAt time.Time
+	Permanent bool
 }
 
 func Issue(ctx context.Context, pool *db.Pool, in IssueInput) (string, *Record, error) {
@@ -73,9 +75,13 @@ func Issue(ctx context.Context, pool *db.Pool, in IssueInput) (string, *Record, 
 	if projectID == "" {
 		return "", nil, errors.New("invites: project_id is required")
 	}
-	expiresAt := in.ExpiresAt.UTC()
-	if expiresAt.IsZero() {
-		expiresAt = time.Now().UTC().Add(24 * time.Hour)
+	var expiresAt any
+	if !in.Permanent {
+		next := in.ExpiresAt.UTC()
+		if next.IsZero() {
+			next = time.Now().UTC().Add(30 * 24 * time.Hour)
+		}
+		expiresAt = next
 	}
 	rawToken, err := GenerateToken()
 	if err != nil {
@@ -229,10 +235,13 @@ func inactive(rec *Record, now time.Time) bool {
 	if rec.ConsumedAt != nil {
 		return true
 	}
+	if rec.ExpiresAt == nil {
+		return false
+	}
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	return !now.Before(rec.ExpiresAt)
+	return !now.Before(*rec.ExpiresAt)
 }
 
 func GenerateToken() (string, error) {
@@ -294,7 +303,7 @@ func ListActive(ctx context.Context, pool *db.Pool, projectID string, now time.T
 		  FROM invite_tokens
 		 WHERE project_id = $1::uuid
 		   AND consumed_at IS NULL
-		   AND expires_at > $2
+		   AND (expires_at IS NULL OR expires_at > $2)
 		 ORDER BY issued_at DESC
 	`, projectID, now)
 	if err != nil {
@@ -315,6 +324,99 @@ func ListActive(ctx context.Context, pool *db.Pool, projectID string, now time.T
 		return nil, fmt.Errorf("iterate invites: %w", err)
 	}
 	return out, nil
+}
+
+type ExtendTo string
+
+const (
+	ExtendPlus7D    ExtendTo = "+7d"
+	ExtendPlus30D   ExtendTo = "+30d"
+	ExtendPermanent ExtendTo = "permanent"
+)
+
+func NormalizeExtendTo(raw string) ExtendTo {
+	return ExtendTo(strings.ToLower(strings.TrimSpace(raw)))
+}
+
+func ValidExtendTo(raw string) bool {
+	switch NormalizeExtendTo(raw) {
+	case ExtendPlus7D, ExtendPlus30D, ExtendPermanent:
+		return true
+	default:
+		return false
+	}
+}
+
+// Extend updates the expiry of an active invite. Relative extensions are
+// added to the current future expiry rather than replacing it; permanent
+// writes NULL expires_at. Already-permanent invites cannot be shortened
+// through +7d/+30d, so those attempts return ErrExtendInvalid.
+func Extend(ctx context.Context, pool *db.Pool, projectID, tokenHash, extendTo, actorUserID string, now time.Time) (*Record, error) {
+	if pool == nil {
+		return nil, errors.New("invites: nil DB pool")
+	}
+	projectID = strings.TrimSpace(projectID)
+	tokenHash = strings.TrimSpace(tokenHash)
+	if projectID == "" || tokenHash == "" {
+		return nil, errors.New("invites: project_id and token_hash are required")
+	}
+	mode := NormalizeExtendTo(extendTo)
+	if !ValidExtendTo(string(mode)) {
+		return nil, ErrExtendInvalid
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin invite extend: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	rec, err := load(ctx, tx, tokenHash, true)
+	if err != nil {
+		return nil, err
+	}
+	if rec.ProjectID != projectID {
+		return nil, ErrTokenNotFound
+	}
+	if inactive(rec, now) {
+		return nil, ErrTokenInactive
+	}
+
+	var nextExpiresAt any
+	switch mode {
+	case ExtendPermanent:
+		nextExpiresAt = nil
+	case ExtendPlus7D, ExtendPlus30D:
+		if rec.ExpiresAt == nil {
+			return nil, ErrExtendInvalid
+		}
+		base := now.UTC()
+		if rec.ExpiresAt.After(base) {
+			base = rec.ExpiresAt.UTC()
+		}
+		days := 7
+		if mode == ExtendPlus30D {
+			days = 30
+		}
+		next := base.Add(time.Duration(days) * 24 * time.Hour)
+		nextExpiresAt = next
+	default:
+		return nil, ErrExtendInvalid
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE invite_tokens
+		   SET expires_at = $3
+		 WHERE token_hash = $1 AND project_id = $2::uuid
+	`, tokenHash, projectID, nextExpiresAt); err != nil {
+		return nil, fmt.Errorf("update invite expiry: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit invite extend: %w", err)
+	}
+	return load(ctx, pool, tokenHash, false)
 }
 
 // Revoke marks an invite token consumed (consumed_at = now, consumed_by

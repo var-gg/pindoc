@@ -1,4 +1,5 @@
 import {
+  isReaderDevSurfaceEnabled,
   normalizeReaderSurfaceSegment,
   projectSurfacePath,
 } from "../src/readerRoutes";
@@ -38,6 +39,25 @@ function testProjectSurfacePathPreservesCanonicalTasks(): void {
   );
 }
 
+function testDevSurfaceGateRequiresDevQueryInProduction(): void {
+  assertEqual(
+    isReaderDevSurfaceEnabled("", false),
+    false,
+    "production default hides dev-only surfaces",
+  );
+  assertEqual(
+    isReaderDevSurfaceEnabled("?dev=1", false),
+    true,
+    "explicit dev query opens dev-only surfaces",
+  );
+  assertEqual(
+    isReaderDevSurfaceEnabled("", true),
+    true,
+    "vite dev server opens dev-only surfaces",
+  );
+}
+
 testTaskAliasNormalizesToTasks();
 testUnknownSurfaceFallsThrough();
 testProjectSurfacePathPreservesCanonicalTasks();
+testDevSurfaceGateRequiresDevQueryInProduction();

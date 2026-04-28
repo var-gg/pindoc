@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Loader2, X } from "lucide-react";
 import {
   api,
+  type InviteExpiryPolicy,
   type InviteIssueResp,
   type InviteRole,
   type Project,
@@ -9,8 +10,11 @@ import {
 } from "../api/client";
 import { useI18n } from "../i18n";
 import { MembersPanel } from "./MembersPanel";
-
-const EXPIRY_OPTIONS = [24, 72, 168, 720] as const;
+import {
+  canIssuePermanentInvite,
+  inviteIssuePayload,
+  INVITE_EXPIRY_OPTIONS,
+} from "./invitePolicy";
 
 type Props = {
   project: Project;
@@ -26,7 +30,7 @@ export function InviteModal({ project, open, onClose, users }: Props) {
   const { t, lang } = useI18n();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [role, setRole] = useState<InviteRole>("viewer");
-  const [expiresInHours, setExpiresInHours] = useState<number>(24);
+  const [expiresPolicy, setExpiresPolicy] = useState<InviteExpiryPolicy>("30d");
   const [issuing, setIssuing] = useState(false);
   const [result, setResult] = useState<InviteIssueResp | null>(null);
   const [copied, setCopied] = useState(false);
@@ -34,12 +38,15 @@ export function InviteModal({ project, open, onClose, users }: Props) {
   const [refreshNonce, setRefreshNonce] = useState(0);
 
   const formattedExpiry = useMemo(() => {
-    if (!result?.expires_at) return "";
+    if (!result) return "";
+    if (!result.expires_at) return t("invite.expiry.permanent");
     return new Intl.DateTimeFormat(lang === "ko" ? "ko-KR" : "en-US", {
       dateStyle: "medium",
       timeStyle: "short",
     }).format(new Date(result.expires_at));
-  }, [lang, result?.expires_at]);
+  }, [lang, result, t]);
+
+  const permanentAllowed = canIssuePermanentInvite(project);
 
   useEffect(() => {
     if (!open) return;
@@ -62,10 +69,7 @@ export function InviteModal({ project, open, onClose, users }: Props) {
     setResult(null);
     setCopied(false);
     try {
-      const out = await api.issueInvite(project.slug, {
-        role,
-        expires_in_hours: expiresInHours,
-      });
+      const out = await api.issueInvite(project.slug, inviteIssuePayload(role, expiresPolicy));
       setResult(out);
       // Tell MembersPanel to refetch — the new token belongs in the
       // active-invites list right away. Without this the user has to
@@ -137,19 +141,31 @@ export function InviteModal({ project, open, onClose, users }: Props) {
             </div>
           </fieldset>
 
-          <label className="invite-modal__field">
-            <span>{t("invite.modal.expiry")}</span>
-            <select
-              value={expiresInHours}
-              onChange={(e) => setExpiresInHours(Number(e.target.value))}
-            >
-              {EXPIRY_OPTIONS.map((hours) => (
-                <option key={hours} value={hours}>
-                  {t(`invite.expiry.${hours}`)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <fieldset className="invite-modal__field">
+            <legend>{t("invite.modal.expiry")}</legend>
+            <div className="invite-modal__segments invite-modal__segments--expiry">
+              {INVITE_EXPIRY_OPTIONS.map((policy) => {
+                const disabled = policy === "permanent" && !permanentAllowed;
+                return (
+                  <label
+                    key={policy}
+                    className={`invite-modal__segment${expiresPolicy === policy ? " is-active" : ""}${disabled ? " is-disabled" : ""}`}
+                    title={disabled ? t("members_panel.role_owner") : undefined}
+                  >
+                    <input
+                      type="radio"
+                      name="invite-expiry"
+                      value={policy}
+                      checked={expiresPolicy === policy}
+                      disabled={disabled}
+                      onChange={() => setExpiresPolicy(policy)}
+                    />
+                    <span>{t(`invite.expiry.${policy}`)}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
 
           {error && <div className="invite-modal__error" role="alert">{error}</div>}
 

@@ -15,18 +15,19 @@ import (
 type inviteIssueRequest struct {
 	Role           string `json:"role"`
 	ExpiresInHours int    `json:"expires_in_hours,omitempty"`
+	ExpiresPolicy  string `json:"expires_policy,omitempty"`
 }
 
 type inviteIssueResponse struct {
-	InviteURL string    `json:"invite_url"`
-	ExpiresAt time.Time `json:"expires_at"`
+	InviteURL string     `json:"invite_url"`
+	ExpiresAt *time.Time `json:"expires_at"`
 }
 
 type inviteJoinInfoResponse struct {
-	ProjectSlug string    `json:"project_slug"`
-	ProjectName string    `json:"project_name"`
-	Role        string    `json:"role"`
-	ExpiresAt   time.Time `json:"expires_at"`
+	ProjectSlug string     `json:"project_slug"`
+	ProjectName string     `json:"project_name"`
+	Role        string     `json:"role"`
+	ExpiresAt   *time.Time `json:"expires_at"`
 }
 
 type inviteJoinRequest struct {
@@ -77,19 +78,16 @@ func (d Deps) handleInviteIssue(w http.ResponseWriter, r *http.Request) {
 		writeInviteError(w, http.StatusForbidden, "PROJECT_OWNER_REQUIRED", "only project owners can issue invites")
 		return
 	}
-	hours := in.ExpiresInHours
-	if hours == 0 {
-		hours = 24
-	}
-	if hours < 1 || hours > 24*30 {
-		writeInviteError(w, http.StatusBadRequest, "INVITE_EXPIRY_INVALID", "expires_in_hours must be between 1 and 720")
+	expiresAt, permanent, ok := inviteIssueExpiry(w, in, time.Now().UTC())
+	if !ok {
 		return
 	}
 	rawToken, rec, err := invites.Issue(r.Context(), d.DB, invites.IssueInput{
 		ProjectID: scope.ProjectID,
 		Role:      role,
 		IssuedBy:  principal.UserID,
-		ExpiresAt: time.Now().UTC().Add(time.Duration(hours) * time.Hour),
+		ExpiresAt: expiresAt,
+		Permanent: permanent,
 	})
 	if err != nil {
 		if errors.Is(err, invites.ErrRoleInvalid) {
@@ -99,8 +97,43 @@ func (d Deps) handleInviteIssue(w http.ResponseWriter, r *http.Request) {
 		writeInviteError(w, http.StatusInternalServerError, "INVITE_ISSUE_FAILED", "failed to issue invite")
 		return
 	}
+	if permanent {
+		if err := d.recordInviteAuditEvent(r.Context(), scope.ProjectID, "invite.permanent_issued", rec.TokenHash, role, "permanent", principal.UserID, rec.ExpiresAt); err != nil {
+			writeInviteError(w, http.StatusInternalServerError, "INVITE_AUDIT_FAILED", "failed to record invite audit event")
+			return
+		}
+	}
 	u := d.inviteBaseURL(r) + "/signup?invite=" + url.QueryEscape(rawToken)
 	writeJSON(w, http.StatusOK, inviteIssueResponse{InviteURL: u, ExpiresAt: rec.ExpiresAt})
+}
+
+func inviteIssueExpiry(w http.ResponseWriter, in inviteIssueRequest, now time.Time) (time.Time, bool, bool) {
+	policy := strings.ToLower(strings.TrimSpace(in.ExpiresPolicy))
+	switch policy {
+	case "permanent":
+		return time.Time{}, true, true
+	case "1d":
+		return now.Add(24 * time.Hour), false, true
+	case "7d":
+		return now.Add(7 * 24 * time.Hour), false, true
+	case "30d":
+		return now.Add(30 * 24 * time.Hour), false, true
+	case "":
+		// Compatibility: older clients submit expires_in_hours. New clients
+		// omit it only for the default 30-day option.
+	default:
+		writeInviteError(w, http.StatusBadRequest, "INVITE_EXPIRY_INVALID", "expires_policy must be 1d, 7d, 30d, or permanent")
+		return time.Time{}, false, false
+	}
+	hours := in.ExpiresInHours
+	if hours == 0 {
+		hours = 24 * 30
+	}
+	if hours < 1 || hours > 24*30 {
+		writeInviteError(w, http.StatusBadRequest, "INVITE_EXPIRY_INVALID", "expires_in_hours must be between 1 and 720")
+		return time.Time{}, false, false
+	}
+	return now.Add(time.Duration(hours) * time.Hour), false, true
 }
 
 func (d Deps) handleInviteJoinInfo(w http.ResponseWriter, r *http.Request) {
