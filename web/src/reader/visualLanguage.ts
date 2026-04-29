@@ -61,6 +61,7 @@ export const visualLanguage = {
     blocks: relationEntry("Ban", "--relation-blocks", "blocks", "블록", "This artifact blocks progress on the target.", "이 artifact가 대상 진행을 막고 있음."),
     relates_to: relationEntry("ArrowLeftRight", "--relation-relates-to", "relates to", "관련", "Loose relationship without a stronger semantic edge.", "더 강한 의미 관계는 아니지만 서로 관련됨."),
     translation_of: relationEntry("Languages", "--relation-translation-of", "translation of", "번역", "This artifact is a translation of the target.", "이 artifact가 대상의 번역본임."),
+    evidence: relationEntry("BadgeCheck", "--relation-evidence", "evidence", "근거", "This artifact is cited as supporting evidence.", "이 artifact가 확인 근거로 인용됨."),
   },
   pins: {
     code: pinEntry("Code2", "--pin-code", "Code", "코드", "Repository file, commit, or line-range evidence.", "repository 파일, commit, line-range 근거."),

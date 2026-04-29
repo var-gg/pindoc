@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
-import { Bot, PanelRightOpen, UserRound, X } from "lucide-react";
+import { Bot, CircleHelp, PanelRightOpen, UserRound, X } from "lucide-react";
 import type { Aggregate } from "./useReaderData";
 import { api, type Artifact, type ArtifactRef, type Area } from "../api/client";
 import { useI18n } from "../i18n";
@@ -1531,6 +1531,17 @@ function TaskColumn({
           {label}
         </span>
         <span className="kanban-col__count">{items.length}</span>
+        {columnId === "blocked" && (
+          <Tooltip content={t("tasks.blocked_hint")}>
+            <button
+              type="button"
+              className="kanban-col__help"
+              aria-label={t("tasks.blocked_head")}
+            >
+              <CircleHelp className="lucide" aria-hidden="true" />
+            </button>
+          </Tooltip>
+        )}
       </div>
       <div className="kanban-col__list">
         {visibleItems.map((a) => (
@@ -1579,9 +1590,8 @@ function TaskColumn({
 // TaskCard renders a single artifact tile in the kanban. Priority chip
 // (P0-P3 OKLCH palette) is the primary left-rail marker; area-chip sits
 // below the title so the area taxonomy reads as metadata rather than
-// competing with priority. task_meta.status=blocked adds a blocked-banner
-// across the card top — the detailed blocks-target list lives in the
-// Sidecar on the artifact detail page to avoid an N+1 fetch here.
+// competing with priority. Blocked-state guidance lives in the column
+// header helper so every kanban column keeps the same card rhythm.
 function TaskCard({
   artifact: a,
   projectSlug,
@@ -1601,11 +1611,10 @@ function TaskCard({
   const navigate = useNavigate();
   const priority = a.task_meta?.priority;
   const prioClass = priority ? PRIORITY_CLASS[priority] : undefined;
-  const blocked = a.task_meta?.status === "blocked";
   const areaLabel = areaNameBySlug.get(a.area_slug) ?? localizedAreaName(t, a.area_slug, a.area_slug);
   const detailHref = `/p/${projectSlug}/wiki/${a.slug}`;
   const selected = isActive || isSelected;
-  const assigneeLabel = taskActorLabel(a.task_meta?.assignee);
+  const assigneeLabel = taskActorLabel(a.task_meta?.assignee, t);
   const requesterLabel = requesterActorLabel(a);
   const showRequester =
     requesterLabel &&
@@ -1629,19 +1638,6 @@ function TaskCard({
         }
       }}
     >
-      {blocked && (
-        <div className="blocked-banner">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide" aria-hidden="true">
-            <path d="M12 9v4" />
-            <path d="M12 17h.01" />
-            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-          </svg>
-          <div className="blocked-banner__body">
-            <div className="blocked-banner__head">{t("tasks.blocked_head")}</div>
-            {t("tasks.blocked_hint")}
-          </div>
-        </div>
-      )}
       <div className="task-card__meta">
         {prioClass && (
           <Tooltip content={t("tasks.priority_hint", priority?.toUpperCase() ?? "")}>
@@ -1697,8 +1693,8 @@ function TaskCard({
   );
 }
 
-function taskActorLabel(value: string | undefined): string {
-  return value?.trim() ?? "";
+function taskActorLabel(value: string | undefined, t: (key: string, ...args: Array<string | number>) => string): string {
+  return value?.trim() || t("tasks.assignee_unassigned");
 }
 
 function requesterActorLabel(a: ArtifactRef): string {

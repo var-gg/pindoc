@@ -57,6 +57,9 @@ func TestGroupRowsTypeCountsUniqueArtifacts(t *testing.T) {
 	if groups[0].FirstArtifact == nil || groups[0].FirstArtifact.Slug != "task-1" {
 		t.Fatalf("first artifact = %#v, want task-1", groups[0].FirstArtifact)
 	}
+	if len(groups[0].Artifacts) != 2 || groups[0].Artifacts[0].Slug != "task-1" || groups[0].Artifacts[1].Slug != "decision-1" {
+		t.Fatalf("artifacts = %#v, want task-1 then decision-1", groups[0].Artifacts)
+	}
 }
 
 func TestGroupRowsFallbackLowConfidence(t *testing.T) {

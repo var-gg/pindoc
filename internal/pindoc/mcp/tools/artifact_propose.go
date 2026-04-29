@@ -106,7 +106,7 @@ type artifactProposeInput struct {
 
 	// RelatesTo records typed edges to other artifacts in the same project.
 	// Valid relations: implements | references | blocks | relates_to |
-	// translation_of.
+	// translation_of | evidence.
 	// Target may be id, slug, or pindoc:// URL — resolved server-side.
 	// Unknown targets fail the whole call with RELATES_TARGET_NOT_FOUND.
 	RelatesTo []ArtifactRelationInput `json:"relates_to,omitempty" jsonschema:"typed edges to other artifacts"`
@@ -157,15 +157,15 @@ type artifactProposeInput struct {
 	// TaskMeta carries typed tracker dimensions for type=Task artifacts
 	// (Phase 15b). Ignored for any other type. All fields optional:
 	//
-	//   status      — todo | in_progress | blocked | done | cancelled
+	//   status      — open | claimed_done | blocked | cancelled
 	//   priority    — p0 | p1 | p2 | p3
-	//   assignee    — agent:<id> | user:<id> | @<handle>
+	//   assignee    — agent:<id> | user:<id> | @<handle> | "" to clear
 	//   due_at      — RFC3339 timestamp
 	//   parent_slug — another Task artifact's slug (for epic→task→subtask)
 	//
-	// On update_of path, TaskMeta (when present) REPLACES the previous
-	// task_meta entirely — there is no merge. Agents that want to change
-	// one field must include the full desired state.
+	// On create, omitted assignee means unassigned; set assignee explicitly
+	// when claiming ownership. On meta_patch update, omitted assignee is
+	// untouched while explicit "" clears it.
 	TaskMeta *TaskMetaInput `json:"task_meta,omitempty" jsonschema:"tracker dims for Task artifacts"`
 
 	// Basis records the evidence the agent gathered before proposing.
@@ -244,6 +244,67 @@ type TaskMetaInput struct {
 	Assignee   string `json:"assignee,omitempty"`
 	DueAt      string `json:"due_at,omitempty" jsonschema:"RFC3339 timestamp"`
 	ParentSlug string `json:"parent_slug,omitempty" jsonschema:"slug of parent Task artifact"`
+
+	assigneeSet bool
+}
+
+// UnmarshalJSON preserves whether the caller supplied task_meta.assignee.
+// A plain string field cannot distinguish omitted from "" after decoding,
+// but the meta_patch lane needs that distinction: omitted means untouched,
+// while explicit "" means clear the assignee.
+func (tm *TaskMetaInput) UnmarshalJSON(data []byte) error {
+	type wireTaskMetaInput struct {
+		Status     string `json:"status,omitempty"`
+		Priority   string `json:"priority,omitempty"`
+		Assignee   string `json:"assignee,omitempty"`
+		DueAt      string `json:"due_at,omitempty"`
+		ParentSlug string `json:"parent_slug,omitempty"`
+	}
+	var wire wireTaskMetaInput
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*tm = TaskMetaInput{
+		Status:      wire.Status,
+		Priority:    wire.Priority,
+		Assignee:    wire.Assignee,
+		DueAt:       wire.DueAt,
+		ParentSlug:  wire.ParentSlug,
+		assigneeSet: raw != nil && raw["assignee"] != nil,
+	}
+	return nil
+}
+
+func (tm TaskMetaInput) MarshalJSON() ([]byte, error) {
+	payload := map[string]any{}
+	if s := strings.TrimSpace(tm.Status); s != "" {
+		payload["status"] = s
+	}
+	if p := strings.TrimSpace(tm.Priority); p != "" {
+		payload["priority"] = p
+	}
+	if a := strings.TrimSpace(tm.Assignee); a != "" {
+		payload["assignee"] = a
+	} else if tm.assigneeSet {
+		payload["assignee"] = nil
+	}
+	if d := strings.TrimSpace(tm.DueAt); d != "" {
+		payload["due_at"] = d
+	}
+	if ps := strings.TrimSpace(tm.ParentSlug); ps != "" {
+		payload["parent_slug"] = ps
+	}
+	return json.Marshal(payload)
+}
+
+func (tm *TaskMetaInput) markAssigneeSet() {
+	if tm != nil {
+		tm.assigneeSet = true
+	}
 }
 
 var validTaskStatuses = map[string]struct{}{
@@ -316,7 +377,7 @@ func validRuleAreaScope(scope string) bool {
 // ArtifactRelationInput is the agent-facing shape for one edge.
 type ArtifactRelationInput struct {
 	TargetID string `json:"target_id" jsonschema:"id, slug, or pindoc:// URL of the related artifact"`
-	Relation string `json:"relation" jsonschema:"one of implements|references|blocks|relates_to|translation_of"`
+	Relation string `json:"relation" jsonschema:"one of implements|references|blocks|relates_to|translation_of|evidence"`
 }
 
 var validRelations = map[string]struct{}{
@@ -324,6 +385,10 @@ var validRelations = map[string]struct{}{
 	// Phase 18 — cross-locale pairing for project-locale composite key
 	// (Task task-phase-18-project-locale-implementation).
 	"translation_of": {},
+	// Evidence links point at another Pindoc artifact used as supporting
+	// proof. Use pins for concrete code/file/URL coordinates; use evidence
+	// when the support is itself an artifact.
+	"evidence": {},
 }
 
 type artifactProposeOutput struct {
@@ -474,7 +539,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.propose",
-			Description: "Propose a new artifact (the only write path humans use — always via an agent). Create path (both update_of and supersede_of omitted) requires basis.search_receipt from pindoc.artifact.search or pindoc.context.for_task in the same session; update/supersede paths do not. Returns Status=accepted + artifact_id on success, or Status=not_ready + checklist + suggested_actions if Pre-flight fails. Always read the checklist; never surface the raw error to the user without trying the suggested actions first.",
+			Description: "Propose a new artifact (the only write path humans use — always via an agent). Create path (both update_of and supersede_of omitted) requires basis.search_receipt from pindoc.artifact.search or pindoc.context.for_task in the same session; update/supersede paths do not. For Task creates, omitted task_meta.assignee means unassigned; explicit assignee claims ownership, and explicit task_meta.assignee=\"\" clears on update. Use pins[] for concrete code/file/URL evidence; use relates_to relation=evidence when the supporting source is another Pindoc artifact. Returns Status=accepted + artifact_id on success, or Status=not_ready + checklist + suggested_actions if Pre-flight fails. Always read the checklist; never surface the raw error to the user without trying the suggested actions first.",
 		},
 		func(ctx context.Context, p *auth.Principal, in artifactProposeInput) (*sdk.CallToolResult, artifactProposeOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -2647,6 +2712,8 @@ func taskMetaToJSON(artifactType string, tm *TaskMetaInput) any {
 	}
 	if a := strings.TrimSpace(tm.Assignee); a != "" {
 		payload["assignee"] = a
+	} else if tm.assigneeSet {
+		payload["assignee"] = nil
 	}
 	if d := strings.TrimSpace(tm.DueAt); d != "" {
 		payload["due_at"] = d
@@ -2937,7 +3004,9 @@ func applyConversationDerivedDefaults(in *artifactProposeInput, meta *ResolvedAr
 }
 
 // applyTaskCreateDefaults normalizes Task create inputs so new Task rows
-// always land with the lifecycle's baseline status plus an assignee.
+// always land with the lifecycle's baseline status. Assignee is deliberately
+// not inferred from author_id: omitted means unassigned, explicit
+// agent:<id>/user:<id>/@handle means owned.
 // Update paths skip this helper because they should preserve the current
 // task_meta unless the caller explicitly changes it.
 func applyTaskCreateDefaults(in *artifactProposeInput) {
@@ -2949,9 +3018,6 @@ func applyTaskCreateDefaults(in *artifactProposeInput) {
 	}
 	if strings.TrimSpace(in.TaskMeta.Status) == "" {
 		in.TaskMeta.Status = "open"
-	}
-	if strings.TrimSpace(in.AuthorID) != "" && strings.TrimSpace(in.TaskMeta.Assignee) == "" {
-		in.TaskMeta.Assignee = "agent:" + in.AuthorID
 	}
 }
 

@@ -86,9 +86,9 @@ const (
 
 // validateAssignee normalises and validates the assignee string. Empty
 // string short-circuits to (empty, true) meaning "explicit clear" — the
-// caller still gets a non-nil TaskMetaInput so handleUpdateMetaPatch
-// writes the empty value and downstream jsonb merge removes the field
-// via JSONB's null-like semantics.
+// caller still gets a non-nil TaskMetaInput with assigneeSet=true so
+// handleUpdateMetaPatch writes JSON null and jsonb_strip_nulls removes
+// the field after the shallow merge.
 func validateAssignee(assignee string) (string, bool) {
 	a := strings.TrimSpace(assignee)
 	if a == "" {
@@ -226,6 +226,7 @@ func assignOneTask(
 		CommitMsg:       commitMsg,
 		TaskMeta:        &TaskMetaInput{Assignee: assignee},
 	}
+	propIn.TaskMeta.markAssigneeSet()
 	if bulkOpID != "" {
 		propIn.Basis = &artifactProposeBasis{
 			SourceSession: "pindoc.task.bulk_assign",

@@ -1,4 +1,4 @@
-import type { ChangeGroup, TodayResp } from "../api/client";
+import type { ChangeGroup, ChangeGroupArtifactRef, TodayResp } from "../api/client";
 
 type TFn = (key: string, ...args: Array<string | number>) => string;
 
@@ -41,13 +41,12 @@ export function buildChangeGroupCardView(
   group: ChangeGroup,
   t: TFn,
 ): ChangeGroupCardView {
-  const summaryParts = splitCommitSummary(group.commit_summary);
   return {
     kindLabel: changeKindLabel(group.group_kind, t),
     importanceLabel: importanceLabel(group.importance.level, t),
     verificationLabel: verificationLabel(group.verification_state, t),
-    title: commitSummaryTitle(group, summaryParts, t),
-    bullets: commitSummaryBullets(group, summaryParts),
+    title: representativeChangeGroupTitle(group, t),
+    bullets: artifactTitleBullets(group, t),
   };
 }
 
@@ -62,46 +61,55 @@ function fallbackMessage(data: TodayResp, t: TFn): string | null {
   }
 }
 
-function splitCommitSummary(summary: string): string[] {
-  return summary
-    .split(/\s*;\s*/)
-    .map(cleanCommitSummary)
-    .filter((part) => part.length > 0)
-    .map((part) => trimText(part, 150));
-}
-
-function commitSummaryTitle(
-  group: ChangeGroup,
-  summaryParts: string[],
-  t: TFn,
-): string {
-  if (!startsWithImplementationCommitNoise(group.commit_summary)) {
-    return summaryParts[0] ?? fallbackChangeGroupTitle(group, t);
-  }
-  return fallbackChangeGroupTitle(group, t);
-}
-
-function cleanCommitSummary(summary: string): string {
-  return summary
-    .replace(/\[fallback_missing_commit_msg\]/gi, "")
-    .replace(/\bcreate artifact:\s*/gi, "")
-    .replace(/^\s*implemented\s+in\s+commit\s+[0-9a-f]{7,40}\s*[:-]?\s*/i, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function startsWithImplementationCommitNoise(summary: string): boolean {
-  return /^\s*implemented\s+in\s+commit\s+[0-9a-f]{7,40}\b/i.test(summary);
-}
-
 function fallbackChangeGroupTitle(group: ChangeGroup, t: TFn): string {
   const area = group.areas[0] ?? t("today.change_group_area_fallback");
   return t("today.change_group_title_area", area, group.artifact_count);
 }
 
-function commitSummaryBullets(group: ChangeGroup, summaryParts: string[]): string[] {
-  const start = startsWithImplementationCommitNoise(group.commit_summary) ? 0 : 1;
-  return summaryParts.slice(start, start + 3);
+function representativeArtifacts(group: ChangeGroup): ChangeGroupArtifactRef[] {
+  const out: ChangeGroupArtifactRef[] = [];
+  const seen = new Set<string>();
+  const add = (artifact: ChangeGroupArtifactRef | undefined) => {
+    if (!artifact?.title?.trim()) return;
+    const key = artifact.id || artifact.slug || artifact.title;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(artifact);
+  };
+  add(group.first_artifact);
+  for (const artifact of group.artifacts ?? []) add(artifact);
+  return out;
+}
+
+function representativeChangeGroupTitle(group: ChangeGroup, t: TFn): string {
+  const artifact = representativeArtifacts(group)[0];
+  if (!artifact) return fallbackChangeGroupTitle(group, t);
+  const title = trimText(artifact.title, 96);
+  const extra = Math.max(0, group.artifact_count - 1);
+  const area = group.areas[0] ?? "";
+  if (area && extra > 0) {
+    return t("today.change_group_title_representative_area_more", area, title, extra);
+  }
+  if (area) {
+    return t("today.change_group_title_representative_area", area, title);
+  }
+  if (extra > 0) {
+    return t("today.change_group_title_representative_more", title, extra);
+  }
+  return title;
+}
+
+function artifactTitleBullets(group: ChangeGroup, t: TFn): string[] {
+  const artifacts = representativeArtifacts(group).slice(0, 3);
+  if (artifacts.length > 0) {
+    return artifacts.map((artifact) =>
+      t("today.change_group_bullet_artifact", trimText(artifact.title, 110)),
+    );
+  }
+  if (group.artifact_count > 0) {
+    return [t("today.change_group_bullet_artifact_count", group.artifact_count)];
+  }
+  return [];
 }
 
 function trimText(text: string, max: number): string {
@@ -169,7 +177,7 @@ function buildBullets(data: TodayResp, t: TFn): string[] {
   );
 
   return [
-    t("today.brief_bullet_top", groups[0] ? commitSummaryTitle(groups[0], splitCommitSummary(groups[0].commit_summary), t) : ""),
+    t("today.brief_bullet_top", groups[0] ? representativeChangeGroupTitle(groups[0], t) : ""),
     t("today.brief_bullet_counts", groups.length, totals.revisions, totals.artifacts),
     totals.verificationRisk
       ? t("today.brief_bullet_verification_risk")

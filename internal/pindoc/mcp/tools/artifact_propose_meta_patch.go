@@ -238,16 +238,16 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 	}
 
 	// task_meta update is a shallow merge (top-level key overwrite) so an
-	// agent can PATCH one field without re-sending the rest. Without this,
-	// "change assignee only" would null out priority and due_at — the UI-
-	// facing TaskControls never ships all four fields at once.
+	// agent can PATCH one field without re-sending the rest. JSON null in
+	// the patch clears a key after jsonb_strip_nulls; this preserves the
+	// difference between omitted assignee and assignee="" clear.
 	if _, err := tx.Exec(ctx, `
 		UPDATE artifacts
 		   SET tags           = $2,
 		       completeness   = $3,
 		       task_meta      = CASE
 		           WHEN $4::jsonb IS NULL THEN task_meta
-		           ELSE COALESCE(task_meta, '{}'::jsonb) || $4::jsonb
+		           ELSE jsonb_strip_nulls(COALESCE(task_meta, '{}'::jsonb) || $4::jsonb)
 		       END,
 		       artifact_meta  = COALESCE($5::jsonb, artifact_meta),
 		       review_state   = CASE

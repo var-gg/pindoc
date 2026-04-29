@@ -42,6 +42,7 @@ import {
   type VisualMetaEnumKey,
 } from "./visualLanguage";
 import { visualIconComponent } from "./visualLanguageIcons";
+import { splitEvidenceEdges } from "./sidecarEvidence";
 import {
   MINI_GRAPH_CENTER,
   graphRadialPositions,
@@ -144,11 +145,16 @@ export function Sidecar({
   const areaLabel = localizedAreaName(t, detail.area_slug, detail.area_slug);
   const artifactHref = `/p/${projectSlug}/wiki/${detail.slug}`;
 
-  // Graph edges aren't derived yet (Phase 3+ pipeline populates these via
-  // artifact.superseded_by + future artifact_edges). Show placeholder
-  // states so the visual treatment is faithful and the data gap is
-  // honest.
+  // Supersede is still a dedicated head field; typed artifact_edges come
+  // through relates_to / related_by and are split below by relation role.
   const hasSupersedes = Boolean(detail.superseded_by && detail.superseded_by !== "");
+  const {
+    regularRelates,
+    regularRelatedBy,
+    evidenceRelates,
+    evidenceRelatedBy,
+  } = splitEvidenceEdges(detail.relates_to ?? [], detail.related_by ?? []);
+  const hasEvidence = evidenceRelates.length > 0 || evidenceRelatedBy.length > 0;
 
   return (
     <aside id="sidecar-live-data" className="sidecar sidecar--detail">
@@ -183,12 +189,24 @@ export function Sidecar({
         )}
         <ConnectedArtifacts
           projectSlug={projectSlug}
-          relates={detail.relates_to ?? []}
-          relatedBy={detail.related_by ?? []}
+          relates={regularRelates}
+          relatedBy={regularRelatedBy}
           hasSupersedes={hasSupersedes}
           supersededBy={detail.superseded_by ?? ""}
         />
       </SidecarStaticSection>
+
+      {hasEvidence && (
+        <SidecarStaticSection heading={t("sidecar.evidence")}>
+          <ConnectedArtifacts
+            projectSlug={projectSlug}
+            relates={evidenceRelates}
+            relatedBy={evidenceRelatedBy}
+            hasSupersedes={false}
+            supersededBy=""
+          />
+        </SidecarStaticSection>
+      )}
 
       <SidecarStaticSection heading={t("sidecar.references")}>
         <PinReferencesPanel projectSlug={projectSlug} pins={detail.pins ?? []} />

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -243,7 +244,7 @@ metadata validation only
 // "no status" bucket by injecting the lifecycle baseline only on create /
 // supersede-create paths. Explicit caller choices still win.
 func TestApplyTaskCreateDefaults(t *testing.T) {
-	t.Run("missing task_meta gets open status and default assignee", func(t *testing.T) {
+	t.Run("missing task_meta gets open status and stays unassigned", func(t *testing.T) {
 		in := artifactProposeInput{
 			Type:     "Task",
 			AuthorID: "codex",
@@ -255,8 +256,8 @@ func TestApplyTaskCreateDefaults(t *testing.T) {
 		if in.TaskMeta.Status != "open" {
 			t.Fatalf("expected status=open, got %q", in.TaskMeta.Status)
 		}
-		if in.TaskMeta.Assignee != "agent:codex" {
-			t.Fatalf("expected assignee=agent:codex, got %q", in.TaskMeta.Assignee)
+		if in.TaskMeta.Assignee != "" {
+			t.Fatalf("expected assignee to stay empty, got %q", in.TaskMeta.Assignee)
 		}
 	})
 
@@ -275,8 +276,8 @@ func TestApplyTaskCreateDefaults(t *testing.T) {
 		if in.TaskMeta.Priority != "p1" {
 			t.Fatalf("expected priority to survive, got %q", in.TaskMeta.Priority)
 		}
-		if in.TaskMeta.Assignee != "agent:codex" {
-			t.Fatalf("expected default assignee, got %q", in.TaskMeta.Assignee)
+		if in.TaskMeta.Assignee != "" {
+			t.Fatalf("expected assignee to stay empty, got %q", in.TaskMeta.Assignee)
 		}
 	})
 
@@ -309,6 +310,65 @@ func TestApplyTaskCreateDefaults(t *testing.T) {
 			t.Fatalf("expected update path to stay nil, got %+v", in.TaskMeta)
 		}
 	})
+}
+
+func TestTaskMetaToJSONDistinguishesAssigneeOmittedFromClear(t *testing.T) {
+	t.Run("omitted assignee leaves key out", func(t *testing.T) {
+		raw := taskMetaToJSON("Task", &TaskMetaInput{Status: "open"})
+		got, ok := raw.(string)
+		if !ok {
+			t.Fatalf("taskMetaToJSON returned %T", raw)
+		}
+		if strings.Contains(got, "assignee") {
+			t.Fatalf("omitted assignee must not serialize assignee key: %s", got)
+		}
+	})
+
+	t.Run("explicit empty assignee serializes null", func(t *testing.T) {
+		var tm TaskMetaInput
+		if err := json.Unmarshal([]byte(`{"assignee":""}`), &tm); err != nil {
+			t.Fatalf("unmarshal task_meta: %v", err)
+		}
+		raw := taskMetaToJSON("Task", &tm)
+		got, ok := raw.(string)
+		if !ok {
+			t.Fatalf("taskMetaToJSON returned %T", raw)
+		}
+		if !strings.Contains(got, `"assignee":null`) {
+			t.Fatalf("explicit assignee clear must serialize JSON null: %s", got)
+		}
+	})
+
+	t.Run("non-empty assignee works without presence flag", func(t *testing.T) {
+		raw := taskMetaToJSON("Task", &TaskMetaInput{Assignee: "agent:codex"})
+		got, ok := raw.(string)
+		if !ok {
+			t.Fatalf("taskMetaToJSON returned %T", raw)
+		}
+		if !strings.Contains(got, `"assignee":"agent:codex"`) {
+			t.Fatalf("non-empty assignee missing: %s", got)
+		}
+	})
+}
+
+func TestEvidenceRelationIsValidRelatesToEnum(t *testing.T) {
+	if _, ok := validRelations["evidence"]; !ok {
+		t.Fatal("evidence relation must be accepted by artifact.propose validation")
+	}
+	in := artifactProposeInput{
+		Type:         "Analysis",
+		Title:        "Evidence relation check",
+		BodyMarkdown: "## Context\nRelation syntax only.\n",
+		AreaSlug:     "mcp",
+		AuthorID:     "test-agent",
+		RelatesTo: []ArtifactRelationInput{
+			{TargetID: "existing-artifact", Relation: "evidence"},
+		},
+	}
+	_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
+	if containsCode(failed, "REL_INVALID") {
+		t.Fatalf("evidence relation should pass enum validation, failed=%v", failed)
+	}
 }
 
 func TestHasExplicitMetadataUpdate(t *testing.T) {

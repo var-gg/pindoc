@@ -487,6 +487,7 @@ export type ChangeGroup = {
   artifact_count: number;
   type_counts?: ChangeGroupTypeCount[];
   first_artifact?: ChangeGroupArtifactRef;
+  artifacts?: ChangeGroupArtifactRef[];
   areas: string[];
   authors: string[];
   time_start: string;

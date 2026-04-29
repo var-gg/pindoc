@@ -123,6 +123,7 @@ func TestApplyTaskQueueCompact(t *testing.T) {
 		return taskQueueOutput{
 			SourceSemantics:       taskQueueSemantics,
 			StatusFilter:          "pending",
+			DefaultFocus:          taskQueueDefaultFocus,
 			AssigneeFilteredCount: 10,
 			AssigneeOpenCount:     7,
 			ProjectTotalCount:     100,
@@ -179,7 +180,7 @@ func TestApplyTaskQueueCompact(t *testing.T) {
 				t.Fatalf("compact JSON must not contain %s; got %s", omitted, body)
 			}
 		}
-		for _, kept := range []string{`"total_count":10`, `"pending_count":7`, `"assignee_open_count":7`, `"assignee_filtered_count":10`, `"project_total_count":100`, `"count_legend"`, `"compact":true`} {
+		for _, kept := range []string{`"default_focus":"assignee_open_count"`, `"total_count":10`, `"pending_count":7`, `"assignee_open_count":7`, `"assignee_filtered_count":10`, `"project_total_count":100`, `"count_legend"`, `"compact":true`} {
 			if !strings.Contains(body, kept) {
 				t.Fatalf("compact JSON missing %s; got %s", kept, body)
 			}
@@ -193,7 +194,7 @@ func TestApplyTaskQueueCompact(t *testing.T) {
 
 func TestTaskQueueCountLegendNamesCountSemantics(t *testing.T) {
 	legend := taskQueueCountLegend()
-	for _, key := range []string{"assignee_filtered_count", "assignee_open_count", "project_total_count", "total_count", "pending_count", "items"} {
+	for _, key := range []string{"default_focus", "assignee_filtered_count", "assignee_open_count", "project_total_count", "total_count", "pending_count", "items", "ready_to_close"} {
 		if strings.TrimSpace(legend[key]) == "" {
 			t.Fatalf("legend missing %s in %+v", key, legend)
 		}
@@ -203,5 +204,82 @@ func TestTaskQueueCountLegendNamesCountSemantics(t *testing.T) {
 	}
 	if !strings.Contains(legend["pending_count"], "assignee_open_count") {
 		t.Fatalf("pending_count legend should point at assignee_open_count: %q", legend["pending_count"])
+	}
+}
+
+func TestTaskQueueReadyToCloseSignal(t *testing.T) {
+	cases := []struct {
+		name      string
+		status    string
+		body      string
+		ready     bool
+		reason    string
+		total     int
+		resolved  int
+		unchecked int
+		partial   int
+		deferred  int
+	}{
+		{
+			name:      "open with unresolved acceptance",
+			status:    "open",
+			body:      "- [x] done\n- [ ] remaining\n- [~] partial\n- [-] moved\n",
+			ready:     false,
+			reason:    "unresolved_acceptance",
+			total:     4,
+			resolved:  3,
+			unchecked: 1,
+			partial:   1,
+			deferred:  1,
+		},
+		{
+			name:     "missing status all resolved is ready",
+			status:   taskStatusMissing,
+			body:     "- [x] done\n- [~] partial\n- [-] deferred\n",
+			ready:    true,
+			reason:   "ready",
+			total:    3,
+			resolved: 3,
+			partial:  1,
+			deferred: 1,
+		},
+		{
+			name:     "claimed done is terminal not close target",
+			status:   "claimed_done",
+			body:     "- [x] done\n",
+			ready:    false,
+			reason:   "terminal_status",
+			total:    1,
+			resolved: 1,
+		},
+		{
+			name:   "open task without checklist is not ready",
+			status: "open",
+			body:   "## Purpose\nNo acceptance section yet\n",
+			ready:  false,
+			reason: "no_acceptance_checkboxes",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			item := taskQueueItem{}
+			applyTaskQueueReadySignal(&item, tc.status, tc.body)
+			if item.ReadyToClose != tc.ready || item.ReadyToCloseStatus != tc.reason {
+				t.Fatalf("ready/status = %v/%q, want %v/%q", item.ReadyToClose, item.ReadyToCloseStatus, tc.ready, tc.reason)
+			}
+			if item.AcceptanceCheckboxesTotal != tc.total ||
+				item.ResolvedCheckboxes != tc.resolved ||
+				item.UnresolvedCheckboxes != tc.unchecked ||
+				item.PartialCheckboxes != tc.partial ||
+				item.DeferredCheckboxes != tc.deferred {
+				t.Fatalf("counts got total=%d resolved=%d unchecked=%d partial=%d deferred=%d",
+					item.AcceptanceCheckboxesTotal,
+					item.ResolvedCheckboxes,
+					item.UnresolvedCheckboxes,
+					item.PartialCheckboxes,
+					item.DeferredCheckboxes,
+				)
+			}
+		})
 	}
 }

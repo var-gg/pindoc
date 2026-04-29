@@ -1067,6 +1067,10 @@
   stroke: var(--relation-translation-of);
   stroke-dasharray: 5 3;
 }
+.mini-graph__edge--evidence {
+  stroke: var(--relation-evidence);
+  stroke-width: 1.55;
+}
 .mini-graph__edge--supersedes {
   stroke: var(--type-decision);
   stroke-width: 1.45;
@@ -2427,6 +2431,10 @@
   stroke: var(--relation-translation-of);
   stroke-dasharray: 6 4;
 }
+.graph-canvas__edge--evidence {
+  stroke: var(--relation-evidence);
+  stroke-width: 1.5;
+}
 .graph-canvas__edge--supersedes {
   stroke: var(--type-decision);
   stroke-width: 1.45;
@@ -3679,6 +3687,29 @@
   text-transform: none;
   letter-spacing: 0;
 }
+.kanban-col__help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-1);
+  background: var(--bg-0);
+  color: var(--fg-3);
+  cursor: help;
+}
+.kanban-col__help:hover,
+.kanban-col__help:focus-visible {
+  color: var(--prio-p0);
+  border-color: color-mix(in oklch, var(--prio-p0) 34%, var(--border));
+  outline: none;
+}
+.kanban-col__help .lucide {
+  width: 13px;
+  height: 13px;
+}
 .kanban-col__list { display: flex; flex-direction: column; gap: 6px; }
 .kanban-col__empty {
   color: var(--fg-4);
@@ -3982,33 +4013,6 @@
   width: 11px;
   height: 11px;
   flex: 0 0 auto;
-}
-
-/* Blocked banner — shown on cards whose task_meta.status=blocked.
- * Full relates_to:blocks target lookup stays in the artifact detail
- * Sidecar for now (N+1 fetch avoided on the kanban list view). */
-.blocked-banner {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px 10px;
-  margin-bottom: 8px;
-  background: var(--prio-p0-bg);
-  border: 1px solid var(--prio-p0-border);
-  border-radius: var(--r-1);
-  color: var(--prio-p0);
-  font-size: 11.5px;
-  line-height: 1.45;
-}
-.blocked-banner .lucide { width: 13px; height: 13px; flex-shrink: 0; margin-top: 1px; }
-.blocked-banner__body { flex: 1; color: var(--fg-1); }
-.blocked-banner__head {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--prio-p0);
-  margin-bottom: 2px;
 }
 
 /* ===========================================================

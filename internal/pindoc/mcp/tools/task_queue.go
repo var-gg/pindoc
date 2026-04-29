@@ -15,9 +15,10 @@ const (
 	taskQueueDefaultLimit = 50
 	taskQueueMaxLimit     = 500
 
-	taskQueueSemantics = "reader_tasks_queue_v1"
-	taskStatusMissing  = "missing_status"
-	taskStatusOther    = "other"
+	taskQueueSemantics    = "reader_tasks_queue_v1"
+	taskQueueDefaultFocus = "assignee_open_count"
+	taskStatusMissing     = "missing_status"
+	taskStatusOther       = "other"
 
 	taskWarningStatusMissing              = "TASK_STATUS_MISSING"
 	taskWarningAcceptanceReconcilePending = "TASK_ACCEPTANCE_DONE_RECONCILE_PENDING"
@@ -57,12 +58,22 @@ type taskQueueItem struct {
 	// Missing task_meta.status is surfaced explicitly as "missing_status"
 	// so agents do not mistake it for completed work.
 	Status        string `json:"status"`
+	StatusBucket  string `json:"status_bucket"`
 	RawStatus     string `json:"raw_status,omitempty"`
 	MissingStatus bool   `json:"missing_status,omitempty"`
 
-	Priority   string    `json:"priority,omitempty"`
-	Assignee   string    `json:"assignee,omitempty"`
-	DueAt      string    `json:"due_at,omitempty"`
+	Priority string `json:"priority,omitempty"`
+	Assignee string `json:"assignee,omitempty"`
+	DueAt    string `json:"due_at,omitempty"`
+
+	AcceptanceCheckboxesTotal int    `json:"acceptance_checkboxes_total"`
+	ResolvedCheckboxes        int    `json:"resolved_checkboxes"`
+	UnresolvedCheckboxes      int    `json:"unresolved_checkboxes"`
+	PartialCheckboxes         int    `json:"partial_checkboxes"`
+	DeferredCheckboxes        int    `json:"deferred_checkboxes"`
+	ReadyToClose              bool   `json:"ready_to_close"`
+	ReadyToCloseStatus        string `json:"ready_to_close_status"`
+
 	ParentSlug string    `json:"parent_slug,omitempty"`
 	UpdatedAt  time.Time `json:"updated_at"`
 	Warnings   []string  `json:"warnings,omitempty"`
@@ -75,6 +86,7 @@ type taskQueueItem struct {
 type taskQueueOutput struct {
 	SourceSemantics string `json:"source_semantics"`
 	StatusFilter    string `json:"status_filter"`
+	DefaultFocus    string `json:"default_focus"`
 
 	// AssigneeFilteredCount is computed after area / priority /
 	// assignee filters and before status filtering. AssigneeOpenCount is
@@ -119,9 +131,13 @@ Default status="pending" means task_meta.status is missing OR "open".
 Counts are grouped by task_meta.status, area, and priority. This is the
 canonical MCP pre-flight before saying "the Task queue is done"; it is
 not the same as pindoc.scope.in_flight, which lists unresolved acceptance
-checkboxes. When the caller is an agent querying its own assignee queue,
-the response may include attention for Tasks idle longer than
-PINDOC_STUCK_THRESHOLD_HOURS (default 24). Count fields are explicit:
+checkboxes. Each item includes ready_to_close fields for the acceptance
+checklist, but queue counts remain lifecycle counts. For agent dogfood,
+default_focus="assignee_open_count" is the current open-work view;
+historical totals are reference context. When the caller is an agent
+querying its own assignee queue, the response may include attention for
+Tasks idle longer than PINDOC_STUCK_THRESHOLD_HOURS (default 24). Count
+fields are explicit:
 assignee_filtered_count is after optional area/priority/assignee filters,
 assignee_open_count is the filtered open+missing_status queue (same as
 legacy pending_count), and project_total_count is the active Task total
@@ -229,12 +245,14 @@ response.
 				}
 
 				item.Status = bucket
+				item.StatusBucket = bucket
 				if bucket == taskStatusOther {
 					item.RawStatus = strings.TrimSpace(rawStatus)
 				}
 				if bucket == taskStatusMissing {
 					item.MissingStatus = true
 				}
+				applyTaskQueueReadySignal(&item, bucket, body)
 				item.Warnings = itemWarnings
 				item.AgentRef = "pindoc://" + item.Slug
 				item.HumanURL = HumanURL(scope.ProjectSlug, scope.ProjectLocale, item.Slug)
@@ -254,6 +272,7 @@ response.
 			out := taskQueueOutput{
 				SourceSemantics:       taskQueueSemantics,
 				StatusFilter:          statusFilter,
+				DefaultFocus:          taskQueueDefaultFocus,
 				AssigneeFilteredCount: total,
 				AssigneeOpenCount:     assigneeOpenCount,
 				ProjectTotalCount:     projectTotalCount,
@@ -351,18 +370,78 @@ func taskQueueWarnings(statusBucket, body string) []string {
 	return warnings
 }
 
+type taskQueueAcceptanceCounts struct {
+	total      int
+	resolved   int
+	unresolved int
+	partial    int
+	deferred   int
+}
+
+func countTaskQueueAcceptance(body string) taskQueueAcceptanceCounts {
+	var out taskQueueAcceptanceCounts
+	for _, cb := range iterateCheckboxes(body) {
+		out.total++
+		switch cb.marker {
+		case ' ', 0:
+			out.unresolved++
+		case '~':
+			out.partial++
+			out.resolved++
+		case '-':
+			out.deferred++
+			out.resolved++
+		case 'x', 'X':
+			out.resolved++
+		default:
+			out.unresolved++
+		}
+	}
+	return out
+}
+
+func applyTaskQueueReadySignal(item *taskQueueItem, statusBucket, body string) {
+	if item == nil {
+		return
+	}
+	counts := countTaskQueueAcceptance(body)
+	item.AcceptanceCheckboxesTotal = counts.total
+	item.ResolvedCheckboxes = counts.resolved
+	item.UnresolvedCheckboxes = counts.unresolved
+	item.PartialCheckboxes = counts.partial
+	item.DeferredCheckboxes = counts.deferred
+
+	switch {
+	case statusBucket == "claimed_done" || statusBucket == "cancelled":
+		item.ReadyToCloseStatus = "terminal_status"
+	case statusBucket == "blocked":
+		item.ReadyToCloseStatus = "blocked"
+	case statusBucket != "open" && statusBucket != taskStatusMissing:
+		item.ReadyToCloseStatus = "not_open"
+	case counts.total == 0:
+		item.ReadyToCloseStatus = "no_acceptance_checkboxes"
+	case counts.unresolved == 0:
+		item.ReadyToClose = true
+		item.ReadyToCloseStatus = "ready"
+	default:
+		item.ReadyToCloseStatus = "unresolved_acceptance"
+	}
+}
+
 func taskQueueNotice() string {
-	return "Reader parity: pending means task_meta.status is missing or open. Acceptance-complete open Tasks are transient reconcile candidates; pindoc.ping auto-transitions them to claimed_done. Use pindoc.scope.in_flight for unresolved [ ]/[~] checklist items."
+	return "Reader parity: pending means task_meta.status is missing or open. Counts are lifecycle counts; item-level ready_to_close is the acceptance checklist signal. Acceptance-complete open Tasks are transient reconcile candidates; pindoc.ping auto-transitions them to claimed_done. Use pindoc.scope.in_flight for unresolved [ ]/[~] checklist items."
 }
 
 func taskQueueCountLegend() map[string]string {
 	return map[string]string{
+		"default_focus":           "The field agents should read first for their current open-work view: assignee_open_count.",
 		"assignee_filtered_count": "Task count after area, priority, and assignee filters, before status filtering.",
 		"assignee_open_count":     "Open queue count after area, priority, and assignee filters: task_meta.status missing or open. Same value as legacy pending_count.",
 		"project_total_count":     "All active Task artifacts in the project, ignoring area, priority, assignee, and status filters.",
 		"total_count":             "Legacy alias for assignee_filtered_count.",
 		"pending_count":           "Legacy alias for assignee_open_count.",
 		"items":                   "Returned rows after status filtering and limit.",
+		"ready_to_close":          "Per-item acceptance checklist signal. true only for open/missing_status Tasks with at least one acceptance checkbox and zero unresolved [ ] items.",
 	}
 }
 

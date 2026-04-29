@@ -190,6 +190,7 @@
   --relation-blocks:         var(--prio-p0);
   --relation-relates-to:     var(--fg-3);
   --relation-translation-of: var(--type-glossary);
+  --relation-evidence:       var(--type-decision);
 
   --pin-code:     var(--type-apiendpoint);
   --pin-doc:      var(--type-glossary);
@@ -447,6 +448,7 @@
   --relation-blocks:         var(--prio-p0);
   --relation-relates-to:     var(--fg-3);
   --relation-translation-of: var(--type-glossary);
+  --relation-evidence:       var(--type-decision);
 
   --pin-code:     var(--type-apiendpoint);
   --pin-doc:      var(--type-glossary);
