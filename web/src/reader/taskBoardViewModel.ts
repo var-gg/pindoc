@@ -86,7 +86,12 @@ export function taskBoardSummary(groups: Map<string, ArtifactRef[]>): TaskBoardS
 function sortTaskColumnItems(columnId: string, items: ArtifactRef[]): ArtifactRef[] {
   const copy = items.slice();
   copy.sort((a, b) => {
-    if (columnId === "claimed_done" || columnId === "open" || columnId === "blocked") {
+    if (columnId === "claimed_done") {
+      const updated = updatedAtMs(b) - updatedAtMs(a);
+      if (updated !== 0) return updated;
+      return priorityRank(a) - priorityRank(b);
+    }
+    if (columnId === "open" || columnId === "blocked" || columnId === "cancelled") {
       const prio = priorityRank(a) - priorityRank(b);
       if (prio !== 0) return prio;
     }

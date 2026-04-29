@@ -37,7 +37,7 @@ function task(slug: string, status: string | undefined, priority: string, update
 }
 
 function testReviewQueueSummaryAndLimit(): void {
-  const items = Array.from({ length: 55 }, (_, i) => task(`review-${i}`, "claimed_done", i === 54 ? "p0" : "p3", i));
+  const items = Array.from({ length: 55 }, (_, i) => task(`review-${i}`, "claimed_done", i === 0 ? "p0" : "p3", i));
   const groups = groupTasksByStatus([
     ...items,
     task("open", "open", "p2", 60),
@@ -51,8 +51,9 @@ function testReviewQueueSummaryAndLimit(): void {
 
   const visible = visibleTaskGroups(groups, {});
   const reviewItems = visible.get("claimed_done") ?? [];
-  assertEqual(reviewItems.length, TASK_REVIEW_INITIAL_LIMIT, "large review queue shows a priority slice");
-  assertEqual(reviewItems[0].slug, "review-54", "p0 claimed_done item sorts first");
+  assertEqual(reviewItems.length, TASK_REVIEW_INITIAL_LIMIT, "large review queue shows a recent completion slice");
+  assertEqual(reviewItems[0].slug, "review-54", "newest claimed_done item sorts first");
+  assert(!reviewItems.some((item) => item.slug === "review-0"), "old p0 claimed_done item does not displace recent completions");
 }
 
 function testCancelledStaysInPrimaryColumns(): void {
@@ -61,5 +62,31 @@ function testCancelledStaysInPrimaryColumns(): void {
   assertEqual(groups.get("cancelled")?.length, 1, "cancelled task stays in the primary status map");
 }
 
+function testClaimedDoneTieBreaksByPriority(): void {
+  const groups = groupTasksByStatus([
+    task("done-p3", "claimed_done", "p3", 10),
+    task("done-p1", "claimed_done", "p1", 10),
+  ]);
+  const done = groups.get("claimed_done") ?? [];
+  assertEqual(done[0].slug, "done-p1", "claimed_done ties fall back to priority");
+}
+
+function testOpenBlockedAndCancelledKeepPriorityFirst(): void {
+  const groups = groupTasksByStatus([
+    task("open-new-p3", "open", "p3", 30),
+    task("open-old-p1", "open", "p1", 1),
+    task("blocked-new-p3", "blocked", "p3", 31),
+    task("blocked-old-p1", "blocked", "p1", 2),
+    task("cancelled-new-p3", "cancelled", "p3", 32),
+    task("cancelled-old-p1", "cancelled", "p1", 3),
+  ]);
+
+  assertEqual(groups.get("open")?.[0]?.slug, "open-old-p1", "open column keeps priority before recency");
+  assertEqual(groups.get("blocked")?.[0]?.slug, "blocked-old-p1", "blocked column keeps priority before recency");
+  assertEqual(groups.get("cancelled")?.[0]?.slug, "cancelled-old-p1", "cancelled column keeps priority before recency");
+}
+
 testReviewQueueSummaryAndLimit();
 testCancelledStaysInPrimaryColumns();
+testClaimedDoneTieBreaksByPriority();
+testOpenBlockedAndCancelledKeepPriorityFirst();
