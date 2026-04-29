@@ -9,8 +9,8 @@ import (
 func TestApplyCreateCommitMsgFallback(t *testing.T) {
 	in := artifactProposeInput{Title: "Policy draft"}
 	warnings := applyCreateCommitMsgFallback(&in)
-	if len(warnings) != 1 || warnings[0] != "MISSING_COMMIT_MSG_ON_CREATE" {
-		t.Fatalf("warnings = %v", warnings)
+	if len(warnings) != 0 {
+		t.Fatalf("create fallback should not surface a warning, got %v", warnings)
 	}
 	if !strings.Contains(in.CommitMsg, "fallback_missing_commit_msg") {
 		t.Fatalf("fallback commit_msg should be intentionally visible, got %q", in.CommitMsg)
@@ -44,6 +44,36 @@ func TestUpdatePathStillRequiresCommitMsg(t *testing.T) {
 	if out.Status != "not_ready" || out.ErrorCode != "MISSING_COMMIT_MSG" {
 		t.Fatalf("expected MISSING_COMMIT_MSG not_ready, got status=%q code=%q", out.Status, out.ErrorCode)
 	}
+}
+
+func TestConsentRequiredForUserChatWarning(t *testing.T) {
+	t.Run("normal user_chat create is quiet", func(t *testing.T) {
+		meta := ResolvedArtifactMeta{SourceType: "user_chat"}
+		if consentRequiredForUserChatWarning(true, meta, "plain technical task summary") {
+			t.Fatalf("plain user_chat should not require consent warning")
+		}
+	})
+
+	t.Run("PII-like user_chat still warns", func(t *testing.T) {
+		meta := ResolvedArtifactMeta{SourceType: "user_chat"}
+		if !consentRequiredForUserChatWarning(true, meta, "contact alice@example.com") {
+			t.Fatalf("PII-like user_chat should require consent warning")
+		}
+	})
+
+	t.Run("explicit consent suppresses warning", func(t *testing.T) {
+		meta := ResolvedArtifactMeta{SourceType: "user_chat", ConsentState: "granted"}
+		if consentRequiredForUserChatWarning(true, meta, "contact alice@example.com") {
+			t.Fatalf("explicit consent should suppress warning")
+		}
+	})
+
+	t.Run("non conversation-derived source is quiet", func(t *testing.T) {
+		meta := ResolvedArtifactMeta{SourceType: "code"}
+		if consentRequiredForUserChatWarning(false, meta, "contact alice@example.com") {
+			t.Fatalf("non conversation-derived source should not require consent warning")
+		}
+	})
 }
 
 func TestAcceptanceUncheckedNudgeWarningsPositiveKeywords(t *testing.T) {

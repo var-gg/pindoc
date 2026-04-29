@@ -528,8 +528,9 @@ four-choice referenced confirmation:
     [c] revise first    [d] discard (do not save)
 
 The server raises CONSENT_REQUIRED_FOR_USER_CHAT on accepted writes that
-look conversation-derived but omit consent_state — it is a warning, not a
-block. Treat it as a signal to classify explicitly on the next propose.
+look conversation-derived, contain PII-like content, and omit
+consent_state — it is a warning, not a block. Treat it as a signal to
+classify explicitly on the next propose.
 
 ## Session bootstrap (workspace.detect)
 

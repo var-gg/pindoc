@@ -13,6 +13,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/changegroup"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
+	"github.com/var-gg/pindoc/internal/pindoc/receipts"
 )
 
 type contextForTaskInput struct {
@@ -132,6 +133,13 @@ type contextForTaskOutput struct {
 	// with context.for_task satisfy the search-before-propose gate without
 	// also calling artifact.search.
 	SearchReceipt string `json:"search_receipt,omitempty"`
+	// TopMatchSimilarityHint is a tiny prompt-only signal for agents. It is
+	// emitted when the nearest landing is close enough that update_of or
+	// supersede_of should be considered before creating a new artifact.
+	TopMatchSimilarityHint string `json:"top_match_similarity_hint,omitempty"`
+	// DecisionHint carries the recommended branch paired with
+	// TopMatchSimilarityHint. It is advisory, never a validator input.
+	DecisionHint string `json:"decision_hint,omitempty"`
 	// CandidateUpdates surfaces landings that are close enough to the task
 	// description that the agent should probably update them instead of
 	// creating a new artifact. Empty when nothing is that close.
@@ -156,6 +164,13 @@ type contextForTaskOutput struct {
 // "update instead of create?" hint. Looser than semanticConflictThreshold
 // (0.18) because this is advisory, not a block.
 const candidateUpdateThreshold = 0.22
+
+// topMatchSimilarityHintThreshold is intentionally looser than
+// candidateUpdateThreshold. CandidateUpdates says "very likely update";
+// this hint says "pause and choose update/supersede/create deliberately".
+const topMatchSimilarityHintThreshold = 0.40
+
+const contextTaskReceiptPerAreaLimit = 20
 
 // staleAgeThreshold: 60 days without an update is our simple "may be
 // stale" proxy. Arbitrary but operational; tune with real dogfood data.
@@ -376,18 +391,15 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			if areaCounts, err := areaArtifactCounts(ctx, deps, scope.ProjectSlug); err == nil {
 				out.SuggestedAreas = suggestAreasForTaskDescription(in.TaskDescription, out.Landings, areaCounts)
 			}
+			applyTopMatchSimilarityHint(&out)
 			out.ApplicableRules = loadApplicableRulesForContext(ctx, deps, scope.ProjectSlug, scope.ProjectLocale, applicableRuleTargetArea(in, out), targetType, ruleLimit)
 			out.PinCandidates = buildPinCandidatesAttention(ctx, deps, p, scope, out.Landings)
 			if deps.Receipts != nil {
 				// Phase E — bind the receipt to the landings' current head
 				// revisions. propose-time verifier flags drift instead of
 				// trusting a 30-min clock.
-				ids := make([]string, 0, len(out.Landings))
-				for _, l := range out.Landings {
-					ids = append(ids, l.ArtifactID)
-				}
 				out.SearchReceipt = deps.Receipts.Issue(scope.ProjectSlug, in.TaskDescription,
-					headSnapshotsForArtifacts(ctx, deps, ids),
+					contextForTaskReceiptSnapshots(ctx, deps, scope.ProjectID, targetType, in, out),
 				)
 			}
 			if err := recordAreaSuggestionEvent(ctx, deps, scope.ProjectSlug, out.SearchReceipt, in.TaskDescription, out.SuggestedAreas); err != nil && deps.Logger != nil {
@@ -396,6 +408,109 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			return nil, out, rows.Err()
 		},
 	)
+}
+
+func applyTopMatchSimilarityHint(out *contextForTaskOutput) {
+	if out == nil || len(out.Landings) == 0 {
+		return
+	}
+	if out.Landings[0].Distance <= topMatchSimilarityHintThreshold {
+		out.TopMatchSimilarityHint = "high"
+		out.DecisionHint = "update_recommended"
+	}
+}
+
+func contextForTaskReceiptSnapshots(ctx context.Context, deps Deps, projectID, targetType string, in contextForTaskInput, out contextForTaskOutput) []receipts.ArtifactRef {
+	ids := make([]string, 0, len(out.Landings))
+	for _, l := range out.Landings {
+		ids = append(ids, l.ArtifactID)
+	}
+	if strings.TrimSpace(targetType) == "Task" {
+		ids = append(ids, activeTaskArtifactIDsForContextReceipt(ctx, deps, projectID, contextForTaskReceiptAreaSlugs(in, out))...)
+	}
+	return headSnapshotsForArtifacts(ctx, deps, dedupeNonEmptyStrings(ids))
+}
+
+func contextForTaskReceiptAreaSlugs(in contextForTaskInput, out contextForTaskOutput) []string {
+	candidates := make([]string, 0, len(in.Areas)+len(out.SuggestedAreas)+len(out.Landings))
+	candidates = append(candidates, in.Areas...)
+	for _, s := range out.SuggestedAreas {
+		candidates = append(candidates, s.AreaSlug)
+	}
+	for _, l := range out.Landings {
+		candidates = append(candidates, l.AreaSlug)
+	}
+	return dedupeNonEmptyStrings(candidates)
+}
+
+func activeTaskArtifactIDsForContextReceipt(ctx context.Context, deps Deps, projectID string, areaSlugs []string) []string {
+	if deps.DB == nil || len(areaSlugs) == 0 {
+		return nil
+	}
+	rows, err := deps.DB.Query(ctx, `
+		WITH ranked AS (
+			SELECT
+				a.id::text AS artifact_id,
+				row_number() OVER (PARTITION BY ar.slug ORDER BY a.updated_at DESC) AS rn
+			FROM artifacts a
+			JOIN areas ar ON ar.id = a.area_id
+			WHERE a.project_id = $1::uuid
+			  AND ar.slug = ANY($2::text[])
+			  AND a.type = 'Task'
+			  AND a.status <> 'archived'
+			  AND a.status <> 'superseded'
+			  AND COALESCE(NULLIF(a.task_meta->>'status', ''), 'open') IN ('open', 'claimed_done')
+		)
+		SELECT artifact_id
+		FROM ranked
+		WHERE rn <= $3
+		ORDER BY artifact_id
+	`, projectID, areaSlugs, contextTaskReceiptPerAreaLimit)
+	if err != nil {
+		if deps.Logger != nil {
+			deps.Logger.Warn("context.for_task active task snapshot query failed", "err", err)
+		}
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			if deps.Logger != nil {
+				deps.Logger.Warn("context.for_task active task snapshot scan failed", "err", err)
+			}
+			continue
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil && deps.Logger != nil {
+		deps.Logger.Warn("context.for_task active task snapshot rows err", "err", err)
+	}
+	return out
+}
+
+func dedupeNonEmptyStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		v := strings.TrimSpace(value)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func firstAreaFilter(areas []string) string {

@@ -240,7 +240,7 @@ type TaskMetaInput struct {
 	// Status is the Task lifecycle enum. `claimed_done` is the settled
 	// completion state after acceptance criteria land.
 	Status     string `json:"status,omitempty" jsonschema:"open | claimed_done | blocked | cancelled"`
-	Priority   string `json:"priority,omitempty" jsonschema:"p0 | p1 | p2 | p3"`
+	Priority   string `json:"priority,omitempty" jsonschema:"p0 release blocker; p1 must close before release; p2 next round; p3 backlog. Project-specific priority policy wins when present."`
 	Assignee   string `json:"assignee,omitempty"`
 	DueAt      string `json:"due_at,omitempty" jsonschema:"RFC3339 timestamp"`
 	ParentSlug string `json:"parent_slug,omitempty" jsonschema:"slug of parent Task artifact"`
@@ -539,7 +539,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.propose",
-			Description: "Propose a new artifact (the only write path humans use — always via an agent). Create path (both update_of and supersede_of omitted) requires basis.search_receipt from pindoc.artifact.search or pindoc.context.for_task in the same session; update/supersede paths do not. For Task creates, omitted task_meta.assignee means unassigned; explicit assignee claims ownership, and explicit task_meta.assignee=\"\" clears on update. Use pins[] for concrete code/file/URL evidence; use relates_to relation=evidence when the supporting source is another Pindoc artifact. Returns Status=accepted + artifact_id on success, or Status=not_ready + checklist + suggested_actions if Pre-flight fails. Always read the checklist; never surface the raw error to the user without trying the suggested actions first.",
+			Description: "Propose a new artifact (the only write path humans use — always via an agent). Create path (both update_of and supersede_of omitted) requires basis.search_receipt from pindoc.artifact.search or pindoc.context.for_task in the same session; update/supersede paths do not. For Task creates, omitted task_meta.assignee means unassigned; explicit assignee claims ownership, and explicit task_meta.assignee=\"\" clears on update. Task priority meanings: p0 release blocker, p1 must close before release, p2 next round, p3 backlog; project-specific priority policy wins when present. Use pins[] for concrete code/file/URL evidence; use relates_to relation=evidence when the supporting source is another Pindoc artifact. Returns Status=accepted + artifact_id on success, or Status=not_ready + checklist + suggested_actions if Pre-flight fails. Always read the checklist; never surface the raw error to the user without trying the suggested actions first.",
 		},
 		func(ctx context.Context, p *auth.Principal, in artifactProposeInput) (*sdk.CallToolResult, artifactProposeOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -1065,7 +1065,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			if detectUnclassifiedUserChat(resolvedMeta, in.Pins, in.BodyMarkdown) {
 				warnings = append(warnings, "SOURCE_TYPE_UNCLASSIFIED")
 			}
-			if isConvDerived && resolvedMeta.ConsentState == "" {
+			if consentRequiredForUserChatWarning(isConvDerived, resolvedMeta, in.BodyMarkdown) {
 				warnings = append(warnings, "CONSENT_REQUIRED_FOR_USER_CHAT")
 			}
 			// Invalidate validator hints when a new `_template_*` row lands
@@ -2743,7 +2743,7 @@ func applyCreateCommitMsgFallback(in *artifactProposeInput) []string {
 		return nil
 	}
 	in.CommitMsg = fallbackCreateCommitMsg(in.Title)
-	return []string{"MISSING_COMMIT_MSG_ON_CREATE"}
+	return nil
 }
 
 func fallbackCreateCommitMsg(title string) string {
@@ -3001,6 +3001,10 @@ func applyConversationDerivedDefaults(in *artifactProposeInput, meta *ResolvedAr
 		meta.NextContextPolicy = "opt_in"
 	}
 	return completeness
+}
+
+func consentRequiredForUserChatWarning(isConvDerived bool, meta ResolvedArtifactMeta, body string) bool {
+	return isConvDerived && meta.ConsentState == "" && hasPIISignal(body)
 }
 
 // applyTaskCreateDefaults normalizes Task create inputs so new Task rows

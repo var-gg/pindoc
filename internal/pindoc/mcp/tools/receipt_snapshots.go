@@ -24,7 +24,9 @@ func headSnapshotsForArtifacts(ctx context.Context, deps Deps, artifactIDs []str
 		GROUP BY artifact_id
 	`, artifactIDs)
 	if err != nil {
-		deps.Logger.Warn("snapshot head lookup failed — receipt issued without snapshots", "err", err)
+		if deps.Logger != nil {
+			deps.Logger.Warn("snapshot head lookup failed — receipt issued without snapshots", "err", err)
+		}
 		return nil
 	}
 	defer rows.Close()
@@ -33,13 +35,17 @@ func headSnapshotsForArtifacts(ctx context.Context, deps Deps, artifactIDs []str
 		var id string
 		var rev int
 		if err := rows.Scan(&id, &rev); err != nil {
-			deps.Logger.Warn("snapshot scan failed", "err", err)
+			if deps.Logger != nil {
+				deps.Logger.Warn("snapshot scan failed", "err", err)
+			}
 			continue
 		}
 		found[id] = rev
 	}
 	if err := rows.Err(); err != nil {
-		deps.Logger.Warn("snapshot rows err", "err", err)
+		if deps.Logger != nil {
+			deps.Logger.Warn("snapshot rows err", "err", err)
+		}
 	}
 	out := make([]receipts.ArtifactRef, 0, len(artifactIDs))
 	for _, id := range artifactIDs {
