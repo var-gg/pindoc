@@ -16,7 +16,6 @@ export type TaskBoardSummary = {
   reviewQueue: number;
   open: number;
   blocked: number;
-  recentDone: number;
 };
 
 export function groupTasksByStatus(list: ArtifactRef[]): Map<string, ArtifactRef[]> {
@@ -81,7 +80,6 @@ export function taskBoardSummary(groups: Map<string, ArtifactRef[]>): TaskBoardS
     reviewQueue,
     open,
     blocked,
-    recentDone: reviewQueue,
   };
 }
 

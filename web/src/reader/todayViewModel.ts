@@ -46,8 +46,8 @@ export function buildChangeGroupCardView(
     kindLabel: changeKindLabel(group.group_kind, t),
     importanceLabel: importanceLabel(group.importance.level, t),
     verificationLabel: verificationLabel(group.verification_state, t),
-    title: summaryParts[0] ?? t("today.change_group_title_fallback"),
-    bullets: summaryParts.slice(1, 4),
+    title: commitSummaryTitle(group, summaryParts, t),
+    bullets: commitSummaryBullets(group, summaryParts),
   };
 }
 
@@ -70,16 +70,38 @@ function splitCommitSummary(summary: string): string[] {
     .map((part) => trimText(part, 150));
 }
 
-function commitSummaryTitle(summary: string, t: TFn): string {
-  return splitCommitSummary(summary)[0] ?? t("today.change_group_title_fallback");
+function commitSummaryTitle(
+  group: ChangeGroup,
+  summaryParts: string[],
+  t: TFn,
+): string {
+  if (!startsWithImplementationCommitNoise(group.commit_summary)) {
+    return summaryParts[0] ?? fallbackChangeGroupTitle(group, t);
+  }
+  return fallbackChangeGroupTitle(group, t);
 }
 
 function cleanCommitSummary(summary: string): string {
   return summary
     .replace(/\[fallback_missing_commit_msg\]/gi, "")
     .replace(/\bcreate artifact:\s*/gi, "")
+    .replace(/^\s*implemented\s+in\s+commit\s+[0-9a-f]{7,40}\s*[:-]?\s*/i, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function startsWithImplementationCommitNoise(summary: string): boolean {
+  return /^\s*implemented\s+in\s+commit\s+[0-9a-f]{7,40}\b/i.test(summary);
+}
+
+function fallbackChangeGroupTitle(group: ChangeGroup, t: TFn): string {
+  const area = group.areas[0] ?? t("today.change_group_area_fallback");
+  return t("today.change_group_title_area", area, group.artifact_count);
+}
+
+function commitSummaryBullets(group: ChangeGroup, summaryParts: string[]): string[] {
+  const start = startsWithImplementationCommitNoise(group.commit_summary) ? 0 : 1;
+  return summaryParts.slice(start, start + 3);
 }
 
 function trimText(text: string, max: number): string {
@@ -147,7 +169,7 @@ function buildBullets(data: TodayResp, t: TFn): string[] {
   );
 
   return [
-    t("today.brief_bullet_top", groups[0] ? commitSummaryTitle(groups[0].commit_summary, t) : ""),
+    t("today.brief_bullet_top", groups[0] ? commitSummaryTitle(groups[0], splitCommitSummary(groups[0].commit_summary), t) : ""),
     t("today.brief_bullet_counts", groups.length, totals.revisions, totals.artifacts),
     totals.verificationRisk
       ? t("today.brief_bullet_verification_risk")

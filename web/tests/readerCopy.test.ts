@@ -41,6 +41,12 @@ function testKoreanReaderChromeCopyHidesRawEnglishLabels(): void {
     ko["reader.inspector_empty"],
     ko["tasks.inspector_empty"],
     ko["reader.byline_unknown"],
+    ko["surface.name.surface"],
+    ko["surface.not_found"],
+    ko["tasks.col_claimed_done"],
+    ko["tasks.summary_review_hint"],
+    ko["trust.task.claimed_done.label"],
+    ko["trust.task.claimed_done.tip"],
     ko["today.type_distribution"],
     ko["today.kind_human_trigger"],
     ko["today.kind_auto_sync"],
@@ -52,6 +58,9 @@ function testKoreanReaderChromeCopyHidesRawEnglishLabels(): void {
     assert(!snapshot.includes(blocked), `KO chrome snapshot should hide raw English token: ${blocked}`);
   }
   assert(!snapshot.includes("(미확인)"), "unknown byline should use neutral copy");
+  assert(!snapshot.includes("완료 주장"), "Task completion copy should hide internal claimed_done wording");
+  assert(!snapshot.includes("surface.name.surface"), "surface fallback should never expose raw i18n keys");
+  assertEqual(ko["reader.byline_unknown"], "작성자 정보 없음", "unknown byline should be explicit and neutral");
 }
 
 testKoreanReaderMetaCopySnapshot();

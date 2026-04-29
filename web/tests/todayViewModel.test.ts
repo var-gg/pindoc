@@ -83,6 +83,26 @@ function testCardViewHidesRawFallbackAndEnums(): void {
   assertEqual(view.verificationLabel, "ko:today.verification_needs_review", "verification label");
 }
 
+function testImplementedCommitNoiseDoesNotLeadTodayCard(): void {
+  const data = today([
+    group({
+      commit_summary: "implemented in commit d4ad2e2; logo href /p/pindoc/today; trusted_local profile menu",
+      artifact_count: 2,
+      areas: ["ui"],
+    }),
+  ]);
+  const brief = buildTodayBrief(data, t("ko"));
+  const firstCard = buildChangeGroupCardView(data.groups[0], t("ko"));
+  const snapshot = [
+    brief.bullets[0],
+    firstCard.title,
+    ...firstCard.bullets,
+  ].join("\n");
+
+  assertEqual(firstCard.title, "ko:today.change_group_title_area:ui/2", "title falls back to scoped copy");
+  assert(!/implemented in commit [0-9a-f]{7}/i.test(snapshot), "Today copy hides implementation commit noise");
+}
+
 function testBriefingSnapshotsStayUserFacing(): void {
   const data = today([
     group({
@@ -119,4 +139,5 @@ function testBriefingSnapshotsStayUserFacing(): void {
 testHeadlineUsesSameDataWithLocaleCopyOnly();
 testFallbackAvoidsTodayReviewHeadline();
 testCardViewHidesRawFallbackAndEnums();
+testImplementedCommitNoiseDoesNotLeadTodayCard();
 testBriefingSnapshotsStayUserFacing();

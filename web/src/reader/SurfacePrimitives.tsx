@@ -18,10 +18,11 @@ type EmptyStateProps = {
   };
 };
 
+type TFn = (key: string, ...args: Array<string | number>) => string;
+
 export function SurfaceHeader({ name, count, secondary }: SurfaceHeaderProps) {
   const { t } = useI18n();
-  const surfaceKey = name.trim().toLowerCase();
-  const surfaceName = t(`surface.name.${surfaceKey}`);
+  const surfaceName = surfaceDisplayName(name, t);
   return (
     <header className="surface-header">
       <div className="surface-header__chip">{t("surface.header_label")}</div>
@@ -41,6 +42,35 @@ export function SurfaceHeader({ name, count, secondary }: SurfaceHeaderProps) {
       </div>
     </header>
   );
+}
+
+export function surfaceDisplayName(name: string, t: TFn): string {
+  const surfaceKey = normalizeSurfaceName(name);
+  const key = `surface.name.${surfaceKey}`;
+  const translated = t(key);
+  if (translated !== key) return translated;
+  return humanizeSurfaceName(surfaceKey);
+}
+
+function normalizeSurfaceName(name: string): string {
+  const raw = safeDecodeURIComponent(name).trim().toLowerCase();
+  return raw || "surface";
+}
+
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function humanizeSurfaceName(value: string): string {
+  const words = value
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return words || "surface";
 }
 
 export function EmptyState({ message, action }: EmptyStateProps) {

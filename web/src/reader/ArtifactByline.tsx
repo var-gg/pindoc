@@ -10,8 +10,8 @@ import { useI18n } from "../i18n";
 //
 // Fallback: artifacts predating migration 0014 (and installs where the
 // operator skipped PINDOC_USER_NAME) have author_user=null. In that
-// case we show "(unknown)" in the user slot so the agent identity
-// stays legible and the gap is obvious.
+// case we show a neutral user slot and keep the avatar anchored to the
+// agent identity so fallback markers never show up in list rows.
 
 type Props = {
   artifact: Pick<ArtifactRef, "author_id" | "author_user"> & { author_version?: string };
@@ -24,7 +24,7 @@ type Props = {
 export function ArtifactByline({ artifact, variant = "inline" }: Props) {
   const { t } = useI18n();
   const display = artifact.author_user?.display_name ?? t("reader.byline_unknown");
-  const av = agentAvatar(artifact.author_user?.github_handle ?? display);
+  const av = agentAvatar(artifact.author_user?.github_handle ?? artifact.author_id);
   const agent = artifact.author_version
     ? `${artifact.author_id} (${artifact.author_version})`
     : artifact.author_id;

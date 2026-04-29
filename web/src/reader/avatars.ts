@@ -17,6 +17,6 @@ export function agentAvatar(authorId: string): AgentAvatar {
   if (known) return known;
   // Unknown agent: two-letter mono initials from first two alnum chars.
   const clean = authorId.replace(/[^a-z0-9]/gi, "");
-  const initials = (clean.slice(0, 2) || "??").toLowerCase();
+  const initials = (clean.slice(0, 2) || "id").toLowerCase();
   return { initials, className: "av" };
 }

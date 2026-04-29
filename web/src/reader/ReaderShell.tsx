@@ -4,6 +4,7 @@ import { Bot, PanelRightOpen, UserRound, X } from "lucide-react";
 import type { Aggregate } from "./useReaderData";
 import { api, type Artifact, type ArtifactRef, type Area } from "../api/client";
 import { useI18n } from "../i18n";
+import { projectSurfacePath } from "../readerRoutes";
 import { InviteModal } from "../project/InviteModal";
 import { CmdK } from "./CmdK";
 import { GraphSurface } from "./Graph";
@@ -19,7 +20,7 @@ import { ReaderSurface, type DetailScope } from "./ReaderSurface";
 import { Sidebar } from "./Sidebar";
 import { Sidecar } from "./Sidecar";
 import { ShortcutsOverlay } from "./ShortcutsOverlay";
-import { EmptyState, SurfaceHeader } from "./SurfacePrimitives";
+import { EmptyState, SurfaceHeader, surfaceDisplayName } from "./SurfacePrimitives";
 import { Tooltip } from "./Tooltip";
 import { Today } from "./Today";
 import { TopNav } from "./TopNav";
@@ -67,9 +68,10 @@ function surfaceAllows(view: ReaderView, a: ArtifactRef): boolean {
 
 type Props = {
   view: ReaderView;
+  unavailableSurface?: string;
 };
 
-export function ReaderShell({ view }: Props) {
+export function ReaderShell({ view, unavailableSurface }: Props) {
   const { project = "", slug } = useParams<{ project: string; slug?: string }>();
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -529,7 +531,9 @@ export function ReaderShell({ view }: Props) {
   const { project: projectData, areas, detail, agents, users, providers, bindAddr } = state.data;
   const reload = state.reload;
   const sidecarDetail =
-    view === "reader"
+    unavailableSurface
+      ? null
+      : view === "reader"
       ? detail ?? wikiInspectorDetail
       : view === "today"
         ? todayInspectorDetail
@@ -539,7 +543,9 @@ export function ReaderShell({ view }: Props) {
         ? graphFocusDetail
         : null;
   const sidecarEmptyMessage =
-    view === "reader" && !detail
+    unavailableSurface
+      ? t("surface.unavailable_sidecar")
+      : view === "reader" && !detail
       ? wikiInspectorLoading
         ? t("reader.inspector_loading")
         : t("reader.inspector_empty")
@@ -633,6 +639,7 @@ export function ReaderShell({ view }: Props) {
           onInboxCountChange={setInboxCount}
           graphFocusSlug={graphFocusSlug}
           onGraphFocusChange={handleGraphFocusChange}
+          unavailableSurface={unavailableSurface}
         />
         <Sidecar
           projectSlug={project}
@@ -776,6 +783,7 @@ function Body({
   onInboxCountChange,
   graphFocusSlug,
   onGraphFocusChange,
+  unavailableSurface,
 }: {
   view: ReaderView;
   projectSlug: string;
@@ -803,6 +811,7 @@ function Body({
   onInboxCountChange: (count: number) => void;
   graphFocusSlug: string | null;
   onGraphFocusChange: (slug: string) => void;
+  unavailableSurface?: string;
 }) {
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -840,6 +849,15 @@ function Body({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [keyboardDisabled, view, detailScope, navigate]);
+
+  if (unavailableSurface) {
+    return (
+      <UnavailableSurface
+        projectSlug={projectSlug}
+        surface={unavailableSurface}
+      />
+    );
+  }
 
   if (view === "graph") {
     return (
@@ -1213,6 +1231,31 @@ function TasksKanban({
   );
 }
 
+function UnavailableSurface({
+  projectSlug,
+  surface,
+}: {
+  projectSlug: string;
+  surface: string;
+}) {
+  const { t } = useI18n();
+  const label = surfaceDisplayName(surface, t);
+  return (
+    <main className="content">
+      <div className="reader-article">
+        <SurfaceHeader name={surface} count={0} />
+        <EmptyState
+          message={t("surface.not_found", label)}
+          action={{
+            label: t("surface.return_today"),
+            href: projectSurfacePath(projectSlug, "today"),
+          }}
+        />
+      </div>
+    </main>
+  );
+}
+
 function TaskBoardHeader({
   scopeLabel,
   totalCount,
@@ -1298,12 +1341,6 @@ function TaskBacklogSummary({ summary }: { summary: TaskBoardSummary }) {
         value={summary.blocked}
         hint={t("tasks.summary_blocked_hint")}
       />
-      <TaskSummaryTile
-        tone="done"
-        label={t("tasks.summary_recent_done")}
-        value={summary.recentDone}
-        hint={t("tasks.summary_recent_done_hint")}
-      />
     </section>
   );
 }
@@ -1314,7 +1351,7 @@ function TaskSummaryTile({
   value,
   hint,
 }: {
-  tone: "review" | "open" | "blocked" | "done";
+  tone: "review" | "open" | "blocked";
   label: string;
   value: number;
   hint: string;

@@ -13,7 +13,6 @@ import { PindocTooltipProvider } from "./reader/Tooltip";
 import { ReaderShell } from "./reader/ReaderShell";
 import { SignupCompletePage } from "./signup/SignupCompletePage";
 import { SignupPage } from "./signup/SignupPage";
-import { EmptyState, SurfaceHeader } from "./reader/SurfacePrimitives";
 import { isReaderDevSurfaceEnabled, normalizeReaderSurfaceSegment, projectSurfacePath } from "./readerRoutes";
 import { findSurface, previews, uiKits } from "./surfaces";
 
@@ -113,7 +112,7 @@ function GraphSurfaceGate() {
   if (isReaderDevSurfaceEnabled(location.search, import.meta.env.DEV)) {
     return <ReaderShell view="graph" />;
   }
-  return <ProjectSurfaceNotFound surfaceOverride="graph" />;
+  return <ReaderShell view="reader" unavailableSurface="graph" />;
 }
 
 function ProjectSurfaceRedirect({ segment }: { segment: string }) {
@@ -130,26 +129,8 @@ function ProjectSurfaceRedirect({ segment }: { segment: string }) {
 }
 
 function ProjectSurfaceNotFound({ surfaceOverride }: { surfaceOverride?: string }) {
-  const { project = "", surface = surfaceOverride ?? "" } = useParams<{
-    project: string;
-    surface?: string;
-  }>();
-  const { t } = useI18n();
-  const surfaceLabel = surfaceOverride ?? surface;
-  return (
-    <main className="content">
-      <article className="reader-article">
-        <SurfaceHeader name="surface" count={0} />
-        <EmptyState
-          message={t("surface.not_found", surfaceLabel)}
-          action={{
-            label: t("surface.return_today"),
-            href: projectSurfacePath(project, "today"),
-          }}
-        />
-      </article>
-    </main>
-  );
+  const { surface = surfaceOverride ?? "" } = useParams<{ surface?: string }>();
+  return <ReaderShell view="reader" unavailableSurface={surfaceOverride ?? surface} />;
 }
 
 function ShellLayout() {
