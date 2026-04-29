@@ -35,6 +35,12 @@ func TestToolsetVersionShape(t *testing.T) {
 	}
 }
 
+func TestToolsetSchemaVersionPresent(t *testing.T) {
+	if strings.TrimSpace(ToolsetSchemaVersion) == "" {
+		t.Fatalf("ToolsetSchemaVersion must be non-empty so same-name schema drift bumps toolset_version")
+	}
+}
+
 // TestToolsetVersionChangesWithCatalog — swap a tool in/out and confirm
 // the hash moves. This prevents "we added a tool but the hash didn't
 // change because someone broke the hashing" regressions.

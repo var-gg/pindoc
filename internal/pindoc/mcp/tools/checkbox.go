@@ -46,7 +46,6 @@ type ScopeDeferInput struct {
 	Reason        string `json:"reason" jsonschema:"short justification — why the item moved, not just where"`
 }
 
-
 // checkboxHit is a positional record for a 4-state checkbox found while
 // walking the body. lineIndex is the line within strings.Split(body,"\n")
 // containing the marker; markerByteOffset is the byte offset of '[' inside

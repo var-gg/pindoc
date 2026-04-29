@@ -27,19 +27,20 @@ type areaListInput struct {
 }
 
 type AreaRef struct {
-	ID               string   `json:"id"`
-	Slug             string   `json:"slug"`
-	Name             string   `json:"name"`
-	Description      string   `json:"description,omitempty"`
-	ParentSlug       string   `json:"parent_slug,omitempty"`
-	IsCrossCutting   bool     `json:"is_cross_cutting"`
-	ArtifactCount    int      `json:"artifact_count"`
-	ChildrenSlugs    []string `json:"children_slugs,omitempty"`
+	ID             string   `json:"id"`
+	Slug           string   `json:"slug"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description,omitempty"`
+	ParentSlug     string   `json:"parent_slug,omitempty"`
+	IsCrossCutting bool     `json:"is_cross_cutting"`
+	ArtifactCount  int      `json:"artifact_count"`
+	ChildrenSlugs  []string `json:"children_slugs,omitempty"`
 }
 
 type areaListOutput struct {
-	ProjectSlug string    `json:"project_slug"`
-	Areas       []AreaRef `json:"areas"`
+	ProjectSlug    string    `json:"project_slug"`
+	Areas          []AreaRef `json:"areas"`
+	ToolsetVersion string    `json:"toolset_version,omitempty"`
 }
 
 // RegisterAreaList wires pindoc.area.list. Returns every Area in the active

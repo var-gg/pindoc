@@ -23,11 +23,12 @@ type workspaceDetectInput struct {
 }
 
 type workspaceDetectOutput struct {
-	ProjectSlug string   `json:"project_slug,omitempty"`
-	Confidence  string   `json:"confidence" jsonschema:"one of high | medium | low | none"`
-	Via         string   `json:"via" jsonschema:"one of pindoc_md | git_remote | directory_match | fallback_only_one | fallback_required"`
-	Candidates  []string `json:"candidates,omitempty"`
-	Reason      string   `json:"reason,omitempty"`
+	ProjectSlug    string   `json:"project_slug,omitempty"`
+	Confidence     string   `json:"confidence" jsonschema:"one of high | medium | low | none"`
+	Via            string   `json:"via" jsonschema:"one of pindoc_md | git_remote | directory_match | fallback_only_one | fallback_required"`
+	Candidates     []string `json:"candidates,omitempty"`
+	Reason         string   `json:"reason,omitempty"`
+	ToolsetVersion string   `json:"toolset_version,omitempty"`
 }
 
 func RegisterWorkspaceDetect(server *sdk.Server, deps Deps) {

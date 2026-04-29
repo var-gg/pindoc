@@ -54,6 +54,7 @@ type projectCurrentOutput struct {
 	Rendering      RenderingCaps           `json:"rendering,omitzero"`
 	Capabilities   Capabilities            `json:"capabilities,omitzero"`
 	TemplateHints  map[string]TemplateHint `json:"template_hints,omitempty"`
+	ToolsetVersion string                  `json:"toolset_version,omitempty"`
 }
 
 // Capabilities tells the agent which optional features the server

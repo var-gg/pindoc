@@ -286,7 +286,11 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 		}
 	}
 
-	if err := tx.Commit(ctx); err != nil {
+	if in.DryRun {
+		if err := tx.Rollback(ctx); err != nil {
+			return nil, artifactProposeOutput{}, fmt.Errorf("rollback dry_run meta_patch: %w", err)
+		}
+	} else if err := tx.Commit(ctx); err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("commit: %w", err)
 	}
 
@@ -300,7 +304,7 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 		severities[i] = warningSeverity(w)
 	}
 
-	return nil, artifactProposeOutput{
+	out := artifactProposeOutput{
 		Status:            "accepted",
 		ArtifactID:        artifactID,
 		Slug:              currentSlug,
@@ -312,7 +316,11 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 		Warnings:          warnings,
 		WarningSeverities: severities,
 		ArtifactMeta:      metaOut,
-	}, nil
+	}
+	if in.DryRun {
+		out = dryRunProposeOutput(out, true)
+	}
+	return nil, out, nil
 }
 
 // metaFieldsChangedList returns the sorted list of top-level meta fields

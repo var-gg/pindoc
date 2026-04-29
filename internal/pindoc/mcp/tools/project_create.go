@@ -66,6 +66,7 @@ type projectCreateOutput struct {
 	ReconnectRequired bool           `json:"reconnect_required"`
 	Activation        string         `json:"activation,omitempty" jsonschema:"one of: in_this_session"`
 	NextSteps         []NextToolHint `json:"next_steps,omitempty"`
+	ToolsetVersion    string         `json:"toolset_version,omitempty"`
 }
 
 // RegisterProjectCreate wires pindoc.project.create. The handler is a

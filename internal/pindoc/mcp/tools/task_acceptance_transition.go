@@ -50,6 +50,7 @@ type taskAcceptanceTransitionOutput struct {
 	ResolvedCount   int    `json:"resolved_count,omitempty"`
 	TotalCount      int    `json:"total_count,omitempty"`
 	TransitionCount int    `json:"transition_count,omitempty"`
+	ToolsetVersion  string `json:"toolset_version,omitempty"`
 }
 
 type appliedAcceptanceTransition struct {

@@ -47,6 +47,7 @@ type areaCreateOutput struct {
 	Description    string    `json:"description,omitempty"`
 	IsCrossCutting bool      `json:"is_cross_cutting,omitempty"`
 	CreatedAt      time.Time `json:"created_at,omitzero"`
+	ToolsetVersion string    `json:"toolset_version,omitempty"`
 }
 
 type normalizedAreaCreateInput struct {

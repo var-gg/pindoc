@@ -22,10 +22,11 @@ type summarySinceInput struct {
 }
 
 type summarySinceOutput struct {
-	ArtifactID string        `json:"artifact_id"`
-	Slug       string        `json:"slug"`
-	Steps      []summaryStep `json:"steps"`
-	TotalStats diff.Stats    `json:"total_stats"`
+	ArtifactID     string        `json:"artifact_id"`
+	Slug           string        `json:"slug"`
+	Steps          []summaryStep `json:"steps"`
+	TotalStats     diff.Stats    `json:"total_stats"`
+	ToolsetVersion string        `json:"toolset_version,omitempty"`
 }
 
 // Split into its own file so the AddTool registration uses the real input

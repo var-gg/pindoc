@@ -59,6 +59,7 @@ type userCurrentOutput struct {
 	MessageLocale  string               `json:"message_locale,omitempty" jsonschema:"locale used for checklist/checklist_items.message after fallback"`
 	Hints          []string             `json:"hints,omitempty"`
 	User           *UserRow             `json:"user,omitempty"`
+	ToolsetVersion string               `json:"toolset_version,omitempty"`
 }
 
 // RegisterUserCurrent wires pindoc.user.current. Missing user identity is
@@ -146,6 +147,7 @@ type userUpdateOutput struct {
 	User           *UserRow             `json:"user,omitempty"`
 	ChangedFields  []string             `json:"changed_fields,omitempty"`
 	Previous       map[string]string    `json:"previous,omitempty"`
+	ToolsetVersion string               `json:"toolset_version,omitempty"`
 }
 
 // RegisterUserUpdate wires pindoc.user.update. Validates inputs, mutates

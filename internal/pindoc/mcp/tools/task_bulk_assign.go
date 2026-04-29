@@ -74,10 +74,11 @@ type taskBulkAssignOutput struct {
 	// that short-circuit return an empty value.
 	BulkOpID string `json:"bulk_op_id,omitempty"`
 
-	Results      []taskBulkAssignResult `json:"results,omitempty"`
-	SuccessCount int                    `json:"success_count"`
-	FailCount    int                    `json:"fail_count"`
-	NewAssignee  string                 `json:"new_assignee,omitempty"`
+	Results        []taskBulkAssignResult `json:"results,omitempty"`
+	SuccessCount   int                    `json:"success_count"`
+	FailCount      int                    `json:"fail_count"`
+	NewAssignee    string                 `json:"new_assignee,omitempty"`
+	ToolsetVersion string                 `json:"toolset_version,omitempty"`
 }
 
 // RegisterTaskBulkAssign wires pindoc.task.bulk_assign. Validates the

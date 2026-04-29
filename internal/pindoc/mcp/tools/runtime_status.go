@@ -114,7 +114,7 @@ func RegisterRuntimeStatus(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.runtime.status",
-			Description: "Read-only diagnostic snapshot. Returns server version, git commit (when build embedded vcs info), MCP toolset_version + tool_count, configured ports (HTTP + sidecar) with overrides, container_id / image_tag / hostname, auth_mode of the calling principal, transport, Go runtime version, and DB connectivity. Use when triaging port mix-ups (5830 vs 5832), 'restart needed?' after a tool catalog bump, or any quick environment check. No mutations.",
+			Description: "Read-only diagnostic snapshot. Returns server version, git commit (when build embedded vcs info), MCP toolset_version + tool_count, configured ports (HTTP + sidecar) with overrides, container_id / image_tag / hostname, auth_mode of the calling principal, transport, Go runtime version, and DB connectivity. After compose rebuild or suspected stale client catalog, compare this toolset_version with cached tool schemas; mismatch means restart/refresh the MCP session. Use when triaging port mix-ups (5830 vs 5832), 'restart needed?' after a tool catalog bump, or any quick environment check. No mutations.",
 		},
 		func(ctx context.Context, p *auth.Principal, _ runtimeStatusInput) (*sdk.CallToolResult, runtimeStatusOutput, error) {
 			commit, modified := readBuildVCS()

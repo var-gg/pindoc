@@ -43,7 +43,8 @@ type artifactTranslateOutput struct {
 	CachedAt         string `json:"cached_at,omitempty"`
 	CachedStale      bool   `json:"cached_stale,omitempty"`
 
-	SaveHint string `json:"save_hint,omitempty"`
+	SaveHint       string `json:"save_hint,omitempty"`
+	ToolsetVersion string `json:"toolset_version,omitempty"`
 }
 
 type translateSourceArtifact struct {

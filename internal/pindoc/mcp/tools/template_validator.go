@@ -19,12 +19,12 @@ import (
 //
 // Task `preflight-template-drift-통합`. Current axes:
 //
-//   required_h2       — H2 headings whose presence is checked by
-//                       requiredH2Warnings (slash-mixed headings like
-//                       "## 목적 / Purpose" are tokenised so either
-//                       side matches a slot).
-//   required_keywords — substring tokens matched case-insensitive
-//                       against the whole body (e.g. "acceptance").
+//	required_h2       — H2 headings whose presence is checked by
+//	                    requiredH2Warnings (slash-mixed headings like
+//	                    "## 목적 / Purpose" are tokenised so either
+//	                    side matches a slot).
+//	required_keywords — substring tokens matched case-insensitive
+//	                    against the whole body (e.g. "acceptance").
 //
 // Unset hints = fall back to the hard-coded defaults in
 // artifact_propose.go (backward compat).

@@ -158,6 +158,7 @@ type contextForTaskOutput struct {
 	ApplicableRules    []ApplicableRule           `json:"applicable_rules"`
 	CallerInFlight     *CallerInFlightAttention   `json:"caller_in_flight,omitempty"`
 	PinCandidates      *PinCandidatesAttention    `json:"pin_candidates,omitempty"`
+	ToolsetVersion     string                     `json:"toolset_version,omitempty"`
 }
 
 // candidateUpdateThreshold: landings under this cosine distance prompt an

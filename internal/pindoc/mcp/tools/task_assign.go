@@ -62,6 +62,7 @@ type taskAssignOutput struct {
 	HumanURL       string `json:"human_url,omitempty"`
 	HumanURLAbs    string `json:"human_url_abs,omitempty"`
 	NewAssignee    string `json:"new_assignee,omitempty"`
+	ToolsetVersion string `json:"toolset_version,omitempty"`
 }
 
 // assigneePattern accepts the three principal shapes defined by Decision

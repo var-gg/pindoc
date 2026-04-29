@@ -39,10 +39,11 @@ type RevisionMeta struct {
 }
 
 type artifactRevisionsOutput struct {
-	ArtifactID string         `json:"artifact_id"`
-	Slug       string         `json:"slug"`
-	Title      string         `json:"title"` // current head title
-	Revisions  []RevisionMeta `json:"revisions"`
+	ArtifactID     string         `json:"artifact_id"`
+	Slug           string         `json:"slug"`
+	Title          string         `json:"title"` // current head title
+	Revisions      []RevisionMeta `json:"revisions"`
+	ToolsetVersion string         `json:"toolset_version,omitempty"`
 }
 
 func RegisterArtifactRevisions(server *sdk.Server, deps Deps) {
@@ -156,16 +157,17 @@ type artifactDiffInput struct {
 }
 
 type artifactDiffOutput struct {
-	ArtifactID    string                   `json:"artifact_id"`
-	Slug          string                   `json:"slug"`
-	From          RevisionMeta             `json:"from"`
-	To            RevisionMeta             `json:"to"`
-	Stats         diff.Stats               `json:"stats"`
-	MetaDelta     []diff.MetaDeltaEntry    `json:"meta_delta"`
-	Acceptance    diff.AcceptanceChecklist `json:"acceptance_checklist"`
-	RevisionType  string                   `json:"revision_type"`
-	SectionDeltas []diff.SectionDelta      `json:"section_deltas"`
-	UnifiedDiff   string                   `json:"unified_diff"`
+	ArtifactID     string                   `json:"artifact_id"`
+	Slug           string                   `json:"slug"`
+	From           RevisionMeta             `json:"from"`
+	To             RevisionMeta             `json:"to"`
+	Stats          diff.Stats               `json:"stats"`
+	MetaDelta      []diff.MetaDeltaEntry    `json:"meta_delta"`
+	Acceptance     diff.AcceptanceChecklist `json:"acceptance_checklist"`
+	RevisionType   string                   `json:"revision_type"`
+	SectionDeltas  []diff.SectionDelta      `json:"section_deltas"`
+	UnifiedDiff    string                   `json:"unified_diff"`
+	ToolsetVersion string                   `json:"toolset_version,omitempty"`
 }
 
 func RegisterArtifactDiff(server *sdk.Server, deps Deps) {

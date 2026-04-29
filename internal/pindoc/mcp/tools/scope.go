@@ -54,8 +54,9 @@ type scopeInFlightOutput struct {
 	Totals map[string]int `json:"totals"`
 	// Truncated is true if the query had more items than Limit. Agents
 	// retry with a tighter area_slug / state_filter to drill in.
-	Truncated bool   `json:"truncated,omitempty"`
-	Notice    string `json:"notice,omitempty"`
+	Truncated      bool   `json:"truncated,omitempty"`
+	Notice         string `json:"notice,omitempty"`
+	ToolsetVersion string `json:"toolset_version,omitempty"`
 }
 
 // RegisterScopeInFlight wires pindoc.scope.in_flight — the Phase F graph

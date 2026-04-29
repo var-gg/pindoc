@@ -21,13 +21,14 @@ type projectExportInput struct {
 }
 
 type projectExportOutput struct {
-	Filename      string `json:"filename"`
-	MimeType      string `json:"mime_type"`
-	Encoding      string `json:"encoding"`
-	Bytes         int    `json:"bytes"`
-	ArtifactCount int    `json:"artifact_count"`
-	FileCount     int    `json:"file_count"`
-	ContentBase64 string `json:"content_base64"`
+	Filename       string `json:"filename"`
+	MimeType       string `json:"mime_type"`
+	Encoding       string `json:"encoding"`
+	Bytes          int    `json:"bytes"`
+	ArtifactCount  int    `json:"artifact_count"`
+	FileCount      int    `json:"file_count"`
+	ContentBase64  string `json:"content_base64"`
+	ToolsetVersion string `json:"toolset_version,omitempty"`
 }
 
 func RegisterProjectExport(server *sdk.Server, deps Deps) {

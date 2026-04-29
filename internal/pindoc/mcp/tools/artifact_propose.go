@@ -85,6 +85,11 @@ type artifactProposeInput struct {
 	// revision_shape.go for the full enum.
 	Shape string `json:"shape,omitempty" jsonschema:"one of body_patch|meta_patch|acceptance_transition|scope_defer; default body_patch"`
 
+	// DryRun validates the same propose payload without persisting an
+	// artifact, revision, edge, pin, or event. It does not bypass
+	// search_receipt, expected_version, relates_to, or policy gates.
+	DryRun bool `json:"dry_run,omitempty" jsonschema:"validate without INSERT/update; does not bypass receipt requirement; use for agent self-validation and MCP regression tests"`
+
 	// SupersedeOf marks the target artifact as superseded by this new one.
 	// Creates a NEW artifact (like a no-update_of call), then flips the
 	// target's status to 'superseded' and sets superseded_by to the new id.
@@ -423,6 +428,7 @@ type artifactProposeOutput struct {
 	PublishedAt    time.Time `json:"published_at,omitzero"`
 	Created        bool      `json:"created"`         // false on updates
 	RevisionNumber int       `json:"revision_number"` // 1 on create, N+1 on update
+	DryRun         bool      `json:"dry_run,omitempty"`
 
 	// Phase 11a: surface what was actually persisted so agents get
 	// confirmation of edge/pin storage without a second read.
@@ -539,7 +545,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.propose",
-			Description: "Propose a new artifact (the only write path humans use — always via an agent). Create path (both update_of and supersede_of omitted) requires basis.search_receipt from pindoc.artifact.search or pindoc.context.for_task in the same session; update/supersede paths do not. For Task creates, omitted task_meta.assignee means unassigned; explicit assignee claims ownership, and explicit task_meta.assignee=\"\" clears on update. Task priority meanings: p0 release blocker, p1 must close before release, p2 next round, p3 backlog; project-specific priority policy wins when present. Use pins[] for concrete code/file/URL evidence; use relates_to relation=evidence when the supporting source is another Pindoc artifact. Returns Status=accepted + artifact_id on success, or Status=not_ready + checklist + suggested_actions if Pre-flight fails. Always read the checklist; never surface the raw error to the user without trying the suggested actions first.",
+			Description: "Propose a new artifact (the only write path humans use — always via an agent). Create path (both update_of and supersede_of omitted) requires basis.search_receipt from pindoc.artifact.search or pindoc.context.for_task in the same session; update/supersede paths do not. dry_run=true validates without INSERT/update and does not bypass receipt, expected_version, relates_to, or policy gates; use it for agent self-validation and MCP regression tests, then retry with dry_run=false to publish. For Task creates, omitted task_meta.assignee means unassigned; explicit assignee claims ownership, and explicit task_meta.assignee=\"\" clears on update. Task priority meanings: p0 release blocker, p1 must close before release, p2 next round, p3 backlog; project-specific priority policy wins when present. Use pins[] for concrete code/file/URL evidence; use relates_to relation=evidence when the supporting source is another Pindoc artifact. Returns Status=accepted + artifact_id on success, or Status=not_ready + checklist + suggested_actions if Pre-flight fails. Always read the checklist; never surface the raw error to the user without trying the suggested actions first.",
 		},
 		func(ctx context.Context, p *auth.Principal, in artifactProposeInput) (*sdk.CallToolResult, artifactProposeOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -1045,7 +1051,11 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				return nil, artifactProposeOutput{}, fmt.Errorf("initial revision insert: %w", err)
 			}
 
-			if err := tx.Commit(ctx); err != nil {
+			if in.DryRun {
+				if err := tx.Rollback(ctx); err != nil {
+					return nil, artifactProposeOutput{}, fmt.Errorf("rollback dry_run create: %w", err)
+				}
+			} else if err := tx.Commit(ctx); err != nil {
 				return nil, artifactProposeOutput{}, fmt.Errorf("commit: %w", err)
 			}
 
@@ -1072,13 +1082,17 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			// — the pre-insert cache may have a negative-cache entry for
 			// this type that we need to clear so the next propose picks
 			// up the template's meta comment.
-			invalidateValidatorHints(scope.ProjectSlug, finalSlug)
+			if !in.DryRun {
+				invalidateValidatorHints(scope.ProjectSlug, finalSlug)
+			}
 
 			// Task propose-경로-warning-영속화: persist the accepted-path
 			// warnings into events so Reader Trust Card and future
 			// sessions can surface them. Best-effort — event failure
 			// doesn't roll back the artifact.
-			recordWarningEvent(ctx, deps, projectID, newID, 1, warnings, in.AuthorID, false)
+			if !in.DryRun {
+				recordWarningEvent(ctx, deps, projectID, newID, 1, warnings, in.AuthorID, false)
+			}
 
 			metaOut := resolvedMeta
 			sortedWarnings := sortWarningsBySeverity(warnings)
@@ -1086,7 +1100,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			for i, w := range sortedWarnings {
 				severities[i] = warningSeverity(w)
 			}
-			return nil, artifactProposeOutput{
+			out := artifactProposeOutput{
 				Status:            "accepted",
 				ArtifactID:        newID,
 				Slug:              finalSlug,
@@ -1106,7 +1120,11 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				ArtifactMeta:      &metaOut,
 				ReceiptExempted:   receiptExempted,
 				ToolsetVersion:    ToolsetVersion(),
-			}, nil
+			}
+			if in.DryRun {
+				out = dryRunProposeOutput(out, false)
+			}
+			return nil, out, nil
 		},
 	)
 }
@@ -1559,14 +1577,20 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		return nil, artifactProposeOutput{}, err
 	}
 
-	if err := tx.Commit(ctx); err != nil {
+	if in.DryRun {
+		if err := tx.Rollback(ctx); err != nil {
+			return nil, artifactProposeOutput{}, fmt.Errorf("rollback dry_run update: %w", err)
+		}
+	} else if err := tx.Commit(ctx); err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("commit: %w", err)
 	}
 
 	// Template validator cache invalidation — revising `_template_*`
 	// should re-anchor the per-type preflight rules without a server
 	// restart (Task preflight-template-drift-통합 §cache invalidation).
-	invalidateValidatorHints(scope.ProjectSlug, slug)
+	if !in.DryRun {
+		invalidateValidatorHints(scope.ProjectSlug, slug)
+	}
 
 	var updateMetaOut *ResolvedArtifactMeta
 	if in.ArtifactMeta != nil {
@@ -1612,14 +1636,16 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	// canonical-rewrite flag into events so Reader Trust Card and future
 	// sessions can surface them. Best-effort — event failure doesn't
 	// roll back the revision.
-	recordWarningEvent(ctx, deps, projectID, artifactID, newRev, warnings, in.AuthorID, canonicalRewriteFlag)
+	if !in.DryRun {
+		recordWarningEvent(ctx, deps, projectID, artifactID, newRev, warnings, in.AuthorID, canonicalRewriteFlag)
+	}
 
 	sortedWarnings := sortWarningsBySeverity(warnings)
 	severities := make([]string, len(sortedWarnings))
 	for i, w := range sortedWarnings {
 		severities[i] = warningSeverity(w)
 	}
-	return nil, artifactProposeOutput{
+	out := artifactProposeOutput{
 		Status:                          "accepted",
 		ArtifactID:                      artifactID,
 		Slug:                            slug,
@@ -1638,7 +1664,11 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		ArtifactMeta:                    updateMetaOut,
 		CanonicalRewriteWithoutEvidence: canonicalRewriteFlag,
 		ToolsetVersion:                  ToolsetVersion(),
-	}, nil
+	}
+	if in.DryRun {
+		out = dryRunProposeOutput(out, true)
+	}
+	return nil, out, nil
 }
 
 // updatePathWarnings aggregates non-blocking advisories for the update
@@ -2752,6 +2782,24 @@ func fallbackCreateCommitMsg(title string) string {
 		title = "(untitled)"
 	}
 	return fmt.Sprintf("[fallback_missing_commit_msg] create artifact: %s", title)
+}
+
+func dryRunProposeOutput(out artifactProposeOutput, keepTargetIdentity bool) artifactProposeOutput {
+	out.DryRun = true
+	out.Created = false
+	out.PublishedAt = time.Time{}
+	out.RevisionNumber = 0
+	out.PinsStored = 0
+	out.EdgesStored = 0
+	out.Superseded = false
+	if !keepTargetIdentity {
+		out.ArtifactID = ""
+		out.Slug = ""
+		out.AgentRef = ""
+		out.HumanURL = ""
+		out.HumanURLAbs = ""
+	}
+	return out
 }
 
 func taskStatusFromJSON(raw []byte) string {

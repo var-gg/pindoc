@@ -66,7 +66,8 @@ type artifactSearchOutput struct {
 	SearchReceipt string `json:"search_receipt,omitempty"`
 	// EmbedderUsed lets the agent verify that ranking came from a real
 	// semantic model (not stub). Added Phase 17 follow-up.
-	EmbedderUsed EmbedderInfo `json:"embedder_used"`
+	EmbedderUsed   EmbedderInfo `json:"embedder_used"`
+	ToolsetVersion string       `json:"toolset_version,omitempty"`
 }
 
 // RegisterArtifactSearch wires pindoc.artifact.search. Does a vector

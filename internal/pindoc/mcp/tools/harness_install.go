@@ -127,7 +127,8 @@ type harnessInstallOutput struct {
 
 	// Metadata the template was rendered from, so the agent can explain
 	// choices to the user.
-	RenderedFor RenderedFor `json:"rendered_for,omitzero"`
+	RenderedFor    RenderedFor `json:"rendered_for,omitzero"`
+	ToolsetVersion string      `json:"toolset_version,omitempty"`
 }
 
 // HarnessSessionBootstrap describes the auto-run handshake a client
@@ -566,6 +567,14 @@ case, manually invoke it as the first tool of the session and treat the
 response the same way (cache the project_slug, reuse for the session).
 The harness.install response carries a session_bootstrap object that
 new clients should consume directly to drive this handshake.
+
+## Toolset version drift
+
+Every MCP tool response includes toolset_version. Keep the first value
+seen in the session; if a later response or pindoc.runtime.status
+returns a different value, the server tool catalog changed underneath
+the client cache. Refresh ToolSearch or restart the MCP session before
+trusting stale tool descriptions.
 
 ## Pre-flight Check protocol (M0.5)
 

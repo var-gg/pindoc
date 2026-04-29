@@ -47,6 +47,7 @@ func AddInstrumentedTool[I, O any](
 		}
 		if store == nil {
 			result, output, err := handler(ctx, p, input)
+			output = stampToolsetVersion(output)
 			output = applyMCPErrorContract(output, deps.UserLanguage)
 			return result, output, err
 		}
@@ -78,6 +79,7 @@ func instrumentCall[I, O any](
 
 	inputJSON, _ := json.Marshal(input)
 	result, output, err := invoke()
+	output = stampToolsetVersion(output)
 	output = applyMCPErrorContract(output, lang)
 	outputJSON, _ := json.Marshal(output)
 
@@ -93,6 +95,45 @@ func instrumentCall[I, O any](
 	store.Record(entry)
 
 	return result, output, err
+}
+
+func stampToolsetVersion[O any](output O) O {
+	rv := reflect.ValueOf(&output).Elem()
+	for rv.Kind() == reflect.Interface {
+		if rv.IsNil() {
+			return output
+		}
+		elem := rv.Elem()
+		if elem.Kind() == reflect.Struct && !elem.CanSet() {
+			copy := reflect.New(elem.Type()).Elem()
+			copy.Set(elem)
+			if setToolsetVersionField(copy) {
+				rv.Set(copy)
+			}
+			return output
+		}
+		rv = elem
+	}
+	for rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return output
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return output
+	}
+	setToolsetVersionField(rv)
+	return output
+}
+
+func setToolsetVersionField(rv reflect.Value) bool {
+	f := rv.FieldByName("ToolsetVersion")
+	if !f.IsValid() || !f.CanSet() || f.Kind() != reflect.String || f.String() != "" {
+		return false
+	}
+	f.SetString(ToolsetVersion())
+	return true
 }
 
 // telemetryEntry packages the per-call fields into a telemetry.Entry,

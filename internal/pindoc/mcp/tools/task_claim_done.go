@@ -83,6 +83,11 @@ type taskClaimDoneInput struct {
 	// silently skipped (warnings carry PIN_DUPLICATE_SKIPPED:<path>) so
 	// claim_done stays idempotent on retry.
 	Pins []ArtifactPinInput `json:"pins,omitempty" jsonschema:"optional implementation evidence; same shape as artifact.propose pins[] — duplicates are skipped silently"`
+
+	// EvidenceArtifacts attaches non-code deliverables such as Decision
+	// or Analysis artifacts as relates_to=evidence edges on the Task.
+	// Code/config/doc changes should still use commit_sha or pins[].
+	EvidenceArtifacts []string `json:"evidence_artifacts,omitempty" jsonschema:"optional non-code deliverable artifacts; slug, UUID, or pindoc:// refs stored as relates_to=evidence edges"`
 }
 
 type taskClaimDoneOutput struct {
@@ -109,7 +114,9 @@ type taskClaimDoneOutput struct {
 	PinsStored             int      `json:"pins_stored"`
 	PinsAutopinCount       int      `json:"pins_autopin_count"`
 	PinsExplicitCount      int      `json:"pins_explicit_count"`
+	EvidenceEdgesStored    int      `json:"evidence_edges_stored,omitempty"`
 	Warnings               []string `json:"warnings,omitempty"`
+	ToolsetVersion         string   `json:"toolset_version,omitempty"`
 }
 
 // RegisterTaskClaimDone wires pindoc.task.claim_done. The handler resolves
@@ -124,7 +131,7 @@ func RegisterTaskClaimDone(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.task.claim_done",
-			Description: "Mark a Task implementation complete. Toggles every unchecked acceptance item ('- [ ]') to '[x]' and sets task_meta.status='claimed_done' in one atomic revision. Already-resolved markers ([x]/[~]/[-]) are preserved — partial / deferred judgment calls are not overwritten. Bypasses search_receipt gating (operational metadata lane). When the Task involved code/doc/config changes, pass commit_sha (7-64 hex chars, prefixed onto commit_msg as '[<short>] ...') and choose pin_strategy: auto (default) auto-pins changed files from the commit diff up to 20, allowlist auto-pins only changed_paths_allowlist entries, explicit disables commit-diff auto pins and stores only pins[]. pins[] uses the same shape as artifact.propose pins[]; duplicate pins are silently skipped. Reason is optional (stored as commit_msg).",
+			Description: "Mark a Task implementation complete. Toggles every unchecked acceptance item ('- [ ]') to '[x]' and sets task_meta.status='claimed_done' in one atomic revision. Already-resolved markers ([x]/[~]/[-]) are preserved — partial / deferred judgment calls are not overwritten. Bypasses search_receipt gating (operational metadata lane). When the Task involved code/doc/config changes, pass commit_sha (7-64 hex chars, prefixed onto commit_msg as '[<short>] ...') and choose pin_strategy: auto (default) auto-pins changed files from the commit diff up to 20, allowlist auto-pins only changed_paths_allowlist entries, explicit disables commit-diff auto pins and stores only pins[]. pins[] uses the same shape as artifact.propose pins[]; duplicate pins are silently skipped. For non-code deliverables such as Decision or Analysis artifacts, pass evidence_artifacts (slug/id/pindoc://) to store relates_to=evidence edges; commit pins and evidence_artifacts can be used together. Reason is optional (stored as commit_msg).",
 		},
 		func(ctx context.Context, p *auth.Principal, in taskClaimDoneInput) (*sdk.CallToolResult, taskClaimDoneOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -342,6 +349,10 @@ func claimOneTaskDone(
 	if len(changedPathsAllowlist) > 0 {
 		shapePayload["changed_paths_allowlist"] = changedPathsAllowlist
 	}
+	evidenceRefs := normalizeClaimDoneEvidenceArtifacts(in.EvidenceArtifacts)
+	if len(evidenceRefs) > 0 {
+		shapePayload["evidence_artifacts"] = evidenceRefs
+	}
 
 	autoPins, autoWarnings := buildClaimDoneAutoPins(ctx, deps, projectID, commitSHA, claimDoneAutopinDefaultLimit, pinStrategy, changedPathsAllowlist)
 	pinWarnings := append([]string{}, autoWarnings...)
@@ -358,6 +369,31 @@ func claimOneTaskDone(
 		return taskClaimDoneOutput{}, fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	evidenceEdgesStored := 0
+	if len(evidenceRefs) > 0 {
+		relations := make([]ArtifactRelationInput, 0, len(evidenceRefs))
+		for _, ref := range evidenceRefs {
+			relations = append(relations, ArtifactRelationInput{TargetID: ref, Relation: "evidence"})
+		}
+		targetIDs, relErr := resolveRelatesTo(ctx, tx, scope.ProjectSlug, relations, deps.UserLanguage)
+		if relErr != nil {
+			return taskClaimDoneOutput{
+				Status:           "not_ready",
+				ErrorCode:        "EVIDENCE_TARGET_NOT_FOUND",
+				Failed:           []string{"EVIDENCE_TARGET_NOT_FOUND"},
+				Checklist:        []string{fmt.Sprintf("evidence_artifacts contains an unknown artifact ref in project %q", scope.ProjectSlug)},
+				SuggestedActions: relErr.SuggestedActions,
+				ArtifactID:       artifactID,
+				Slug:             currentSlug,
+			}, nil
+		}
+		stored, err := insertEdges(ctx, tx, artifactID, targetIDs, relations)
+		if err != nil {
+			return taskClaimDoneOutput{}, err
+		}
+		evidenceEdgesStored = stored
+	}
 
 	// Pin attachment runs *inside* the transaction so artifact_pins,
 	// artifact_revisions, and the events row commit or roll back
@@ -411,6 +447,7 @@ func claimOneTaskDone(
 	}
 	shapePayload["pins_explicit_count"] = pinsExplicitCount
 	shapePayload["pins_autopin_count"] = pinsAutopinCount
+	shapePayload["evidence_edges_stored"] = evidenceEdgesStored
 	shapePayloadJSON, err := json.Marshal(shapePayload)
 	if err != nil {
 		return taskClaimDoneOutput{}, fmt.Errorf("marshal shape_payload: %w", err)
@@ -493,9 +530,10 @@ func claimOneTaskDone(
 			'pins_stored',              $10::int,
 			'pins_explicit_count',      $11::int,
 			'pins_autopin_count',       $12::int,
-			'pin_strategy',             $13::text
+			'pin_strategy',             $13::text,
+			'evidence_edges_stored',    $14::int
 		))
-	`, projectID, artifactID, newRev, currentSlug, effAuthorID, commitMsg, changedCount, prevStatus, commitSHA, pinsStored, pinsExplicitCount, pinsAutopinCount, pinStrategy); err != nil {
+	`, projectID, artifactID, newRev, currentSlug, effAuthorID, commitMsg, changedCount, prevStatus, commitSHA, pinsStored, pinsExplicitCount, pinsAutopinCount, pinStrategy, evidenceEdgesStored); err != nil {
 		return taskClaimDoneOutput{}, fmt.Errorf("emit task_claimed_done event: %w", err)
 	}
 
@@ -524,6 +562,7 @@ func claimOneTaskDone(
 		PinsStored:             pinsStored,
 		PinsExplicitCount:      pinsExplicitCount,
 		PinsAutopinCount:       pinsAutopinCount,
+		EvidenceEdgesStored:    evidenceEdgesStored,
 		Warnings:               outWarnings,
 	}, nil
 }
@@ -622,6 +661,26 @@ func normalizeClaimDoneChangedPath(path string) string {
 		path = strings.TrimPrefix(path, "./")
 	}
 	return path
+}
+
+func normalizeClaimDoneEvidenceArtifacts(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		ref := normalizeRef(value)
+		if ref == "" {
+			continue
+		}
+		if _, ok := seen[ref]; ok {
+			continue
+		}
+		seen[ref] = struct{}{}
+		out = append(out, ref)
+	}
+	return out
 }
 
 func buildClaimDoneAutoPins(ctx context.Context, deps Deps, projectID, commitSHA string, limit int, pinStrategy string, changedPathsAllowlist []string) ([]ArtifactPinInput, []string) {

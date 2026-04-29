@@ -83,7 +83,8 @@ type artifactReadOutput struct {
 	// artifacts. It is deliberately carried out-of-band from body_markdown
 	// so retrieval reads and human Reader views do not accumulate prompt
 	// noise. Server-side gates below decide whether it appears at all.
-	TaskAttention *TaskAttention `json:"task_attention,omitempty"`
+	TaskAttention  *TaskAttention `json:"task_attention,omitempty"`
+	ToolsetVersion string         `json:"toolset_version,omitempty"`
 }
 
 type TaskAttention struct {

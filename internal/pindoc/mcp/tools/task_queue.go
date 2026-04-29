@@ -110,10 +110,11 @@ type taskQueueOutput struct {
 	// at a glance whether the omitted aggregates are intentional.
 	Compact bool `json:"compact,omitempty"`
 
-	Items     []taskQueueItem     `json:"items"`
-	Truncated bool                `json:"truncated,omitempty"`
-	Notice    string              `json:"notice"`
-	Attention *TaskQueueAttention `json:"attention,omitempty"`
+	Items          []taskQueueItem     `json:"items"`
+	Truncated      bool                `json:"truncated,omitempty"`
+	Notice         string              `json:"notice"`
+	Attention      *TaskQueueAttention `json:"attention,omitempty"`
+	ToolsetVersion string              `json:"toolset_version,omitempty"`
 }
 
 // RegisterTaskQueue wires pindoc.task.queue. This is the MCP counterpart

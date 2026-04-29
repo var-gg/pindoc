@@ -22,12 +22,13 @@ type artifactReadStateInput struct {
 }
 
 type artifactReadStateOutput struct {
-	ArtifactID    string  `json:"artifact_id"`
-	UserKey       string  `json:"user_key"`
-	ReadState     string  `json:"read_state"`
-	CompletionPct float64 `json:"completion_pct"`
-	LastSeenAt    string  `json:"last_seen_at,omitempty"`
-	EventCount    int     `json:"event_count"`
+	ArtifactID     string  `json:"artifact_id"`
+	UserKey        string  `json:"user_key"`
+	ReadState      string  `json:"read_state"`
+	CompletionPct  float64 `json:"completion_pct"`
+	LastSeenAt     string  `json:"last_seen_at,omitempty"`
+	EventCount     int     `json:"event_count"`
+	ToolsetVersion string  `json:"toolset_version,omitempty"`
 }
 
 // RegisterArtifactReadState wires pindoc.artifact.read_state — Layer 2 of
