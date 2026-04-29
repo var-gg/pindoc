@@ -430,15 +430,22 @@ export function ReaderShell({ view, unavailableSurface }: Props) {
       }),
     [surfaceList, selectedArea, selectedType, badgeFilters],
   );
+  const areaCounterArtifacts = useMemo(
+    () =>
+      surfaceList.filter((a) => {
+        if (selectedType && a.type !== selectedType) return false;
+        if (!artifactMatchesBadgeFilters(a, badgeFilters)) return false;
+        return true;
+      }),
+    [surfaceList, selectedType, badgeFilters],
+  );
   const areaCountMap = useMemo(() => {
     const map = new Map<string, number>();
-    for (const a of surfaceList) {
-      if (selectedType && a.type !== selectedType) continue;
-      if (!artifactMatchesBadgeFilters(a, badgeFilters)) continue;
+    for (const a of areaCounterArtifacts) {
       map.set(a.area_slug, (map.get(a.area_slug) ?? 0) + 1);
     }
     return map;
-  }, [surfaceList, selectedType, badgeFilters]);
+  }, [areaCounterArtifacts]);
   const typeCounts = useMemo<Aggregate[]>(() => {
     const map = new Map<string, number>();
     for (const a of surfaceList) {
@@ -599,6 +606,8 @@ export function ReaderShell({ view, unavailableSurface }: Props) {
       />
       <div className="main">
         <Sidebar
+          projectSlug={project}
+          artifacts={areaCounterArtifacts}
           areas={displayAreas}
           types={typeCounts}
           agents={agents}
@@ -1185,26 +1194,32 @@ function TasksKanban({
           onClearFilters={onClearFilters}
         />
       )}
-      <div className="kanban">
-        {TASK_COLUMNS.map((col) => (
-          <TaskColumn
-            key={col.id}
-            columnId={col.id}
-            label={t(col.labelKey)}
-            pill={col.pill}
-            items={groups.get(col.id) ?? []}
-            visibleLimit={visibleLimitFor(col.id)}
-            allCount={allGroups.get(col.id)?.length ?? 0}
-            hasActiveFilters={hasActiveFilters}
-            onClearFilters={onClearFilters}
-            onShowMore={() => showMoreColumn(col.id)}
-            projectSlug={projectSlug}
-            currentSlug={currentSlug}
-            selectedTaskSlug={selectedTaskSlug}
-            onSelectTask={onSelectTask}
-            areaNameBySlug={areaNameBySlug}
-          />
-        ))}
+      <div className="kanban-mobile-hint">
+        <span>{t("tasks.mobile_scroll_hint")}</span>
+        <span aria-hidden="true">→</span>
+      </div>
+      <div className="kanban-scroll-wrap">
+        <div className="kanban">
+          {TASK_COLUMNS.map((col) => (
+            <TaskColumn
+              key={col.id}
+              columnId={col.id}
+              label={t(col.labelKey)}
+              pill={col.pill}
+              items={groups.get(col.id) ?? []}
+              visibleLimit={visibleLimitFor(col.id)}
+              allCount={allGroups.get(col.id)?.length ?? 0}
+              hasActiveFilters={hasActiveFilters}
+              onClearFilters={onClearFilters}
+              onShowMore={() => showMoreColumn(col.id)}
+              projectSlug={projectSlug}
+              currentSlug={currentSlug}
+              selectedTaskSlug={selectedTaskSlug}
+              onSelectTask={onSelectTask}
+              areaNameBySlug={areaNameBySlug}
+            />
+          ))}
+        </div>
       </div>
       {(groups.get("no_status")?.length ?? 0) > 0 && (
         <div className="kanban__extra">

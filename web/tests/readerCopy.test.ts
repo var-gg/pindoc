@@ -30,13 +30,27 @@ function testKoreanReaderChromeCopyHidesRawEnglishLabels(): void {
     ko["wiki.section_areas"],
     ko["sidebar.types"],
     ko["sidebar.agents"],
+    ko["sidebar.unread_count"],
+    ko["nav.mobile_menu"],
+    ko["nav.mobile_surfaces"],
+    ko["profile.role"],
+    ko["profile.auth_mode.trusted_local"],
+    ko["help.open"],
+    ko["help.title"],
+    ko["help.surface_label"],
+    ko["help.types_title"],
+    ko["help.areas_title"],
+    ko["help.docs_title"],
     ko["surface.header_label"],
     ko["surface.name.artifact"],
     ko["surface.name.inbox"],
     ko["surface.name.graph"],
     ko["today.eyebrow"],
     ko["today.open_area"],
+    ko["today.export_project"],
     ko["today.export_area"],
+    ko["today.filters"],
+    ko["today.brief_bullet_no_groups"],
     ko["today.inspector_empty"],
     ko["reader.inspector_empty"],
     ko["tasks.inspector_empty"],
@@ -52,9 +66,14 @@ function testKoreanReaderChromeCopyHidesRawEnglishLabels(): void {
     ko["today.kind_auto_sync"],
     ko["today.kind_maintenance"],
     ko["today.kind_system"],
+    ko["new_project.field.language"],
+    ko["invite.modal.role"],
+    ko["signup.meta.role"],
+    ko["tasks.mobile_scroll_hint"],
+    ko["ops.title"],
   ].join("\n");
 
-  for (const blocked of ["Area", "Type", "Agent", "Briefing", "Surface", "Inspector", "artifact", "change"]) {
+  for (const blocked of ["Area", "Type", "Agent", "Briefing", "Surface", "Inspector", "artifact", "change", "trusted local", "immutable", "surface 도움말", "Role", "export"]) {
     assert(!snapshot.includes(blocked), `KO chrome snapshot should hide raw English token: ${blocked}`);
   }
   assert(!snapshot.includes("(미확인)"), "unknown byline should use neutral copy");

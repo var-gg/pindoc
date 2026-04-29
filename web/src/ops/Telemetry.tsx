@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router";
 import { api, type TelemetryResponse, type TelemetryWindow } from "../api/client";
+import { useI18n } from "../i18n";
 import "../styles/telemetry.css";
 
 // Telemetry is the Phase J UI — aggregated view of the async
@@ -20,6 +21,7 @@ const WINDOWS: { value: TelemetryWindow; label: string }[] = [
 ];
 
 export function Telemetry() {
+  const { t } = useI18n();
   const [data, setData] = useState<TelemetryResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -55,8 +57,8 @@ export function Telemetry() {
   return (
     <div className="ops">
       <header className="ops__bar">
-        <Link to="/" className="ops__back">◀ Reader</Link>
-        <h1 className="ops__title">MCP Telemetry</h1>
+        <Link to="/" className="ops__back">{t("ops.back")}</Link>
+        <h1 className="ops__title">{t("ops.title")}</h1>
         <div className="ops__controls">
           <div className="ops__windows">
             {WINDOWS.map((w) => (
@@ -76,10 +78,10 @@ export function Telemetry() {
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
             />
-            <span>auto</span>
+            <span>{t("ops.auto")}</span>
           </label>
           <button type="button" className="ops__refresh" onClick={load} disabled={loading}>
-            {loading ? "…" : "refresh"}
+            {loading ? "…" : t("ops.refresh")}
           </button>
         </div>
       </header>
@@ -88,96 +90,98 @@ export function Telemetry() {
 
       {totals && (
         <section className="ops__totals">
-          <Metric label="calls" value={totals.calls.toLocaleString()} />
-          <Metric label="errors" value={totals.errors.toLocaleString()} sub={`${(errorRate * 100).toFixed(1)}%`} emphasize={totals.errors > 0} />
-          <Metric label="in tokens" value={totals.total_input_tokens.toLocaleString()} />
-          <Metric label="out tokens" value={totals.total_output_tokens.toLocaleString()} />
-          <Metric label="total tokens" value={(totals.total_input_tokens + totals.total_output_tokens).toLocaleString()} emphasize />
-          <Metric label="agents" value={totals.unique_agents.toLocaleString()} />
+          <Metric label={t("ops.metric.calls")} value={totals.calls.toLocaleString()} />
+          <Metric label={t("ops.metric.errors")} value={totals.errors.toLocaleString()} sub={`${(errorRate * 100).toFixed(1)}%`} emphasize={totals.errors > 0} />
+          <Metric label={t("ops.metric.in_tokens")} value={totals.total_input_tokens.toLocaleString()} />
+          <Metric label={t("ops.metric.out_tokens")} value={totals.total_output_tokens.toLocaleString()} />
+          <Metric label={t("ops.metric.total_tokens")} value={(totals.total_input_tokens + totals.total_output_tokens).toLocaleString()} emphasize />
+          <Metric label={t("ops.metric.agents")} value={totals.unique_agents.toLocaleString()} />
         </section>
       )}
 
       {data && data.tools.length === 0 && !err && (
         <div className="ops__empty">
-          No tool calls in the last {window}. Either no MCP sessions ran
-          in this window or the telemetry pipeline isn't wired — check
-          the server log for "telemetry flush failed".
+          {t("ops.empty", window)}
         </div>
       )}
 
       {data && data.tools.length > 0 && (
         <section className="ops__tools">
-          <h2>Per tool</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>tool</th>
-                <th className="num">calls</th>
-                <th className="num">errs</th>
-                <th className="num">avg ms</th>
-                <th className="num">p95 ms</th>
-                <th className="num">avg in tok</th>
-                <th className="num">avg out tok</th>
-                <th className="num">total tokens</th>
-                <th>last</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.tools.map((t) => {
-                const totalTok = t.total_input_tokens + t.total_output_tokens;
+          <h2>{t("ops.tools_title")}</h2>
+          <div className="ops__table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>{t("ops.th.tool")}</th>
+                  <th className="num">{t("ops.th.calls")}</th>
+                  <th className="num">{t("ops.th.errs")}</th>
+                  <th className="num">{t("ops.th.avg_ms")}</th>
+                  <th className="num">{t("ops.th.p95_ms")}</th>
+                  <th className="num">{t("ops.th.avg_in_tok")}</th>
+                  <th className="num">{t("ops.th.avg_out_tok")}</th>
+                  <th className="num">{t("ops.th.total_tokens")}</th>
+                  <th>{t("ops.th.last")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.tools.map((toolRow) => {
+                const totalTok = toolRow.total_input_tokens + toolRow.total_output_tokens;
                 return (
-                  <tr key={t.tool_name}>
-                    <td className="tool">{t.tool_name}</td>
-                    <td className="num">{t.calls}</td>
-                    <td className={`num ${t.errors > 0 ? "err" : ""}`}>{t.errors || "·"}</td>
-                    <td className="num">{t.avg_duration_ms}</td>
-                    <td className="num">{t.p95_duration_ms}</td>
-                    <td className="num">{t.avg_input_tokens}</td>
-                    <td className="num">{t.avg_output_tokens}</td>
+                  <tr key={toolRow.tool_name}>
+                    <td className="tool">{toolRow.tool_name}</td>
+                    <td className="num">{toolRow.calls}</td>
+                    <td className={`num ${toolRow.errors > 0 ? "err" : ""}`}>{toolRow.errors || "·"}</td>
+                    <td className="num">{toolRow.avg_duration_ms}</td>
+                    <td className="num">{toolRow.p95_duration_ms}</td>
+                    <td className="num">{toolRow.avg_input_tokens}</td>
+                    <td className="num">{toolRow.avg_output_tokens}</td>
                     <td className="num strong">{totalTok.toLocaleString()}</td>
-                    <td className="ts">{formatRelative(t.last_call_at)}</td>
+                    <td className="ts">{formatRelative(toolRow.last_call_at)}</td>
                   </tr>
                 );
               })}
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
 
       {data && data.recent.length > 0 && (
         <section className="ops__recent">
-          <h2>Recent calls ({data.recent.length})</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>time</th>
-                <th>tool</th>
-                <th className="num">ms</th>
-                <th className="num">in</th>
-                <th className="num">out</th>
-                <th>error</th>
-                <th>agent</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.recent.map((c, i) => (
-                <tr key={`${c.started_at}-${i}`} className={c.error_code ? "is-err" : ""}>
-                  <td className="ts">{formatRelative(c.started_at)}</td>
-                  <td className="tool">{c.tool_name}</td>
-                  <td className="num">{c.duration_ms}</td>
-                  <td className="num" title={`${c.input_bytes}B`}>{c.input_tokens_est}t</td>
-                  <td className="num" title={`${c.output_bytes}B`}>{c.output_tokens_est}t</td>
-                  <td className="err">{c.error_code || "·"}</td>
-                  <td className="mono">{c.agent_id ? c.agent_id.slice(0, 10) : "·"}</td>
+          <h2>{t("ops.recent_title", data.recent.length)}</h2>
+          <div className="ops__table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>{t("ops.th.time")}</th>
+                  <th>{t("ops.th.tool")}</th>
+                  <th className="num">{t("ops.th.ms")}</th>
+                  <th className="num">{t("ops.th.in")}</th>
+                  <th className="num">{t("ops.th.out")}</th>
+                  <th>{t("ops.th.error")}</th>
+                  <th>{t("ops.th.agent")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.recent.map((c, i) => (
+                  <tr key={`${c.started_at}-${i}`} className={c.error_code ? "is-err" : ""}>
+                    <td className="ts">{formatRelative(c.started_at)}</td>
+                    <td className="tool">{c.tool_name}</td>
+                    <td className="num">{c.duration_ms}</td>
+                    <td className="num" title={`${c.input_bytes}B`}>{c.input_tokens_est}t</td>
+                    <td className="num" title={`${c.output_bytes}B`}>{c.output_tokens_est}t</td>
+                    <td className="err">{c.error_code || "·"}</td>
+                    <td className="mono">{c.agent_id ? c.agent_id.slice(0, 10) : "·"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
 
       <footer className="ops__foot">
-        <span>Token counts are approximations (tiktoken cl100k_base). Actual Claude billing may differ ±20% on CJK content.</span>
+        <span>{t("ops.footer")}</span>
       </footer>
     </div>
   );

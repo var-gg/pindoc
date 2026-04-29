@@ -13,6 +13,9 @@
   --ops-err: #f08886;
   --ops-ok: #7fd0a0;
   min-height: 100vh;
+  box-sizing: border-box;
+  width: 100%;
+  overflow-x: hidden;
   background: var(--ops-bg);
   color: var(--ops-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -21,9 +24,14 @@
   padding: 24px 32px 64px;
 }
 
+.ops * {
+  box-sizing: border-box;
+}
+
 .ops__bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 24px;
   margin-bottom: 24px;
 }
@@ -46,15 +54,18 @@
 .ops__controls {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 12px;
 }
 
 .ops__windows {
   display: flex;
+  flex-wrap: wrap;
   background: var(--ops-surface);
   border: 1px solid var(--ops-border);
   border-radius: 4px;
-  overflow: hidden;
+  overflow: clip;
 }
 
 .ops__win {
@@ -160,13 +171,20 @@
   font-weight: 500;
 }
 
-.ops table {
+.ops__table-scroll {
   width: 100%;
-  border-collapse: collapse;
+  max-width: 100%;
+  overflow-x: auto;
   background: var(--ops-surface);
   border: 1px solid var(--ops-border);
   border-radius: 6px;
-  overflow: hidden;
+}
+
+.ops table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  background: var(--ops-surface);
 }
 
 .ops th, .ops td {
@@ -204,4 +222,54 @@
   border-top: 1px solid var(--ops-border);
   color: var(--ops-mute);
   font-size: 11px;
+}
+
+@media (max-width: 600px) {
+  .ops {
+    padding: 16px 12px 56px;
+  }
+  .ops__bar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .ops__title {
+    flex: 0 0 auto;
+  }
+  .ops__controls {
+    justify-content: flex-start;
+    gap: 8px;
+  }
+  .ops__windows {
+    width: 100%;
+  }
+  .ops__win {
+    flex: 1 1 20%;
+    min-width: 52px;
+    border-left: 0;
+    border-top: 1px solid var(--ops-border);
+  }
+  .ops__win:nth-child(-n + 5) {
+    border-top: 0;
+  }
+  .ops__auto,
+  .ops__refresh {
+    min-height: 32px;
+  }
+  .ops__totals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 24px;
+  }
+  .ops__metric {
+    min-width: 0;
+    padding: 12px;
+  }
+  .ops__metric-val {
+    font-size: 17px;
+    overflow-wrap: anywhere;
+  }
+  .ops table {
+    min-width: 680px;
+  }
 }

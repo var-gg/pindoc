@@ -15,6 +15,7 @@ import { Tooltip } from "./Tooltip";
 import { canShowTelemetryNav, telemetryDebugEnabled } from "./opsAccess";
 import { paletteOpenAfterProjectSwitcherToggle, projectSwitcherOpenAfterPaletteChange } from "./overlayStack";
 import { isReaderDevSurfaceEnabled } from "../readerRoutes";
+import { maskEmail } from "./profilePrivacy";
 
 type Props = {
   project: Project;
@@ -63,6 +64,7 @@ export function TopNav({
   const canInvite = project.current_role === "owner" && Boolean(onOpenInvite);
   const showGraphSurface = isReaderDevSurfaceEnabled(location.search, import.meta.env.DEV);
   const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
+  const [mobileSurfaceMenuOpen, setMobileSurfaceMenuOpen] = useState(false);
   const opsDebug = telemetryDebugEnabled(
     location.search,
     typeof window === "undefined" ? null : window.localStorage.getItem("pindoc.ops.debug"),
@@ -72,6 +74,10 @@ export function TopNav({
   useEffect(() => {
     setProjectSwitcherOpen((open) => projectSwitcherOpenAfterPaletteChange(open, paletteOpen));
   }, [paletteOpen]);
+
+  useEffect(() => {
+    setMobileSurfaceMenuOpen(false);
+  }, [location.pathname, location.search]);
 
   function openPalette() {
     setProjectSwitcherOpen(false);
@@ -85,11 +91,22 @@ export function TopNav({
     }
   }
 
+  function toggleMobileMenu() {
+    setMobileSurfaceMenuOpen((open) => !open);
+    onToggleMenu();
+  }
+
   return (
-    <div className="nav">
-      <button className="nav__menu" aria-label="Open menu" onClick={onToggleMenu}>
-        <Menu className="lucide" />
-      </button>
+    <>
+      <div className="nav">
+        <button
+          className="nav__menu"
+          aria-label={t("nav.mobile_menu")}
+          aria-expanded={mobileSurfaceMenuOpen}
+          onClick={toggleMobileMenu}
+        >
+          <Menu className="lucide" />
+        </button>
       <NavLink to={`${baseRoute}/today`} className="nav__brand">
         <svg width="20" height="20" viewBox="0 0 32 32" fill="none" style={{ color: "var(--fg-0)", flexShrink: 0 }}>
           <rect x="5" y="7.5" width="19" height="21" rx="2.5" stroke="currentColor" strokeWidth="1.5" />
@@ -179,14 +196,36 @@ export function TopNav({
         </Tooltip>
       )}
 
-      <UserProfileMenu
-        project={project}
-        theme={theme}
-        nextLang={nextLang}
-        onToggleTheme={onToggleTheme}
-        onChangeLang={setLang}
-      />
-    </div>
+        <UserProfileMenu
+          project={project}
+          theme={theme}
+          nextLang={nextLang}
+          onToggleTheme={onToggleTheme}
+          onChangeLang={setLang}
+        />
+      </div>
+      {mobileSurfaceMenuOpen && (
+        <nav className="nav-mobile-surfaces" aria-label={t("nav.mobile_surfaces")}>
+          <NavLink to={`${baseRoute}/today`} className="nav-mobile-surfaces__item" onClick={() => setMobileSurfaceMenuOpen(false)}>
+            <CalendarDays className="lucide" />
+            <span>{t("nav.today")}</span>
+          </NavLink>
+          <NavLink to={`${baseRoute}/wiki`} className="nav-mobile-surfaces__item" onClick={() => setMobileSurfaceMenuOpen(false)}>
+            <FileText className="lucide" />
+            <span>{t("nav.wiki_reader")}</span>
+          </NavLink>
+          <NavLink to={`${baseRoute}/inbox`} className="nav-mobile-surfaces__item" onClick={() => setMobileSurfaceMenuOpen(false)}>
+            <Inbox className="lucide" />
+            <span>{t("nav.inbox")}</span>
+            {inboxCount > 0 && <span className="count">{inboxCount}</span>}
+          </NavLink>
+          <NavLink to={`${baseRoute}/tasks`} className="nav-mobile-surfaces__item" onClick={() => setMobileSurfaceMenuOpen(false)}>
+            <FileText className="lucide" />
+            <span>{t("nav.tasks")}</span>
+          </NavLink>
+        </nav>
+      )}
+    </>
   );
 }
 
@@ -242,7 +281,7 @@ function UserProfileMenu({
   const user = current?.user;
   const authMode = current?.auth_mode ?? "unknown";
   const name = user?.display_name || t("profile.fallback_name");
-  const email = user?.email || t("profile.fallback_email");
+  const email = user?.email ? maskEmail(user.email) : t("profile.fallback_email");
   const initials = profileInitials(user?.display_name || user?.email || project.slug);
   const canSignOut = authMode === "oauth_github";
 

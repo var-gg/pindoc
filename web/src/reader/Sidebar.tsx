@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { Check, ChevronDown, ChevronRight, FolderOpen, LayoutTemplate, Lock } from "lucide-react";
-import type { Area } from "../api/client";
+import { useEffect, useMemo, useState } from "react";
+import { Check, ChevronDown, ChevronRight, FolderOpen, LayoutTemplate } from "lucide-react";
+import { api, type Area, type ArtifactReadState, type ArtifactRef } from "../api/client";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
 import { compareAreas, isFixedTaxonomyArea, localizedAreaName } from "./areaLocale";
@@ -9,8 +9,11 @@ import { visualArea, visualDescription, visualLabel, visualType } from "./visual
 import { visualIconComponent } from "./visualLanguageIcons";
 import { Tooltip } from "./Tooltip";
 import { sidebarAgentRows } from "./readerInternalVisibility";
+import { buildAreaUnreadOwnCounts, subtreeUnreadCount } from "./sidebarUnread";
 
 type Props = {
+  projectSlug: string;
+  artifacts: ArtifactRef[];
   areas: Area[];
   types: Aggregate[];
   agents: Aggregate[];
@@ -75,6 +78,8 @@ function containsSelected(node: AreaNode, selectedArea: string | null): boolean 
 }
 
 export function Sidebar({
+  projectSlug,
+  artifacts,
   areas,
   types,
   agents,
@@ -89,12 +94,31 @@ export function Sidebar({
   showInternalAgents = false,
 }: Props) {
   const { t, lang } = useI18n();
+  const [readStates, setReadStates] = useState<ArtifactReadState[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.readStates(projectSlug)
+      .then((resp) => {
+        if (!cancelled) setReadStates(resp.states);
+      })
+      .catch(() => {
+        if (!cancelled) setReadStates(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectSlug]);
 
   const regular = areas.filter((a) => !a.is_cross_cutting);
   const crossCutting = areas.filter((a) => a.is_cross_cutting);
   const tree = buildAreaTree(regular);
   const crossCuttingTree = buildAreaTree(crossCutting);
   const visibleAgents = sidebarAgentRows(agents, showInternalAgents);
+  const unreadOwnCounts = useMemo(
+    () => readStates ? buildAreaUnreadOwnCounts(artifacts, readStates) : new Map<string, number>(),
+    [artifacts, readStates],
+  );
 
   return (
     <aside className={`sidebar${open ? " open" : ""}`}>
@@ -116,6 +140,7 @@ export function Sidebar({
           onSelectArea={onSelectArea}
           t={t}
           lang={lang}
+          unreadOwnCounts={unreadOwnCounts}
         />
       ))}
       {crossCuttingTree.length > 0 && (
@@ -132,6 +157,7 @@ export function Sidebar({
               onSelectArea={onSelectArea}
               t={t}
               lang={lang}
+              unreadOwnCounts={unreadOwnCounts}
             />
           ))}
         </>
@@ -148,7 +174,7 @@ export function Sidebar({
               style={{ color: "var(--fg-3)", cursor: "default" }}
             >
               <Check className="lucide" />
-              <span>Task</span>
+              <span>{t("nav.tasks")}</span>
               <span className="side-item__count">{t("sidebar.type_locked_badge")}</span>
             </div>
           </Tooltip>
@@ -173,10 +199,6 @@ export function Sidebar({
                   >
                     <Icon className="lucide" />
                     <span className="side-item__label">{label}</span>
-                    <Lock
-                      className="side-item__taxonomy side-item__taxonomy--fixed"
-                      aria-label={t("sidebar.type_fixed_hint")}
-                    />
                     <span className="side-item__count">{count}</span>
                   </button>
                 </Tooltip>
@@ -234,13 +256,15 @@ function AreaTreeNode({
   onSelectArea,
   t,
   lang,
+  unreadOwnCounts,
 }: {
   node: AreaNode;
   level: number;
   selectedArea: string | null;
   onSelectArea: (slug: string | null) => void;
-  t: (key: string) => string;
+  t: (key: string, ...args: Array<string | number>) => string;
   lang: string;
+  unreadOwnCounts: ReadonlyMap<string, number>;
 }) {
   const selectedInside = containsSelected(node, selectedArea);
   // Default closed keeps the eight-domain taxonomy scannable; selected
@@ -249,6 +273,7 @@ function AreaTreeNode({
   const hasChildren = node.children.length > 0;
   const active = selectedArea === node.slug;
   const subtreeCount = subtreeArtifactCount(node);
+  const unreadCount = subtreeUnreadCount(node, unreadOwnCounts);
   const empty = subtreeCount === 0;
   const indent = { paddingLeft: 8 + level * 14 } as React.CSSProperties;
   const fixed = isFixedTaxonomyArea(node.slug);
@@ -302,18 +327,16 @@ function AreaTreeNode({
           )}
           <AreaIcon className="lucide side-item__area-icon" />
           <span className="side-item__label">{areaLabel}</span>
-          {fixed ? (
-            <Lock
-              className="side-item__taxonomy side-item__taxonomy--fixed"
-              aria-label={taxonomyHint}
-            />
-          ) : (
+          {!fixed && (
             <span
               className="side-item__taxonomy side-item__taxonomy--promoted"
               aria-label={taxonomyHint}
             />
           )}
           <span className="side-item__count">{subtreeCount}</span>
+          {unreadCount > 0 && (
+            <span className="side-item__unread">{t("sidebar.unread_count", unreadCount)}</span>
+          )}
         </button>
       </Tooltip>
       {hasChildren && expanded && node.children.map((child) => (
@@ -325,6 +348,7 @@ function AreaTreeNode({
           onSelectArea={onSelectArea}
           t={t}
           lang={lang}
+          unreadOwnCounts={unreadOwnCounts}
         />
       ))}
     </>
