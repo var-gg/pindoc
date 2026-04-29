@@ -101,7 +101,7 @@ type runtimeStatusOutput struct {
 	DBHealthy bool `json:"db_healthy"`
 
 	// Notice nudges callers toward the most common interpretation of a
-	// toolset_version mismatch — restart the session.
+	// toolset_version mismatch — refresh/restart the MCP session.
 	Notice string `json:"notice,omitempty"`
 }
 
@@ -153,7 +153,7 @@ func RegisterRuntimeStatus(server *sdk.Server, deps Deps) {
 				Transport:      deps.Transport,
 				GoVersion:      runtime.Version(),
 				DBHealthy:      dbHealthy,
-				Notice:         "Diagnostic snapshot is read-only. toolset_version mismatch between this response and the client schema cache means the catalog grew — restart the MCP session.",
+				Notice:         "Diagnostic snapshot is read-only. toolset_version mismatch between this response and the client schema cache means the tool catalog or schema changed — refresh ToolSearch or restart the MCP session.",
 			}, nil
 		},
 	)
