@@ -124,10 +124,12 @@ func TestApplyTaskQueueCompact(t *testing.T) {
 			SourceSemantics:       taskQueueSemantics,
 			StatusFilter:          "pending",
 			AssigneeFilteredCount: 10,
+			AssigneeOpenCount:     7,
 			ProjectTotalCount:     100,
 			TotalCount:            10,
 			PendingCount:          7,
 			CountDeprecationNote:  "legacy",
+			CountLegend:           taskQueueCountLegend(),
 			StatusCounts:          map[string]int{"open": 5, taskStatusMissing: 2, "claimed_done": 3},
 			AreaCounts:            map[string]int{"ui": 4, "mcp": 6},
 			PriorityCounts:        map[string]int{"p2": 3},
@@ -159,8 +161,8 @@ func TestApplyTaskQueueCompact(t *testing.T) {
 		if out.StatusCounts != nil || out.AreaCounts != nil || out.PriorityCounts != nil || out.WarningCounts != nil {
 			t.Fatalf("compact must drop status/area/priority/warning maps; got %+v", out)
 		}
-		if out.TotalCount != 10 || out.PendingCount != 7 || out.AssigneeFilteredCount != 10 || out.ProjectTotalCount != 100 {
-			t.Fatalf("compact must preserve totals; got total=%d pending=%d assignee=%d project=%d", out.TotalCount, out.PendingCount, out.AssigneeFilteredCount, out.ProjectTotalCount)
+		if out.TotalCount != 10 || out.PendingCount != 7 || out.AssigneeOpenCount != 7 || out.AssigneeFilteredCount != 10 || out.ProjectTotalCount != 100 {
+			t.Fatalf("compact must preserve totals; got total=%d pending=%d open=%d assignee=%d project=%d", out.TotalCount, out.PendingCount, out.AssigneeOpenCount, out.AssigneeFilteredCount, out.ProjectTotalCount)
 		}
 		if len(out.Items) != 1 {
 			t.Fatalf("compact must preserve items; got %d", len(out.Items))
@@ -177,7 +179,7 @@ func TestApplyTaskQueueCompact(t *testing.T) {
 				t.Fatalf("compact JSON must not contain %s; got %s", omitted, body)
 			}
 		}
-		for _, kept := range []string{`"total_count":10`, `"pending_count":7`, `"assignee_filtered_count":10`, `"project_total_count":100`, `"compact":true`} {
+		for _, kept := range []string{`"total_count":10`, `"pending_count":7`, `"assignee_open_count":7`, `"assignee_filtered_count":10`, `"project_total_count":100`, `"count_legend"`, `"compact":true`} {
 			if !strings.Contains(body, kept) {
 				t.Fatalf("compact JSON missing %s; got %s", kept, body)
 			}
@@ -187,4 +189,19 @@ func TestApplyTaskQueueCompact(t *testing.T) {
 	t.Run("nil receiver is safe", func(t *testing.T) {
 		applyTaskQueueCompact(nil, true) // should not panic
 	})
+}
+
+func TestTaskQueueCountLegendNamesCountSemantics(t *testing.T) {
+	legend := taskQueueCountLegend()
+	for _, key := range []string{"assignee_filtered_count", "assignee_open_count", "project_total_count", "total_count", "pending_count", "items"} {
+		if strings.TrimSpace(legend[key]) == "" {
+			t.Fatalf("legend missing %s in %+v", key, legend)
+		}
+	}
+	if !strings.Contains(legend["assignee_open_count"], "missing or open") {
+		t.Fatalf("assignee_open_count legend should explain pending semantics: %q", legend["assignee_open_count"])
+	}
+	if !strings.Contains(legend["pending_count"], "assignee_open_count") {
+		t.Fatalf("pending_count legend should point at assignee_open_count: %q", legend["pending_count"])
+	}
 }

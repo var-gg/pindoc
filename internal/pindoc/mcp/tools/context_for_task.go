@@ -136,6 +136,10 @@ type contextForTaskOutput struct {
 	// description that the agent should probably update them instead of
 	// creating a new artifact. Empty when nothing is that close.
 	CandidateUpdates []CandidateUpdate `json:"candidate_updates,omitempty"`
+	// TemplateHints gives the target_type's required H2 slots and aliases
+	// before the agent drafts an artifact. This mirrors artifact.propose
+	// preflight without changing the validator contract.
+	TemplateHints map[string]TemplateHint `json:"template_hints,omitempty"`
 	// Stale flags landings that may be out-of-date. Phase 11c uses a
 	// simple updated_at age heuristic; later phases add pin-diff checks.
 	Stale []StaleSignal `json:"stale,omitempty"`
@@ -231,11 +235,13 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 				ruleLimit = 20
 			}
 			recentChangeGroups := recentChangeGroupsForTask(ctx, deps, scope.ProjectSlug, in)
+			templateHints := templateHintsForTypes(ctx, deps, scope.ProjectSlug, []string{targetType})
 			if deps.Embedder == nil {
 				applicableRules := loadApplicableRulesForContext(ctx, deps, scope.ProjectSlug, scope.ProjectLocale, firstAreaFilter(in.Areas), targetType, ruleLimit)
 				return nil, contextForTaskOutput{
 					TaskDescription:    in.TaskDescription,
 					Notice:             "embedder not configured on this server; context.for_task disabled",
+					TemplateHints:      templateHints,
 					RecentChangeGroups: recentChangeGroups,
 					ApplicableRules:    applicableRules,
 					CallerInFlight:     callerInFlight,
@@ -298,6 +304,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 				TaskDescription:    in.TaskDescription,
 				Landings:           []ContextLanding{},
 				SuggestedAreas:     []AreaSuggestion{},
+				TemplateHints:      templateHints,
 				RecentChangeGroups: recentChangeGroups,
 				CallerInFlight:     callerInFlight,
 			}

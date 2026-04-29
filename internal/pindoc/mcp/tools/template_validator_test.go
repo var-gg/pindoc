@@ -158,6 +158,52 @@ func TestTemplateSelfHealHintsForStructureFailures(t *testing.T) {
 	}
 }
 
+func TestTemplateHintsForTypesExposeRequiredH2Aliases(t *testing.T) {
+	hints := templateHintsForTypes(context.Background(), Deps{}, "", []string{"Analysis"})
+	analysis, ok := hints["Analysis"]
+	if !ok {
+		t.Fatalf("Analysis template hint missing: %+v", hints)
+	}
+	if analysis.TemplateSlug != "_template_analysis" {
+		t.Fatalf("template slug = %q, want _template_analysis", analysis.TemplateSlug)
+	}
+	if len(analysis.RequiredH2) != 1 || analysis.RequiredH2[0].Label != "TL;DR" {
+		t.Fatalf("required_h2 = %+v, want TL;DR slot", analysis.RequiredH2)
+	}
+	for _, wantAlias := range []string{"TL", "요약"} {
+		if !containsExactString(analysis.RequiredH2[0].Aliases, wantAlias) {
+			t.Fatalf("aliases %v missing %q", analysis.RequiredH2[0].Aliases, wantAlias)
+		}
+	}
+}
+
+func TestTemplateHintsForAllArtifactTypesIncludesTierABTypes(t *testing.T) {
+	hints := templateHintsForAllArtifactTypes(context.Background(), Deps{}, "")
+	for artifactType := range validArtifactTypes {
+		hint, ok := hints[artifactType]
+		if !ok {
+			t.Fatalf("template_hints missing %s in %+v", artifactType, hints)
+		}
+		if hint.ArtifactType != artifactType {
+			t.Fatalf("%s hint artifact_type = %q", artifactType, hint.ArtifactType)
+		}
+	}
+}
+
+func TestAnalysisWithTLDRPassesStructureOnFirstTry(t *testing.T) {
+	in := artifactProposeInput{
+		Type:         "Analysis",
+		Title:        "analysis first draft",
+		BodyMarkdown: "## TL;DR\n\nThe important result is stated first.\n\n## Details\n\nSupporting notes.",
+		AreaSlug:     "mcp",
+		AuthorID:     "test-agent",
+	}
+	_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
+	if hasCodePrefix(failed, "MISSING_H2:") {
+		t.Fatalf("Analysis draft with TL;DR should not fail H2 validation: %v", failed)
+	}
+}
+
 func hasCodePrefix(codes []string, prefix string) bool {
 	for _, code := range codes {
 		if strings.HasPrefix(code, prefix) {
@@ -170,6 +216,15 @@ func hasCodePrefix(codes []string, prefix string) bool {
 func containsSubstring(values []string, needle string) bool {
 	for _, value := range values {
 		if strings.Contains(value, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsExactString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
 			return true
 		}
 	}

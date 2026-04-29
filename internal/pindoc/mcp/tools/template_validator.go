@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 
@@ -30,6 +31,17 @@ import (
 type validatorHints struct {
 	RequiredH2       []string
 	RequiredKeywords []string
+}
+
+// TemplateHint is the agent-facing projection of the same template /
+// validator metadata used by artifact.propose preflight. It is advisory:
+// callers can shape a first draft from it, while the actual validator
+// contract remains enforced by preflight.
+type TemplateHint struct {
+	ArtifactType     string           `json:"artifact_type,omitempty"`
+	TemplateSlug     string           `json:"template_slug,omitempty"`
+	RequiredH2       []ExpectedH2Slot `json:"required_h2,omitempty"`
+	RequiredKeywords []string         `json:"required_keywords,omitempty"`
 }
 
 var (
@@ -157,4 +169,63 @@ func loadTemplateHints(ctx context.Context, deps Deps, projectSlug, artType stri
 		return nil
 	}
 	return parseValidatorHints(body)
+}
+
+func templateHintsForTypes(ctx context.Context, deps Deps, projectSlug string, artifactTypes []string) map[string]TemplateHint {
+	if len(artifactTypes) == 0 {
+		return nil
+	}
+	out := map[string]TemplateHint{}
+	seen := map[string]struct{}{}
+	for _, artifactType := range artifactTypes {
+		artifactType = strings.TrimSpace(artifactType)
+		if artifactType == "" {
+			continue
+		}
+		key := strings.ToLower(artifactType)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		if hint, ok := templateHintForType(ctx, deps, projectSlug, artifactType); ok {
+			out[artifactType] = hint
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func templateHintsForAllArtifactTypes(ctx context.Context, deps Deps, projectSlug string) map[string]TemplateHint {
+	artifactTypes := make([]string, 0, len(validArtifactTypes))
+	for artifactType := range validArtifactTypes {
+		artifactTypes = append(artifactTypes, artifactType)
+	}
+	sort.Strings(artifactTypes)
+	return templateHintsForTypes(ctx, deps, projectSlug, artifactTypes)
+}
+
+func templateHintForType(ctx context.Context, deps Deps, projectSlug, artifactType string) (TemplateHint, bool) {
+	if _, ok := validArtifactTypes[artifactType]; !ok {
+		return TemplateHint{}, false
+	}
+	validator := getValidatorHints(ctx, deps, projectSlug, artifactType)
+	slots := requiredH2SlotsFromHints(artifactType, validator)
+	requiredH2 := make([]ExpectedH2Slot, 0, len(slots))
+	for _, slot := range slots {
+		requiredH2 = append(requiredH2, ExpectedH2Slot{
+			Label:   slot.Label,
+			Aliases: aliasesWithoutLabel(slot.Label, slot.Aliases),
+		})
+	}
+	hint := TemplateHint{
+		ArtifactType: artifactType,
+		TemplateSlug: templateSlugForType(artifactType),
+		RequiredH2:   requiredH2,
+	}
+	if validator != nil && len(validator.RequiredKeywords) > 0 {
+		hint.RequiredKeywords = append([]string{}, validator.RequiredKeywords...)
+	}
+	return hint, true
 }

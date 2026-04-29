@@ -77,14 +77,17 @@ type taskQueueOutput struct {
 	StatusFilter    string `json:"status_filter"`
 
 	// AssigneeFilteredCount is computed after area / priority /
-	// assignee filters and before status filtering. ProjectTotalCount is
-	// the unfiltered active Task count for the project. The legacy
+	// assignee filters and before status filtering. AssigneeOpenCount is
+	// the open+missing subset after those same filters. ProjectTotalCount
+	// is the unfiltered active Task count for the project. The legacy
 	// total_count / pending_count fields remain for old clients.
-	AssigneeFilteredCount int    `json:"assignee_filtered_count"`
-	ProjectTotalCount     int    `json:"project_total_count"`
-	TotalCount            int    `json:"total_count"`
-	PendingCount          int    `json:"pending_count"`
-	CountDeprecationNote  string `json:"count_deprecation_notice,omitempty"`
+	AssigneeFilteredCount int               `json:"assignee_filtered_count"`
+	AssigneeOpenCount     int               `json:"assignee_open_count"`
+	ProjectTotalCount     int               `json:"project_total_count"`
+	TotalCount            int               `json:"total_count"`
+	PendingCount          int               `json:"pending_count"`
+	CountDeprecationNote  string            `json:"count_deprecation_notice,omitempty"`
+	CountLegend           map[string]string `json:"count_legend,omitempty"`
 
 	StatusCounts   map[string]int `json:"status_counts,omitempty"`
 	AreaCounts     map[string]int `json:"area_counts,omitempty"`
@@ -120,8 +123,11 @@ checkboxes. When the caller is an agent querying its own assignee queue,
 the response may include attention for Tasks idle longer than
 PINDOC_STUCK_THRESHOLD_HOURS (default 24). Count fields are explicit:
 assignee_filtered_count is after optional area/priority/assignee filters,
-while project_total_count is the active Task total for the whole project.
-Legacy total_count and pending_count remain for backward compatibility.
+assignee_open_count is the filtered open+missing_status queue (same as
+legacy pending_count), and project_total_count is the active Task total
+for the whole project. Legacy total_count and pending_count remain for
+backward compatibility; count_legend repeats these meanings in the
+response.
 `),
 		},
 		func(ctx context.Context, p *auth.Principal, in taskQueueInput) (*sdk.CallToolResult, taskQueueOutput, error) {
@@ -243,15 +249,18 @@ Legacy total_count and pending_count remain for backward compatibility.
 			for _, n := range statusCounts {
 				total += n
 			}
+			assigneeOpenCount := statusCounts["open"] + statusCounts[taskStatusMissing]
 
 			out := taskQueueOutput{
 				SourceSemantics:       taskQueueSemantics,
 				StatusFilter:          statusFilter,
 				AssigneeFilteredCount: total,
+				AssigneeOpenCount:     assigneeOpenCount,
 				ProjectTotalCount:     projectTotalCount,
 				TotalCount:            total,
-				PendingCount:          statusCounts["open"] + statusCounts[taskStatusMissing],
-				CountDeprecationNote:  "total_count is kept as an alias for assignee_filtered_count; prefer assignee_filtered_count and project_total_count for new clients.",
+				PendingCount:          assigneeOpenCount,
+				CountDeprecationNote:  "total_count is kept as an alias for assignee_filtered_count; pending_count is kept as an alias for assignee_open_count.",
+				CountLegend:           taskQueueCountLegend(),
 				StatusCounts:          statusCounts,
 				AreaCounts:            areaCounts,
 				PriorityCounts:        priorityCounts,
@@ -344,6 +353,17 @@ func taskQueueWarnings(statusBucket, body string) []string {
 
 func taskQueueNotice() string {
 	return "Reader parity: pending means task_meta.status is missing or open. Acceptance-complete open Tasks are transient reconcile candidates; pindoc.ping auto-transitions them to claimed_done. Use pindoc.scope.in_flight for unresolved [ ]/[~] checklist items."
+}
+
+func taskQueueCountLegend() map[string]string {
+	return map[string]string{
+		"assignee_filtered_count": "Task count after area, priority, and assignee filters, before status filtering.",
+		"assignee_open_count":     "Open queue count after area, priority, and assignee filters: task_meta.status missing or open. Same value as legacy pending_count.",
+		"project_total_count":     "All active Task artifacts in the project, ignoring area, priority, assignee, and status filters.",
+		"total_count":             "Legacy alias for assignee_filtered_count.",
+		"pending_count":           "Legacy alias for assignee_open_count.",
+		"items":                   "Returned rows after status filtering and limit.",
+	}
 }
 
 // applyTaskQueueCompact drops the aggregate maps when the

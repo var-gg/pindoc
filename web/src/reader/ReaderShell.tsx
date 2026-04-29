@@ -1165,6 +1165,7 @@ function TasksKanban({
             scopeLabel={scopeLabel}
             totalCount={0}
             filteredPendingCount={0}
+            allPendingCount={0}
             selectedArea={selectedArea}
             badgeFilters={badgeFilters}
             onClearAreaFilter={onClearAreaFilter}
@@ -1182,6 +1183,7 @@ function TasksKanban({
         scopeLabel={scopeLabel}
         totalCount={allList.length}
         filteredPendingCount={filteredPendingCount}
+        allPendingCount={allPendingCount}
         selectedArea={selectedArea}
         badgeFilters={badgeFilters}
         onClearAreaFilter={onClearAreaFilter}
@@ -1275,6 +1277,7 @@ function TaskBoardHeader({
   scopeLabel,
   totalCount,
   filteredPendingCount,
+  allPendingCount,
   selectedArea,
   badgeFilters,
   onClearAreaFilter,
@@ -1283,18 +1286,27 @@ function TaskBoardHeader({
   scopeLabel: string;
   totalCount: number;
   filteredPendingCount: number;
+  allPendingCount: number;
   selectedArea: string | null;
   badgeFilters: BadgeFilter[];
   onClearAreaFilter: () => void;
   onClearBadgeFilter: (key: BadgeFilterKey) => void;
 }) {
   const { t } = useI18n();
+  const hasActiveFilters = Boolean(selectedArea || badgeFilters.length > 0);
+  const primaryOpenCount = hasActiveFilters ? filteredPendingCount : allPendingCount;
+  const secondary =
+    hasActiveFilters
+      ? { label: t("tasks.header_all_open"), count: allPendingCount }
+      : allPendingCount !== totalCount
+      ? { label: t("tasks.header_all_tasks"), count: totalCount }
+      : undefined;
   return (
     <div className="task-board-head">
       <SurfaceHeader
         name="task"
-        count={selectedArea || badgeFilters.length > 0 ? filteredPendingCount : totalCount}
-        secondary={selectedArea || badgeFilters.length > 0 ? { label: t("surface.all"), count: totalCount } : undefined}
+        count={primaryOpenCount}
+        secondary={secondary}
       />
       <div className="task-filter-bar" aria-label={t("tasks.filter_bar_label")}>
         <span className="task-filter-chip task-filter-chip--locked">

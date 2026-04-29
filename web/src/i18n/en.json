@@ -188,6 +188,8 @@
   "tasks.col_claimed_done": "Completed",
   "tasks.col_no_status": "No status",
   "tasks.col_cancelled": "Cancelled",
+  "tasks.header_all_open": "all open",
+  "tasks.header_all_tasks": "all tasks",
   "tasks.summary_label": "Task status summary",
   "tasks.summary_review": "Completed",
   "tasks.summary_review_hint": "Implementation finished",

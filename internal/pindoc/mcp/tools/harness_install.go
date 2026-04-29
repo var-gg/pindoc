@@ -945,7 +945,7 @@ When this project's agent spawns a worktree-based chip / parallel sub-session:
 ### Retroactive policy
 - Ad-hoc dev work without pre-defined Task: git history acceptable for
   solo dev.
-- Public OSS / team work: retroactive Task with status="claimed_done"
+- Public OSS / team work: retroactive Task with task_meta.status: "claimed_done"
   recommended for audit trail.`
 }
 

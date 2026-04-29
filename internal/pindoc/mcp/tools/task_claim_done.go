@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -17,6 +18,12 @@ import (
 )
 
 const claimDoneAutopinDefaultLimit = 20
+
+const (
+	claimDonePinStrategyAuto      = "auto"
+	claimDonePinStrategyAllowlist = "allowlist"
+	claimDonePinStrategyExplicit  = "explicit"
+)
 
 // taskClaimDoneInput is the agent-facing shape for pindoc.task.claim_done.
 // Atomic shortcut over the two halves of "I finished implementing this
@@ -57,6 +64,18 @@ type taskClaimDoneInput struct {
 	// hex-only; empty / whitespace is treated as "no commit attached".
 	CommitSHA string `json:"commit_sha,omitempty" jsonschema:"optional 7-64 char hex commit hash that proves implementation; auto-pins changed files from the commit diff when possible"`
 
+	// PinStrategy selects how commit_sha turns into artifact_pins.
+	// "auto" (default) preserves the historical behavior and pins up to
+	// 20 changed files from the commit diff. "allowlist" pins only
+	// paths listed in changed_paths_allowlist. "explicit" disables
+	// commit-diff auto pins entirely and stores only pins[].
+	PinStrategy string `json:"pin_strategy,omitempty" jsonschema:"optional auto|allowlist|explicit; default auto preserves commit-diff auto pins"`
+
+	// ChangedPathsAllowlist limits commit-diff auto pins when
+	// pin_strategy="allowlist". Paths are matched against normalized Git
+	// changed-file paths (trimmed, backslashes converted to slashes).
+	ChangedPathsAllowlist []string `json:"changed_paths_allowlist,omitempty" jsonschema:"for pin_strategy=allowlist, only these changed paths are eligible for commit-diff auto pins"`
+
 	// Pins attaches structured implementation evidence to the artifact.
 	// Same shape as artifact.propose pins[]. Each pin lands in
 	// artifact_pins so the Reader Sidecar references panel renders it
@@ -85,6 +104,8 @@ type taskClaimDoneOutput struct {
 	PrevStatus             string   `json:"prev_status,omitempty"`
 	NewStatus              string   `json:"new_status,omitempty"`
 	CommitSHA              string   `json:"commit_sha,omitempty"`
+	PinStrategy            string   `json:"pin_strategy,omitempty"`
+	ChangedPathsAllowlist  []string `json:"changed_paths_allowlist,omitempty"`
 	PinsStored             int      `json:"pins_stored"`
 	PinsAutopinCount       int      `json:"pins_autopin_count"`
 	PinsExplicitCount      int      `json:"pins_explicit_count"`
@@ -103,7 +124,7 @@ func RegisterTaskClaimDone(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.task.claim_done",
-			Description: "Mark a Task implementation complete. Toggles every unchecked acceptance item ('- [ ]') to '[x]' and sets task_meta.status='claimed_done' in one atomic revision. Already-resolved markers ([x]/[~]/[-]) are preserved — partial / deferred judgment calls are not overwritten. Bypasses search_receipt gating (operational metadata lane). When the Task involved code/doc/config changes, pass commit_sha (7-64 hex chars, prefixed onto commit_msg as '[<short>] ...') to auto-pin changed files from the commit diff (default limit 20), and/or pins[] (same shape as artifact.propose pins[]) so the Reader references panel renders the implementation source without an add_pin round-trip; duplicate pins are silently skipped. Reason is optional (stored as commit_msg).",
+			Description: "Mark a Task implementation complete. Toggles every unchecked acceptance item ('- [ ]') to '[x]' and sets task_meta.status='claimed_done' in one atomic revision. Already-resolved markers ([x]/[~]/[-]) are preserved — partial / deferred judgment calls are not overwritten. Bypasses search_receipt gating (operational metadata lane). When the Task involved code/doc/config changes, pass commit_sha (7-64 hex chars, prefixed onto commit_msg as '[<short>] ...') and choose pin_strategy: auto (default) auto-pins changed files from the commit diff up to 20, allowlist auto-pins only changed_paths_allowlist entries, explicit disables commit-diff auto pins and stores only pins[]. pins[] uses the same shape as artifact.propose pins[]; duplicate pins are silently skipped. Reason is optional (stored as commit_msg).",
 		},
 		func(ctx context.Context, p *auth.Principal, in taskClaimDoneInput) (*sdk.CallToolResult, taskClaimDoneOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -174,6 +195,24 @@ func claimOneTaskDone(
 			ErrorCode: sCode,
 			Failed:    []string{sCode},
 			Checklist: []string{sMsg},
+		}, nil
+	}
+	pinStrategy, psCode, psMsg := normalizeClaimDonePinStrategy(in.PinStrategy)
+	if psCode != "" {
+		return taskClaimDoneOutput{
+			Status:    "not_ready",
+			ErrorCode: psCode,
+			Failed:    []string{psCode},
+			Checklist: []string{psMsg},
+		}, nil
+	}
+	changedPathsAllowlist := normalizeClaimDoneChangedPathsAllowlist(in.ChangedPathsAllowlist)
+	if pinStrategy == claimDonePinStrategyAllowlist && len(changedPathsAllowlist) == 0 {
+		return taskClaimDoneOutput{
+			Status:    "not_ready",
+			ErrorCode: "CLAIM_DONE_PIN_ALLOWLIST_EMPTY",
+			Failed:    []string{"CLAIM_DONE_PIN_ALLOWLIST_EMPTY"},
+			Checklist: []string{"pin_strategy=allowlist requires at least one non-empty changed_paths_allowlist entry"},
 		}, nil
 	}
 	pinsValidated, pCode, pMsg := validateClaimDonePins(in.Pins)
@@ -295,12 +334,16 @@ func claimOneTaskDone(
 		"changed_acceptance_count": changedCount,
 		"prev_status":              prevStatus,
 		"new_status":               "claimed_done",
+		"pin_strategy":             pinStrategy,
 	}
 	if commitSHA != "" {
 		shapePayload["commit_sha"] = commitSHA
 	}
+	if len(changedPathsAllowlist) > 0 {
+		shapePayload["changed_paths_allowlist"] = changedPathsAllowlist
+	}
 
-	autoPins, autoWarnings := buildClaimDoneAutoPins(ctx, deps, projectID, commitSHA, claimDoneAutopinDefaultLimit)
+	autoPins, autoWarnings := buildClaimDoneAutoPins(ctx, deps, projectID, commitSHA, claimDoneAutopinDefaultLimit, pinStrategy, changedPathsAllowlist)
 	pinWarnings := append([]string{}, autoWarnings...)
 	pinSources := make([]claimDonePinWithSource, 0, len(pinsValidated)+len(autoPins))
 	for _, pin := range pinsValidated {
@@ -449,9 +492,10 @@ func claimOneTaskDone(
 			'commit_sha',               NULLIF($9::text, ''),
 			'pins_stored',              $10::int,
 			'pins_explicit_count',      $11::int,
-			'pins_autopin_count',       $12::int
+			'pins_autopin_count',       $12::int,
+			'pin_strategy',             $13::text
 		))
-	`, projectID, artifactID, newRev, currentSlug, effAuthorID, commitMsg, changedCount, prevStatus, commitSHA, pinsStored, pinsExplicitCount, pinsAutopinCount); err != nil {
+	`, projectID, artifactID, newRev, currentSlug, effAuthorID, commitMsg, changedCount, prevStatus, commitSHA, pinsStored, pinsExplicitCount, pinsAutopinCount, pinStrategy); err != nil {
 		return taskClaimDoneOutput{}, fmt.Errorf("emit task_claimed_done event: %w", err)
 	}
 
@@ -475,6 +519,8 @@ func claimOneTaskDone(
 		PrevStatus:             prevStatus,
 		NewStatus:              "claimed_done",
 		CommitSHA:              commitSHA,
+		PinStrategy:            pinStrategy,
+		ChangedPathsAllowlist:  changedPathsAllowlist,
 		PinsStored:             pinsStored,
 		PinsExplicitCount:      pinsExplicitCount,
 		PinsAutopinCount:       pinsAutopinCount,
@@ -535,8 +581,54 @@ func prefixClaimDoneCommitMsg(commitMsg, commitSHA string) string {
 	return fmt.Sprintf("[%s] %s", short, commitMsg)
 }
 
-func buildClaimDoneAutoPins(ctx context.Context, deps Deps, projectID, commitSHA string, limit int) ([]ArtifactPinInput, []string) {
+func normalizeClaimDonePinStrategy(raw string) (string, string, string) {
+	v := strings.TrimSpace(strings.ToLower(raw))
+	if v == "" {
+		return claimDonePinStrategyAuto, "", ""
+	}
+	switch v {
+	case claimDonePinStrategyAuto, claimDonePinStrategyAllowlist, claimDonePinStrategyExplicit:
+		return v, "", ""
+	default:
+		return v, "CLAIM_DONE_PIN_STRATEGY_INVALID",
+			"pin_strategy must be one of auto, allowlist, explicit"
+	}
+}
+
+func normalizeClaimDoneChangedPathsAllowlist(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(raw))
+	for _, value := range raw {
+		path := normalizeClaimDoneChangedPath(value)
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func normalizeClaimDoneChangedPath(path string) string {
+	path = strings.TrimSpace(strings.ReplaceAll(path, "\\", "/"))
+	for strings.HasPrefix(path, "./") {
+		path = strings.TrimPrefix(path, "./")
+	}
+	return path
+}
+
+func buildClaimDoneAutoPins(ctx context.Context, deps Deps, projectID, commitSHA string, limit int, pinStrategy string, changedPathsAllowlist []string) ([]ArtifactPinInput, []string) {
 	if strings.TrimSpace(commitSHA) == "" {
+		return nil, nil
+	}
+	if pinStrategy == claimDonePinStrategyExplicit {
 		return nil, nil
 	}
 	if limit <= 0 {
@@ -561,7 +653,7 @@ func buildClaimDoneAutoPins(ctx context.Context, deps Deps, projectID, commitSHA
 		}
 		files, err := provider.ChangedFiles(ctx, repo, commitSHA)
 		if err == nil {
-			return claimDoneAutoPinsFromChangedFiles(files, commitSHA, repo, limit)
+			return claimDoneAutoPinsFromChangedFiles(files, commitSHA, repo, limit, changedPathsAllowlist)
 		}
 		switch {
 		case errors.Is(err, pgit.ErrCommitNotFound):
@@ -578,17 +670,29 @@ func buildClaimDoneAutoPins(ctx context.Context, deps Deps, projectID, commitSHA
 	return nil, []string{lastWarning}
 }
 
-func claimDoneAutoPinsFromChangedFiles(files []pgit.ChangedFile, commitSHA string, repo pgit.Repo, limit int) ([]ArtifactPinInput, []string) {
+func claimDoneAutoPinsFromChangedFiles(files []pgit.ChangedFile, commitSHA string, repo pgit.Repo, limit int, changedPathsAllowlist []string) ([]ArtifactPinInput, []string) {
 	if limit <= 0 {
 		limit = claimDoneAutopinDefaultLimit
+	}
+	allowlisted := map[string]struct{}{}
+	for _, path := range changedPathsAllowlist {
+		path = normalizeClaimDoneChangedPath(path)
+		if path != "" {
+			allowlisted[path] = struct{}{}
+		}
 	}
 	out := make([]ArtifactPinInput, 0, min(len(files), limit))
 	warnings := []string{}
 	validFiles := 0
 	for _, file := range files {
-		path := strings.TrimSpace(file.Path)
+		path := normalizeClaimDoneChangedPath(file.Path)
 		if path == "" {
 			continue
+		}
+		if len(allowlisted) > 0 {
+			if _, ok := allowlisted[path]; !ok {
+				continue
+			}
 		}
 		validFiles++
 		if len(out) >= limit {

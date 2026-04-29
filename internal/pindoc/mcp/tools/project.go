@@ -47,12 +47,13 @@ type projectCurrentOutput struct {
 	// Locale is a compatibility alias for PrimaryLanguage. Locale is no
 	// longer part of project identity after task-canonical-locale-
 	// migration; clients should treat project_slug as the canonical key.
-	Locale         string        `json:"locale,omitempty"`
-	AreasCount     int           `json:"areas_count,omitempty"`
-	ArtifactsCount int           `json:"artifacts_count,omitempty"`
-	CreatedAt      time.Time     `json:"created_at,omitzero"`
-	Rendering      RenderingCaps `json:"rendering,omitzero"`
-	Capabilities   Capabilities  `json:"capabilities,omitzero"`
+	Locale         string                  `json:"locale,omitempty"`
+	AreasCount     int                     `json:"areas_count,omitempty"`
+	ArtifactsCount int                     `json:"artifacts_count,omitempty"`
+	CreatedAt      time.Time               `json:"created_at,omitzero"`
+	Rendering      RenderingCaps           `json:"rendering,omitzero"`
+	Capabilities   Capabilities            `json:"capabilities,omitzero"`
+	TemplateHints  map[string]TemplateHint `json:"template_hints,omitempty"`
 }
 
 // Capabilities tells the agent which optional features the server
@@ -236,6 +237,7 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 			out.Status = "accepted"
 			out.Rendering = pindocRenderingCaps
 			out.Capabilities = buildCapabilities(deps, princ, deriveMultiProject(ctx, deps, princ))
+			out.TemplateHints = templateHintsForAllArtifactTypes(ctx, deps, scope.ProjectSlug)
 			return nil, out, nil
 		},
 	)

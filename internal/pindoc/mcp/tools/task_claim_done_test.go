@@ -156,13 +156,35 @@ func TestPrefixClaimDoneCommitMsg(t *testing.T) {
 	}
 }
 
+func TestNormalizeClaimDonePinStrategy(t *testing.T) {
+	cases := []struct {
+		in       string
+		want     string
+		wantCode string
+	}{
+		{"", claimDonePinStrategyAuto, ""},
+		{" auto ", claimDonePinStrategyAuto, ""},
+		{"ALLOWLIST", claimDonePinStrategyAllowlist, ""},
+		{"explicit", claimDonePinStrategyExplicit, ""},
+		{"manual", "manual", "CLAIM_DONE_PIN_STRATEGY_INVALID"},
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			got, code, _ := normalizeClaimDonePinStrategy(c.in)
+			if got != c.want || code != c.wantCode {
+				t.Fatalf("normalize = (%q, %q), want (%q, %q)", got, code, c.want, c.wantCode)
+			}
+		})
+	}
+}
+
 func TestClaimDoneAutoPinsFromChangedFiles(t *testing.T) {
 	files := []pgit.ChangedFile{
 		{Path: "internal/pindoc/mcp/tools/task_claim_done.go"},
 		{Path: "web/src/api/client.ts"},
 		{Path: "docs/notes.md"},
 	}
-	pins, warnings := claimDoneAutoPinsFromChangedFiles(files, "abc1234", pgit.Repo{ID: "repo-1", Name: "origin"}, 2)
+	pins, warnings := claimDoneAutoPinsFromChangedFiles(files, "abc1234", pgit.Repo{ID: "repo-1", Name: "origin"}, 2, nil)
 	if len(pins) != 2 {
 		t.Fatalf("pins len = %d, want 2", len(pins))
 	}
@@ -174,6 +196,48 @@ func TestClaimDoneAutoPinsFromChangedFiles(t *testing.T) {
 	}
 	if len(warnings) != 1 || warnings[0] != "PINS_AUTOPIN_TRUNCATED:1" {
 		t.Fatalf("warnings = %v, want truncation warning", warnings)
+	}
+}
+
+func TestClaimDoneAutoPinsFromChangedFilesAllowlist(t *testing.T) {
+	files := []pgit.ChangedFile{
+		{Path: "internal/pindoc/mcp/tools/task_claim_done.go"},
+		{Path: "web/src/api/client.ts"},
+		{Path: "docs/notes.md"},
+	}
+	pins, warnings := claimDoneAutoPinsFromChangedFiles(files, "abc1234", pgit.Repo{Name: "origin"}, 20, []string{
+		`.\web\src\api\client.ts`,
+		"missing/file.go",
+	})
+	if len(pins) != 1 {
+		t.Fatalf("pins len = %d, want 1 (%+v)", len(pins), pins)
+	}
+	if pins[0].Path != "web/src/api/client.ts" {
+		t.Fatalf("allowlist selected %q, want web/src/api/client.ts", pins[0].Path)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("allowlist should not warn for non-allowlisted changes; got %v", warnings)
+	}
+}
+
+func TestNormalizeClaimDoneChangedPathsAllowlist(t *testing.T) {
+	got := normalizeClaimDoneChangedPathsAllowlist([]string{
+		`.\web\src\api\client.ts`,
+		"web/src/api/client.ts",
+		" internal/pindoc/mcp/tools/task_claim_done.go ",
+		"",
+	})
+	want := []string{
+		"internal/pindoc/mcp/tools/task_claim_done.go",
+		"web/src/api/client.ts",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got[%d] = %q, want %q (all=%v)", i, got[i], want[i], got)
+		}
 	}
 }
 
