@@ -71,7 +71,7 @@ export type Project = {
   description?: string;
   color?: string;
   primary_language: string;
-  sensitive_ops?: "auto" | "confirm";
+  sensitive_ops?: ProjectSensitiveOps;
   current_role?: "owner" | "editor" | "viewer";
   // Compatibility alias for primary_language. Locale is metadata, not a
   // route or identity key.
@@ -82,6 +82,17 @@ export type Project = {
   capabilities?: {
     review_queue_supported?: boolean;
   };
+};
+
+export type ProjectSensitiveOps = "auto" | "confirm";
+
+export type ProjectSettingsPatchInput = {
+  sensitive_ops: ProjectSensitiveOps;
+};
+
+export type ProjectSettingsPatchResp = {
+  status: "ok";
+  sensitive_ops: ProjectSensitiveOps;
 };
 
 export type ProjectListItem = {
@@ -943,6 +954,30 @@ export const api = {
 
   // Project-scoped
   project: (project: string) => j<Project>(p(project)),
+  projectSettingsPatch: async (
+    project: string,
+    input: ProjectSettingsPatchInput,
+  ): Promise<ProjectSettingsPatchResp> => {
+    const res = await fetch(`${p(project)}/settings`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      let parsed: { error_code?: string; message?: string } | null = null;
+      try {
+        parsed = (await res.json()) as { error_code?: string; message?: string };
+      } catch {
+        // fall through to generic
+      }
+      const err = new Error(
+        parsed?.message ?? `${res.status} ${res.statusText}`,
+      ) as Error & { error_code?: string };
+      if (parsed?.error_code) err.error_code = parsed.error_code;
+      throw err;
+    }
+    return (await res.json()) as ProjectSettingsPatchResp;
+  },
   issueInvite: async (
     project: string,
     input: InviteIssueInput,

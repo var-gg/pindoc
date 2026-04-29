@@ -164,6 +164,7 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	// projects.slug; 404 if missing so URL shares fail loudly rather than
 	// silently leaking to the caller's current project.
 	mux.HandleFunc("GET /api/p/{project}", d.handleProjectCurrent)
+	mux.HandleFunc("PATCH /api/p/{project}/settings", d.handleProjectSettingsPatch)
 	mux.HandleFunc("GET /api/p/{project}/areas", d.handleAreas)
 	mux.HandleFunc("GET /api/p/{project}/artifacts", d.handleArtifactList)
 	mux.HandleFunc("GET /api/p/{project}/artifacts/{idOrSlug}", d.handleArtifactGet)
@@ -236,7 +237,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 func withCORS(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

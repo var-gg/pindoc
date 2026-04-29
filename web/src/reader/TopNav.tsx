@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router";
-import { Activity, AlignCenter, AlignJustify, CalendarDays, ChevronDown, CircleHelp, ExternalLink, FileText, Inbox, Languages, LogOut, Maximize2, Menu, Moon, Search, Share2, Sun, UserCircle } from "lucide-react";
+import { Activity, AlignCenter, AlignJustify, CalendarDays, ChevronDown, CircleHelp, ExternalLink, FileText, Inbox, Languages, LogOut, Maximize2, Menu, Moon, Search, Settings2, Share2, Sun, UserCircle } from "lucide-react";
 import type { ComponentType } from "react";
 import { api, type CurrentUserResp, type ProjectListItem } from "../api/client";
 import { useI18n, type Lang } from "../i18n";
@@ -62,6 +62,7 @@ export function TopNav({
   const nextLang: Lang = lang === "ko" ? "en" : "ko";
   const baseRoute = `/p/${project.slug}`;
   const canInvite = project.current_role === "owner" && Boolean(onOpenInvite);
+  const reviewQueueEnabled = project.sensitive_ops === "confirm";
   const showGraphSurface = isReaderDevSurfaceEnabled(location.search, import.meta.env.DEV);
   const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
   const [mobileSurfaceMenuOpen, setMobileSurfaceMenuOpen] = useState(false);
@@ -132,11 +133,13 @@ export function TopNav({
           <FileText className="lucide" />
           <span className="label">{t("nav.wiki_reader")}</span>
         </NavLink>
-        <NavLink to={`${baseRoute}/inbox`} className="nav__tab">
-          <Inbox className="lucide" />
-          <span className="label">{t("nav.inbox")}</span>
-          {inboxCount > 0 && <span className="count">{inboxCount}</span>}
-        </NavLink>
+        {reviewQueueEnabled && (
+          <NavLink to={`${baseRoute}/inbox`} className="nav__tab">
+            <Inbox className="lucide" />
+            <span className="label">{t("nav.inbox")}</span>
+            {inboxCount > 0 && <span className="count">{inboxCount}</span>}
+          </NavLink>
+        )}
         {showGraphSurface && (
           <NavLink to={`${baseRoute}/graph${location.search || ""}`} className="nav__tab">
             <Share2 className="lucide" />
@@ -214,11 +217,13 @@ export function TopNav({
             <FileText className="lucide" />
             <span>{t("nav.wiki_reader")}</span>
           </NavLink>
-          <NavLink to={`${baseRoute}/inbox`} className="nav-mobile-surfaces__item" onClick={() => setMobileSurfaceMenuOpen(false)}>
-            <Inbox className="lucide" />
-            <span>{t("nav.inbox")}</span>
-            {inboxCount > 0 && <span className="count">{inboxCount}</span>}
-          </NavLink>
+          {reviewQueueEnabled && (
+            <NavLink to={`${baseRoute}/inbox`} className="nav-mobile-surfaces__item" onClick={() => setMobileSurfaceMenuOpen(false)}>
+              <Inbox className="lucide" />
+              <span>{t("nav.inbox")}</span>
+              {inboxCount > 0 && <span className="count">{inboxCount}</span>}
+            </NavLink>
+          )}
           <NavLink to={`${baseRoute}/tasks`} className="nav-mobile-surfaces__item" onClick={() => setMobileSurfaceMenuOpen(false)}>
             <FileText className="lucide" />
             <span>{t("nav.tasks")}</span>
@@ -284,6 +289,7 @@ function UserProfileMenu({
   const email = user?.email ? maskEmail(user.email) : t("profile.fallback_email");
   const initials = profileInitials(user?.display_name || user?.email || project.slug);
   const canSignOut = authMode === "oauth_github";
+  const settingsHref = `/p/${project.slug}/settings`;
 
   async function handleSignOut() {
     if (!canSignOut || signingOut) return;
@@ -332,6 +338,15 @@ function UserProfileMenu({
             </div>
           </dl>
           <div className="profile-menu__actions">
+            <NavLink
+              to={settingsHref}
+              className="profile-menu__action"
+              onClick={() => setOpen(false)}
+            >
+              <Settings2 className="lucide" />
+              <span>{t("profile.project_settings")}</span>
+              <strong>{t("profile.project_settings_short")}</strong>
+            </NavLink>
             <button
               type="button"
               className="profile-menu__action"

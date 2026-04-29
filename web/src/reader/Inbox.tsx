@@ -10,12 +10,13 @@ import { ArtifactTypeChip, VisualAreaChip } from "./VisualChips";
 
 type Props = {
   projectSlug: string;
+  enabled?: boolean;
   onCountChange?: (count: number) => void;
 };
 
 type ReviewAction = "approve" | "reject";
 
-export function Inbox({ projectSlug, onCountChange }: Props) {
+export function Inbox({ projectSlug, enabled = true, onCountChange }: Props) {
   const { t } = useI18n();
   const [items, setItems] = useState<ArtifactRef[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,6 +24,13 @@ export function Inbox({ projectSlug, onCountChange }: Props) {
   const [busySlug, setBusySlug] = useState<string | null>(null);
 
   async function load() {
+    if (!enabled) {
+      setItems([]);
+      setLoading(false);
+      setError(null);
+      onCountChange?.(0);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -37,6 +45,13 @@ export function Inbox({ projectSlug, onCountChange }: Props) {
   }
 
   useEffect(() => {
+    if (!enabled) {
+      setItems([]);
+      setLoading(false);
+      setError(null);
+      onCountChange?.(0);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -55,7 +70,7 @@ export function Inbox({ projectSlug, onCountChange }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [projectSlug, onCountChange]);
+  }, [projectSlug, enabled, onCountChange]);
 
   async function review(item: ArtifactRef, action: ReviewAction) {
     setBusySlug(item.slug);
@@ -78,7 +93,7 @@ export function Inbox({ projectSlug, onCountChange }: Props) {
         <div className="inbox-surface__head">
           <SurfaceHeader name="inbox" count={items.length} />
           <Tooltip content={t("inbox.refresh")}>
-            <button type="button" className="inbox-icon-button" onClick={load} disabled={loading}>
+            <button type="button" className="inbox-icon-button" onClick={load} disabled={loading || !enabled}>
               <RefreshCw size={15} aria-hidden="true" />
               <span className="sr-only">{t("inbox.refresh")}</span>
             </button>
@@ -87,7 +102,9 @@ export function Inbox({ projectSlug, onCountChange }: Props) {
 
         {error && <div className="inbox-error">{error}</div>}
         {loading && <EmptyState message={t("inbox.loading")} />}
-        {!loading && items.length === 0 && <EmptyState message={t("wiki.stub_inbox")} />}
+        {!loading && items.length === 0 && (
+          <EmptyState message={enabled ? t("wiki.stub_inbox") : t("inbox.disabled_empty")} />
+        )}
         {!loading && items.length > 0 && (
           <div className="inbox-list">
             {items.map((item) => (

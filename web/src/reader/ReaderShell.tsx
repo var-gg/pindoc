@@ -537,6 +537,7 @@ export function ReaderShell({ view, unavailableSurface }: Props) {
 
   const { project: projectData, areas, detail, agents, users, providers, bindAddr } = state.data;
   const reload = state.reload;
+  const reviewQueueEnabled = projectData.sensitive_ops === "confirm";
   const sidecarDetail =
     unavailableSurface
       ? null
@@ -599,7 +600,7 @@ export function ReaderShell({ view, unavailableSurface }: Props) {
         onClosePalette={() => setPaletteOpen(false)}
         onToggleMenu={() => setMenuOpen((v) => !v)}
         paletteOpen={paletteOpen}
-        inboxCount={inboxCount}
+        inboxCount={reviewQueueEnabled ? inboxCount : 0}
         readerWidth={readerWidth}
         onChangeReaderWidth={changeReaderWidth}
         onOpenInvite={() => setInviteOpen(true)}
@@ -646,6 +647,7 @@ export function ReaderShell({ view, unavailableSurface }: Props) {
           onApplyAreaFilter={applyAreaFilterFromBadge}
           onSelectArea={handleSelectArea}
           onInboxCountChange={setInboxCount}
+          reviewQueueEnabled={reviewQueueEnabled}
           graphFocusSlug={graphFocusSlug}
           onGraphFocusChange={handleGraphFocusChange}
           unavailableSurface={unavailableSurface}
@@ -790,6 +792,7 @@ function Body({
   onApplyAreaFilter,
   onSelectArea,
   onInboxCountChange,
+  reviewQueueEnabled,
   graphFocusSlug,
   onGraphFocusChange,
   unavailableSurface,
@@ -818,6 +821,7 @@ function Body({
   onApplyAreaFilter: (areaSlug: string) => void;
   onSelectArea: (areaSlug: string) => void;
   onInboxCountChange: (count: number) => void;
+  reviewQueueEnabled: boolean;
   graphFocusSlug: string | null;
   onGraphFocusChange: (slug: string) => void;
   unavailableSurface?: string;
@@ -885,7 +889,15 @@ function Body({
       />
     );
   }
-  if (view === "inbox") return <Inbox projectSlug={projectSlug} onCountChange={onInboxCountChange} />;
+  if (view === "inbox") {
+    return (
+      <Inbox
+        projectSlug={projectSlug}
+        enabled={reviewQueueEnabled}
+        onCountChange={onInboxCountChange}
+      />
+    );
+  }
   if (view === "today") {
     return (
       <Today
