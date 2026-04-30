@@ -404,6 +404,7 @@ func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOp
 		return mcpServer
 	}
 	streamHandler := sdk.NewStreamableHTTPHandler(getServer, nil)
+	mcp.StartToolsetListChangedNotifier(ctx)
 	var mcpHandler http.Handler = streamHandler
 	if cfg != nil && cfg.HasAuthProvider(config.AuthProviderGitHub) {
 		if oauthSvc == nil {
@@ -496,14 +497,14 @@ func validateServerConfig(cfg *config.Config) error {
 // loopback identity binding (Decision agent-only-write-분할 +
 // task-providers-admin-ui follow-up):
 //
-//   1. server_settings.default_loopback_user_id (DB) wins when set —
-//      the operator's onboarding flow already wrote it.
-//   2. PINDOC_USER_NAME / PINDOC_USER_EMAIL env seed when (1) is empty
-//      — same first-boot semantics as PINDOC_PUBLIC_BASE_URL.
-//   3. Single non-test users row (excluding `*@example.invalid` test
-//      residue) backfills automatically — covers existing installs
-//      that predate the column without making the operator click
-//      through the onboarding form.
+//  1. server_settings.default_loopback_user_id (DB) wins when set —
+//     the operator's onboarding flow already wrote it.
+//  2. PINDOC_USER_NAME / PINDOC_USER_EMAIL env seed when (1) is empty
+//     — same first-boot semantics as PINDOC_PUBLIC_BASE_URL.
+//  3. Single non-test users row (excluding `*@example.invalid` test
+//     residue) backfills automatically — covers existing installs
+//     that predate the column without making the operator click
+//     through the onboarding form.
 //
 // Empty return value triggers the Reader-side onboarding form on the
 // next /api/config request. Anything that returns a user_id also

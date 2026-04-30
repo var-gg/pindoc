@@ -85,9 +85,11 @@ type Options struct {
 }
 
 type Server struct {
-	sdk       *sdk.Server
-	logger    *slog.Logger
-	telemetry *telemetry.Store
+	sdk                 *sdk.Server
+	logger              *slog.Logger
+	telemetry           *telemetry.Store
+	toolsetListChanged  *toolsetListChangedNotifier
+	toolsetChangeNotice toolsetChangeNotice
 }
 
 func NewServer(opts Options) (*Server, error) {
@@ -197,10 +199,25 @@ func NewServer(opts Options) (*Server, error) {
 	// Phase F revision-shapes — queryable scope graph.
 	tools.RegisterScopeInFlight(s, deps)
 
+	toolsetNotice, err := recordToolsetVersion(context.Background(), opts.DB, tools.ToolsetVersion())
+	if err != nil {
+		opts.Logger.Warn("toolset version state update failed; list_changed notification disabled",
+			"toolset_version", tools.ToolsetVersion(),
+			"error", err,
+		)
+	} else if toolsetNotice.Changed {
+		opts.Logger.Info("toolset version changed; scheduling tools/list_changed notification",
+			"previous_toolset_version", toolsetNotice.Previous,
+			"current_toolset_version", toolsetNotice.Current,
+		)
+	}
+
 	return &Server{
-		sdk:       s,
-		logger:    opts.Logger,
-		telemetry: opts.Telemetry,
+		sdk:                 s,
+		logger:              opts.Logger,
+		telemetry:           opts.Telemetry,
+		toolsetListChanged:  &toolsetListChangedNotifier{notice: toolsetNotice},
+		toolsetChangeNotice: toolsetNotice,
 	}, nil
 }
 
@@ -235,7 +252,20 @@ func (s *Server) Run(ctx context.Context, transport sdk.Transport) error {
 		"tools", tools.RegisteredTools,
 		"toolset_version", tools.ToolsetVersion(),
 	)
+	s.StartToolsetListChangedNotifier(ctx)
 	return s.sdk.Run(ctx, transport)
+}
+
+// StartToolsetListChangedNotifier schedules one standards-compliant
+// notifications/tools/list_changed push when this process observes that the
+// persisted toolset_version changed since the previous server version. It is
+// transport-neutral: stdio uses it from Run, while streamable_http starts it
+// after wiring the shared SDK server into the HTTP handler.
+func (s *Server) StartToolsetListChangedNotifier(ctx context.Context) {
+	if s == nil || s.toolsetListChanged == nil {
+		return
+	}
+	s.toolsetListChanged.start(ctx, s.sdk, s.logger)
 }
 
 // SDK returns the underlying go-sdk Server for callers that need to plug

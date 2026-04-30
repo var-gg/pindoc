@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -22,6 +23,16 @@ import (
 // never inspect raw HTTP headers — both responsibilities belong to
 // the resolver chain (Decision principal-resolver-architecture).
 type Handler[I, O any] func(ctx context.Context, p *auth.Principal, in I) (*sdk.CallToolResult, O, error)
+
+type toolReannounce struct {
+	name     string
+	register func()
+}
+
+var (
+	toolReannounceMu       sync.RWMutex
+	toolReannounceByServer = map[*sdk.Server]toolReannounce{}
+)
 
 // AddInstrumentedTool is the drop-in replacement for sdk.AddTool that
 // every Pindoc tool uses. Resolves the calling Principal via
@@ -64,6 +75,45 @@ func AddInstrumentedTool[I, O any](
 		})
 	}
 	sdk.AddTool(server, tool, sdkHandler)
+	rememberToolReannounce(server, name, func() {
+		sdk.AddTool(server, tool, sdkHandler)
+	})
+}
+
+func rememberToolReannounce(server *sdk.Server, name string, register func()) {
+	if server == nil || register == nil || name == "" {
+		return
+	}
+	toolReannounceMu.Lock()
+	defer toolReannounceMu.Unlock()
+	if _, exists := toolReannounceByServer[server]; exists {
+		return
+	}
+	toolReannounceByServer[server] = toolReannounce{
+		name:     name,
+		register: register,
+	}
+}
+
+// ReannounceToolListChanged re-adds one already-registered tool to trigger
+// the SDK's standard notifications/tools/list_changed path without changing
+// Pindoc's tool catalog. The SDK treats AddTool as a replacement and emits
+// the notification to active sessions; the handler is identical to the
+// original registration, so calls continue to route normally.
+func ReannounceToolListChanged(server *sdk.Server) (name string, ok bool) {
+	toolReannounceMu.RLock()
+	entry, exists := toolReannounceByServer[server]
+	toolReannounceMu.RUnlock()
+	if !exists {
+		return "", false
+	}
+	defer func() {
+		if recover() != nil {
+			name, ok = "", false
+		}
+	}()
+	entry.register()
+	return entry.name, true
 }
 
 // instrumentCall records one tool-call entry around the supplied
