@@ -1,6 +1,9 @@
 # Pindoc
 
-언어: [English](README.md) | [한국어](README-ko.md)
+<p>
+  <a href="./README.md"><img alt="English README" src="https://img.shields.io/badge/lang-English-6b7280.svg?style=flat-square"></a>
+  <a href="./README-ko.md"><img alt="Korean README" src="https://img.shields.io/badge/lang-%ED%95%9C%EA%B5%AD%EC%96%B4-2563eb.svg?style=flat-square"></a>
+</p>
 
 [![CI](https://github.com/var-gg/pindoc/actions/workflows/ci.yml/badge.svg)](https://github.com/var-gg/pindoc/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
