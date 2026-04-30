@@ -113,8 +113,8 @@
 #### 문서 & 마케팅
 - [ ] Quickstart (5분 내 `pindoc init` + 첫 promote)
 - [ ] MCP 연동 가이드 (Claude Code / Cursor / Cline / Codex)
-- [ ] 30초 Promote 데모 gif
-- [ ] 라이선스 확정 (AGPL-3.0 유력)
+- [ ] read-only live demo + 대표 screenshot (GIF/영상은 announcement 보조 자산)
+- [x] 라이선스 확정: Apache 2.0
 
 ### V1 Non-goals
 
@@ -139,7 +139,7 @@
 3. **External 2+ 인스턴스**: Solo 2명 or Solo 1 + 팀 1 (Multi-project 포함), 30일+ 사용
 4. **pindoc.org 공개 인스턴스 오픈** (아래 섹션)
 5. **문서 완비**: README, Quickstart, MCP 연동 가이드 4종, Self-host 가이드
-6. **데모 gif**: 30초 "pindoc init → 체크포인트 제안 → Referenced Confirmation → auto-publish" 전과정
+6. **공개 데모**: read-only live demo + 대표 screenshot. GIF/영상은 announcement 보조 자산
 7. **깨끗한 VM 10분 내 세팅** 검증
 8. **라이선스 확정**
 
@@ -216,7 +216,7 @@ dashboard_slots:
 
 - Core OSS 영원히 무료
 - Tier 분할·광고 embed는 Custom Slot 메커니즘으로만
-- AGPL-3.0 네트워크 카피레프트로 hosted 경쟁 방어
+- Apache 2.0으로 MCP 클라이언트 생태계와 enterprise 내부 채택 마찰 최소화
 
 ---
 

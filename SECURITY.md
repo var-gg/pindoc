@@ -1,0 +1,89 @@
+# Security Policy
+
+Pindoc is self-hosted software that stores project memory, code references,
+agent-written artifacts, and optional identity-provider configuration. Treat a
+Pindoc instance as sensitive infrastructure for the projects it indexes.
+
+## Supported Versions
+
+Pindoc has not cut a stable release yet. Security fixes target `main` until the
+first tagged release series exists. After that, this file will list supported
+release branches.
+
+## Reporting a Vulnerability
+
+Use GitHub Security Advisories when available. If private advisories are not yet
+enabled for the repository, open a minimal public issue that does not include
+exploit details, secrets, tokens, private URLs, or sensitive project data, and
+ask maintainers for a private contact path.
+
+Please include:
+
+- affected commit or version,
+- deployment mode: loopback-only, LAN, public reverse proxy, or hosted demo,
+- whether `PINDOC_AUTH_PROVIDERS` or `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED` is set,
+- the smallest safe reproduction you can share.
+
+## Local Trust Model
+
+The default Docker setup is intended for a single operator on loopback:
+
+- `PINDOC_BIND_ADDR=127.0.0.1:5830`
+- `PINDOC_AUTH_PROVIDERS` empty
+- `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED=false`
+- Docker publishes the daemon to `127.0.0.1:${PINDOC_DAEMON_PORT}`
+
+Loopback requests are trusted and mapped to the local owner identity. This is
+deliberate for local agent workflows; it is not a public internet security
+model.
+
+## External Exposure
+
+If `PINDOC_BIND_ADDR` is non-loopback, Pindoc refuses to start unless one of
+these is true:
+
+- `PINDOC_AUTH_PROVIDERS` enables an identity provider such as `github`, or
+- `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED=true` explicitly opts into an
+  unauthenticated network model.
+
+Do not set `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED=true` for a writable public
+internet deployment. Use it only behind a trusted LAN or reverse proxy with
+additional access controls.
+
+## Read-Only Public Demo
+
+A public demo should not expose a normal writable daemon. Prefer this shape:
+
+- keep the Pindoc daemon private or behind a reverse proxy,
+- block `/mcp` from the public internet,
+- block non-`GET`/`HEAD`/`OPTIONS` methods publicly,
+- block admin and mutation routes such as project creation, provider admin,
+  invite/member management, task metadata writes, inbox review, read events,
+  onboarding identity, and joins,
+- block git preview endpoints unless every referenced repository is already
+  public and the demo owner has explicitly approved source-code browsing.
+
+See [docs/22-public-demo.md](docs/22-public-demo.md) for the operational
+checklist.
+
+## Secrets and Sensitive Data
+
+Before publishing a demo, scrub or exclude:
+
+- API tokens, OAuth client secrets, signing keys, and database URLs,
+- local usernames, home-directory paths, private machine names, and internal IPs,
+- private repo names, branch names, deployment hosts, and unpublished customer or
+  project names,
+- artifact bodies that quote private chat logs or issue trackers,
+- git blob/diff preview routes for private repositories.
+
+Pindoc's public Reader is useful only if the data set was curated for public
+viewing. Reverse-proxy read-only controls do not sanitize already-stored
+artifact content.
+
+## Dependency and Build Security
+
+The Docker image builds the web UI and Go server from source, runs as the
+non-root `pindoc` user, and stores runtime cache under `/var/lib/pindoc/cache`.
+Operators should pin image tags for production, keep the base image updated, and
+avoid mounting writable source trees into publicly exposed containers.

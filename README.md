@@ -1,276 +1,173 @@
 # Pindoc
 
+Languages: [English](README.md) | [한국어](README-ko.md)
+
+[![CI](https://github.com/var-gg/pindoc/actions/workflows/ci.yml/badge.svg)](https://github.com/var-gg/pindoc/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![MCP](https://img.shields.io/badge/MCP-agent%20memory-4b5563.svg)](docs/10-mcp-tools-spec.md)
+
 > **The wiki you never type into.**
-> Where agent work becomes lasting memory — pinned to code, written by agents.
+> Agent work becomes lasting project memory, pinned to code and ready for the next session.
 
-**Pindoc**은 사람이 직접 타이핑하지 않는 위키입니다.
-모든 쓰기는 코딩 에이전트(Claude Code / Cursor / Cline / Codex)를 통해 일어나고,
-사람은 승인·거절·방향 제시만 합니다. 모든 문서는 코드 커밋·파일 경로에 **핀(pin)** 됩니다.
+Pindoc is a self-hosted project memory system for AI-assisted software work.
+Humans decide direction; coding agents write the durable record through MCP.
+Every artifact is typed, scoped to a project area, and linked back to code,
+commits, files, URLs, or other Pindoc artifacts.
 
-`var.gg` 생태계의 첫 플래그십 제품. Self-host first. 로컬 기본 경로는
-`docker compose up -d` 한 번으로 Postgres + pgvector + Pindoc HTTP daemon까지
-띄우는 흐름이다. 코드 수정 중 빠른 반복이 필요할 때만 host-native
-`pindoc-server -http 127.0.0.1:5830` 경로를 보조로 쓴다.
+## Why It Exists
 
-Apache License 2.0. 기여 가이드와 CLA는 [CONTRIBUTING.md](CONTRIBUTING.md) 참조.
+AI coding sessions are productive, but their context disappears:
 
----
+- a debugging path dies with the terminal session,
+- the same decision is re-explained to every new agent,
+- project memory scatters across chat logs, issues, docs, and commit messages.
 
-## Why Pindoc
+Pindoc turns useful agent work into a searchable, code-pinned memory layer.
+The next session can ask Pindoc what matters before it edits.
 
-2026년의 개발자는 에이전트와 협업합니다. 하지만 에이전트의 출력은 세 갈래로 사라집니다:
+## What Makes Pindoc Different
 
-1. **휘발** — 터미널 세션 닫히면 디버깅 2시간이 증발
-2. **검색 지옥** — 월 단위로 쌓인 세션·채팅 중 "그때 그거" 못 찾음
-3. **파편화** — Notion/Linear/Slack에 흩어진 흔적만
+- **Agent-only write surface**: the Reader UI is for reading and review; durable writes go through agents.
+- **MCP-native workflow**: tools such as `pindoc.context_for_task`, `pindoc.artifact.propose`, and `pindoc.task.queue` regulate agent behavior instead of acting as a thin CRUD API.
+- **Typed artifacts**: Decision, Analysis, Debug, Flow, Task, TC, Glossary, and domain-pack types.
+- **Code-pinned memory**: artifacts can point to commits, files, line ranges, resources, URLs, and related artifacts.
+- **Multi-project daemon**: one `/mcp` endpoint can serve multiple projects; each tool call carries `project_slug`.
+- **Self-host first**: Docker Compose brings up Postgres, pgvector, the Pindoc daemon, and the Reader SPA.
 
-그 결과 개인·팀은 같은 문제를 N번 풉니다.
+## Public Demo
 
-**Pindoc은 이 흐름을 바꿉니다.** 에이전트가 세션에서 만든 가치를 에이전트가 정제해 발행하고, 다음 세션의 컨텍스트로 자동 주입됩니다. 사람은 방향만 제시합니다.
+A read-only public demo is planned for the first public release. It will expose
+real Pindoc artifacts from Pindoc itself and selected owner projects, with write
+surfaces blocked and sensitive data scrubbed.
 
-## Core Loop
+The demo plan is tracked in [docs/22-public-demo.md](docs/22-public-demo.md).
+The README intentionally treats the live demo as the primary proof; GIF/video
+assets are optional launch material, not a requirement.
 
+## Quick Start
+
+Prerequisites:
+
+- Docker 27+
+- Go 1.25+ only for host-native development
+- Node 20.15+ and pnpm 10+ only for web development outside Docker
+
+```bash
+git clone https://github.com/var-gg/pindoc.git
+cd pindoc
+docker compose up -d --build
 ```
-Harness (PINDOC.md)
-   │
-   ▼
-Agent Session ── checkpoint ──▶ Promote ──▶ Artifact ──▶ Graph ──▶ Next Session
-(외부, 흡수 없음)                (typed,                                 ▲
-                                 pinned,                                 │
-                                 area-tagged)                            │
-                                                                         │
-                                        URL → agent fetch ───────────────┘
-                                        (Continuation Context)
+
+Open the Reader:
+
+```text
+http://localhost:5830/
 ```
 
-## What makes Pindoc different
+On a fresh instance, create the first project at:
 
-- **Agent-only write surface** — UI에 편집 버튼 없음. 오탈자부터 아키텍처까지 전부 에이전트 경유.
-- **Harness Reversal** — Pindoc MCP가 연결되면 `PINDOC.md`로 에이전트의 base 규약을 주입.
-- **Tool-driven Pre-flight Check** — `propose` 요청은 즉답 대신 체크리스트로 에이전트에게 **더 많은 일을 지시**. MCP가 응답 서버가 아니라 regulator.
-- **Referenced Confirmation** — 에이전트가 사용자에게 확인 요청할 때 **항상 링크 동반**.
-- **Typed Documents (Tier A/B/C)** — Decision/Analysis/Debug/Flow/Task/TC/Glossary + Domain Pack.
-- **Git-pinned artifacts** — 커밋/PR/파일 경로 고정. 코드 변경 시 stale 자동.
-- **Fast Landing** — 완벽 인덱스 아님. 핵심 리소스 1~3개로의 빠른 착륙. M7 자가 검증.
-- **Multi-project by Design** — 한 인스턴스 = 복수 프로젝트 (schema/URL/UI 모두 `/p/:project/…` 스코프). `pindoc-server`는 두 transport를 지원: stdio(기본, subprocess-per-session)와 `pindoc-server -http <addr>` 데몬 모드. HTTP 데몬은 단일 `/mcp` URL에 모든 워크스페이스가 attach하고, 프로젝트는 각 tool input의 `project_slug`로 결정된다. FE/BE 분리·Solo 사이드 프로젝트·영세 팀 현실 지원.
+```text
+http://localhost:5830/projects/new
+```
 
-## Target Users
+## Connect an MCP Client
 
-- **Solo 개발자** — 1급 시민. "promote 안 하면 못 찾음"을 오히려 promote 문화로 해결.
-- **2~10인 소규모 팀** — 에이전트 사용자 최소 1명.
-- **자율 에이전트 환경 (OpenClaw 등)** — PINDOC.md mode=auto로 human-out-of-the-loop 지원.
+The Docker daemon exposes one account-level MCP endpoint:
+
+```jsonc
+{
+  "mcpServers": {
+    "pindoc": {
+      "type": "http",
+      "url": "http://127.0.0.1:5830/mcp"
+    }
+  }
+}
+```
+
+Project scope is not encoded in the URL. Agents pass `project_slug` on
+project-scoped tool calls. Workspaces generated by `pindoc.harness.install`
+store that slug in `PINDOC.md` frontmatter.
+
+## Common Workflows
+
+Ask an agent to start work with project context:
+
+```text
+Use Pindoc context before editing. Find the current project, inspect assigned
+Tasks, then implement the next acceptance item.
+```
+
+Typical MCP loop:
+
+1. `pindoc.workspace.detect`
+2. `pindoc.task.queue`
+3. `pindoc.context_for_task`
+4. code or doc work
+5. `pindoc.artifact.propose`
+6. update Task acceptance and closeout state
+
+## Configuration
+
+The default Docker path is single-user and loopback-only:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PINDOC_DAEMON_PORT` | `5830` | Host port used by Docker Compose. |
+| `PINDOC_PROJECT` | `pindoc` | Default project for unscoped reads/config. |
+| `PINDOC_PUBLIC_BASE_URL` | `http://127.0.0.1:${PINDOC_DAEMON_PORT}` | Public base URL used in generated links and OAuth metadata. |
+| `PINDOC_BIND_ADDR` | `127.0.0.1:5830` | Security intent. Non-loopback values require an IdP or explicit public unauthenticated opt-in. |
+| `PINDOC_AUTH_PROVIDERS` | empty | Identity providers enabled for external requests. Current provider: `github`. |
+| `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED` | `false` | Explicit opt-in for external exposure without an IdP. Use only behind a trusted network/reverse proxy. |
+
+Do not expose a writable daemon to the public internet without an identity
+provider. For a public read-only demo, keep `/mcp` and mutating HTTP routes
+blocked at the reverse proxy; see [SECURITY.md](SECURITY.md) and
+[docs/22-public-demo.md](docs/22-public-demo.md).
+
+## Development
+
+```bash
+# Run Go tests. Integration tests that need Postgres are skipped unless
+# PINDOC_TEST_DATABASE_URL is set.
+go test ./...
+
+# Web checks.
+cd web
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm test:unit
+pnpm build
+
+# Full image build.
+docker build -t pindoc-server:local .
+```
+
+On Windows hosts without a local C toolchain, run Go tests through Docker:
+
+```powershell
+docker run --rm -v "${PWD}:/work" -w /work golang:1.25 go test ./...
+```
+
+## Documentation
+
+- [Vision](docs/00-vision.md)
+- [Architecture](docs/03-architecture.md)
+- [MCP Tools Spec](docs/10-mcp-tools-spec.md)
+- [PINDOC.md Harness Spec](docs/09-pindoc-md-spec.md)
+- [Public Demo Plan](docs/22-public-demo.md)
+- [Public Release Checklist](docs/23-public-release-checklist.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
 
 ## Status
 
-🚧 **M1 스캐폴드 진행 중** — 기획 완료, 구현 착수. 이 repo가 **첫 meta-dogfooding 사례**입니다. Phase 2 완료 시점부터 docs는 Pindoc을 통해서만 수정됩니다.
-
-### M1 현 진행 상태 (2026-04-22)
-
-- ✅ Phase 1 — Docker Compose + Go MCP 서버 스켈레톤 + `pindoc.ping` stdio handshake
-- ✅ Phase 2 — Project/Area/Artifact schema + `propose`/`read`/`search` 도구
-- ✅ Phase 3 — 임베딩 레이어 (stub default, HTTP provider 준비됨)
-- ✅ Phase 4 — Web UI 실데이터 연결 (Reader + Sidebar + Sidecar + ⌘K)
-- ✅ Phase 5 — `pindoc.harness.install` + i18n (ko/en)
-- ✅ Phase 6 — `docs/*.md` 15개를 Pindoc artifact로 임포트 (meta-dogfood 시드)
-- ✅ Phase 7 — revision 시스템 (revisions / diff / summary_since + history·diff UI)
-- ✅ Phase 8 — URL 멀티프로젝트 재구조화 (`/p/:project/…` canonical + `pindoc.project.create` MCP tool)
-- ✅ Phase 9 — `human_url`/`agent_ref` 분리 + `capabilities` 블록 + spec↔runtime drift 가시화
-- ✅ Phase 10 — real embedder dogfood (Docker TEI + `multilingual-e5-base` + pindoc-reembed CLI)
-- ✅ Phase 11 — write contract 강화 (`search_receipt` hard enforce + bootstrap receipt/empty-area first-N exemption + `pins[]` + `expected_version` + `supersede_of` + `relates_to[]` + semantic conflict block + `_unsorted` area)
-- ✅ Phase 12 — agent ergonomics (`not_ready`에 `Failed[]`/`NextTools[]`/`Related[]` + `artifact.read(view=brief|full|continuation)` + server-issued `agent_id` + revision `source_session_ref`)
-- ✅ Phase 13 — template artifact seed (`_template_{debug,decision,analysis,task}` — 포맷도 evolving artifact, Reader UI "Show templates" 토글)
-- ✅ Phase 14 — operator settings + contract hardening (server_settings 테이블 + `pindoc-admin` CLI + `human_url_abs` + `expected_version` hard + `patchable_fields[]` + candidate warning + receipt TTL 30m + ~~auth_mode rename~~ — `auth_mode` framing은 Decision `decision-auth-model-loopback-and-providers`에서 폐기되고 `PINDOC_AUTH_PROVIDERS` + `PINDOC_BIND_ADDR` + `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED` 세 env로 대체됨)
-- ✅ Phase 15 — dogfood-driven UX 완결 (Task heuristic + Area hierarchy + pin kind enum + task_meta + kanban-lite + Sidecar 연결 카드)
-- ✅ Phase 16 — Today first screen + Change Group backend + summary cache + project markdown export (`pindoc.project_export`, `/api/p/:project/export`)
-
-M1 + 3차 peer review 반영 + 1호 사용자 dogfood readiness 완료.
-
-상세: [docs/12-m1-implementation-plan.md](docs/12-m1-implementation-plan.md) · 외부 피어리뷰 판단: [docs/14-peer-review-response.md](docs/14-peer-review-response.md)
-
-## Quick start (현재 M1 개발자 경로)
-
-현재 repo의 `docker-compose.yml`은 Postgres와 Pindoc HTTP daemon을 기본
-서비스로 띄운다. TEI embedder는 옵션 profile이고, 기본 embedder는 daemon
-프로세스 안의 Gemma provider다.
-
-**사전 요구사항** (Windows/macOS/Linux 공통):
-- Docker **27+** (Desktop 또는 engine)
-- Go **1.24+** / Node **20.15+** & pnpm **10+** — host-native 개발이나
-  Vite dev server를 직접 돌릴 때만 필요
-
-```bash
-# Postgres + Pindoc HTTP daemon + Reader SPA
-docker compose up -d --build
-
-# Browser: http://localhost:5830/
-# 빈 인스턴스에서는 http://localhost:5830/projects/new 에서 첫 프로젝트 생성
-
-# 선택: HTTP embedder를 명시적으로 쓸 때만 TEI 기동.
-# daemon 컨테이너는 host PINDOC_EMBED_PROVIDER를 읽지 않고
-# PINDOC_COMPOSE_EMBED_PROVIDER로만 opt-in한다.
-# docker compose --profile tei up -d embed
-```
-
-주요 환경변수:
-
-| 변수 | 기본값 | 설명 |
-|---|---|---|
-| `PINDOC_BIND_ADDR` | `127.0.0.1:5830` | 데몬이 listen할 host:port. 루프백(`127.0.0.1` / `::1` / `localhost`)이면 모든 incoming 요청은 자동 신뢰(Loopback Trust). 비-루프백이면 `PINDOC_AUTH_PROVIDERS` 또는 `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED` 중 하나를 명시해야 부팅. |
-| `PINDOC_AUTH_PROVIDERS` | empty | 활성화할 IdP CSV. 현재 지원: `github`. 비어 있으면 외부 IdP가 노출되지 않는다. 외부 노출(비-루프백 bind) + 빈 리스트 + `ALLOW_PUBLIC_UNAUTHENTICATED=false` 조합은 부팅 거부 (`ErrPublicWithoutAuth`). |
-| `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED` | `false` | "외부 노출인데 IdP 없음"을 명시적으로 opt-in. 신뢰망 LAN의 reverse proxy 뒤에서만 켠다. |
-| `PINDOC_PROJECT` | `pindoc` | `project_slug`를 생략한 일부 read/config 호출의 fallback 프로젝트. |
-| `PINDOC_DAEMON_PORT` | `5830` | Docker Compose daemon의 host port override. |
-| `PINDOC_PUBLIC_BASE_URL` | `http://127.0.0.1:${PINDOC_DAEMON_PORT}` | MCP resource/issuer metadata에 노출되는 public base URL. |
-| `PINDOC_OAUTH_REDIRECT_BASE_URL` | empty | GitHub OAuth callback base URL override. 비어 있으면 `PINDOC_PUBLIC_BASE_URL`을 쓴다. GitHub App callback은 `{base}/auth/github/callback`이다. |
-| `PINDOC_GITHUB_CLIENT_ID` / `PINDOC_GITHUB_CLIENT_SECRET` | empty | `PINDOC_AUTH_PROVIDERS=github`이 활성일 때 필수인 GitHub OAuth App credentials. |
-
-Windows에서 기존 NSSM 서비스가 아직 5830 포트를 점유 중이면, 관리자
-PowerShell에서 제거하기 전까지 Docker daemon을 임시 포트로 띄운다.
-
-```powershell
-$env:PINDOC_DAEMON_PORT = "5832"
-docker compose up -d --build pindoc-server-daemon
-```
-
-### 1인 self-host (default)
-
-`docker compose up -d` 한 번이 그대로 1인 셋업이다. `PINDOC_BIND_ADDR`은
-루프백 `127.0.0.1:5830`이고 `PINDOC_AUTH_PROVIDERS`는 비어 있으니 모든
-요청이 자동 owner principal로 매핑된다. agent stdio MCP / `localhost`
-브라우저 / `.mcp.json`의 streamable_http URL — 셋 다 동일하게 동작
-(Decision Case A1/A2). 추가 env 작업 없음.
-
-### 외부 노출 + GitHub IdP 활성화 (협업)
-
-데스크톱 데몬에 노트북이 OAuth로 합류하거나(Case A3), 1인 프로젝트에
-친구가 invite로 합류(Case D)하는 경우 — 두 결정만 명시한다:
-
-1. **외부 노출** — `PINDOC_BIND_ADDR=0.0.0.0:5830` 또는 reverse proxy.
-2. **IdP 추가** — `PINDOC_AUTH_PROVIDERS=github` + GitHub OAuth App
-   credentials. callback URL은 `{public-base}/auth/github/callback`로
-   GitHub OAuth App에 등록.
-
-```bash
-PINDOC_BIND_ADDR=0.0.0.0:5830 \
-PINDOC_AUTH_PROVIDERS=github \
-PINDOC_GITHUB_CLIENT_ID=... \
-PINDOC_GITHUB_CLIENT_SECRET=... \
-docker compose up -d --build pindoc-server-daemon
-```
-
-Loopback에서 들어오는 요청(=박스의 운영자 본인)은 OAuth를 거치지 않고
-그대로 owner로 동작 — 협업 모드로 "전환"하면서 운영자가 자기 자신을
-재로그인하거나 agent를 재인증할 일이 없다. 외부에서 들어오는 요청만
-Pindoc AS의 Bearer JWT를 요구한다.
-
-초대 링크는 `/signup?invite=<token>` 형태로 Reader에서 열며, 현재 구현은
-GitHub verified primary email로 기존 `users.email` 행을 자동 링크하거나 새
-행을 만든다. invite token 발급/취소·멤버 제거는 Reader Members panel에서
-가능하다.
-
-### 외부 노출, IdP 없음 (LAN-only / reverse-proxy 신뢰망)
-
-위의 둘 어느 쪽에도 해당하지 않는 third-track. `0.0.0.0`에 bind하지만
-인증 없이 신뢰하겠다는 의도를 명시할 때:
-
-```bash
-PINDOC_BIND_ADDR=0.0.0.0:5830 \
-PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED=true \
-docker compose up -d --build pindoc-server-daemon
-```
-
-이 opt-in을 안 켜면 Public-Without-Auth Refusal이 부팅을 거부한다.
-
-Host-native 개발 경로가 필요하면 아래처럼 직접 실행할 수 있다.
-
-```bash
-docker compose up -d db
-go mod tidy
-go build -o bin/pindoc-server ./cmd/pindoc-server
-./bin/pindoc-server -http 127.0.0.1:5830
-
-# 또는 정적 웹 미리보기 (디자인 시스템 프로토타입, daemon과 같은 포트라 동시에 실행 불가)
-cd web && pnpm install && pnpm dev   # http://localhost:5830
-```
-
-### Running in background (OS-specific)
-
-Docker Compose를 쓰는 설치는 `restart: unless-stopped`로 백그라운드 재시작을 맡긴다. host-native daemon을 직접 운영할 때만 아래 OS별 자동 기동 경로를 사용한다.
-
-**Windows**: user-mode Scheduled Task로 등록하면 이후 agent가 admin 권한 없이 재시작할 수 있다.
-
-```powershell
-# 이전 NSSM 서비스가 있다면 관리자 PowerShell에서 1회만 실행
-powershell -ExecutionPolicy Bypass -File scripts\uninstall-service.ps1
-
-# 일반 PowerShell에서 user-mode daemon 등록 + 즉시 시작
-powershell -ExecutionPolicy Bypass -File scripts\install-user-mode.ps1
-
-# 코드 변경 후 agent/개발자가 직접 build + restart + health check
-powershell -ExecutionPolicy Bypass -File scripts\dev-restart.ps1
-```
-
-**macOS**: `~/Library/LaunchAgents/dev.pindoc.server.plist`에 `RunAtLoad` + `KeepAlive`를 두고 `pindoc-server -http 127.0.0.1:5830`을 실행한다.
-
-**Linux**: `~/.config/systemd/user/pindoc-server.service`를 만들고 `systemctl --user enable --now pindoc-server`를 사용한다.
-
-**MCP 클라이언트에 등록**: 전역 또는 워크스페이스 MCP 설정에 아래 URL 하나를 넣는다. 새 세션에서 `pindoc.ping` 실행하면 handshake 성공. 임시 포트 `5832`로 띄웠다면 URL 포트만 `5832`로 바꾼다.
-
-```jsonc
-{ "mcpServers": { "pindoc": { "type": "http", "url": "http://127.0.0.1:5830/mcp" } } }
-```
-
-이 URL은 account-level entrypoint다. 프로젝트 scope는 URL path가 아니라 각
-MCP tool input의 `project_slug`로 결정된다. 워크스페이스의 기본 project는
-`PINDOC.md` frontmatter(`project_slug`)가 명시 source다.
-
-Reader 첫 화면은 `/p/{project}/today`다. `/`도 기본 프로젝트의 Today로
-redirect한다. Today는 최근 revision을 Change Group으로 묶고, deterministic
-brief 또는 `PINDOC_SUMMARY_LLM_ENDPOINT`가 설정된 local/OpenAI-compatible
-endpoint의 source-bound brief를 summary cache에 저장한다. Markdown export는
-Reader의 export 버튼 또는 MCP `pindoc.project_export`로 실행한다.
-
-### 데몬 모드 — 다수 워크스페이스에서 같은 Pindoc 인스턴스 attach
-
-여러 워크스페이스에서 각자 다른 프로젝트를 다루려면 `pindoc-server`를 HTTP 데몬으로 한 번만 띄우고 모든 MCP 클라이언트가 같은 `/mcp` URL로 attach한다. 프로젝트 scope는 연결 URL이 아니라 각 tool input의 `project_slug`로 정해진다. 같은 포트가 Reader API(`/api/...`)와 liveness probe(`/health`)도 함께 서빙하므로 별도 `pindoc-api` 데몬을 띄울 필요가 없다.
-
-```bash
-# 데몬 띄우기 (1회만)
-go build -o bin/pindoc-server ./cmd/pindoc-server
-./bin/pindoc-server -http 127.0.0.1:5830
-# 또는 PINDOC_HTTP_MCP_ADDR=127.0.0.1:5830 ./bin/pindoc-server
-```
-
-각 세션에서 `pindoc.project.current(project_slug="...")`를 호출하면 프로젝트 메타데이터와 capabilities가 반환된다. 현재 HTTP 데몬은 `transport=streamable_http`, `scope_mode=per_call`, `providers=[...]`(빈 배열이면 IdP 없음), `bind_addr=$PINDOC_BIND_ADDR`을 advertise한다. 기본 셋업(loopback bind + 빈 providers)에서 모든 요청은 자동 owner. 외부 노출이 필요하면 위 "협업" 섹션 참고.
-
-`pindoc.harness.install`이 생성하는 `PINDOC.md`는 YAML frontmatter(`project_slug`, `project_id`, `locale`, `schema_version`)를 포함한다. Frontmatter는 이후 workspace detection의 명시적 source다. Section X는 정책 wiki를 `context.for_task`의 `applicable_rules[]`로 자동 적용하는 규약을 설명하고, Section 12는 chip/parallel work가 시작·진행·merge·중단될 때 Pindoc Task status와 acceptance checkbox를 어떻게 갱신할지 규정한다. 기본 응답은 호환성을 위해 `response_format=full`이지만, 반복 호출은 `file_only` 또는 이전 etag(`if_content_etag`, `if_style_snippet_etag`)로 대형 body 재전송을 피한다.
-
-Windows host-native 기본 운영은 `scripts\install-user-mode.ps1` 이다. 기존
-`scripts\install-service.ps1` NSSM 경로는 deprecated legacy 옵션으로만 남긴다.
-지금 Windows에서 재시작 권한 문제가 나면 legacy NSSM 서비스가 아직 남아있는
-상태다.
-
-상세 설계: Decision `mcp-scope-account-level-industry-standard`.
-
-## Read the design
-
-- [00 Vision](docs/00-vision.md) — 북극성, 디자인 원칙
-- [01 Problem](docs/01-problem.md) — 실패 모드 F1–F6
-- [02 Concepts](docs/02-concepts.md) — 5대 Primitive + 용어집
-- [03 Architecture](docs/03-architecture.md) — MCP · Multi-project · 배포 시나리오
-- [04 Data Model](docs/04-data-model.md) — Tier A/B, Area, Pin vs Related Resource
-- [05 Mechanisms](docs/05-mechanisms.md) — M0 Harness Reversal부터 M7 Freshness까지
-- [06 UI Flows](docs/06-ui-flows.md) — Wiki Reader · Cmd+K · Onboarding
-- [07 Roadmap](docs/07-roadmap.md) — V1 / V1.1 / V1.x / V2
-- [08 Non-Goals](docs/08-non-goals.md) — 하지 않을 것들
-- [09 PINDOC.md Spec](docs/09-pindoc-md-spec.md) — Harness 파일 완전 스펙 + 해설
-- [10 MCP Tools Spec](docs/10-mcp-tools-spec.md) — Tool input/output 스키마 + 예시
-- [19 Area Taxonomy](docs/19-area-taxonomy.md) — 8 concern skeleton + sub-area 운영 규칙
-- [20 Sub-area Promotion Policy](docs/20-sub-area-promotion-policy.md) — Tag → sub-area 승격, rename, merge, remove 절차
-- [21 Cross-cutting Admission Rule](docs/21-cross-cutting-admission-rule.md) — cross-cutting 입장/해제 기준
-- [Glossary](docs/glossary.md) — 모든 용어 정의 + 경계 (Meta-dogfooding 1호)
-- [Decisions](docs/decisions.md) — Resolved decisions + Open questions
+Pindoc is in active dogfood. The local self-host path, Reader UI, project/area
+model, artifact proposal flow, task queue, revision history, summaries, and
+real embedding provider path are implemented. The public OSS launch track is
+focused on first-run reliability, public demo hardening, CI, security docs, and
+README polish.
 
 ## License
 
-To be decided. Candidate: **AGPL-3.0**.
+Apache License 2.0. See [LICENSE](LICENSE).

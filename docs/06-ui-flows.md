@@ -505,7 +505,7 @@ Cmd+K 에서도 접근 가능.
 │ (개발자 타겟, privacy-first 광고)                              │
 │                                                              │
 │ ── [footer slot: html] ────                                  │
-│ Open source · AGPL-3.0 · Built by var.gg                    │
+│ Open source · Apache-2.0 · Built by var.gg                  │
 └────────────────────────────────────────────────────────────┘
 ```
 

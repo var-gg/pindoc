@@ -4,7 +4,7 @@
 # GnuWin32.Make` or similar). Users without make can run the commands
 # verbatim — this file is short on purpose.
 
-.PHONY: help compose-up compose-up-sidecar compose-logs db-up db-down db-logs embed-up embed-down embed-logs server-build api-build reembed-build server-run server-dev server-run-http server-run-daemon api-run-http web-dev fmt tidy
+.PHONY: help compose-up compose-up-sidecar compose-logs db-up db-down db-logs embed-up embed-down embed-logs server-build api-build reembed-build server-run server-dev server-run-http server-run-daemon api-run-http web-dev fmt test web-test docker-build ci-smoke tidy
 
 # Embedding env used by the http provider (Phase 10). Keep the model hint,
 # dimension, and E5-style prefixes together so a single `make server-run-http`
@@ -38,6 +38,10 @@ help:
 	@echo "  api-run-http     — run the standalone HTTP API daemon (deprecated; use server-run-daemon)"
 	@echo "  web-dev          — run the Vite dev server (port 5830 — stop the daemon first)"
 	@echo "  fmt              — gofmt + go vet the whole module"
+	@echo "  test             — run Go tests"
+	@echo "  web-test         — run web typecheck + unit tests + build"
+	@echo "  docker-build     — build the Docker image"
+	@echo "  ci-smoke         — run the local CI smoke set"
 	@echo "  tidy             — go mod tidy"
 
 compose-up:
@@ -97,6 +101,17 @@ web-dev:
 fmt:
 	go fmt ./...
 	go vet ./...
+
+test:
+	go test ./...
+
+web-test:
+	cd web && pnpm typecheck && pnpm test:unit && pnpm build
+
+docker-build:
+	docker build -t pindoc-server:local .
+
+ci-smoke: test web-test docker-build
 
 tidy:
 	go mod tidy

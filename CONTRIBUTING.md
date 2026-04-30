@@ -24,9 +24,15 @@ targets.
 Run the smoke loop before submitting a PR:
 
 ```bash
-docker compose up -d db embed
-go build ./... && go vet ./...
-cd web && pnpm exec tsc --noEmit
+go test ./...
+cd web && pnpm install --frozen-lockfile && pnpm typecheck && pnpm test:unit
+docker build -t pindoc-server:local .
+```
+
+On Windows hosts without a local C toolchain, run Go tests in Docker:
+
+```powershell
+docker run --rm -v "${PWD}:/work" -w /work golang:1.25 go test ./...
 ```
 
 ## Contributor License Agreement (CLA)

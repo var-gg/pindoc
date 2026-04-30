@@ -58,7 +58,15 @@ services:
       PINDOC_DATABASE_URL: postgres://pindoc:pindoc_dev@db:5432/pindoc?sslmode=disable
       PINDOC_HTTP_MCP_ADDR: 0.0.0.0:5830
       PINDOC_PROJECT: ${PINDOC_PROJECT:-pindoc}
-      PINDOC_AUTH_MODE: ${PINDOC_AUTH_MODE:-trusted_local}
+      # Security intent, not the container listen socket. The default
+      # loopback intent pairs with the host-port binding below
+      # (127.0.0.1:${PINDOC_DAEMON_PORT}). If you publish the daemon through
+      # a public reverse proxy, set PINDOC_BIND_ADDR to a non-loopback value
+      # and configure either PINDOC_AUTH_PROVIDERS or the explicit
+      # PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED opt-in.
+      PINDOC_BIND_ADDR: ${PINDOC_BIND_ADDR:-127.0.0.1:5830}
+      PINDOC_AUTH_PROVIDERS: ${PINDOC_AUTH_PROVIDERS:-}
+      PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED: ${PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED:-false}
       PINDOC_LOG_LEVEL: ${PINDOC_LOG_LEVEL:-info}
       PINDOC_USER_LANGUAGE: ${PINDOC_USER_LANGUAGE:-ko}
       PINDOC_USER_NAME: ${PINDOC_USER_NAME:-}
