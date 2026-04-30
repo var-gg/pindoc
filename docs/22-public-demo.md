@@ -16,10 +16,11 @@ The public demo should make the product understandable in one click:
 - a visitor opens a real Reader URL,
 - sees typed artifacts such as Task, Decision, Analysis, and Debug,
 - follows links between project memory and code evidence,
-- understands that agents write Pindoc and humans review the result.
+- understands that agents write Pindoc and humans review, discuss, and steer the result.
 
 The live demo is the primary proof. A GIF or video can still help an
 announcement post, but it is not required for the repository README.
+The curated launch route is tracked in [Public Demo Story Path](25-public-demo-story-path.md).
 
 ## Public URL
 
@@ -158,6 +159,13 @@ Pindoc is a living project memory system rather than a static documentation
 site. Link deeper examples from the README or demo landing after the public data
 set is approved.
 
+## Story Path
+
+The first public route should show collaboration value, not just a populated
+Reader UI. Prefer paths where visitors can move from Today to a Task, then to
+an Analysis, Debug, or Decision artifact, and finally to code evidence. The
+current shortlist lives in [Public Demo Story Path](25-public-demo-story-path.md).
+
 ## Scrub Checklist
 
 Before publishing a project, sample artifact bodies, pins, metadata, and API
@@ -198,8 +206,8 @@ Task or Analysis change group and no private paths, emails, or unpublished
 domains. Suggested caption:
 
 ```text
-Real Pindoc artifacts from the Pindoc project itself. Agents write the project
-memory; humans review and steer it.
+Real Pindoc artifacts from the Pindoc project itself. Agents turn useful work
+into code-pinned team memory; humans review, discuss, and steer it.
 ```
 
 ## Smoke Tests

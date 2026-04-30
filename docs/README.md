@@ -6,15 +6,18 @@
 </p>
 
 This hub separates the repository docs into public entry points, current
-operator material, design source notes, and maintainer history. Public-facing
-docs have language-aware counterparts when they are part of the first launch
-path. Deeper design notes remain in their original language until they become
-stable user-facing documentation.
+operator material, design source notes, and maintainer history. Pindoc's public
+docs should explain the collaborative workflow first: agents capture useful
+discoveries as code-pinned project memory, while humans review, discuss, and
+decide what becomes durable team knowledge. Deeper design notes remain in their
+original language until they become stable user-facing documentation.
 
 ## Start Here
 
 - [README](../README.md) - product overview, quick start, and MCP client setup.
 - [Public Demo Plan](22-public-demo.md) - read-only demo shape, proxy policy, scrub checklist, and screenshot rule.
+- [Public Demo Story Path](25-public-demo-story-path.md) - curated dogfood routes that show collaborative AI insight becoming reusable project memory.
+- [Record-worthy Artifact Policy](24-record-worthy-artifact-policy.md) - what Pindoc records, what it refuses to archive, and when to update instead of creating more docs.
 - [Public Release Checklist](23-public-release-checklist.md) - the minimum trust gate before opening the repo or linking a demo.
 - [Security Policy](../SECURITY.md) - local trust model, external exposure, and vulnerability reporting.
 - [Contributing Guide](../CONTRIBUTING.md) - issues, PR process, smoke loop, and CLA.

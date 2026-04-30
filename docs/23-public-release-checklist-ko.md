@@ -13,6 +13,7 @@
 - `README.md`는 영어 기본 landing page입니다.
 - `README-ko.md`는 첫 화면에서 연결됩니다.
 - `docs/README.md`와 `docs/README-ko.md`는 언어별 documentation hub입니다.
+- `docs/24-record-worthy-artifact-policy-ko.md`는 무엇을 durable memory로 남기고 무엇을 제외할지 설명합니다.
 - `LICENSE`는 Apache 2.0이고 README/license 표현이 일치합니다.
 - `SECURITY.md`와 `SECURITY-ko.md`는 loopback trust, external exposure, read-only demo 제약을 설명합니다.
 - `CONTRIBUTING.md`와 `CONTRIBUTING-ko.md`는 public contribution path를 설명합니다.
@@ -62,6 +63,7 @@ README에 public demo URL을 추가하기 전:
 - public non-`GET` method가 차단됩니다.
 - 모든 참조 repo가 public이고 source browsing이 명시 승인된 경우가 아니라면 git preview route가 차단됩니다.
 - Demo data가 [공개 데모 운영안](22-public-demo-ko.md)의 scrub checklist를 통과합니다.
+- 첫 visitor path가 [공개 데모 story path](25-public-demo-story-path-ko.md)에 정리되어 있습니다.
 - 이후 launch decision이 바꾸지 않는 한 기본 public entry point는 `/p/pindoc/today`입니다.
 - curated screenshot 1개가 `docs/assets/` 아래 commit되어 있습니다.
 

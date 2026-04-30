@@ -13,6 +13,7 @@ public demo from the README.
 - `README.md` is the English primary landing page.
 - `README-ko.md` exists and is linked from the first screen.
 - `docs/README.md` and `docs/README-ko.md` exist as language-aware documentation hubs.
+- `docs/24-record-worthy-artifact-policy.md` explains what becomes durable memory and what stays out.
 - `LICENSE` is Apache 2.0 and README/license references agree.
 - `SECURITY.md` explains loopback trust, external exposure, and read-only demo
   constraints.
@@ -65,6 +66,7 @@ Before adding a public demo URL to README:
 - Git preview routes are blocked unless every referenced repo is public and
   source browsing is explicitly approved.
 - Demo data passes the scrub checklist in [22-public-demo.md](22-public-demo.md).
+- The curated first visitor path is documented in [25-public-demo-story-path.md](25-public-demo-story-path.md).
 - The default public entry point is `/p/pindoc/today` unless a later launch
   decision changes it.
 - One curated screenshot is committed under `docs/assets/`.

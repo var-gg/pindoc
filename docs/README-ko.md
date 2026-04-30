@@ -6,14 +6,17 @@
 </p>
 
 이 허브는 repo 문서를 공개 진입점, 운영 문서, 설계 원본, 유지보수 히스토리로
-나눕니다. 한국어 README에서 들어오는 경로는 한국어판이 있는 문서로 연결하고,
-깊은 설계 문서는 작성 당시의 원본 언어를 유지합니다. 공개 사용자가 처음 읽는
-문서부터 번역 짝을 갖추고, 내부 dogfood 로그까지 억지로 번역하지 않는 정책입니다.
+나눕니다. 공개 문서는 먼저 협업 흐름을 설명해야 합니다. 에이전트는 유용한
+분석과 작업 결과를 code-pinned project memory로 남기고, 사람은 읽고 토론하고
+무엇을 팀 지식으로 남길지 결정합니다. 깊은 설계 문서는 작성 당시의 원본 언어를
+유지합니다.
 
 ## 먼저 볼 문서
 
 - [README](../README-ko.md) - 제품 개요, 빠른 시작, MCP 클라이언트 연결.
 - [공개 데모 운영안](22-public-demo-ko.md) - read-only demo 구조, proxy 정책, scrub 체크리스트, screenshot 규칙.
+- [공개 데모 story path](25-public-demo-story-path-ko.md) - 실제 dogfood artifact로 협업형 AI 통찰이 팀 지식이 되는 경로를 보여주는 큐레이션.
+- [Record-worthy artifact 정책](24-record-worthy-artifact-policy-ko.md) - 무엇을 기록하고, 무엇을 기록하지 않으며, 언제 새 문서보다 update/supersede를 우선할지 정합니다.
 - [공개 릴리스 체크리스트](23-public-release-checklist-ko.md) - repo 공개나 demo 링크 추가 전 최소 신뢰 게이트.
 - [보안 정책](../SECURITY-ko.md) - 로컬 신뢰 모델, 외부 노출, 취약점 제보.
 - [기여 안내](../CONTRIBUTING-ko.md) - issue, PR, smoke loop, CLA.

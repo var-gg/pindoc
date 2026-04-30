@@ -9,31 +9,40 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-agent%20memory-4b5563.svg)](docs/README-ko.md)
 
-> **The wiki you never type into.**
-> 에이전트 작업을 다음 세션이 다시 읽을 수 있는 프로젝트 기억으로 남깁니다.
+> **AI-assisted 개발을 위한 code-pinned team memory.**
+> 에이전트가 durable record를 쓰고, 사람은 읽고 토론하고 방향을 정합니다.
 
-Pindoc은 AI 코딩 세션을 위한 self-hosted 프로젝트 메모리 시스템입니다.
-사람은 방향과 승인에 집중하고, 코딩 에이전트가 MCP를 통해 지속 가능한
-문서를 남깁니다. 모든 artifact는 타입, area, 코드/커밋/파일/URL pin,
-관련 artifact를 함께 가집니다.
+Pindoc은 AI 코딩 에이전트와 함께 일하는 팀을 위한 self-hosted 프로젝트
+메모리 시스템입니다. 에이전트가 발견한 분석, 결정, 디버그 경로, task
+closeout, 검증 근거를 typed artifact로 남기고, 각 artifact는 area와
+코드/커밋/파일/URL/resource pin, 관련 artifact를 함께 가집니다.
+
+출발점은 AI로 분석한 이슈와 통찰을 기존 wiki/task tracker에 정리해 팀과
+공유하고 공론화하던 경험입니다. Pindoc은 그 과정을 agent-native하게 만들되,
+raw chat archive가 아니라 미래 팀원과 미래 에이전트가 재사용할 수 있는 핵심만
+남깁니다.
 
 ## 왜 필요한가
 
-AI 코딩 세션은 빠르지만 맥락이 쉽게 사라집니다.
+AI 코딩 세션은 빠르지만 팀 맥락은 여전히 쉽게 사라집니다.
 
 - 터미널 세션이 끝나면 디버깅 경로가 사라집니다.
 - 새 에이전트에게 같은 결정을 반복 설명해야 합니다.
-- 채팅, 이슈, 문서, 커밋 메시지 사이에 프로젝트 기억이 흩어집니다.
+- 유효한 분석이 한 operator의 채팅 안에만 남고 팀 지식이 되지 못합니다.
+- wiki, issue tracker, PR, commit message 사이에 중복 문서가 늘어납니다.
+- 실제 프로젝트에서는 책임소재와 내부 관행 때문에 문제를 발견해도 바로 고칠 수 없고, 근거 있는 문서로 먼저 공론화해야 할 때가 많습니다.
 
 Pindoc은 에이전트가 만든 유효한 작업 흔적을 검색 가능하고 코드에 고정된
-메모리 레이어로 바꿉니다.
+팀 메모리 레이어로 바꿉니다.
 
 ## 차별점
 
+- **Collaborative memory layer**: artifact는 개인 채팅 요약이 아니라 팀원과 미래 에이전트가 다시 읽는 지식입니다.
 - **Agent-only write surface**: Reader UI는 읽기와 검토 중심이고, 의미 있는 쓰기는 에이전트를 거칩니다.
 - **MCP-native workflow**: `context_for_task`, `artifact.propose`, `task.queue` 같은 도구가 에이전트 행동을 규율합니다.
 - **Typed artifacts**: Decision, Analysis, Debug, Flow, Task, TC, Glossary 등을 지원합니다.
 - **Code-pinned memory**: 커밋, 파일, 라인, URL, 다른 artifact와 연결됩니다.
+- **Record-worthy by design**: raw chat log를 저장하지 않고, 미래 작업에 가치가 있는 결정, 분석, 디버그 경로, 검증, task 맥락만 남깁니다.
 - **Multi-project daemon**: 하나의 `/mcp` 엔드포인트가 여러 프로젝트를 처리하고, 각 tool call이 `project_slug`를 가집니다.
 - **Self-host first**: Docker Compose로 Postgres, pgvector, Pindoc daemon, Reader SPA를 함께 띄웁니다.
 
@@ -45,7 +54,8 @@ Pindoc 자체와 실제 작업 프로젝트 일부를 보여주되, write surfac
 
 운영안은 [공개 데모 운영안](docs/22-public-demo-ko.md)에 정리합니다. GIF나
 영상은 필수가 아니라 보조 홍보 자산으로 둡니다. 1차 증거는 직접 눌러볼 수
-있는 live demo와 대표 screenshot입니다.
+있는 live demo와 대표 screenshot입니다. 첫 demo path는
+[공개 데모 story path](docs/25-public-demo-story-path-ko.md)에 정리합니다.
 
 ## 빠른 시작
 
@@ -134,6 +144,8 @@ docker run --rm -v "${PWD}:/work" -w /work golang:1.25 go test ./...
 
 - [문서 허브](docs/README-ko.md)
 - [공개 데모 운영안](docs/22-public-demo-ko.md)
+- [공개 데모 story path](docs/25-public-demo-story-path-ko.md)
+- [Record-worthy artifact 정책](docs/24-record-worthy-artifact-policy-ko.md)
 - [공개 릴리스 체크리스트](docs/23-public-release-checklist-ko.md)
 - [기여 안내](CONTRIBUTING-ko.md)
 - [보안 정책](SECURITY-ko.md)
@@ -144,8 +156,8 @@ docker run --rm -v "${PWD}:/work" -w /work golang:1.25 go test ./...
 Pindoc은 현재 실제 dogfood 중입니다. 로컬 self-host 경로, Reader UI,
 project/area 모델, artifact propose, task queue, revision history, summary,
 real embedding provider 경로가 구현되어 있습니다. 공개 OSS 런치 트랙은
-first-run reliability, read-only public demo, CI, 보안 문서, README 정비에
-집중합니다.
+first-run reliability, read-only dogfood demo, CI, 보안 문서, 협업형
+포지셔닝 정비에 집중합니다.
 
 ## 라이선스
 

@@ -9,31 +9,45 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-agent%20memory-4b5563.svg)](docs/README.md#agent-workflow-and-mcp)
 
-> **The wiki you never type into.**
-> Agent work becomes lasting project memory, pinned to code and ready for the next session.
+> **Code-pinned team memory for AI-assisted development.**
+> Agents write the durable record; humans review, discuss, and steer.
 
-Pindoc is a self-hosted project memory system for AI-assisted software work.
-Humans decide direction; coding agents write the durable record through MCP.
-Every artifact is typed, scoped to a project area, and linked back to code,
-commits, files, URLs, or other Pindoc artifacts.
+Pindoc is a self-hosted project memory system for teams working with AI coding
+agents. It turns useful agent discoveries into typed artifacts: decisions,
+debugging paths, task closeouts, verification notes, and code-linked analyses.
+Every artifact is scoped to a project area and pinned back to commits, files,
+URLs, resources, or related Pindoc artifacts.
+
+It is still the wiki you never type into, but the point is not automation for
+its own sake. Pindoc keeps the parts of agent work that teammates and future
+agents can reuse.
 
 ## Why It Exists
 
-AI coding sessions are productive, but their context disappears:
+AI coding sessions are productive, but team context still falls through the
+cracks:
 
 - a debugging path dies with the terminal session,
 - the same decision is re-explained to every new agent,
-- project memory scatters across chat logs, issues, docs, and commit messages.
+- useful analysis stays in one operator's chat instead of becoming team
+  knowledge,
+- duplicate documents accumulate across wikis, issue trackers, PRs, and commit
+  messages,
+- in real project environments, the person who finds a problem cannot always
+  change the code immediately; structured evidence helps the team discuss and
+  decide.
 
-Pindoc turns useful agent work into a searchable, code-pinned memory layer.
-The next session can ask Pindoc what matters before it edits.
+Pindoc turns agent work worth keeping into searchable, code-pinned team memory.
+The next teammate or coding agent can ask Pindoc what matters before it edits.
 
 ## What Makes Pindoc Different
 
+- **Collaborative memory layer**: artifacts are written for teammates and future agents, not as private chat summaries.
 - **Agent-only write surface**: the Reader UI is for reading and review; durable writes go through agents.
 - **MCP-native workflow**: tools such as `pindoc.context_for_task`, `pindoc.artifact.propose`, and `pindoc.task.queue` regulate agent behavior instead of acting as a thin CRUD API.
 - **Typed artifacts**: Decision, Analysis, Debug, Flow, Task, TC, Glossary, and domain-pack types.
 - **Code-pinned memory**: artifacts can point to commits, files, line ranges, resources, URLs, and related artifacts.
+- **Record-worthy by design**: Pindoc avoids raw chat archives and keeps only decisions, analyses, debug paths, verification, and task context with future value.
 - **Multi-project daemon**: one `/mcp` endpoint can serve multiple projects; each tool call carries `project_slug`.
 - **Self-host first**: Docker Compose brings up Postgres, pgvector, the Pindoc daemon, and the Reader SPA.
 
@@ -45,7 +59,8 @@ surfaces blocked and sensitive data scrubbed.
 
 The demo plan is tracked in [Public Demo Plan](docs/22-public-demo.md).
 The README intentionally treats the live demo as the primary proof; GIF/video
-assets are optional launch material, not a requirement.
+assets are optional launch material, not a requirement. The first demo path is
+tracked in [Public Demo Story Path](docs/25-public-demo-story-path.md).
 
 ## Quick Start
 
@@ -156,6 +171,8 @@ docker run --rm -v "${PWD}:/work" -w /work golang:1.25 go test ./...
 
 - [Documentation Hub](docs/README.md)
 - [Public Demo Plan](docs/22-public-demo.md)
+- [Public Demo Story Path](docs/25-public-demo-story-path.md)
+- [Record-worthy Artifact Policy](docs/24-record-worthy-artifact-policy.md)
 - [Public Release Checklist](docs/23-public-release-checklist.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)
@@ -166,8 +183,8 @@ docker run --rm -v "${PWD}:/work" -w /work golang:1.25 go test ./...
 Pindoc is in active dogfood. The local self-host path, Reader UI, project/area
 model, artifact proposal flow, task queue, revision history, summaries, and
 real embedding provider path are implemented. The public OSS launch track is
-focused on first-run reliability, public demo hardening, CI, security docs, and
-README polish.
+focused on first-run reliability, a read-only dogfood demo, CI, security docs,
+and clearer collaborative positioning.
 
 ## License
 
