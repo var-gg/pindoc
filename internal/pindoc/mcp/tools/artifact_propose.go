@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -46,7 +47,7 @@ type artifactProposeInput struct {
 	ProjectSlug   string   `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	Type          string   `json:"type" jsonschema:"one of Decision|Analysis|Debug|Flow|Task|TC|Glossary|Feature|APIEndpoint|Screen|DataModel"`
 	AreaSlug      string   `json:"area_slug" jsonschema:"slug from pindoc.area.list; use 'misc' or '_unsorted' if unsure"`
-	Title         string   `json:"title"`
+	Title         string   `json:"title" jsonschema:"concise artifact title. For non-English primary_language projects, prefer the project language for title; English-only titles fragment Cmd+K keyword search and weaken cross-lingual semantic distance. Mixed Korean/Japanese + English dev terms is acceptable and recommended."`
 	BodyMarkdown  string   `json:"body_markdown" jsonschema:"main content in markdown"`
 	BodyLocale    string   `json:"body_locale,omitempty" jsonschema:"BCP 47 body language tag; default = project primary_language"`
 	Slug          string   `json:"slug,omitempty" jsonschema:"optional; auto-generated from title if absent"`
@@ -1066,6 +1067,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			warnings = append(warnings, commitMsgWarnings...)
 			warnings = append(warnings, pinPathWarnings(deps, in.Pins)...)
 			warnings = append(warnings, titleQualityWarnings(in.Title, in.BodyLocale, projectTitleJargon(deps))...)
+			warnings = append(warnings, titleLocaleMismatchWarnings(scope.ProjectLocale, in.Title)...)
 			warnings = append(warnings, bodyH1Warnings(in.BodyMarkdown)...)
 			warnings = append(warnings, requiredH2WarningsFor(ctx, deps, scope.ProjectSlug, in.BodyMarkdown, in.Type)...)
 			warnings = append(warnings, sectionDuplicatesEdgesWarnings(in.BodyMarkdown)...)
@@ -1074,6 +1076,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			warnings = append(warnings, slugWarnings...)
 			suggestedActions := append([]string{}, slugSuggestedActions...)
 			suggestedActions = append(suggestedActions, sectionDuplicatesEdgesSuggestedActions(warnings)...)
+			suggestedActions = append(suggestedActions, titleLocaleMismatchSuggestedActions(warnings)...)
 			if detectUnclassifiedUserChat(resolvedMeta, in.Pins, in.BodyMarkdown) {
 				warnings = append(warnings, "SOURCE_TYPE_UNCLASSIFIED")
 			}
@@ -1634,6 +1637,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	warnings = append(warnings, repoWarnings...)
 	warnings = append(warnings, acceptanceUncheckedNudgeWarnings(currentType, in.BodyMarkdown, in.CommitMsg)...)
 	warnings = append(warnings, decisionSubjectAreaWarnings(in)...)
+	warnings = append(warnings, titleLocaleMismatchWarnings(scope.ProjectLocale, in.Title)...)
 	// Body-patch warnings bubble up here so PATCH_NOOP etc. sit alongside
 	// canonical-rewrite / source-type advisories instead of a separate
 	// response field.
@@ -1661,6 +1665,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		}
 	}
 	suggested = append(suggested, sectionDuplicatesEdgesSuggestedActions(warnings)...)
+	suggested = append(suggested, titleLocaleMismatchSuggestedActions(warnings)...)
 
 	// Task propose-경로-warning-영속화: persist update-path warnings +
 	// canonical-rewrite flag into events so Reader Trust Card and future
@@ -3364,6 +3369,48 @@ func titleQualityWarnings(title, bodyLocale string, extraJargon []string) []stri
 		out = append(out, f.Code)
 	}
 	return out
+}
+
+const titleLocaleMismatchWarning = "TITLE_LOCALE_MISMATCH"
+
+func titleLocaleMismatchWarnings(projectLocale, title string) []string {
+	lang := strings.ToLower(strings.TrimSpace(projectLocale))
+	if lang == "" || strings.HasPrefix(lang, "en") {
+		return nil
+	}
+	if !isASCIIEnglishOnlyTitle(title) {
+		return nil
+	}
+	return []string{titleLocaleMismatchWarning}
+}
+
+func isASCIIEnglishOnlyTitle(title string) bool {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return false
+	}
+	hasASCIILetter := false
+	for _, r := range title {
+		if unicode.In(r, unicode.Hangul, unicode.Han, unicode.Hiragana, unicode.Katakana) {
+			return false
+		}
+		if r > unicode.MaxASCII {
+			return false
+		}
+		if ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') {
+			hasASCIILetter = true
+		}
+	}
+	return hasASCIILetter
+}
+
+func titleLocaleMismatchSuggestedActions(warnings []string) []string {
+	for _, warning := range warnings {
+		if warning == titleLocaleMismatchWarning {
+			return []string{"TITLE_LOCALE_MISMATCH: revise the title toward the project language; for existing artifacts use pindoc.artifact.propose(update_of=..., title=..., expected_version=...) or pindoc.artifact.wording_fix for body wording cleanup."}
+		}
+	}
+	return nil
 }
 
 // bodyH1Warnings flags an H1 inside body_markdown. Reader renders

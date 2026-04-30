@@ -77,15 +77,19 @@ func TestProjectReposIntegration(t *testing.T) {
 func assertProjectRepoRow(t *testing.T, ctx context.Context, tx pgx.Tx, projectID, wantRemote, wantOriginal string) {
 	t.Helper()
 	var gotRemote, gotOriginal, gotName, gotBranch string
+	var gotLocalPaths []string
 	if err := tx.QueryRow(ctx, `
-		SELECT git_remote_url, git_remote_url_original, name, default_branch
+		SELECT git_remote_url, git_remote_url_original, name, default_branch, local_paths
 		  FROM project_repos
 		 WHERE project_id = $1::uuid
-	`, projectID).Scan(&gotRemote, &gotOriginal, &gotName, &gotBranch); err != nil {
+	`, projectID).Scan(&gotRemote, &gotOriginal, &gotName, &gotBranch, &gotLocalPaths); err != nil {
 		t.Fatalf("select project repo: %v", err)
 	}
 	if gotRemote != wantRemote || gotOriginal != wantOriginal || gotName != "origin" || gotBranch != "main" {
 		t.Fatalf("project repo = remote=%q original=%q name=%q branch=%q", gotRemote, gotOriginal, gotName, gotBranch)
+	}
+	if gotLocalPaths == nil || len(gotLocalPaths) != 0 {
+		t.Fatalf("project repo local_paths = %#v, want empty non-NULL array", gotLocalPaths)
 	}
 }
 

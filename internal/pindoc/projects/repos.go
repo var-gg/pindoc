@@ -243,6 +243,9 @@ func normalizeRepoStringSet(in []string) []string {
 		seen[s] = true
 		out = append(out, s)
 	}
+	if out == nil {
+		return []string{}
+	}
 	return out
 }
 

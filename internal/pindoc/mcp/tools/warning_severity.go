@@ -50,6 +50,7 @@ var warningSeverityCatalog = map[string]string{
 	"TITLE_TOO_SHORT":                SeverityWarn,
 	"TITLE_TOO_LONG":                 SeverityWarn,
 	"TITLE_GENERIC_TOKENS":           SeverityWarn,
+	"TITLE_LOCALE_MISMATCH":          SeverityWarn,
 	"SLUG_VERBOSE":                   SeverityWarn,
 	"PIN_PATH_NONEXISTENT":           SeverityWarn,
 	"PIN_PATH_OUTSIDE_REPO":          SeverityWarn,

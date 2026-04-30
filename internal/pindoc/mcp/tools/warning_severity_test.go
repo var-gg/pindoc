@@ -22,6 +22,7 @@ func TestWarningSeverity(t *testing.T) {
 		"TITLE_TOO_SHORT":                    SeverityWarn,
 		"TITLE_TOO_LONG":                     SeverityWarn,
 		"TITLE_GENERIC_TOKENS":               SeverityWarn,
+		"TITLE_LOCALE_MISMATCH":              SeverityWarn,
 		"SECTION_DUPLICATES_EDGES":           SeverityWarn,
 		"SLUG_VERBOSE":                       SeverityWarn,
 		"acceptance_unchecked":               SeverityWarn,

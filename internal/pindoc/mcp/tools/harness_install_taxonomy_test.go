@@ -67,6 +67,22 @@ func TestRenderPindocMDProjectLanguageGuidance(t *testing.T) {
 	}
 }
 
+func TestRenderPindocMDTitleLocaleGuidance(t *testing.T) {
+	body := renderPindocMD("Pindoc", "project-123", "pindoc", "ko", "ko", "test", true)
+
+	for _, want := range []string{
+		"non-English primary_language",
+		"prefer the project language",
+		"English-only titles fragment Cmd+K keyword search",
+		"cross-lingual semantic distance",
+		"mixed Korean/Japanese + English dev",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("rendered PINDOC.md missing title locale guidance %q", want)
+		}
+	}
+}
+
 func TestRenderPindocMDBodyVsGraphEdgesGuidance(t *testing.T) {
 	body := renderPindocMD("Pindoc", "project-123", "pindoc", "ko", "ko", "test", true)
 

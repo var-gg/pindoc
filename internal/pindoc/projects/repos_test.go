@@ -35,3 +35,13 @@ func TestNormalizeGitRemoteURLErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeRepoPathSetEmptyReturnsEmptySlice(t *testing.T) {
+	got := normalizeRepoPathSet(nil)
+	if got == nil {
+		t.Fatal("empty local_paths must encode as an empty array, not NULL")
+	}
+	if len(got) != 0 {
+		t.Fatalf("normalizeRepoPathSet(nil) = %v, want empty", got)
+	}
+}
