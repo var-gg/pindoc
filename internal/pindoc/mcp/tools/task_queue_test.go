@@ -83,6 +83,22 @@ func TestTaskQueueNoticeSeparatesAcceptanceView(t *testing.T) {
 	}
 }
 
+func TestTaskQueueCloseoutNextTools(t *testing.T) {
+	if got := taskQueueCloseoutNextTools("pindoc", ""); got != nil {
+		t.Fatalf("missing assignee should not emit closeout next tools: %+v", got)
+	}
+	got := taskQueueCloseoutNextTools("pindoc", " agent:codex ")
+	if len(got) != 1 {
+		t.Fatalf("next_tools len = %d, want 1", len(got))
+	}
+	if got[0].Tool != "pindoc.task.done_check" {
+		t.Fatalf("tool = %q", got[0].Tool)
+	}
+	if got[0].Args["project_slug"] != "pindoc" || got[0].Args["assignee"] != "agent:codex" {
+		t.Fatalf("args = %+v", got[0].Args)
+	}
+}
+
 func TestTaskQueueWarnings(t *testing.T) {
 	bodyDone := "## Acceptance\n- [x] implemented\n- [-] deferred with reason\n"
 	got := taskQueueWarnings("open", bodyDone)

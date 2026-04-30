@@ -47,8 +47,10 @@ func TestTaskClaimDoneEvidenceArtifactsIntegration(t *testing.T) {
 	taskID := insertContextReceiptTask(t, ctx, pool, projectID, areaID, taskSlug)
 	evidenceSlugA := fmt.Sprintf("evidence-a-%d", suffix)
 	evidenceSlugB := fmt.Sprintf("evidence-b-%d", suffix)
+	receiptSlug := fmt.Sprintf("verification-receipt-%d", suffix)
 	insertDryRunArtifact(t, ctx, pool, projectID, areaID, evidenceSlugA, "Decision", "Evidence A", "## Context\na\n## Decision\nb\n## Rationale\nc\n## Alternatives considered\nd\n## Consequences\ne\n")
 	insertDryRunArtifact(t, ctx, pool, projectID, areaID, evidenceSlugB, "Analysis", "Evidence B", "## Context\na\n## Findings\nb\n")
+	insertDryRunArtifact(t, ctx, pool, projectID, areaID, receiptSlug, "TC", "Verification Receipt", "## Context\nlong test output\n")
 
 	scope := &auth.ProjectScope{
 		ProjectID:     projectID,
@@ -58,24 +60,41 @@ func TestTaskClaimDoneEvidenceArtifactsIntegration(t *testing.T) {
 	}
 	principal := &auth.Principal{AgentID: "agent:evidence-test", Source: auth.SourceLoopback}
 	out, err := claimOneTaskDone(ctx, Deps{DB: pool}, principal, scope, taskClaimDoneInput{
-		ProjectSlug:       projectSlug,
-		SlugOrID:          taskSlug,
-		Reason:            "claim with decision evidence",
-		PinStrategy:       claimDonePinStrategyExplicit,
-		Pins:              []ArtifactPinInput{{Kind: "url", Path: "https://example.invalid/evidence"}},
-		EvidenceArtifacts: []string{evidenceSlugA, "pindoc://" + evidenceSlugB, evidenceSlugA, ""},
+		ProjectSlug:          projectSlug,
+		SlugOrID:             taskSlug,
+		Reason:               "claim with decision evidence",
+		PinStrategy:          claimDonePinStrategyExplicit,
+		Pins:                 []ArtifactPinInput{{Kind: "url", Path: "https://example.invalid/evidence"}},
+		EvidenceArtifacts:    []string{evidenceSlugA, "pindoc://" + evidenceSlugB, evidenceSlugA, ""},
+		VerificationNotes:    []VerificationNoteInput{{Kind: "test", Status: "passed", Command: "go test ./...", Summary: "integration tests passed"}},
+		VerificationReceipts: []string{receiptSlug},
 	})
 	if err != nil {
 		t.Fatalf("claimOneTaskDone: %v", err)
 	}
-	if out.Status != "accepted" || out.EvidenceEdgesStored != 2 || out.PinsStored != 1 || out.PinsExplicitCount != 1 {
-		t.Fatalf("claim_done output = status=%q evidence=%d pins=%d explicit=%d", out.Status, out.EvidenceEdgesStored, out.PinsStored, out.PinsExplicitCount)
+	if out.Status != "accepted" || out.EvidenceEdgesStored != 2 || out.VerificationReceiptEdgesStored != 1 || out.PinsStored != 1 || out.PinsExplicitCount != 1 {
+		t.Fatalf("claim_done output = status=%q evidence=%d receipt_edges=%d pins=%d explicit=%d", out.Status, out.EvidenceEdgesStored, out.VerificationReceiptEdgesStored, out.PinsStored, out.PinsExplicitCount)
 	}
-	assertEvidenceEdges(t, ctx, pool, taskID, evidenceSlugA, evidenceSlugB)
+	if len(out.VerificationNotes) != 1 || out.VerificationNotes[0].Kind != "test" || out.VerificationNotes[0].Status != "passed" {
+		t.Fatalf("verification notes output = %+v", out.VerificationNotes)
+	}
+	if len(out.VerificationReceipts) != 1 || out.VerificationReceipts[0] != receiptSlug {
+		t.Fatalf("verification receipts output = %+v", out.VerificationReceipts)
+	}
+	if len(out.NextTools) == 0 || out.NextTools[0].Tool != "pindoc.task.done_check" {
+		t.Fatalf("claim_done next_tools = %+v", out.NextTools)
+	}
+	assertEvidenceEdges(t, ctx, pool, taskID, evidenceSlugA, evidenceSlugB, receiptSlug)
 
 	readOut := callArtifactReadForEvidenceTest(t, ctx, pool, projectSlug, taskSlug)
 	if !edgeRefsContainEvidence(readOut.RelatesTo, evidenceSlugA, evidenceSlugB) {
 		t.Fatalf("artifact.read continuation relates_to = %+v, want evidence edges to %q and %q", readOut.RelatesTo, evidenceSlugA, evidenceSlugB)
+	}
+	if len(readOut.VerificationNotes) != 1 || readOut.VerificationNotes[0].Summary != "integration tests passed" {
+		t.Fatalf("artifact.read verification_notes = %+v", readOut.VerificationNotes)
+	}
+	if len(readOut.VerificationReceipts) != 1 || readOut.VerificationReceipts[0] != receiptSlug {
+		t.Fatalf("artifact.read verification_receipts = %+v", readOut.VerificationReceipts)
 	}
 
 	badTaskSlug := fmt.Sprintf("task-bad-evidence-%d", suffix)
@@ -139,7 +158,7 @@ func callArtifactReadForEvidenceTest(t *testing.T, ctx context.Context, pool *db
 	return out
 }
 
-func assertEvidenceEdges(t *testing.T, ctx context.Context, pool *db.Pool, taskID, slugA, slugB string) {
+func assertEvidenceEdges(t *testing.T, ctx context.Context, pool *db.Pool, taskID string, slugs ...string) {
 	t.Helper()
 	var n int
 	if err := pool.QueryRow(ctx, `
@@ -148,12 +167,12 @@ func assertEvidenceEdges(t *testing.T, ctx context.Context, pool *db.Pool, taskI
 		JOIN artifacts target ON target.id = e.target_id
 		WHERE e.source_id = $1::uuid
 		  AND e.relation = 'evidence'
-		  AND target.slug IN ($2, $3)
-	`, taskID, slugA, slugB).Scan(&n); err != nil {
+		  AND target.slug = ANY($2::text[])
+	`, taskID, slugs).Scan(&n); err != nil {
 		t.Fatalf("count evidence edges: %v", err)
 	}
-	if n != 2 {
-		t.Fatalf("evidence edge count = %d, want 2", n)
+	if n != len(slugs) {
+		t.Fatalf("evidence edge count = %d, want %d", n, len(slugs))
 	}
 }
 

@@ -15,7 +15,7 @@ import (
 )
 
 type artifactReadStateInput struct {
-	ProjectSlug  string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug  string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	ArtifactSlug string `json:"artifact_slug,omitempty" jsonschema:"artifact slug; mutually exclusive with artifact_id"`
 	ArtifactID   string `json:"artifact_id,omitempty" jsonschema:"artifact UUID; mutually exclusive with artifact_slug"`
 	UserKey      string `json:"user_key,omitempty" jsonschema:"reader user_key; defaults to 'local' in trusted_local mode"`

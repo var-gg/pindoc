@@ -13,7 +13,7 @@ type areaListInput struct {
 	// ProjectSlug picks which project's areas to enumerate (account-
 	// level scope, Decision mcp-scope-account-level-industry-standard).
 	// Required — empty surfaces PROJECT_SLUG_REQUIRED.
-	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	// IncludeArchived is reserved; we only flip the flag once the archive
 	// flow for areas lands. Shipping the field shape early so agents don't
 	// need to relearn a new schema later.

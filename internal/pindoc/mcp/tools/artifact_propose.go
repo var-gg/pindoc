@@ -43,7 +43,7 @@ type artifactProposeInput struct {
 	// ProjectSlug picks which project this artifact lands in (account-
 	// level scope, Decision mcp-scope-account-level-industry-standard).
 	// Required.
-	ProjectSlug   string   `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug   string   `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	Type          string   `json:"type" jsonschema:"one of Decision|Analysis|Debug|Flow|Task|TC|Glossary|Feature|APIEndpoint|Screen|DataModel"`
 	AreaSlug      string   `json:"area_slug" jsonschema:"slug from pindoc.area.list; use 'misc' or '_unsorted' if unsure"`
 	Title         string   `json:"title"`

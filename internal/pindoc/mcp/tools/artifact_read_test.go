@@ -165,13 +165,13 @@ func TestBuildTaskAttentionGates(t *testing.T) {
 		if got.Code != "task_still_open" || got.Level != "info" {
 			t.Fatalf("unexpected code/level: %+v", got)
 		}
-		want := "이 Task는 status=open. 작업이 끝났으면 acceptance 체크를 갱신하고 status를 claimed_done으로 옮기세요."
+		want := "이 Task는 status=open. 작업이 끝났으면 acceptance 체크와 evidence를 정리한 뒤 pindoc.task.claim_done을 호출하고, 최종 응답 전 pindoc.task.done_check로 닫힘을 확인하세요."
 		if got.Message != want {
 			t.Fatalf("message = %q; want %q", got.Message, want)
 		}
 		if len(got.NextTools) != 2 ||
 			got.NextTools[0].Tool != "pindoc.artifact.propose" ||
-			got.NextTools[1].Tool != "pindoc.artifact.propose" {
+			got.NextTools[1].Tool != "pindoc.task.claim_done" {
 			t.Fatalf("unexpected next_tools: %+v", got.NextTools)
 		}
 	})
@@ -181,7 +181,7 @@ func TestBuildTaskAttentionGates(t *testing.T) {
 		if got == nil {
 			t.Fatal("expected task_attention")
 		}
-		want := "This Task is still open. If you're done, update the acceptance checks and move status to claimed_done."
+		want := "This Task is still open. If you're done, update acceptance/evidence, call pindoc.task.claim_done, then run pindoc.task.done_check before final handoff."
 		if got.Message != want {
 			t.Fatalf("message = %q; want %q", got.Message, want)
 		}

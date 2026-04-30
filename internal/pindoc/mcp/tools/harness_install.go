@@ -16,7 +16,7 @@ type harnessInstallInput struct {
 	// ProjectSlug picks which project the PINDOC.md is rendered for
 	// (account-level scope, Decision mcp-scope-account-level-industry-
 	// standard). Required.
-	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 
 	// Language can override the project's primary_language for this PINDOC.md
 	// render. Optional; falls back to the project setting.
@@ -164,6 +164,22 @@ type HarnessSessionBootstrap struct {
 	// Notes is a short prose hint for human reviewers reading the
 	// harness.install response. Not consumed by the harness itself.
 	Notes string `json:"notes,omitempty"`
+
+	// ToolsetVersionCacheKey names the session cache slot that stores the
+	// first toolset_version observed from any MCP response.
+	ToolsetVersionCacheKey string `json:"toolset_version_cache_key,omitempty"`
+
+	// DriftCheckTool is the read-only probe the harness calls when a later
+	// response's toolset_version differs from the cached value.
+	DriftCheckTool string `json:"drift_check_tool,omitempty"`
+
+	// DriftActions describes the narrow client-side response to a toolset
+	// mismatch. This is intentionally not a global step_phase envelope.
+	DriftActions []string `json:"drift_actions,omitempty"`
+
+	// SessionHandoffTemplate is the artifact template slug agents read when
+	// a long-running/interrupted session needs a durable continuation note.
+	SessionHandoffTemplate string `json:"session_handoff_template,omitempty"`
 }
 
 // defaultHarnessSessionBootstrap returns the canonical bootstrap
@@ -185,7 +201,14 @@ func defaultHarnessSessionBootstrap() *HarnessSessionBootstrap {
 			"user_switched_workspace",
 			"tool_returned_PROJECT_SLUG_REQUIRED",
 		},
-		Notes: "Run once per MCP session before yielding to the agent. Cache the resolved project_slug; do not re-call on every tool invocation.",
+		Notes:                  "Run once per MCP session before yielding to the agent. Cache the resolved project_slug; do not re-call on every tool invocation.",
+		ToolsetVersionCacheKey: "pindoc.session.toolset_version",
+		DriftCheckTool:         "pindoc.runtime.status",
+		DriftActions: []string{
+			"compare cached toolset_version with the live response",
+			"refresh ToolSearch or restart the MCP session before relying on stale schemas",
+		},
+		SessionHandoffTemplate: "_template_session_handoff",
 	}
 }
 
@@ -492,11 +515,22 @@ Use pindoc.task.claim_done when the implementation is finished. It
 toggles every unchecked acceptance item ("- [ ]") to "[x]" and sets
 task_meta.status="claimed_done" in one atomic revision — no need to
 re-send the body. Already-resolved markers ([x]/[~]/[-]) are preserved.
+Attach commit_sha/pins for code changes, evidence_artifacts for non-code
+deliverables, verification_notes[] for short build/test/smoke/manual QA
+facts, and verification_receipts[] for longer TC/Analysis receipt artifacts.
 
     pindoc.task.claim_done(
       slug_or_id="task-reader-ia-refactor",
-      reason="All acceptance items shipped in PR #142"
+      reason="All acceptance items shipped in PR #142",
+      verification_notes=[
+        {kind:"test", status:"passed", command:"go test ./internal/...", summary:"MCP unit tests passed"}
+      ]
     )
+
+After claim_done, run pindoc.task.done_check for the assignee before
+telling the user the assigned Task queue is complete. task.queue answers
+lifecycle pending state; scope.in_flight answers unresolved acceptance
+checkbox state. Do not substitute one for the other.
 
 Use artifact.propose(shape="meta_patch") for other operational metadata
 fields such as priority or due_at unless a narrower task-specific tool
@@ -571,10 +605,21 @@ new clients should consume directly to drive this handshake.
 ## Toolset version drift
 
 Every MCP tool response includes toolset_version. Keep the first value
-seen in the session; if a later response or pindoc.runtime.status
-returns a different value, the server tool catalog changed underneath
-the client cache. Refresh ToolSearch or restart the MCP session before
-trusting stale tool descriptions.
+seen in the session under "pindoc.session.toolset_version"; if a later
+response differs, call pindoc.runtime.status and compare that live value
+against the cached one. A mismatch means the server tool catalog or schema
+changed underneath the client cache. Refresh ToolSearch or restart the MCP
+session before trusting stale tool descriptions. This drift signal is about
+client schema freshness, not Task lifecycle state.
+
+## Session handoff convention
+
+For long-running, interrupted, or cross-agent Task work, read
+_template_session_handoff and create a short handoff artifact instead of
+relying only on chat history. The handoff should name the current Task slug,
+completed work, pending checks, evidence artifacts or pins, and next MCP tool
+calls. Reader UI support is optional in this iteration because the artifact
+itself is already searchable and readable by continuation sessions.
 
 ## Pre-flight Check protocol (M0.5)
 
@@ -947,9 +992,17 @@ When this project's agent spawns a worktree-based chip / parallel sub-session:
   ` + "`pindoc.task.claim_done(slug_or_id=<task>, commit_sha=<sha>)`" + ` so
   acceptance checkboxes, task_meta.status, and implementation references
   land in one atomic revision.
+- The same claim_done call may include ` + "`verification_notes[]`" + ` for short
+  build/test/smoke/manual QA facts and ` + "`verification_receipts[]`" + ` for long
+  receipt artifacts.
+- Before telling the user the assigned queue is done, call
+  ` + "`pindoc.task.done_check(project_slug=<project>, assignee=<agent>)`" + `.
 
 ### If interrupted / abandoned
 - Task stays open. Orchestrator decides: re-spawn / reassign / cancel.
+- For long interruptions, create a handoff artifact from
+  ` + "`_template_session_handoff`" + ` with current Task slug, completed work,
+  pending checks, evidence artifacts/pins, and next MCP tool calls.
 - Cancel via task_meta.status="cancelled" + reason.
 
 ### Retroactive policy

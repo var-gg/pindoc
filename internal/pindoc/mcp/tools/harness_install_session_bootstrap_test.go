@@ -35,6 +35,19 @@ func TestDefaultHarnessSessionBootstrapContract(t *testing.T) {
 		t.Fatalf("RerunOn: got %v, want %v", got.RerunOn, wantRerun)
 	}
 
+	if got.ToolsetVersionCacheKey != "pindoc.session.toolset_version" {
+		t.Fatalf("toolset cache key drift: %q", got.ToolsetVersionCacheKey)
+	}
+	if got.DriftCheckTool != "pindoc.runtime.status" {
+		t.Fatalf("drift check tool = %q", got.DriftCheckTool)
+	}
+	if len(got.DriftActions) != 2 {
+		t.Fatalf("DriftActions len = %d, want 2", len(got.DriftActions))
+	}
+	if got.SessionHandoffTemplate != "_template_session_handoff" {
+		t.Fatalf("handoff template = %q", got.SessionHandoffTemplate)
+	}
+
 	if got.Notes == "" {
 		t.Fatal("Notes should be a non-empty hint for human reviewers")
 	}
@@ -55,6 +68,11 @@ func TestRenderPindocMDSessionBootstrapSection(t *testing.T) {
 		"git_remote_url",
 		"pindoc.session.default_project_slug",
 		"PROJECT_SLUG_REQUIRED",
+		"pindoc.session.toolset_version",
+		"pindoc.runtime.status",
+		"stale tool descriptions",
+		"_template_session_handoff",
+		"pindoc.task.done_check",
 		"### When to re-run",
 		"### Fallback when bootstrap is missing",
 		"session_bootstrap object",

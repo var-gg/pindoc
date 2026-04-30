@@ -19,7 +19,7 @@ import (
 // ---------------------------------------------------------------------------
 
 type artifactRevisionsInput struct {
-	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	IDOrSlug    string `json:"id_or_slug" jsonschema:"artifact UUID, slug, or pindoc:// URL"`
 	Limit       int    `json:"limit,omitempty" jsonschema:"max rows; default 30, cap 200"`
 }
@@ -150,7 +150,7 @@ func RegisterArtifactRevisions(server *sdk.Server, deps Deps) {
 // ---------------------------------------------------------------------------
 
 type artifactDiffInput struct {
-	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	IDOrSlug    string `json:"id_or_slug"`
 	FromRev     int    `json:"from_rev,omitempty" jsonschema:"optional; default = to_rev - 1"`
 	ToRev       int    `json:"to_rev,omitempty" jsonschema:"optional; default = latest revision"`

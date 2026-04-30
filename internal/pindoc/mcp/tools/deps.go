@@ -1,7 +1,9 @@
 package tools
 
 import (
+	"context"
 	"log/slog"
+	"os/exec"
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
@@ -101,13 +103,31 @@ type Deps struct {
 	// artifact.propose statically verifies each kind="code" pin's path and
 	// emits a PIN_PATH_NOT_FOUND warning on accepted responses if the file
 	// is missing at HEAD. Empty = validation disabled (V1.5 git-pinner
-	// takes over). Pure warning, never blocks.
+	// takes over). Pure warning, never blocks. Project-scope defaulting also
+	// uses this path as the server-visible workspace signal when callers omit
+	// project_slug and no PINDOC_PROJECT fallback is configured.
 	RepoRoot string
+
+	// GitRemoteFromWorkdir lets tests stub the local workspace signal used
+	// by project_slug defaulting. Nil falls back to git remote get-url
+	// origin through projects.GitRemoteURLFromWorkdir.
+	GitRemoteFromWorkdir func(ctx context.Context, workdir string) (string, error)
 
 	// Telemetry is the async MCP tool-call logger (Phase J). Nil-safe
 	// — Instrument() no-ops when absent, so tests that don't care
 	// about observability can leave it unset.
 	Telemetry *telemetry.Store
+}
+
+func gitRemoteFromWorkdir(ctx context.Context, deps Deps, workdir string) (string, error) {
+	if deps.GitRemoteFromWorkdir != nil {
+		return deps.GitRemoteFromWorkdir(ctx, workdir)
+	}
+	out, err := exec.CommandContext(ctx, "git", "-c", "safe.directory=*", "-C", workdir, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 
 // AbsHumanURL builds an absolute share URL from the current settings. Empty

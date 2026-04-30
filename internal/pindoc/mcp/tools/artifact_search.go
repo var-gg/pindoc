@@ -13,7 +13,7 @@ import (
 )
 
 type artifactSearchInput struct {
-	ProjectSlug       string   `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug       string   `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	Query             string   `json:"query" jsonschema:"user's natural-language question"`
 	TopK              int      `json:"top_k,omitempty" jsonschema:"default 5, max 20"`
 	Types             []string `json:"types,omitempty" jsonschema:"filter by artifact type (Decision, Debug, ...)"`

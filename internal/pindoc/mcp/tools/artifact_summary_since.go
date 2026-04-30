@@ -15,7 +15,7 @@ import (
 )
 
 type summarySinceInput struct {
-	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	IDOrSlug    string `json:"id_or_slug"`
 	SinceRev    int    `json:"since_rev,omitempty" jsonschema:"revision number to compare from"`
 	SinceTime   string `json:"since_time,omitempty" jsonschema:"RFC3339 timestamp; revisions after this"`

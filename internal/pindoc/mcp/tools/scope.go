@@ -11,7 +11,7 @@ import (
 )
 
 type scopeInFlightInput struct {
-	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	AreaSlug    string `json:"area_slug,omitempty" jsonschema:"optional — restrict to one area; default is project-wide"`
 	// StateFilter: which acceptance states to include. "open" = [ ] +
 	// [~] (the default — "work still owed"); "unchecked" = [ ] only;

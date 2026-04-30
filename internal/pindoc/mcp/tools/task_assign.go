@@ -20,7 +20,7 @@ import (
 type taskAssignInput struct {
 	// ProjectSlug picks which project owns the Task (account-level scope,
 	// Decision mcp-scope-account-level-industry-standard). Required.
-	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 
 	// SlugOrID identifies the Task. Accepts UUID, project-scoped slug, or
 	// pindoc://slug URL.

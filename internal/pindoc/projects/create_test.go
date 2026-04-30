@@ -153,12 +153,12 @@ func TestValidateProjectSlug(t *testing.T) {
 	}
 
 	invalidShape := []string{
-		"",        // empty
-		"X",       // single char (still single after lower)
-		"-foo",    // leading dash
-		"1foo",    // leading digit
-		"foo_bar", // underscore
-		"foo.bar", // dot
+		"",                      // empty
+		"X",                     // single char (still single after lower)
+		"-foo",                  // leading dash
+		"1foo",                  // leading digit
+		"foo_bar",               // underscore
+		"foo.bar",               // dot
 		strings.Repeat("a", 41), // too long
 	}
 	for _, s := range invalidShape {
@@ -203,16 +203,17 @@ func TestLocalizedAreaDescription(t *testing.T) {
 	}
 }
 
-// TestTemplateSeeds_V1Set locks the four Tier A templates expected by
-// Decision task-templates-prose-first-redesign. Adding Feature /
-// APIEndpoint / Screen / DataModel templates lands here when V1.x picks
-// up the Web-SaaS Domain Pack.
+// TestTemplateSeeds_V1Set locks the Tier A templates plus the optional
+// SessionHandoff convention template. Adding Feature / APIEndpoint /
+// Screen / DataModel templates lands here when V1.x picks up the Web-SaaS
+// Domain Pack.
 func TestTemplateSeeds_V1Set(t *testing.T) {
 	want := []string{
 		"_template_debug",
 		"_template_decision",
 		"_template_analysis",
 		"_template_task",
+		"_template_session_handoff",
 	}
 	if len(TemplateSeeds) != len(want) {
 		t.Fatalf("template count = %d, want %d", len(TemplateSeeds), len(want))

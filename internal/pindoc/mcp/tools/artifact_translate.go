@@ -15,7 +15,7 @@ import (
 )
 
 type artifactTranslateInput struct {
-	ProjectSlug  string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug  string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	ArtifactSlug string `json:"artifact_slug" jsonschema:"artifact slug, UUID, pindoc:// ref, or Reader share URL to translate"`
 	TargetLocale string `json:"target_locale" jsonschema:"target BCP 47 language tag, e.g. en | ko | ja | hi"`
 	// UseCache defaults to true. Pointer keeps omitted distinct from

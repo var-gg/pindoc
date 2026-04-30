@@ -17,7 +17,7 @@ import (
 )
 
 type contextForTaskInput struct {
-	ProjectSlug     string   `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug     string   `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	TaskDescription string   `json:"task_description" jsonschema:"free-form natural language description of what the agent is about to do"`
 	TopK            int      `json:"top_k,omitempty" jsonschema:"number of artifacts to return; default 3, max 10"`
 	Areas           []string `json:"areas,omitempty" jsonschema:"optional area_slug filter"`

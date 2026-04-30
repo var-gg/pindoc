@@ -22,7 +22,7 @@ type taskBulkAssignInput struct {
 	// ProjectSlug picks which project owns the Tasks (account-level
 	// scope, Decision mcp-scope-account-level-industry-standard).
 	// Required.
-	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 
 	// Slugs is the list of Task references to update. Order is preserved
 	// in the response. Accepts UUID, slug, or pindoc:// URL.

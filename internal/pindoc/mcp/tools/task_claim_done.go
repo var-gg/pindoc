@@ -38,7 +38,7 @@ const (
 type taskClaimDoneInput struct {
 	// ProjectSlug picks which project owns the Task (account-level scope,
 	// Decision mcp-scope-account-level-industry-standard).
-	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 
 	// SlugOrID identifies the Task. Accepts UUID, project-scoped slug, or
 	// pindoc://slug URL.
@@ -88,6 +88,25 @@ type taskClaimDoneInput struct {
 	// or Analysis artifacts as relates_to=evidence edges on the Task.
 	// Code/config/doc changes should still use commit_sha or pins[].
 	EvidenceArtifacts []string `json:"evidence_artifacts,omitempty" jsonschema:"optional non-code deliverable artifacts; slug, UUID, or pindoc:// refs stored as relates_to=evidence edges"`
+
+	// VerificationNotes stores compact build/test/smoke/manual QA results
+	// directly on the claim_done revision. Use for short one-line
+	// verification facts; longer logs should be published as an artifact
+	// and linked via verification_receipts.
+	VerificationNotes []VerificationNoteInput `json:"verification_notes,omitempty" jsonschema:"optional short verification notes; each note has kind, status, summary, and optional command"`
+
+	// VerificationReceipts links longer verification artifacts, such as a
+	// TC or Analysis artifact containing command output or manual QA logs.
+	// Stored as relates_to=evidence edges but reported separately from
+	// generic evidence_artifacts and code pins.
+	VerificationReceipts []string `json:"verification_receipts,omitempty" jsonschema:"optional long verification receipt artifacts; slug, UUID, or pindoc:// refs stored as evidence edges and surfaced separately"`
+}
+
+type VerificationNoteInput struct {
+	Kind    string `json:"kind" jsonschema:"build | test | smoke | manual | qa | deploy | other"`
+	Status  string `json:"status" jsonschema:"passed | failed | skipped | info"`
+	Summary string `json:"summary" jsonschema:"short human-readable verification result"`
+	Command string `json:"command,omitempty" jsonschema:"optional command or scenario name"`
 }
 
 type taskClaimDoneOutput struct {
@@ -99,24 +118,29 @@ type taskClaimDoneOutput struct {
 	SuggestedActions []string `json:"suggested_actions,omitempty"`
 
 	// Populated on accepted paths.
-	ArtifactID             string   `json:"artifact_id,omitempty"`
-	Slug                   string   `json:"slug,omitempty"`
-	AgentRef               string   `json:"agent_ref,omitempty"`
-	RevisionNumber         int      `json:"revision_number,omitempty"`
-	HumanURL               string   `json:"human_url,omitempty"`
-	HumanURLAbs            string   `json:"human_url_abs,omitempty"`
-	ChangedAcceptanceCount int      `json:"changed_acceptance_count"`
-	PrevStatus             string   `json:"prev_status,omitempty"`
-	NewStatus              string   `json:"new_status,omitempty"`
-	CommitSHA              string   `json:"commit_sha,omitempty"`
-	PinStrategy            string   `json:"pin_strategy,omitempty"`
-	ChangedPathsAllowlist  []string `json:"changed_paths_allowlist,omitempty"`
-	PinsStored             int      `json:"pins_stored"`
-	PinsAutopinCount       int      `json:"pins_autopin_count"`
-	PinsExplicitCount      int      `json:"pins_explicit_count"`
-	EvidenceEdgesStored    int      `json:"evidence_edges_stored,omitempty"`
-	Warnings               []string `json:"warnings,omitempty"`
-	ToolsetVersion         string   `json:"toolset_version,omitempty"`
+	ArtifactID                     string                  `json:"artifact_id,omitempty"`
+	Slug                           string                  `json:"slug,omitempty"`
+	AgentRef                       string                  `json:"agent_ref,omitempty"`
+	RevisionNumber                 int                     `json:"revision_number,omitempty"`
+	HumanURL                       string                  `json:"human_url,omitempty"`
+	HumanURLAbs                    string                  `json:"human_url_abs,omitempty"`
+	ChangedAcceptanceCount         int                     `json:"changed_acceptance_count"`
+	PrevStatus                     string                  `json:"prev_status,omitempty"`
+	NewStatus                      string                  `json:"new_status,omitempty"`
+	CommitSHA                      string                  `json:"commit_sha,omitempty"`
+	PinStrategy                    string                  `json:"pin_strategy,omitempty"`
+	ChangedPathsAllowlist          []string                `json:"changed_paths_allowlist,omitempty"`
+	PinsStored                     int                     `json:"pins_stored"`
+	PinsAutopinCount               int                     `json:"pins_autopin_count"`
+	PinsExplicitCount              int                     `json:"pins_explicit_count"`
+	EvidenceEdgesStored            int                     `json:"evidence_edges_stored,omitempty"`
+	VerificationNotes              []VerificationNoteInput `json:"verification_notes,omitempty"`
+	VerificationReceipts           []string                `json:"verification_receipts,omitempty"`
+	VerificationReceiptEdgesStored int                     `json:"verification_receipt_edges_stored,omitempty"`
+	NextTools                      []NextToolHint          `json:"next_tools,omitempty"`
+	Notice                         string                  `json:"notice,omitempty"`
+	Warnings                       []string                `json:"warnings,omitempty"`
+	ToolsetVersion                 string                  `json:"toolset_version,omitempty"`
 }
 
 // RegisterTaskClaimDone wires pindoc.task.claim_done. The handler resolves
@@ -131,7 +155,7 @@ func RegisterTaskClaimDone(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.task.claim_done",
-			Description: "Mark a Task implementation complete. Toggles every unchecked acceptance item ('- [ ]') to '[x]' and sets task_meta.status='claimed_done' in one atomic revision. Already-resolved markers ([x]/[~]/[-]) are preserved — partial / deferred judgment calls are not overwritten. Bypasses search_receipt gating (operational metadata lane). When the Task involved code/doc/config changes, pass commit_sha (7-64 hex chars, prefixed onto commit_msg as '[<short>] ...') and choose pin_strategy: auto (default) auto-pins changed files from the commit diff up to 20, allowlist auto-pins only changed_paths_allowlist entries, explicit disables commit-diff auto pins and stores only pins[]. pins[] uses the same shape as artifact.propose pins[]; duplicate pins are silently skipped. For non-code deliverables such as Decision or Analysis artifacts, pass evidence_artifacts (slug/id/pindoc://) to store relates_to=evidence edges; commit pins and evidence_artifacts can be used together. Reason is optional (stored as commit_msg).",
+			Description: "Mark a Task implementation complete. Toggles every unchecked acceptance item ('- [ ]') to '[x]' and sets task_meta.status='claimed_done' in one atomic revision. Already-resolved markers ([x]/[~]/[-]) are preserved — partial / deferred judgment calls are not overwritten. Bypasses search_receipt gating (operational metadata lane). When the Task involved code/doc/config changes, pass commit_sha (7-64 hex chars, prefixed onto commit_msg as '[<short>] ...') and choose pin_strategy: auto (default) auto-pins changed files from the commit diff up to 20, allowlist auto-pins only changed_paths_allowlist entries, explicit disables commit-diff auto pins and stores only pins[]. pins[] uses the same shape as artifact.propose pins[]; duplicate pins are silently skipped. For non-code deliverables such as Decision or Analysis artifacts, pass evidence_artifacts (slug/id/pindoc://) to store relates_to=evidence edges; commit pins and evidence_artifacts can be used together. For short verification results, pass verification_notes[]; for long logs/reports, create a TC/Analysis receipt artifact and pass verification_receipts[] so they surface separately from code pins. After accepted, call pindoc.task.done_check before final user handoff. Reason is optional (stored as commit_msg).",
 		},
 		func(ctx context.Context, p *auth.Principal, in taskClaimDoneInput) (*sdk.CallToolResult, taskClaimDoneOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -231,6 +255,16 @@ func claimOneTaskDone(
 			Checklist: []string{pMsg},
 		}, nil
 	}
+	verificationNotes, vnCode, vnMsg := normalizeClaimDoneVerificationNotes(in.VerificationNotes)
+	if vnCode != "" {
+		return taskClaimDoneOutput{
+			Status:    "not_ready",
+			ErrorCode: vnCode,
+			Failed:    []string{vnCode},
+			Checklist: []string{vnMsg},
+		}, nil
+	}
+	verificationReceipts := normalizeClaimDoneEvidenceArtifacts(in.VerificationReceipts)
 
 	var (
 		artifactID, projectID, currentBody, currentTitle, currentType, currentSlug string
@@ -353,6 +387,12 @@ func claimOneTaskDone(
 	if len(evidenceRefs) > 0 {
 		shapePayload["evidence_artifacts"] = evidenceRefs
 	}
+	if len(verificationNotes) > 0 {
+		shapePayload["verification_notes"] = verificationNotes
+	}
+	if len(verificationReceipts) > 0 {
+		shapePayload["verification_receipts"] = verificationReceipts
+	}
 
 	autoPins, autoWarnings := buildClaimDoneAutoPins(ctx, deps, projectID, commitSHA, claimDoneAutopinDefaultLimit, pinStrategy, changedPathsAllowlist)
 	pinWarnings := append([]string{}, autoWarnings...)
@@ -393,6 +433,30 @@ func claimOneTaskDone(
 			return taskClaimDoneOutput{}, err
 		}
 		evidenceEdgesStored = stored
+	}
+	verificationReceiptEdgesStored := 0
+	if len(verificationReceipts) > 0 {
+		relations := make([]ArtifactRelationInput, 0, len(verificationReceipts))
+		for _, ref := range verificationReceipts {
+			relations = append(relations, ArtifactRelationInput{TargetID: ref, Relation: "evidence"})
+		}
+		targetIDs, relErr := resolveRelatesTo(ctx, tx, scope.ProjectSlug, relations, deps.UserLanguage)
+		if relErr != nil {
+			return taskClaimDoneOutput{
+				Status:           "not_ready",
+				ErrorCode:        "VERIFICATION_RECEIPT_NOT_FOUND",
+				Failed:           []string{"VERIFICATION_RECEIPT_NOT_FOUND"},
+				Checklist:        []string{fmt.Sprintf("verification_receipts contains an unknown artifact ref in project %q", scope.ProjectSlug)},
+				SuggestedActions: relErr.SuggestedActions,
+				ArtifactID:       artifactID,
+				Slug:             currentSlug,
+			}, nil
+		}
+		stored, err := insertEdges(ctx, tx, artifactID, targetIDs, relations)
+		if err != nil {
+			return taskClaimDoneOutput{}, err
+		}
+		verificationReceiptEdgesStored = stored
 	}
 
 	// Pin attachment runs *inside* the transaction so artifact_pins,
@@ -448,6 +512,7 @@ func claimOneTaskDone(
 	shapePayload["pins_explicit_count"] = pinsExplicitCount
 	shapePayload["pins_autopin_count"] = pinsAutopinCount
 	shapePayload["evidence_edges_stored"] = evidenceEdgesStored
+	shapePayload["verification_receipt_edges_stored"] = verificationReceiptEdgesStored
 	shapePayloadJSON, err := json.Marshal(shapePayload)
 	if err != nil {
 		return taskClaimDoneOutput{}, fmt.Errorf("marshal shape_payload: %w", err)
@@ -546,24 +611,29 @@ func claimOneTaskDone(
 		outWarnings = pinWarnings
 	}
 	return taskClaimDoneOutput{
-		Status:                 "accepted",
-		ArtifactID:             artifactID,
-		Slug:                   currentSlug,
-		AgentRef:               "pindoc://" + currentSlug,
-		RevisionNumber:         newRev,
-		HumanURL:               HumanURL(scope.ProjectSlug, scope.ProjectLocale, currentSlug),
-		HumanURLAbs:            AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, currentSlug),
-		ChangedAcceptanceCount: changedCount,
-		PrevStatus:             prevStatus,
-		NewStatus:              "claimed_done",
-		CommitSHA:              commitSHA,
-		PinStrategy:            pinStrategy,
-		ChangedPathsAllowlist:  changedPathsAllowlist,
-		PinsStored:             pinsStored,
-		PinsExplicitCount:      pinsExplicitCount,
-		PinsAutopinCount:       pinsAutopinCount,
-		EvidenceEdgesStored:    evidenceEdgesStored,
-		Warnings:               outWarnings,
+		Status:                         "accepted",
+		ArtifactID:                     artifactID,
+		Slug:                           currentSlug,
+		AgentRef:                       "pindoc://" + currentSlug,
+		RevisionNumber:                 newRev,
+		HumanURL:                       HumanURL(scope.ProjectSlug, scope.ProjectLocale, currentSlug),
+		HumanURLAbs:                    AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, currentSlug),
+		ChangedAcceptanceCount:         changedCount,
+		PrevStatus:                     prevStatus,
+		NewStatus:                      "claimed_done",
+		CommitSHA:                      commitSHA,
+		PinStrategy:                    pinStrategy,
+		ChangedPathsAllowlist:          changedPathsAllowlist,
+		PinsStored:                     pinsStored,
+		PinsExplicitCount:              pinsExplicitCount,
+		PinsAutopinCount:               pinsAutopinCount,
+		EvidenceEdgesStored:            evidenceEdgesStored,
+		VerificationNotes:              verificationNotes,
+		VerificationReceipts:           verificationReceipts,
+		VerificationReceiptEdgesStored: verificationReceiptEdgesStored,
+		NextTools:                      claimDoneCloseoutNextTools(scope.ProjectSlug, currentSlug, claimDoneCloseoutAssignee(currentTaskMeta, p)),
+		Notice:                         "Task claimed_done recorded. Run pindoc.task.done_check for the assignee before telling the user the assigned Task queue is complete.",
+		Warnings:                       outWarnings,
 	}, nil
 }
 
@@ -681,6 +751,92 @@ func normalizeClaimDoneEvidenceArtifacts(values []string) []string {
 		out = append(out, ref)
 	}
 	return out
+}
+
+var validVerificationNoteKinds = map[string]struct{}{
+	"build": {}, "test": {}, "smoke": {}, "manual": {}, "qa": {}, "deploy": {}, "other": {},
+}
+
+var validVerificationNoteStatuses = map[string]struct{}{
+	"passed": {}, "failed": {}, "skipped": {}, "info": {},
+}
+
+func normalizeClaimDoneVerificationNotes(values []VerificationNoteInput) ([]VerificationNoteInput, string, string) {
+	if len(values) == 0 {
+		return nil, "", ""
+	}
+	out := make([]VerificationNoteInput, 0, len(values))
+	for i, note := range values {
+		kind := strings.ToLower(strings.TrimSpace(note.Kind))
+		if kind == "" {
+			kind = "other"
+		}
+		if _, ok := validVerificationNoteKinds[kind]; !ok {
+			return nil, "CLAIM_DONE_VERIFICATION_NOTE_INVALID", fmt.Sprintf("verification_notes[%d].kind must be one of build|test|smoke|manual|qa|deploy|other", i)
+		}
+		status := strings.ToLower(strings.TrimSpace(note.Status))
+		if status == "" {
+			status = "info"
+		}
+		if _, ok := validVerificationNoteStatuses[status]; !ok {
+			return nil, "CLAIM_DONE_VERIFICATION_NOTE_INVALID", fmt.Sprintf("verification_notes[%d].status must be one of passed|failed|skipped|info", i)
+		}
+		summary := strings.TrimSpace(note.Summary)
+		if summary == "" {
+			return nil, "CLAIM_DONE_VERIFICATION_NOTE_INVALID", fmt.Sprintf("verification_notes[%d].summary is required", i)
+		}
+		if utf8.RuneCountInString(summary) > 400 {
+			return nil, "CLAIM_DONE_VERIFICATION_NOTE_INVALID", fmt.Sprintf("verification_notes[%d].summary must be 400 runes or fewer", i)
+		}
+		command := strings.TrimSpace(note.Command)
+		if utf8.RuneCountInString(command) > 300 {
+			return nil, "CLAIM_DONE_VERIFICATION_NOTE_INVALID", fmt.Sprintf("verification_notes[%d].command must be 300 runes or fewer", i)
+		}
+		out = append(out, VerificationNoteInput{
+			Kind:    kind,
+			Status:  status,
+			Summary: summary,
+			Command: command,
+		})
+	}
+	return out, "", ""
+}
+
+func claimDoneCloseoutNextTools(projectSlug, taskSlug, assignee string) []NextToolHint {
+	args := map[string]any{
+		"project_slug": projectSlug,
+	}
+	if strings.TrimSpace(assignee) != "" {
+		args["assignee"] = assignee
+	}
+	return []NextToolHint{
+		{
+			Tool:   "pindoc.task.done_check",
+			Args:   args,
+			Reason: "verify no assigned Tasks remain open and no claimed_done Tasks retain unresolved acceptance before final handoff",
+		},
+		{
+			Tool: "pindoc.artifact.read",
+			Args: map[string]any{
+				"project_slug": projectSlug,
+				"id_or_slug":   taskSlug,
+				"view":         "continuation",
+			},
+			Reason: "inspect stored evidence, verification notes, receipt artifacts, and closeout revision if needed",
+		},
+	}
+}
+
+func claimDoneCloseoutAssignee(taskMeta map[string]any, p *auth.Principal) string {
+	if taskMeta != nil {
+		if assignee, ok := taskMeta["assignee"].(string); ok && strings.TrimSpace(assignee) != "" {
+			return strings.TrimSpace(assignee)
+		}
+	}
+	if p != nil && strings.TrimSpace(p.AgentID) != "" {
+		return strings.TrimSpace(p.AgentID)
+	}
+	return ""
 }
 
 func buildClaimDoneAutoPins(ctx context.Context, deps Deps, projectID, commitSHA string, limit int, pinStrategy string, changedPathsAllowlist []string) ([]ArtifactPinInput, []string) {

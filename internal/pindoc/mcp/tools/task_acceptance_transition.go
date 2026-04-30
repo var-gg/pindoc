@@ -15,7 +15,7 @@ import (
 )
 
 type taskAcceptanceTransitionInput struct {
-	ProjectSlug  string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug  string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	TaskIDOrSlug string `json:"task_id_or_slug" jsonschema:"Task artifact UUID, slug, or pindoc:// URL"`
 
 	CheckboxIndex      *int   `json:"checkbox_index,omitempty" jsonschema:"single checkbox index; optional shorthand for checkbox_indices=[N]"`

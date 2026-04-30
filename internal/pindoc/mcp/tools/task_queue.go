@@ -25,7 +25,7 @@ const (
 )
 
 type taskQueueInput struct {
-	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 
 	// Status selects the task lifecycle bucket to return. The default
 	// "pending" intentionally matches the Reader header count:
@@ -113,6 +113,7 @@ type taskQueueOutput struct {
 	Items          []taskQueueItem     `json:"items"`
 	Truncated      bool                `json:"truncated,omitempty"`
 	Notice         string              `json:"notice"`
+	NextTools      []NextToolHint      `json:"next_tools,omitempty"`
 	Attention      *TaskQueueAttention `json:"attention,omitempty"`
 	ToolsetVersion string              `json:"toolset_version,omitempty"`
 }
@@ -288,6 +289,7 @@ response.
 				Items:                 items,
 				Truncated:             truncated,
 				Notice:                taskQueueNotice(),
+				NextTools:             taskQueueCloseoutNextTools(scope.ProjectSlug, strings.TrimSpace(in.Assignee)),
 			}
 			out.Attention = buildTaskQueueAttention(ctx, deps, p, scope.ProjectSlug, strings.TrimSpace(in.Assignee), deps.UserLanguage)
 			applyTaskQueueCompact(&out, in.Compact)
@@ -431,6 +433,22 @@ func applyTaskQueueReadySignal(item *taskQueueItem, statusBucket, body string) {
 
 func taskQueueNotice() string {
 	return "Reader parity: pending means task_meta.status is missing or open. Counts are lifecycle counts; item-level ready_to_close is the acceptance checklist signal. Acceptance-complete open Tasks are transient reconcile candidates; pindoc.ping auto-transitions them to claimed_done. Use pindoc.scope.in_flight for unresolved [ ]/[~] checklist items."
+}
+
+func taskQueueCloseoutNextTools(projectSlug, assignee string) []NextToolHint {
+	if strings.TrimSpace(assignee) == "" {
+		return nil
+	}
+	return []NextToolHint{
+		{
+			Tool: "pindoc.task.done_check",
+			Args: map[string]any{
+				"project_slug": projectSlug,
+				"assignee":     strings.TrimSpace(assignee),
+			},
+			Reason: "final assigned-work closeout check before telling the user the queue is complete",
+		},
+	}
 }
 
 func taskQueueCountLegend() map[string]string {

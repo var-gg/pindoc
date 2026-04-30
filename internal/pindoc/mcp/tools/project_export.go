@@ -13,7 +13,7 @@ import (
 )
 
 type projectExportInput struct {
-	ProjectSlug      string   `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug      string   `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	Areas            []string `json:"areas,omitempty" jsonschema:"optional area_slug filters"`
 	Slugs            []string `json:"slugs,omitempty" jsonschema:"optional artifact slug filters"`
 	IncludeRevisions bool     `json:"include_revisions,omitempty" jsonschema:"default false; true adds per-artifact .revisions.md files"`

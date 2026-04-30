@@ -11,7 +11,7 @@ import (
 )
 
 type taskDoneCheckInput struct {
-	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	Assignee    string `json:"assignee,omitempty" jsonschema:"optional exact task_meta.assignee; defaults to the calling agent id, e.g. agent:codex"`
 }
 

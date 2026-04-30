@@ -17,7 +17,7 @@ import (
 )
 
 type artifactAddPinInput struct {
-	ProjectSlug     string           `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug     string           `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	SlugOrID        string           `json:"slug_or_id" jsonschema:"target artifact UUID, slug, or pindoc:// URL"`
 	Pin             ArtifactPinInput `json:"pin" jsonschema:"required; same pin item shape as artifact.propose pins[]"`
 	Reason          string           `json:"reason" jsonschema:"required, 2-200 runes; stored as commit_msg with add_pin prefix"`

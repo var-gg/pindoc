@@ -304,3 +304,51 @@ func TestValidateClaimDonePins(t *testing.T) {
 		}
 	})
 }
+
+func TestNormalizeClaimDoneVerificationNotes(t *testing.T) {
+	notes, code, msg := normalizeClaimDoneVerificationNotes([]VerificationNoteInput{
+		{Kind: " TEST ", Status: " PASSED ", Command: " go test ./... ", Summary: " unit tests passed "},
+		{Summary: "manual QA recorded"},
+	})
+	if code != "" {
+		t.Fatalf("expected ok, got code=%q msg=%q", code, msg)
+	}
+	if len(notes) != 2 {
+		t.Fatalf("notes len = %d, want 2", len(notes))
+	}
+	if notes[0].Kind != "test" || notes[0].Status != "passed" || notes[0].Command != "go test ./..." || notes[0].Summary != "unit tests passed" {
+		t.Fatalf("first note not normalized: %+v", notes[0])
+	}
+	if notes[1].Kind != "other" || notes[1].Status != "info" {
+		t.Fatalf("default note not normalized: %+v", notes[1])
+	}
+
+	_, code, msg = normalizeClaimDoneVerificationNotes([]VerificationNoteInput{{Kind: "lint", Status: "passed", Summary: "ok"}})
+	if code != "CLAIM_DONE_VERIFICATION_NOTE_INVALID" || !strings.Contains(msg, "kind") {
+		t.Fatalf("invalid kind = code %q msg %q", code, msg)
+	}
+	_, code, msg = normalizeClaimDoneVerificationNotes([]VerificationNoteInput{{Kind: "test", Status: "green", Summary: "ok"}})
+	if code != "CLAIM_DONE_VERIFICATION_NOTE_INVALID" || !strings.Contains(msg, "status") {
+		t.Fatalf("invalid status = code %q msg %q", code, msg)
+	}
+	_, code, msg = normalizeClaimDoneVerificationNotes([]VerificationNoteInput{{Kind: "test", Status: "passed"}})
+	if code != "CLAIM_DONE_VERIFICATION_NOTE_INVALID" || !strings.Contains(msg, "summary") {
+		t.Fatalf("missing summary = code %q msg %q", code, msg)
+	}
+}
+
+func TestClaimDoneCloseoutNextTools(t *testing.T) {
+	got := claimDoneCloseoutNextTools("pindoc", "task-a", "agent:codex")
+	if len(got) != 2 {
+		t.Fatalf("next_tools len = %d, want 2", len(got))
+	}
+	if got[0].Tool != "pindoc.task.done_check" {
+		t.Fatalf("first next tool = %q", got[0].Tool)
+	}
+	if got[0].Args["project_slug"] != "pindoc" || got[0].Args["assignee"] != "agent:codex" {
+		t.Fatalf("done_check args = %+v", got[0].Args)
+	}
+	if got[1].Tool != "pindoc.artifact.read" || got[1].Args["id_or_slug"] != "task-a" || got[1].Args["view"] != "continuation" {
+		t.Fatalf("read args = %+v", got[1])
+	}
+}

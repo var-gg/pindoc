@@ -21,7 +21,7 @@ import (
 var areaSlugRe = regexp.MustCompile(`^[a-z][a-z0-9-]{1,39}$`)
 
 type areaCreateInput struct {
-	ProjectSlug    string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug    string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	ParentSlug     string `json:"parent_slug" jsonschema:"required top-level area slug that will own the new sub-area"`
 	Slug           string `json:"slug" jsonschema:"lowercase kebab-case slug, 2-40 chars, unique within the project"`
 	Name           string `json:"name" jsonschema:"display name, 2-60 chars"`

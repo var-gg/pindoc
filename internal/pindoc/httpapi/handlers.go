@@ -674,8 +674,10 @@ type artifactDetail struct {
 	// ref records the agent_id that authored the latest revision. Both
 	// empty when the artifact has no pins / the agent didn't report a
 	// session.
-	Pins             []pinRow        `json:"pins,omitempty"`
-	SourceSessionRef json.RawMessage `json:"source_session_ref,omitempty"`
+	Pins                 []pinRow              `json:"pins,omitempty"`
+	SourceSessionRef     json.RawMessage       `json:"source_session_ref,omitempty"`
+	VerificationNotes    []verificationNoteRow `json:"verification_notes,omitempty"`
+	VerificationReceipts []string              `json:"verification_receipts,omitempty"`
 
 	// RecentWarnings projects events.artifact.warning_raised rows for
 	// the Reader Trust Card (Task propose-경로-warning-영속화). The
@@ -724,6 +726,13 @@ type pinRow struct {
 	Path       string `json:"path"`
 	LinesStart int    `json:"lines_start,omitempty"`
 	LinesEnd   int    `json:"lines_end,omitempty"`
+}
+
+type verificationNoteRow struct {
+	Kind    string `json:"kind"`
+	Status  string `json:"status"`
+	Summary string `json:"summary"`
+	Command string `json:"command,omitempty"`
 }
 
 func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
@@ -820,8 +829,61 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	} else {
 		a.RecentWarnings = warnings
 	}
+	if notes, receipts, err := d.loadLatestVerificationEvidence(r.Context(), a.ID); err != nil {
+		d.Logger.Warn("verification evidence lookup failed", "artifact_id", a.ID, "err", err)
+	} else {
+		a.VerificationNotes = notes
+		a.VerificationReceipts = receipts
+	}
 
 	writeJSON(w, http.StatusOK, a)
+}
+
+func (d Deps) loadLatestVerificationEvidence(ctx context.Context, artifactID string) ([]verificationNoteRow, []string, error) {
+	var raw []byte
+	err := d.DB.QueryRow(ctx, `
+		SELECT shape_payload
+		  FROM artifact_revisions
+		 WHERE artifact_id = $1
+		   AND shape_payload->>'kind' = 'claim_done'
+		   AND (
+		        shape_payload ? 'verification_notes'
+		     OR shape_payload ? 'verification_receipts'
+		   )
+		 ORDER BY revision_number DESC
+		 LIMIT 1
+	`, artifactID).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	var parsed struct {
+		VerificationNotes    []verificationNoteRow `json:"verification_notes"`
+		VerificationReceipts []string              `json:"verification_receipts"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, nil, err
+	}
+	return parsed.VerificationNotes, normalizeStringRefs(parsed.VerificationReceipts), nil
+}
+
+func normalizeStringRefs(values []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(strings.TrimPrefix(value, "pindoc://"))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 // loadRecentWarnings returns up to 5 most-recent

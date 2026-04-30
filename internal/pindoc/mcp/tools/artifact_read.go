@@ -19,7 +19,7 @@ type artifactReadInput struct {
 	// ProjectSlug picks which project to look the artifact up in
 	// (account-level scope, Decision mcp-scope-account-level-industry-
 	// standard). Required — empty surfaces PROJECT_SLUG_REQUIRED.
-	ProjectSlug string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
+	ProjectSlug string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 
 	// One of IDOrSlug (UUID or project-scoped slug) must be set.
 	// URLs coming from Wiki Reader share links (pindoc://... or
@@ -68,10 +68,12 @@ type artifactReadOutput struct {
 	Stale   *StaleSignal `json:"stale,omitempty"`
 
 	// View: populated on continuation only.
-	RecentRevisions            []RevisionSummaryRef `json:"recent_revisions,omitempty"`
-	RelatesTo                  []EdgeRef            `json:"relates_to,omitempty"`
-	RelatedBy                  []EdgeRef            `json:"related_by,omitempty"`
-	UnresolvedAcceptanceLabels []AcceptanceLabelRef `json:"unresolved_acceptance_labels,omitempty"`
+	RecentRevisions            []RevisionSummaryRef    `json:"recent_revisions,omitempty"`
+	RelatesTo                  []EdgeRef               `json:"relates_to,omitempty"`
+	RelatedBy                  []EdgeRef               `json:"related_by,omitempty"`
+	UnresolvedAcceptanceLabels []AcceptanceLabelRef    `json:"unresolved_acceptance_labels,omitempty"`
+	VerificationNotes          []VerificationNoteInput `json:"verification_notes,omitempty"`
+	VerificationReceipts       []string                `json:"verification_receipts,omitempty"`
 
 	// ArtifactMeta echoes the epistemic axes persisted on the artifact.
 	// Populated on every view (brief / full / continuation) because the
@@ -235,6 +237,12 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			out.HumanURLAbs = AbsHumanURL(deps.Settings, out.ProjectSlug, scope.ProjectLocale, out.Slug)
 			out.View = view
 			out.UnresolvedAcceptanceLabels = unresolvedAcceptanceLabels(out.BodyMarkdown)
+			if notes, receipts, err := loadLatestVerificationEvidence(ctx, deps, out.ID); err != nil {
+				deps.Logger.Warn("verification evidence lookup failed", "artifact_id", out.ID, "err", err)
+			} else {
+				out.VerificationNotes = notes
+				out.VerificationReceipts = receipts
+			}
 			taskStatus, taskAssignee := taskAttentionTaskMetaFields(taskMetaRaw)
 			out.TaskAttention = buildTaskAttention(
 				out.Type,
@@ -347,15 +355,12 @@ func buildTaskAttention(artifactType, taskStatus, taskAssignee, lastRevisionAuth
 				Reason: "update acceptance checks",
 			},
 			{
-				Tool: "pindoc.artifact.propose",
+				Tool: "pindoc.task.claim_done",
 				Args: map[string]any{
 					"project_slug": projectSlug,
-					"update_of":    "pindoc://" + slug,
-					"task_meta": map[string]any{
-						"status": "claimed_done",
-					},
+					"slug_or_id":   "pindoc://" + slug,
 				},
-				Reason: "move Task lifecycle after acceptance is complete",
+				Reason: "claim completion atomically, attach evidence, then run pindoc.task.done_check before final handoff",
 			},
 		},
 	}
@@ -392,9 +397,9 @@ func stripAgentPrefix(id string) string {
 
 func taskAttentionMessage(locale string) string {
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "ko") {
-		return "이 Task는 status=open. 작업이 끝났으면 acceptance 체크를 갱신하고 status를 claimed_done으로 옮기세요."
+		return "이 Task는 status=open. 작업이 끝났으면 acceptance 체크와 evidence를 정리한 뒤 pindoc.task.claim_done을 호출하고, 최종 응답 전 pindoc.task.done_check로 닫힘을 확인하세요."
 	}
-	return "This Task is still open. If you're done, update the acceptance checks and move status to claimed_done."
+	return "This Task is still open. If you're done, update acceptance/evidence, call pindoc.task.claim_done, then run pindoc.task.done_check before final handoff."
 }
 
 // summarizeBody returns up to ~240 chars, preferring the first paragraph
@@ -458,6 +463,36 @@ func loadPins(ctx context.Context, deps Deps, artifactID string) ([]PinRef, erro
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+func loadLatestVerificationEvidence(ctx context.Context, deps Deps, artifactID string) ([]VerificationNoteInput, []string, error) {
+	var raw []byte
+	err := deps.DB.QueryRow(ctx, `
+		SELECT shape_payload
+		  FROM artifact_revisions
+		 WHERE artifact_id = $1
+		   AND shape_payload->>'kind' = 'claim_done'
+		   AND (
+		        shape_payload ? 'verification_notes'
+		     OR shape_payload ? 'verification_receipts'
+		   )
+		 ORDER BY revision_number DESC
+		 LIMIT 1
+	`, artifactID).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	var parsed struct {
+		VerificationNotes    []VerificationNoteInput `json:"verification_notes"`
+		VerificationReceipts []string                `json:"verification_receipts"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, nil, err
+	}
+	return parsed.VerificationNotes, normalizeClaimDoneEvidenceArtifacts(parsed.VerificationReceipts), nil
 }
 
 // staleFromAge reuses the Phase 11c heuristic: over 60 days without an
