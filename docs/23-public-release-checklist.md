@@ -1,5 +1,10 @@
 # Public Release Checklist
 
+<p>
+  <a href="./23-public-release-checklist.md"><img alt="English public release checklist" src="https://img.shields.io/badge/lang-English-2563eb.svg?style=flat-square"></a>
+  <a href="./23-public-release-checklist-ko.md"><img alt="Korean public release checklist" src="https://img.shields.io/badge/lang-%ED%95%9C%EA%B5%AD%EC%96%B4-6b7280.svg?style=flat-square"></a>
+</p>
+
 This is the minimum trust gate before making the repository public or linking a
 public demo from the README.
 
@@ -7,9 +12,11 @@ public demo from the README.
 
 - `README.md` is the English primary landing page.
 - `README-ko.md` exists and is linked from the first screen.
+- `docs/README.md` and `docs/README-ko.md` exist as language-aware documentation hubs.
 - `LICENSE` is Apache 2.0 and README/license references agree.
 - `SECURITY.md` explains loopback trust, external exposure, and read-only demo
   constraints.
+- `SECURITY-ko.md`, `CONTRIBUTING-ko.md`, and Korean launch docs exist for the public Korean entry path.
 - No README or first-run docs describe stale M1 scaffold or stub-default
   behavior as current.
 

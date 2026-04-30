@@ -1,5 +1,10 @@
 # Contributing to Pindoc
 
+<p>
+  <a href="./CONTRIBUTING.md"><img alt="English contributing guide" src="https://img.shields.io/badge/lang-English-2563eb.svg?style=flat-square"></a>
+  <a href="./CONTRIBUTING-ko.md"><img alt="Korean contributing guide" src="https://img.shields.io/badge/lang-%ED%95%9C%EA%B5%AD%EC%96%B4-6b7280.svg?style=flat-square"></a>
+</p>
+
 Thanks for your interest in improving Pindoc. This document covers how
 to file issues, submit pull requests, and sign the Contributor License
 Agreement so your changes can be merged.

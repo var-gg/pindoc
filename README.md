@@ -7,7 +7,7 @@
 
 [![CI](https://github.com/var-gg/pindoc/actions/workflows/ci.yml/badge.svg)](https://github.com/var-gg/pindoc/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![MCP](https://img.shields.io/badge/MCP-agent%20memory-4b5563.svg)](docs/10-mcp-tools-spec.md)
+[![MCP](https://img.shields.io/badge/MCP-agent%20memory-4b5563.svg)](docs/README.md#agent-workflow-and-mcp)
 
 > **The wiki you never type into.**
 > Agent work becomes lasting project memory, pinned to code and ready for the next session.
@@ -43,7 +43,7 @@ A read-only public demo is planned for the first public release. It will expose
 real Pindoc artifacts from Pindoc itself and selected owner projects, with write
 surfaces blocked and sensitive data scrubbed.
 
-The demo plan is tracked in [docs/22-public-demo.md](docs/22-public-demo.md).
+The demo plan is tracked in [Public Demo Plan](docs/22-public-demo.md).
 The README intentionally treats the live demo as the primary proof; GIF/video
 assets are optional launch material, not a requirement.
 
@@ -154,14 +154,12 @@ docker run --rm -v "${PWD}:/work" -w /work golang:1.25 go test ./...
 
 ## Documentation
 
-- [Vision](docs/00-vision.md)
-- [Architecture](docs/03-architecture.md)
-- [MCP Tools Spec](docs/10-mcp-tools-spec.md)
-- [PINDOC.md Harness Spec](docs/09-pindoc-md-spec.md)
+- [Documentation Hub](docs/README.md)
 - [Public Demo Plan](docs/22-public-demo.md)
 - [Public Release Checklist](docs/23-public-release-checklist.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)
+- [Design source notes](docs/README.md#design-source-notes)
 
 ## Status
 

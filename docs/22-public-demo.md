@@ -1,5 +1,10 @@
 # Public Read-Only Demo Plan
 
+<p>
+  <a href="./22-public-demo.md"><img alt="English public demo plan" src="https://img.shields.io/badge/lang-English-2563eb.svg?style=flat-square"></a>
+  <a href="./22-public-demo-ko.md"><img alt="Korean public demo plan" src="https://img.shields.io/badge/lang-%ED%95%9C%EA%B5%AD%EC%96%B4-6b7280.svg?style=flat-square"></a>
+</p>
+
 This document defines the launch demo shape for Pindoc. The demo is intended to
 show real Pindoc usage, not a marketing mockup: visitors should be able to read
 actual artifacts from Pindoc itself and selected owner projects.

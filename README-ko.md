@@ -7,7 +7,7 @@
 
 [![CI](https://github.com/var-gg/pindoc/actions/workflows/ci.yml/badge.svg)](https://github.com/var-gg/pindoc/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![MCP](https://img.shields.io/badge/MCP-agent%20memory-4b5563.svg)](docs/10-mcp-tools-spec.md)
+[![MCP](https://img.shields.io/badge/MCP-agent%20memory-4b5563.svg)](docs/README-ko.md)
 
 > **The wiki you never type into.**
 > 에이전트 작업을 다음 세션이 다시 읽을 수 있는 프로젝트 기억으로 남깁니다.
@@ -43,7 +43,7 @@ Pindoc은 에이전트가 만든 유효한 작업 흔적을 검색 가능하고 
 Pindoc 자체와 실제 작업 프로젝트 일부를 보여주되, write surface는 막고
 민감정보는 scrub합니다.
 
-운영안은 [docs/22-public-demo.md](docs/22-public-demo.md)에 정리합니다. GIF나
+운영안은 [공개 데모 운영안](docs/22-public-demo-ko.md)에 정리합니다. GIF나
 영상은 필수가 아니라 보조 홍보 자산으로 둡니다. 1차 증거는 직접 눌러볼 수
 있는 live demo와 대표 screenshot입니다.
 
@@ -107,8 +107,8 @@ Docker daemon은 account-level MCP 엔드포인트 하나를 노출합니다.
 
 공개 read-only demo는 daemon을 그대로 인터넷에 쓰기 가능하게 여는 방식이
 아니라, reverse proxy에서 `/mcp`와 mutating HTTP route를 막는 방식으로
-운영해야 합니다. 자세한 내용은 [SECURITY.md](SECURITY.md)와
-[docs/22-public-demo.md](docs/22-public-demo.md)를 봅니다.
+운영해야 합니다. 자세한 내용은 [보안 정책](SECURITY-ko.md)과
+[공개 데모 운영안](docs/22-public-demo-ko.md)을 봅니다.
 
 ## 개발
 
@@ -132,14 +132,12 @@ docker run --rm -v "${PWD}:/work" -w /work golang:1.25 go test ./...
 
 ## 문서
 
-- [Vision](docs/00-vision.md)
-- [Architecture](docs/03-architecture.md)
-- [MCP Tools Spec](docs/10-mcp-tools-spec.md)
-- [PINDOC.md Harness Spec](docs/09-pindoc-md-spec.md)
-- [Public Demo Plan](docs/22-public-demo.md)
-- [Public Release Checklist](docs/23-public-release-checklist.md)
-- [Contributing](CONTRIBUTING.md)
-- [Security](SECURITY.md)
+- [문서 허브](docs/README-ko.md)
+- [공개 데모 운영안](docs/22-public-demo-ko.md)
+- [공개 릴리스 체크리스트](docs/23-public-release-checklist-ko.md)
+- [기여 안내](CONTRIBUTING-ko.md)
+- [보안 정책](SECURITY-ko.md)
+- [설계 원본 노트](docs/README-ko.md#설계-원본-노트)
 
 ## 상태
 

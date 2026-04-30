@@ -1,5 +1,10 @@
 # Security Policy
 
+<p>
+  <a href="./SECURITY.md"><img alt="English security policy" src="https://img.shields.io/badge/lang-English-2563eb.svg?style=flat-square"></a>
+  <a href="./SECURITY-ko.md"><img alt="Korean security policy" src="https://img.shields.io/badge/lang-%ED%95%9C%EA%B5%AD%EC%96%B4-6b7280.svg?style=flat-square"></a>
+</p>
+
 Pindoc is self-hosted software that stores project memory, code references,
 agent-written artifacts, and optional identity-provider configuration. Treat a
 Pindoc instance as sensitive infrastructure for the projects it indexes.
