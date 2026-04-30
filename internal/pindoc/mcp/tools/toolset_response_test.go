@@ -29,6 +29,7 @@ func TestStampToolsetVersionOnOutputs(t *testing.T) {
 		taskAssignOutput{},
 		taskBulkAssignOutput{},
 		taskClaimDoneOutput{},
+		taskDoneCheckOutput{},
 		taskQueueOutput{},
 		userCurrentOutput{},
 		userUpdateOutput{},

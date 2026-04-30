@@ -18,10 +18,11 @@ type taskAcceptanceTransitionInput struct {
 	ProjectSlug  string `json:"project_slug" jsonschema:"projects.slug to scope this call to"`
 	TaskIDOrSlug string `json:"task_id_or_slug" jsonschema:"Task artifact UUID, slug, or pindoc:// URL"`
 
-	CheckboxIndex   *int   `json:"checkbox_index,omitempty" jsonschema:"single checkbox index; optional shorthand for checkbox_indices=[N]"`
-	CheckboxIndices []int  `json:"checkbox_indices,omitempty" jsonschema:"0-based checkbox indices across all 4-state acceptance checkboxes"`
-	NewState        string `json:"new_state" jsonschema:"one of '[ ]' | '[x]' | '[~]' | '[-]'"`
-	Reason          string `json:"reason,omitempty" jsonschema:"required for [~] and [-]; stored in revision shape_payload"`
+	CheckboxIndex      *int   `json:"checkbox_index,omitempty" jsonschema:"single checkbox index; optional shorthand for checkbox_indices=[N]"`
+	CheckboxIndices    []int  `json:"checkbox_indices,omitempty" jsonschema:"0-based checkbox indices across all 4-state acceptance checkboxes"`
+	CheckboxLabelMatch string `json:"checkbox_label_match,omitempty" jsonschema:"fuzzy unresolved checkbox label selector; index fields take precedence when present"`
+	NewState           string `json:"new_state" jsonschema:"one of '[ ]' | '[x]' | '[~]' | '[-]'"`
+	Reason             string `json:"reason,omitempty" jsonschema:"required for [~] and [-]; stored in revision shape_payload"`
 
 	ExpectedVersion *int   `json:"expected_version,omitempty" jsonschema:"required optimistic lock; current artifact revision number"`
 	CommitMsg       string `json:"commit_msg,omitempty" jsonschema:"optional one-line rationale; auto-filled when omitted"`
@@ -40,17 +41,20 @@ type taskAcceptanceTransitionOutput struct {
 	MessageLocale   string               `json:"message_locale,omitempty" jsonschema:"locale used for checklist/checklist_items.message after fallback"`
 	PatchableFields []string             `json:"patchable_fields,omitempty"`
 
-	ArtifactID      string `json:"artifact_id,omitempty"`
-	Slug            string `json:"slug,omitempty"`
-	AgentRef        string `json:"agent_ref,omitempty"`
-	RevisionNumber  int    `json:"revision_number,omitempty"`
-	HumanURL        string `json:"human_url,omitempty"`
-	HumanURLAbs     string `json:"human_url_abs,omitempty"`
-	NewStatus       string `json:"new_status,omitempty"`
-	ResolvedCount   int    `json:"resolved_count,omitempty"`
-	TotalCount      int    `json:"total_count,omitempty"`
-	TransitionCount int    `json:"transition_count,omitempty"`
-	ToolsetVersion  string `json:"toolset_version,omitempty"`
+	ArtifactID                 string               `json:"artifact_id,omitempty"`
+	Slug                       string               `json:"slug,omitempty"`
+	AgentRef                   string               `json:"agent_ref,omitempty"`
+	RevisionNumber             int                  `json:"revision_number,omitempty"`
+	HumanURL                   string               `json:"human_url,omitempty"`
+	HumanURLAbs                string               `json:"human_url_abs,omitempty"`
+	NewStatus                  string               `json:"new_status,omitempty"`
+	ResolvedCount              int                  `json:"resolved_count,omitempty"`
+	TotalCount                 int                  `json:"total_count,omitempty"`
+	TransitionCount            int                  `json:"transition_count,omitempty"`
+	Warnings                   []string             `json:"warnings,omitempty"`
+	AcceptanceLabelMatches     []AcceptanceLabelRef `json:"acceptance_label_matches,omitempty"`
+	UnresolvedAcceptanceLabels []AcceptanceLabelRef `json:"unresolved_acceptance_labels,omitempty"`
+	ToolsetVersion             string               `json:"toolset_version,omitempty"`
 }
 
 type appliedAcceptanceTransition struct {
@@ -69,7 +73,7 @@ func RegisterTaskAcceptanceTransition(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.task.acceptance.transition",
-			Description: "Transition one or more Task acceptance checkboxes in a single revision. Pass checkbox_indices plus new_state; expected_version is required. When the final unchecked item is resolved, task_meta.status automatically becomes claimed_done.",
+			Description: "Transition one or more Task acceptance checkboxes in a single revision. Pass checkbox_indices plus new_state, or checkbox_label_match for fuzzy unresolved-label selection; use checkbox_index when exactness matters. expected_version is required. When the final unchecked item is resolved, task_meta.status automatically becomes claimed_done.",
 		},
 		func(ctx context.Context, p *auth.Principal, in taskAcceptanceTransitionInput) (*sdk.CallToolResult, taskAcceptanceTransitionOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -87,8 +91,9 @@ func RegisterTaskAcceptanceTransition(server *sdk.Server, deps Deps) {
 				}, nil
 			}
 
+			checkboxLabel := strings.TrimSpace(in.CheckboxLabelMatch)
 			indices, code := normalizeTransitionIndices(in.CheckboxIndex, in.CheckboxIndices)
-			if code != "" {
+			if code != "" && !(code == "ACCEPT_TRANSITION_INDEX_REQUIRED" && checkboxLabel != "") {
 				return nil, taskAcceptanceTransitionOutput{
 					Status:          "not_ready",
 					ErrorCode:       code,
@@ -161,16 +166,47 @@ func RegisterTaskAcceptanceTransition(server *sdk.Server, deps Deps) {
 				}, nil
 			}
 
+			var acceptanceLabelMatches []AcceptanceLabelRef
+			var unresolvedAcceptanceLabels []AcceptanceLabelRef
+			var warnings []string
+			if len(indices) == 0 && checkboxLabel != "" {
+				idx, matches, unresolved, code := resolveAcceptanceLabelMatch(currentBody, checkboxLabel)
+				acceptanceLabelMatches = matches
+				unresolvedAcceptanceLabels = unresolved
+				if code != "" {
+					return nil, taskAcceptanceTransitionOutput{
+						Status:                     "not_ready",
+						ErrorCode:                  code,
+						Failed:                     []string{code},
+						Checklist:                  []string{acceptanceTransitionChecklist(deps.UserLanguage, code)},
+						PatchableFields:            []string{"checkbox_label_match", "checkbox_index", "checkbox_indices"},
+						ArtifactID:                 artifactID,
+						Slug:                       currentSlug,
+						AcceptanceLabelMatches:     matches,
+						UnresolvedAcceptanceLabels: unresolved,
+					}, nil
+				}
+				indices = []int{idx}
+			} else if checkboxLabel != "" {
+				for _, idx := range indices {
+					if !labelMatchesCheckboxIndex(currentBody, idx, checkboxLabel) {
+						warnings = append(warnings, acceptanceLabelWarning("ACCEPTANCE_LABEL_MISMATCH", checkboxLabel))
+						break
+					}
+				}
+			}
+
 			newBody, applied, applyCode := applyAcceptanceTransitions(currentBody, indices, in.NewState, in.Reason)
 			if applyCode != "" {
 				return nil, taskAcceptanceTransitionOutput{
-					Status:          "not_ready",
-					ErrorCode:       applyCode,
-					Failed:          []string{applyCode},
-					Checklist:       []string{acceptanceTransitionChecklist(deps.UserLanguage, applyCode)},
-					PatchableFields: []string{"checkbox_indices", "new_state", "reason"},
-					ArtifactID:      artifactID,
-					Slug:            currentSlug,
+					Status:                     "not_ready",
+					ErrorCode:                  applyCode,
+					Failed:                     []string{applyCode},
+					Checklist:                  []string{acceptanceTransitionChecklist(deps.UserLanguage, applyCode)},
+					PatchableFields:            []string{"checkbox_indices", "new_state", "reason"},
+					ArtifactID:                 artifactID,
+					Slug:                       currentSlug,
+					UnresolvedAcceptanceLabels: unresolvedAcceptanceLabels,
 				}, nil
 			}
 
@@ -189,10 +225,11 @@ func RegisterTaskAcceptanceTransition(server *sdk.Server, deps Deps) {
 				commitMsg = fmt.Sprintf("acceptance %s on %d item(s)", strings.TrimSpace(in.NewState), len(applied))
 			}
 			shapePayload, err := json.Marshal(map[string]any{
-				"transitions":       applied,
-				"auto_claimed_done": autoClaimedDone,
-				"resolved_count":    resolved,
-				"total_count":       total,
+				"transitions":          applied,
+				"auto_claimed_done":    autoClaimedDone,
+				"resolved_count":       resolved,
+				"total_count":          total,
+				"checkbox_label_match": checkboxLabel,
 			})
 			if err != nil {
 				return nil, taskAcceptanceTransitionOutput{}, fmt.Errorf("marshal shape payload: %w", err)
@@ -264,17 +301,20 @@ func RegisterTaskAcceptanceTransition(server *sdk.Server, deps Deps) {
 				newStatus = "claimed_done"
 			}
 			return nil, taskAcceptanceTransitionOutput{
-				Status:          "accepted",
-				ArtifactID:      artifactID,
-				Slug:            currentSlug,
-				AgentRef:        "pindoc://" + currentSlug,
-				RevisionNumber:  newRev,
-				HumanURL:        HumanURL(scope.ProjectSlug, scope.ProjectLocale, currentSlug),
-				HumanURLAbs:     AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, currentSlug),
-				NewStatus:       newStatus,
-				ResolvedCount:   resolved,
-				TotalCount:      total,
-				TransitionCount: len(applied),
+				Status:                     "accepted",
+				ArtifactID:                 artifactID,
+				Slug:                       currentSlug,
+				AgentRef:                   "pindoc://" + currentSlug,
+				RevisionNumber:             newRev,
+				HumanURL:                   HumanURL(scope.ProjectSlug, scope.ProjectLocale, currentSlug),
+				HumanURLAbs:                AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, currentSlug),
+				NewStatus:                  newStatus,
+				ResolvedCount:              resolved,
+				TotalCount:                 total,
+				TransitionCount:            len(applied),
+				Warnings:                   warnings,
+				AcceptanceLabelMatches:     acceptanceLabelMatches,
+				UnresolvedAcceptanceLabels: unresolvedAcceptanceLabels,
 			}, nil
 		},
 	)

@@ -13,7 +13,7 @@ import (
 // tool name. RegisteredTools catches catalog membership drift; this salt
 // catches same-name surface drift that client-side schema caches otherwise
 // cannot see.
-const ToolsetSchemaVersion = "2026-04-30-dry-run-evidence-toolset-v2"
+const ToolsetSchemaVersion = "2026-04-30-done-check-label-selector-v3"
 
 // RegisteredTools is the canonical list of MCP tool names this package
 // exposes — kept in sync with the Register*(…) calls in
@@ -52,6 +52,7 @@ var RegisteredTools = []string{
 	"pindoc.task.assign",
 	"pindoc.task.bulk_assign",
 	"pindoc.task.claim_done",
+	"pindoc.task.done_check",
 }
 
 // ToolsetVersion returns a stable short string identifying the current tool

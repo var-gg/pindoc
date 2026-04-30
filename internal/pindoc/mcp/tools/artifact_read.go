@@ -68,9 +68,10 @@ type artifactReadOutput struct {
 	Stale   *StaleSignal `json:"stale,omitempty"`
 
 	// View: populated on continuation only.
-	RecentRevisions []RevisionSummaryRef `json:"recent_revisions,omitempty"`
-	RelatesTo       []EdgeRef            `json:"relates_to,omitempty"`
-	RelatedBy       []EdgeRef            `json:"related_by,omitempty"`
+	RecentRevisions            []RevisionSummaryRef `json:"recent_revisions,omitempty"`
+	RelatesTo                  []EdgeRef            `json:"relates_to,omitempty"`
+	RelatedBy                  []EdgeRef            `json:"related_by,omitempty"`
+	UnresolvedAcceptanceLabels []AcceptanceLabelRef `json:"unresolved_acceptance_labels,omitempty"`
 
 	// ArtifactMeta echoes the epistemic axes persisted on the artifact.
 	// Populated on every view (brief / full / continuation) because the
@@ -135,7 +136,7 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.read",
-			Description: "Fetch an artifact by UUID, slug, or share URL, including /p/{project}/wiki/{slug} paths and their absolute URLs. Legacy /p/{project}/{locale}/wiki/{slug} paths are accepted. view=brief returns title/summary/pins/stale without the full body; view=continuation adds recent revisions and typed edges; view=full (default) returns everything. For open Task artifacts, full/continuation reads may include task_attention only when the caller is the assignee or latest revision author.",
+			Description: "Fetch an artifact by UUID, slug, or share URL, including /p/{project}/wiki/{slug} paths and their absolute URLs. Legacy /p/{project}/{locale}/wiki/{slug} paths are accepted. view=brief returns title/summary/pins/stale without the full body; view=continuation adds recent revisions and typed edges; view=full (default) returns everything. Responses include unresolved_acceptance_labels for [ ]/[~] checkbox selector context. For open Task artifacts, full/continuation reads may include task_attention only when the caller is the assignee or latest revision author.",
 		},
 		func(ctx context.Context, p *auth.Principal, in artifactReadInput) (*sdk.CallToolResult, artifactReadOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -233,6 +234,7 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			out.HumanURL = HumanURL(out.ProjectSlug, scope.ProjectLocale, out.Slug)
 			out.HumanURLAbs = AbsHumanURL(deps.Settings, out.ProjectSlug, scope.ProjectLocale, out.Slug)
 			out.View = view
+			out.UnresolvedAcceptanceLabels = unresolvedAcceptanceLabels(out.BodyMarkdown)
 			taskStatus, taskAssignee := taskAttentionTaskMetaFields(taskMetaRaw)
 			out.TaskAttention = buildTaskAttention(
 				out.Type,

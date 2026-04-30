@@ -460,8 +460,10 @@ type artifactProposeOutput struct {
 	// parallel WarningSeverities slice carries the resolved severity
 	// ("error" | "warn" | "info") aligned index-by-index so rich clients
 	// don't have to hardcode the catalog.
-	Warnings          []string `json:"warnings,omitempty"`
-	WarningSeverities []string `json:"warning_severities,omitempty" jsonschema:"aligned with warnings[] index-by-index; one of error | warn | info"`
+	Warnings                   []string             `json:"warnings,omitempty"`
+	WarningSeverities          []string             `json:"warning_severities,omitempty" jsonschema:"aligned with warnings[] index-by-index; one of error | warn | info"`
+	AcceptanceLabelMatches     []AcceptanceLabelRef `json:"acceptance_label_matches,omitempty"`
+	UnresolvedAcceptanceLabels []AcceptanceLabelRef `json:"unresolved_acceptance_labels,omitempty"`
 	// ToolsetVersion echoes the current MCP tool catalog hash so agents
 	// can detect drift without a dedicated ping — every propose response
 	// is enough to notice "server grew a tool between sessions, reconnect".
@@ -545,7 +547,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.propose",
-			Description: "Propose a new artifact (the only write path humans use — always via an agent). Create path (both update_of and supersede_of omitted) requires basis.search_receipt from pindoc.artifact.search or pindoc.context.for_task in the same session; update/supersede paths do not. dry_run=true validates without INSERT/update and does not bypass receipt, expected_version, relates_to, or policy gates; use it for agent self-validation and MCP regression tests, then retry with dry_run=false to publish. For Task creates, omitted task_meta.assignee means unassigned; explicit assignee claims ownership, and explicit task_meta.assignee=\"\" clears on update. Task priority meanings: p0 release blocker, p1 must close before release, p2 next round, p3 backlog; project-specific priority policy wins when present. Use pins[] for concrete code/file/URL evidence; use relates_to relation=evidence when the supporting source is another Pindoc artifact. Returns Status=accepted + artifact_id on success, or Status=not_ready + checklist + suggested_actions if Pre-flight fails. Always read the checklist; never surface the raw error to the user without trying the suggested actions first.",
+			Description: "Propose a new artifact (the only write path humans use — always via an agent). Create path (both update_of and supersede_of omitted) requires basis.search_receipt from pindoc.artifact.search or pindoc.context.for_task in the same session; update/supersede paths do not. dry_run=true validates without INSERT/update and does not bypass receipt, expected_version, relates_to, or policy gates; use it for agent self-validation and MCP regression tests, then retry with dry_run=false to publish. For shape=acceptance_transition, checkbox_label_match is a fuzzy unresolved-label selector; use checkbox_index when exactness matters. For Task creates, omitted task_meta.assignee means unassigned; explicit assignee claims ownership, and explicit task_meta.assignee=\"\" clears on update. Task priority meanings: p0 release blocker, p1 must close before release, p2 next round, p3 backlog; project-specific priority policy wins when present. Use pins[] for concrete code/file/URL evidence; use relates_to relation=evidence when the supporting source is another Pindoc artifact. Returns Status=accepted + artifact_id on success, or Status=not_ready + checklist + suggested_actions if Pre-flight fails. Always read the checklist; never surface the raw error to the user without trying the suggested actions first.",
 		},
 		func(ctx context.Context, p *auth.Principal, in artifactProposeInput) (*sdk.CallToolResult, artifactProposeOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -1245,6 +1247,9 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	var acceptanceShapePayload []byte
 	var scopeDeferTargetID string
 	var scopeDeferTargetSlug string
+	var acceptanceLabelMatches []AcceptanceLabelRef
+	var unresolvedAcceptanceLabels []AcceptanceLabelRef
+	var acceptanceLabelWarnings []string
 	if shape == ShapeAcceptanceTransition || shape == ShapeScopeDefer {
 		acceptanceInput := in.AcceptanceTransition
 		if shape == ShapeScopeDefer {
@@ -1314,14 +1319,35 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 				PatchableFields: patchFieldsFor("ACCEPT_TRANSITION_REQUIRED"),
 			}, nil
 		}
+		checkboxLabel := strings.TrimSpace(acceptanceInput.CheckboxLabelMatch)
+		if acceptanceInput.CheckboxIndex == nil && checkboxLabel != "" {
+			idx, matches, unresolved, code := resolveAcceptanceLabelMatch(currentBody, checkboxLabel)
+			acceptanceLabelMatches = matches
+			unresolvedAcceptanceLabels = unresolved
+			if code != "" {
+				return nil, artifactProposeOutput{
+					Status:                     "not_ready",
+					ErrorCode:                  code,
+					Failed:                     []string{code},
+					Checklist:                  []string{acceptanceTransitionChecklist(lang, code)},
+					PatchableFields:            []string{"acceptance_transition.checkbox_label_match", "acceptance_transition.checkbox_index"},
+					AcceptanceLabelMatches:     matches,
+					UnresolvedAcceptanceLabels: unresolved,
+				}, nil
+			}
+			acceptanceInput.CheckboxIndex = &idx
+		} else if acceptanceInput.CheckboxIndex != nil && checkboxLabel != "" && !labelMatchesCheckboxIndex(currentBody, *acceptanceInput.CheckboxIndex, checkboxLabel) {
+			acceptanceLabelWarnings = append(acceptanceLabelWarnings, acceptanceLabelWarning("ACCEPTANCE_LABEL_MISMATCH", checkboxLabel))
+		}
 		newBody, fromMarker, code := applyAcceptanceTransition(currentBody, acceptanceInput)
 		if code != "" {
 			return nil, artifactProposeOutput{
-				Status:          "not_ready",
-				ErrorCode:       code,
-				Failed:          []string{code},
-				Checklist:       []string{acceptanceTransitionChecklist(lang, code)},
-				PatchableFields: patchFieldsFor(code),
+				Status:                     "not_ready",
+				ErrorCode:                  code,
+				Failed:                     []string{code},
+				Checklist:                  []string{acceptanceTransitionChecklist(lang, code)},
+				PatchableFields:            patchFieldsFor(code),
+				UnresolvedAcceptanceLabels: unresolvedAcceptanceLabels,
 			}, nil
 		}
 		in.BodyMarkdown = newBody
@@ -1332,6 +1358,9 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		}
 		if r := strings.TrimSpace(acceptanceInput.Reason); r != "" {
 			payload["reason"] = r
+		}
+		if checkboxLabel != "" {
+			payload["checkbox_label_match"] = checkboxLabel
 		}
 		if shape == ShapeScopeDefer {
 			payload["to_artifact_id"] = scopeDeferTargetID
@@ -1609,6 +1638,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	// canonical-rewrite / source-type advisories instead of a separate
 	// response field.
 	warnings = append(warnings, patchWarnings...)
+	warnings = append(warnings, acceptanceLabelWarnings...)
 	var suggested []string
 	var prevMeta ResolvedArtifactMeta
 	if len(currentMetaRaw) > 0 {
@@ -1663,6 +1693,8 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		EmbedderUsed:                    embedderInfo(deps),
 		ArtifactMeta:                    updateMetaOut,
 		CanonicalRewriteWithoutEvidence: canonicalRewriteFlag,
+		AcceptanceLabelMatches:          acceptanceLabelMatches,
+		UnresolvedAcceptanceLabels:      unresolvedAcceptanceLabels,
 		ToolsetVersion:                  ToolsetVersion(),
 	}
 	if in.DryRun {

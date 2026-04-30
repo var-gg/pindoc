@@ -2,7 +2,9 @@ package tools
 
 import (
 	"fmt"
+	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/var-gg/pindoc/internal/pindoc/i18n"
 )
@@ -25,9 +27,10 @@ import (
 // partial and deferred transitions (otherwise the handler rejects with
 // ACCEPT_TRANSITION_REASON_REQUIRED) and OPTIONAL for done / reopen.
 type AcceptanceTransitionInput struct {
-	CheckboxIndex *int   `json:"checkbox_index,omitempty" jsonschema:"0-based index across all 4-state acceptance checkboxes in document order"`
-	NewState      string `json:"new_state" jsonschema:"one of '[ ]' | '[x]' | '[~]' | '[-]'"`
-	Reason        string `json:"reason,omitempty" jsonschema:"required for [~] and [-]; free-form justification stored on the revision"`
+	CheckboxIndex      *int   `json:"checkbox_index,omitempty" jsonschema:"0-based index across all 4-state acceptance checkboxes in document order"`
+	CheckboxLabelMatch string `json:"checkbox_label_match,omitempty" jsonschema:"fuzzy label selector; case-insensitive substring/token match over unresolved checkbox labels; exactness-sensitive callers should use checkbox_index"`
+	NewState           string `json:"new_state" jsonschema:"one of '[ ]' | '[x]' | '[~]' | '[-]'"`
+	Reason             string `json:"reason,omitempty" jsonschema:"required for [~] and [-]; free-form justification stored on the revision"`
 }
 
 // ScopeDeferInput is the Phase F payload for shape=scope_defer. Moves an
@@ -55,6 +58,13 @@ type checkboxHit struct {
 	lineIndex        int
 	markerByteOffset int
 	marker           byte
+}
+
+type AcceptanceLabelRef struct {
+	Index       int    `json:"index"`
+	State       string `json:"state"`
+	Label       string `json:"label"`
+	IndentLevel int    `json:"indent_level"`
 }
 
 // iterateCheckboxes returns every 4-state checkbox in the body in document
@@ -94,6 +104,160 @@ func iterateCheckboxes(body string) []checkboxHit {
 			})
 		}
 	}
+	return out
+}
+
+func acceptanceLabels(body string, unresolvedOnly bool) []AcceptanceLabelRef {
+	hits := iterateCheckboxes(body)
+	if len(hits) == 0 {
+		return nil
+	}
+	lines := strings.Split(body, "\n")
+	out := make([]AcceptanceLabelRef, 0, len(hits))
+	for i, cb := range hits {
+		state := markerState(cb.marker)
+		if unresolvedOnly && state != "[ ]" && state != "[~]" {
+			continue
+		}
+		label := ""
+		indent := 0
+		if cb.lineIndex < len(lines) {
+			line := strings.TrimRight(lines[cb.lineIndex], "\r")
+			labelStart := cb.markerByteOffset + 3
+			if labelStart < len(line) {
+				label = strings.TrimSpace(line[labelStart:])
+			}
+			indent = acceptanceIndentLevel(line)
+		}
+		out = append(out, AcceptanceLabelRef{
+			Index:       i,
+			State:       state,
+			Label:       label,
+			IndentLevel: indent,
+		})
+	}
+	return out
+}
+
+func unresolvedAcceptanceLabels(body string) []AcceptanceLabelRef {
+	return acceptanceLabels(body, true)
+}
+
+func acceptanceIndentLevel(line string) int {
+	width := 0
+	for _, r := range line {
+		switch r {
+		case ' ':
+			width++
+		case '\t':
+			width += 4
+		default:
+			return width
+		}
+	}
+	return width
+}
+
+func matchingAcceptanceLabels(body, query string) []AcceptanceLabelRef {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil
+	}
+	labels := unresolvedAcceptanceLabels(body)
+	matches := make([]AcceptanceLabelRef, 0, len(labels))
+	for _, label := range labels {
+		if acceptanceLabelMatches(query, label.Label) {
+			matches = append(matches, label)
+		}
+	}
+	return matches
+}
+
+func acceptanceLabelMatches(query, label string) bool {
+	q := normalizeAcceptanceLabelText(query)
+	l := normalizeAcceptanceLabelText(label)
+	if q == "" || l == "" {
+		return false
+	}
+	if strings.Contains(l, q) {
+		return true
+	}
+	qTokens := strings.Fields(q)
+	lTokens := strings.Fields(l)
+	if len(qTokens) == 0 || len(lTokens) == 0 {
+		return false
+	}
+	labelSet := map[string]struct{}{}
+	for _, tok := range lTokens {
+		labelSet[tok] = struct{}{}
+	}
+	for _, tok := range qTokens {
+		if _, ok := labelSet[tok]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeAcceptanceLabelText(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	lastSpace := true
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			b.WriteRune(r)
+			lastSpace = false
+			continue
+		}
+		if !lastSpace {
+			b.WriteByte(' ')
+			lastSpace = true
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func resolveAcceptanceLabelMatch(body string, label string) (int, []AcceptanceLabelRef, []AcceptanceLabelRef, string) {
+	unresolved := unresolvedAcceptanceLabels(body)
+	matches := make([]AcceptanceLabelRef, 0, len(unresolved))
+	for _, candidate := range unresolved {
+		if acceptanceLabelMatches(label, candidate.Label) {
+			matches = append(matches, candidate)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return 0, matches, unresolved, "ACCEPTANCE_LABEL_NOT_FOUND"
+	case 1:
+		return matches[0].Index, matches, unresolved, ""
+	default:
+		return 0, matches, unresolved, "ACCEPTANCE_LABEL_AMBIGUOUS"
+	}
+}
+
+func labelMatchesCheckboxIndex(body string, index int, label string) bool {
+	for _, candidate := range acceptanceLabels(body, false) {
+		if candidate.Index == index {
+			return acceptanceLabelMatches(label, candidate.Label)
+		}
+	}
+	return false
+}
+
+func acceptanceLabelWarning(code, label string) string {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return code
+	}
+	return code + ":" + label
+}
+
+func uniqueSortedInts(values []int) []int {
+	out := append([]int(nil), values...)
+	sort.Ints(out)
 	return out
 }
 
@@ -202,6 +366,10 @@ func acceptanceTransitionChecklist(lang, code string) string {
 		key = "preflight.accept_transition_reason_required"
 	case "ACCEPT_TRANSITION_NOOP":
 		key = "preflight.accept_transition_noop"
+	case "ACCEPTANCE_LABEL_NOT_FOUND":
+		return "✗ checkbox_label_match did not match any unresolved acceptance label."
+	case "ACCEPTANCE_LABEL_AMBIGUOUS":
+		return "✗ checkbox_label_match matched more than one unresolved acceptance label; use checkbox_index or a more specific label."
 	default:
 		return fmt.Sprintf("✗ acceptance transition rejected: %s", code)
 	}
