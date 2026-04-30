@@ -183,14 +183,14 @@ type HarnessSessionBootstrap struct {
 }
 
 // defaultHarnessSessionBootstrap returns the canonical bootstrap
-// contract — a single workspace.detect call cached for the session,
-// with rerun reserved for explicit workspace switches and the
-// PROJECT_SLUG_REQUIRED error code path. Bumping this contract is the
-// only place a new auto-call step needs to land; PINDOC.md text mirrors
-// the values via the same constants.
+// contract — workspace.detect pins the likely project_slug, then
+// task.queue(across_projects=true) sweeps every visible project for the
+// caller's assigned open work before the agent starts implementation.
+// Bumping this contract is the only place a new auto-call step needs to
+// land; PINDOC.md text mirrors the values via the same constants.
 func defaultHarnessSessionBootstrap() *HarnessSessionBootstrap {
 	return &HarnessSessionBootstrap{
-		AutoCall:                   []string{"pindoc.workspace.detect"},
+		AutoCall:                   []string{"pindoc.workspace.detect", "pindoc.task.queue"},
 		CacheKeyForWorkspaceDetect: "pindoc.session.default_project_slug",
 		SignalsFromClient: []string{
 			"pindoc_md_frontmatter",
@@ -201,7 +201,7 @@ func defaultHarnessSessionBootstrap() *HarnessSessionBootstrap {
 			"user_switched_workspace",
 			"tool_returned_PROJECT_SLUG_REQUIRED",
 		},
-		Notes:                  "Run once per MCP session before yielding to the agent. Cache the resolved project_slug; do not re-call on every tool invocation.",
+		Notes:                  "Run once per MCP session before yielding to the agent. Cache the resolved project_slug, sweep task.queue with across_projects=true, then pin a concrete project_slug for follow-up tools.",
 		ToolsetVersionCacheKey: "pindoc.session.toolset_version",
 		DriftCheckTool:         "pindoc.runtime.status",
 		DriftActions: []string{
@@ -567,11 +567,13 @@ look conversation-derived, contain PII-like content, and omit
 consent_state — it is a warning, not a block. Treat it as a signal to
 classify explicitly on the next propose.
 
-## Session bootstrap (workspace.detect)
+## Session bootstrap (workspace.detect + task.queue sweep)
 
 The harness auto-runs **pindoc.workspace.detect** once at session start
 so your first artifact write does not need a hint about which project
-owns this workspace. The flow:
+owns this workspace. It then runs **pindoc.task.queue** with
+across_projects=true so assigned work in sibling projects is visible
+before the agent pins a single project for implementation. The flow:
 
 1. Client harness collects three signals from the local environment:
    - PINDOC.md frontmatter (project_slug when set explicitly).
@@ -582,9 +584,16 @@ owns this workspace. The flow:
    priority chain returns the resolved project_slug plus a "via" field
    naming which signal won.
 3. The detected slug is cached in the session under the contract key
-   "pindoc.session.default_project_slug". Every subsequent tool call
-   reads project_slug from that cache; do not re-call workspace.detect
-   on every invocation.
+   "pindoc.session.default_project_slug".
+4. Harness calls pindoc.task.queue with across_projects=true, compact=true,
+   and no project_slug. When assignee is omitted, task.queue defaults to
+   the calling agent, so projects[slug].items and
+   total_assignee_open_count show the current assigned workload across
+   visible projects.
+5. After reviewing the sweep, pin the specific project_slug for follow-up
+   tools: use the cached workspace.detect slug for workspace-local work,
+   or the slug from the project that owns the Task being handled. Do not
+   keep relying on implicit defaulting once a concrete project is known.
 
 ### When to re-run
 
@@ -593,14 +602,19 @@ owns this workspace. The flow:
 - A tool call returns NOT_READY with PROJECT_SLUG_REQUIRED — the cache
   was cleared (server restart) or never populated. Re-bootstrap before
   retrying.
+- pindoc.task.queue returns a MULTI_PROJECT_WORKSPACE warning — rerun it
+  with across_projects=true for the full sweep, then retry the scoped
+  operation with an explicit project_slug.
 
 ### Fallback when bootstrap is missing
 
 Older harness builds may not auto-call workspace.detect yet. In that
-case, manually invoke it as the first tool of the session and treat the
-response the same way (cache the project_slug, reuse for the session).
-The harness.install response carries a session_bootstrap object that
-new clients should consume directly to drive this handshake.
+case, manually invoke workspace.detect first, then call pindoc.task.queue
+with across_projects=true before implementation. Treat the response the
+same way: cache the project_slug, review the projects map for assigned
+Tasks, and use a pinned project_slug on follow-up calls. The
+harness.install response carries a session_bootstrap object that new
+clients should consume directly to drive this handshake.
 
 ## Toolset version drift
 
@@ -626,8 +640,10 @@ itself is already searchable and readable by continuation sessions.
 Before calling pindoc.artifact.propose:
 
 0. (Auto, see "Session bootstrap" above) pindoc.workspace.detect already
-   ran and the session-cached project_slug is your default. If it is
-   missing, re-bootstrap before continuing.
+   ran and pindoc.task.queue(across_projects=true) already swept assigned
+   Tasks across visible projects. Review that sweep before implementation,
+   then pin a concrete project_slug for the current Task. If the cached
+   slug is missing, re-bootstrap before continuing.
 1. Call pindoc.project.current once per session to pin scope.
 2. Call pindoc.area.list and pick an existing area_slug; use 'misc' if
    nothing fits. Never invent an area_slug.

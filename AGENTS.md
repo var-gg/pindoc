@@ -1,5 +1,15 @@
 @PINDOC.md
 
+## Pindoc Session Start
+
+- Load PINDOC.md first.
+- At session start, run pindoc.workspace.detect, then run
+  pindoc.task.queue with across_projects=true and compact=true before
+  implementation. Review projects[slug].items for assigned Tasks across
+  visible projects, then pin the concrete project_slug for follow-up tools.
+- If a scoped task.queue call returns MULTI_PROJECT_WORKSPACE, rerun the
+  sweep with across_projects=true or retry with an explicit project_slug.
+
 # Codex Local Notes
 
 ## VARGG

@@ -136,6 +136,7 @@ func TestTaskQueueWarnings(t *testing.T) {
 // alone — backward-compat for existing callers.
 func TestApplyTaskQueueCompact(t *testing.T) {
 	mkOut := func() taskQueueOutput {
+		totalOpen := 7
 		return taskQueueOutput{
 			SourceSemantics:       taskQueueSemantics,
 			StatusFilter:          "pending",
@@ -151,6 +152,14 @@ func TestApplyTaskQueueCompact(t *testing.T) {
 			AreaCounts:            map[string]int{"ui": 4, "mcp": 6},
 			PriorityCounts:        map[string]int{"p2": 3},
 			WarningCounts:         map[string]int{"TASK_STATUS_MISSING": 2},
+			Projects: map[string]taskQueueProjectOutput{
+				"pindoc": {
+					ProjectSlug:       "pindoc",
+					AssigneeOpenCount: 7,
+					Items:             []taskQueueItem{{ArtifactID: "id-1", Slug: "task-a", Title: "A"}},
+				},
+			},
+			TotalAssigneeOpenCount: &totalOpen,
 			Items: []taskQueueItem{
 				{ArtifactID: "id-1", Slug: "task-a", Title: "A"},
 			},
@@ -184,6 +193,12 @@ func TestApplyTaskQueueCompact(t *testing.T) {
 		if len(out.Items) != 1 {
 			t.Fatalf("compact must preserve items; got %d", len(out.Items))
 		}
+		if out.Projects == nil || out.Projects["pindoc"].AssigneeOpenCount != 7 {
+			t.Fatalf("compact must preserve projects map; got %+v", out.Projects)
+		}
+		if out.TotalAssigneeOpenCount == nil || *out.TotalAssigneeOpenCount != 7 {
+			t.Fatalf("compact must preserve total_assignee_open_count; got %v", out.TotalAssigneeOpenCount)
+		}
 
 		// JSON contract: aggregate keys are absent (omitempty), totals stay.
 		buf, err := json.Marshal(out)
@@ -196,7 +211,7 @@ func TestApplyTaskQueueCompact(t *testing.T) {
 				t.Fatalf("compact JSON must not contain %s; got %s", omitted, body)
 			}
 		}
-		for _, kept := range []string{`"default_focus":"assignee_open_count"`, `"total_count":10`, `"pending_count":7`, `"assignee_open_count":7`, `"assignee_filtered_count":10`, `"project_total_count":100`, `"count_legend"`, `"compact":true`} {
+		for _, kept := range []string{`"default_focus":"assignee_open_count"`, `"total_count":10`, `"pending_count":7`, `"assignee_open_count":7`, `"assignee_filtered_count":10`, `"project_total_count":100`, `"count_legend"`, `"compact":true`, `"projects"`, `"total_assignee_open_count":7`} {
 			if !strings.Contains(body, kept) {
 				t.Fatalf("compact JSON missing %s; got %s", kept, body)
 			}
@@ -206,6 +221,32 @@ func TestApplyTaskQueueCompact(t *testing.T) {
 	t.Run("nil receiver is safe", func(t *testing.T) {
 		applyTaskQueueCompact(nil, true) // should not panic
 	})
+}
+
+func TestBuildTaskQueueMultiProjectWorkspaceWarning(t *testing.T) {
+	got, ok := buildTaskQueueMultiProjectWorkspaceWarning(projectSlugDefaultResult{
+		ProjectSlug: "pindoc",
+		Via:         projectSlugDefaultEnv,
+	}, []string{"vargg", "pindoc", "pindoc"})
+	if !ok {
+		t.Fatal("expected MULTI_PROJECT_WORKSPACE warning")
+	}
+	if got.Code != taskWarningMultiProjectWorkspace {
+		t.Fatalf("warning code = %q", got.Code)
+	}
+	if strings.Join(got.DetectedProjects, ",") != "pindoc,vargg" {
+		t.Fatalf("detected projects = %v", got.DetectedProjects)
+	}
+	if !strings.Contains(got.Hint, "across_projects=true") || !strings.Contains(got.Hint, "project_slug") {
+		t.Fatalf("warning hint should name across_projects and project_slug: %+v", got)
+	}
+
+	if _, ok := buildTaskQueueMultiProjectWorkspaceWarning(projectSlugDefaultResult{}, []string{"pindoc", "vargg"}); ok {
+		t.Fatal("explicit project_slug calls must not warn")
+	}
+	if _, ok := buildTaskQueueMultiProjectWorkspaceWarning(projectSlugDefaultResult{Via: projectSlugDefaultEnv}, []string{"pindoc"}); ok {
+		t.Fatal("single-project workspaces must not warn")
+	}
 }
 
 func TestTaskQueueCountLegendNamesCountSemantics(t *testing.T) {

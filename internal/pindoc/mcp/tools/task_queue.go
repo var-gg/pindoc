@@ -22,10 +22,12 @@ const (
 
 	taskWarningStatusMissing              = "TASK_STATUS_MISSING"
 	taskWarningAcceptanceReconcilePending = "TASK_ACCEPTANCE_DONE_RECONCILE_PENDING"
+	taskWarningMultiProjectWorkspace      = "MULTI_PROJECT_WORKSPACE"
 )
 
 type taskQueueInput struct {
-	ProjectSlug string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
+	ProjectSlug    string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
+	AcrossProjects bool   `json:"across_projects,omitempty" jsonschema:"optional - true lists the caller-visible workspace project queues in one response; defaults assignee to the calling agent when assignee is omitted"`
 
 	// Status selects the task lifecycle bucket to return. The default
 	// "pending" intentionally matches the Reader header count:
@@ -49,10 +51,11 @@ type taskQueueInput struct {
 }
 
 type taskQueueItem struct {
-	ArtifactID string `json:"artifact_id"`
-	Slug       string `json:"slug"`
-	Title      string `json:"title"`
-	AreaSlug   string `json:"area_slug"`
+	ArtifactID  string `json:"artifact_id"`
+	Slug        string `json:"slug"`
+	Title       string `json:"title"`
+	ProjectSlug string `json:"project_slug,omitempty"`
+	AreaSlug    string `json:"area_slug"`
 
 	// Status is the normalized lifecycle bucket used by the Reader queue.
 	// Missing task_meta.status is surfaced explicitly as "missing_status"
@@ -87,6 +90,8 @@ type taskQueueOutput struct {
 	SourceSemantics string `json:"source_semantics"`
 	StatusFilter    string `json:"status_filter"`
 	DefaultFocus    string `json:"default_focus"`
+	AcrossProjects  bool   `json:"across_projects,omitempty"`
+	WorkspaceRoot   string `json:"workspace_root,omitempty"`
 
 	// AssigneeFilteredCount is computed after area / priority /
 	// assignee filters and before status filtering. AssigneeOpenCount is
@@ -106,6 +111,10 @@ type taskQueueOutput struct {
 	PriorityCounts map[string]int `json:"priority_counts,omitempty"`
 	WarningCounts  map[string]int `json:"warning_counts,omitempty"`
 
+	Projects               map[string]taskQueueProjectOutput `json:"projects,omitempty"`
+	TotalAssigneeOpenCount *int                              `json:"total_assignee_open_count,omitempty"`
+	Warnings               []taskQueueWarning                `json:"warnings,omitempty"`
+
 	// Compact mirrors the input flag back so callers / telemetry can tell
 	// at a glance whether the omitted aggregates are intentional.
 	Compact bool `json:"compact,omitempty"`
@@ -116,6 +125,24 @@ type taskQueueOutput struct {
 	NextTools      []NextToolHint      `json:"next_tools,omitempty"`
 	Attention      *TaskQueueAttention `json:"attention,omitempty"`
 	ToolsetVersion string              `json:"toolset_version,omitempty"`
+}
+
+type taskQueueProjectOutput struct {
+	ProjectSlug           string          `json:"project_slug"`
+	AssigneeFilteredCount int             `json:"assignee_filtered_count"`
+	AssigneeOpenCount     int             `json:"assignee_open_count"`
+	ProjectTotalCount     int             `json:"project_total_count"`
+	TotalCount            int             `json:"total_count"`
+	PendingCount          int             `json:"pending_count"`
+	Items                 []taskQueueItem `json:"items"`
+	Truncated             bool            `json:"truncated,omitempty"`
+}
+
+type taskQueueWarning struct {
+	Code             string   `json:"code"`
+	Message          string   `json:"message"`
+	DetectedProjects []string `json:"detected_projects,omitempty"`
+	Hint             string   `json:"hint,omitempty"`
 }
 
 // RegisterTaskQueue wires pindoc.task.queue. This is the MCP counterpart
@@ -138,7 +165,14 @@ checklist, but queue counts remain lifecycle counts. For agent dogfood,
 default_focus="assignee_open_count" is the current open-work view;
 historical totals are reference context. When the caller is an agent
 querying its own assignee queue, the response may include attention for
-Tasks idle longer than PINDOC_STUCK_THRESHOLD_HOURS (default 24). Count
+Tasks idle longer than PINDOC_STUCK_THRESHOLD_HOURS (default 24).
+Pass across_projects=true during session pre-flight to return every
+caller-visible project queue in projects{slug:{items, assignee_open_count}}
+with total_assignee_open_count and workspace_root; when assignee is omitted
+in this mode, the caller agent's assignee id is used. If project_slug is
+omitted in a multi-project workspace without across_projects, the response
+includes a MULTI_PROJECT_WORKSPACE warning with detected_projects and a
+hint to rerun the sweep or pin project_slug explicitly. Count
 fields are explicit:
 assignee_filtered_count is after optional area/priority/assignee filters,
 assignee_open_count is the filtered open+missing_status queue (same as
@@ -149,10 +183,6 @@ response.
 `),
 		},
 		func(ctx context.Context, p *auth.Principal, in taskQueueInput) (*sdk.CallToolResult, taskQueueOutput, error) {
-			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
-			if err != nil {
-				return nil, taskQueueOutput{}, fmt.Errorf("task.queue: %w", err)
-			}
 			statusFilter, ok := normalizeTaskQueueStatusFilter(in.Status)
 			if !ok {
 				return nil, taskQueueOutput{}, fmt.Errorf("status must be one of: pending | all | open | missing_status | missing | claimed_done | blocked | cancelled")
@@ -172,130 +202,288 @@ response.
 				limit = taskQueueMaxLimit
 			}
 
-			var projectTotalCount int
-			if err := deps.DB.QueryRow(ctx, `
-				SELECT count(*)::int
-				  FROM artifacts a
-				  JOIN projects p ON p.id = a.project_id
-				 WHERE p.slug = $1
-				   AND a.type = 'Task'
-				   AND a.status <> 'archived'
-				   AND a.status <> 'superseded'
-				   AND NOT starts_with(a.slug, '_template_')
-			`, scope.ProjectSlug).Scan(&projectTotalCount); err != nil {
-				return nil, taskQueueOutput{}, fmt.Errorf("task.queue project total: %w", err)
+			if in.AcrossProjects {
+				out, err := handleTaskQueueAcrossProjects(ctx, deps, p, in, statusFilter, priority, limit)
+				if err != nil {
+					return nil, taskQueueOutput{}, err
+				}
+				applyTaskQueueCompact(&out, in.Compact)
+				return nil, out, nil
+			}
+			if strings.TrimSpace(in.ProjectSlug) == "" {
+				if warning, ok := taskQueueMultiProjectWorkspaceWarning(ctx, deps, p); ok {
+					out := emptyTaskQueueOutput(statusFilter)
+					out.Warnings = append(out.Warnings, warning)
+					applyTaskQueueCompact(&out, in.Compact)
+					return nil, out, nil
+				}
 			}
 
-			rows, err := deps.DB.Query(ctx, `
-				SELECT a.id::text, a.slug, a.title, ar.slug, a.updated_at,
-				       a.body_markdown,
-				       COALESCE(a.task_meta->>'status', ''),
-				       COALESCE(a.task_meta->>'priority', ''),
-				       COALESCE(a.task_meta->>'assignee', ''),
-				       COALESCE(a.task_meta->>'due_at', ''),
-				       COALESCE(a.task_meta->>'parent_slug', '')
-				FROM artifacts a
-				JOIN projects p ON p.id = a.project_id
-				JOIN areas    ar ON ar.id = a.area_id
-				WHERE p.slug = $1
-				  AND a.type = 'Task'
-				  AND a.status <> 'archived'
-				  AND a.status <> 'superseded'
-				  AND NOT starts_with(a.slug, '_template_')
-				  AND ($2::text = '' OR ar.slug = $2)
-				  AND ($3::text = '' OR a.task_meta->>'priority' = $3)
-				  AND ($4::text = '' OR a.task_meta->>'assignee' = $4)
-				ORDER BY a.updated_at DESC
-			`, scope.ProjectSlug, strings.TrimSpace(in.AreaSlug), priority, strings.TrimSpace(in.Assignee))
+			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
 			if err != nil {
-				return nil, taskQueueOutput{}, fmt.Errorf("task.queue query: %w", err)
+				return nil, taskQueueOutput{}, fmt.Errorf("task.queue: %w", err)
 			}
-			defer rows.Close()
-
-			statusCounts := newTaskStatusCounts()
-			areaCounts := map[string]int{}
-			priorityCounts := map[string]int{}
-			warningCounts := map[string]int{}
-			items := []taskQueueItem{}
-			truncated := false
-
-			for rows.Next() {
-				var item taskQueueItem
-				var body, rawStatus string
-				if err := rows.Scan(
-					&item.ArtifactID, &item.Slug, &item.Title, &item.AreaSlug, &item.UpdatedAt,
-					&body, &rawStatus, &item.Priority, &item.Assignee, &item.DueAt, &item.ParentSlug,
-				); err != nil {
-					return nil, taskQueueOutput{}, fmt.Errorf("task.queue scan: %w", err)
-				}
-
-				bucket := taskStatusBucket(rawStatus)
-				statusCounts[bucket]++
-				areaCounts[item.AreaSlug]++
-				priorityCounts[taskPriorityBucket(item.Priority)]++
-				itemWarnings := taskQueueWarnings(bucket, body)
-				for _, w := range itemWarnings {
-					warningCounts[w]++
-				}
-
-				if !taskQueueStatusMatches(rawStatus, statusFilter) {
-					continue
-				}
-				if len(items) >= limit {
-					truncated = true
-					continue
-				}
-
-				item.Status = bucket
-				item.StatusBucket = bucket
-				if bucket == taskStatusOther {
-					item.RawStatus = strings.TrimSpace(rawStatus)
-				}
-				if bucket == taskStatusMissing {
-					item.MissingStatus = true
-				}
-				applyTaskQueueReadySignal(&item, bucket, body)
-				item.Warnings = itemWarnings
-				item.AgentRef = "pindoc://" + item.Slug
-				item.HumanURL = HumanURL(scope.ProjectSlug, scope.ProjectLocale, item.Slug)
-				item.HumanURLAbs = AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, item.Slug)
-				items = append(items, item)
-			}
-			if err := rows.Err(); err != nil {
-				return nil, taskQueueOutput{}, fmt.Errorf("task.queue rows: %w", err)
-			}
-
-			total := 0
-			for _, n := range statusCounts {
-				total += n
-			}
-			assigneeOpenCount := statusCounts["open"] + statusCounts[taskStatusMissing]
-
-			out := taskQueueOutput{
-				SourceSemantics:       taskQueueSemantics,
-				StatusFilter:          statusFilter,
-				DefaultFocus:          taskQueueDefaultFocus,
-				AssigneeFilteredCount: total,
-				AssigneeOpenCount:     assigneeOpenCount,
-				ProjectTotalCount:     projectTotalCount,
-				TotalCount:            total,
-				PendingCount:          assigneeOpenCount,
-				CountDeprecationNote:  "total_count is kept as an alias for assignee_filtered_count; pending_count is kept as an alias for assignee_open_count.",
-				CountLegend:           taskQueueCountLegend(),
-				StatusCounts:          statusCounts,
-				AreaCounts:            areaCounts,
-				PriorityCounts:        priorityCounts,
-				WarningCounts:         warningCounts,
-				Items:                 items,
-				Truncated:             truncated,
-				Notice:                taskQueueNotice(),
-				NextTools:             taskQueueCloseoutNextTools(scope.ProjectSlug, strings.TrimSpace(in.Assignee)),
+			out, err := buildTaskQueueForProject(ctx, deps, p, scope, in, statusFilter, priority, limit, strings.TrimSpace(in.Assignee), false)
+			if err != nil {
+				return nil, taskQueueOutput{}, err
 			}
 			out.Attention = buildTaskQueueAttention(ctx, deps, p, scope.ProjectSlug, strings.TrimSpace(in.Assignee), deps.UserLanguage)
+			if warning, ok := taskQueueMultiProjectWorkspaceWarning(ctx, deps, p); ok {
+				out.Warnings = append(out.Warnings, warning)
+			}
 			applyTaskQueueCompact(&out, in.Compact)
 			return nil, out, nil
 		},
 	)
+}
+
+func handleTaskQueueAcrossProjects(ctx context.Context, deps Deps, p *auth.Principal, in taskQueueInput, statusFilter, priority string, limit int) (taskQueueOutput, error) {
+	slugs, err := visibleProjectSlugs(ctx, deps, p)
+	if err != nil {
+		return taskQueueOutput{}, fmt.Errorf("task.queue across_projects: %w", err)
+	}
+	assignee := strings.TrimSpace(in.Assignee)
+	if assignee == "" {
+		assignee = callerAgentAssignee(p)
+	}
+
+	projects := make(map[string]taskQueueProjectOutput, len(slugs))
+	statusCounts := newTaskStatusCounts()
+	areaCounts := map[string]int{}
+	priorityCounts := map[string]int{}
+	warningCounts := map[string]int{}
+	items := []taskQueueItem{}
+	totalAssigneeOpen := 0
+	assigneeFilteredTotal := 0
+	projectTotal := 0
+	truncated := false
+
+	for _, slug := range slugs {
+		scope, err := auth.ResolveProject(ctx, deps.DB, p, slug)
+		if err != nil {
+			return taskQueueOutput{}, fmt.Errorf("task.queue across_projects resolve %q: %w", slug, err)
+		}
+		projectOut, err := buildTaskQueueForProject(ctx, deps, p, scope, in, statusFilter, priority, limit, assignee, true)
+		if err != nil {
+			return taskQueueOutput{}, err
+		}
+		projects[slug] = taskQueueProjectOutput{
+			ProjectSlug:           slug,
+			AssigneeFilteredCount: projectOut.AssigneeFilteredCount,
+			AssigneeOpenCount:     projectOut.AssigneeOpenCount,
+			ProjectTotalCount:     projectOut.ProjectTotalCount,
+			TotalCount:            projectOut.TotalCount,
+			PendingCount:          projectOut.PendingCount,
+			Items:                 projectOut.Items,
+			Truncated:             projectOut.Truncated,
+		}
+		mergeTaskQueueCounts(statusCounts, projectOut.StatusCounts)
+		mergeTaskQueueCounts(areaCounts, projectOut.AreaCounts)
+		mergeTaskQueueCounts(priorityCounts, projectOut.PriorityCounts)
+		mergeTaskQueueCounts(warningCounts, projectOut.WarningCounts)
+		items = append(items, projectOut.Items...)
+		totalAssigneeOpen += projectOut.AssigneeOpenCount
+		assigneeFilteredTotal += projectOut.AssigneeFilteredCount
+		projectTotal += projectOut.ProjectTotalCount
+		truncated = truncated || projectOut.Truncated
+	}
+
+	totalOpenCopy := totalAssigneeOpen
+	return taskQueueOutput{
+		SourceSemantics:        taskQueueSemantics,
+		StatusFilter:           statusFilter,
+		DefaultFocus:           taskQueueDefaultFocus,
+		AcrossProjects:         true,
+		WorkspaceRoot:          strings.TrimSpace(deps.RepoRoot),
+		AssigneeFilteredCount:  assigneeFilteredTotal,
+		AssigneeOpenCount:      totalAssigneeOpen,
+		ProjectTotalCount:      projectTotal,
+		TotalCount:             assigneeFilteredTotal,
+		PendingCount:           totalAssigneeOpen,
+		CountDeprecationNote:   "total_count is kept as an alias for assignee_filtered_count; pending_count is kept as an alias for assignee_open_count.",
+		CountLegend:            taskQueueCountLegend(),
+		StatusCounts:           statusCounts,
+		AreaCounts:             areaCounts,
+		PriorityCounts:         priorityCounts,
+		WarningCounts:          warningCounts,
+		Projects:               projects,
+		TotalAssigneeOpenCount: &totalOpenCopy,
+		Items:                  items,
+		Truncated:              truncated,
+		Notice:                 taskQueueNotice(),
+	}, nil
+}
+
+func buildTaskQueueForProject(ctx context.Context, deps Deps, p *auth.Principal, scope *auth.ProjectScope, in taskQueueInput, statusFilter, priority string, limit int, assignee string, includeItemProjectSlug bool) (taskQueueOutput, error) {
+	var projectTotalCount int
+	if err := deps.DB.QueryRow(ctx, `
+		SELECT count(*)::int
+		  FROM artifacts a
+		  JOIN projects p ON p.id = a.project_id
+		 WHERE p.slug = $1
+		   AND a.type = 'Task'
+		   AND a.status <> 'archived'
+		   AND a.status <> 'superseded'
+		   AND NOT starts_with(a.slug, '_template_')
+	`, scope.ProjectSlug).Scan(&projectTotalCount); err != nil {
+		return taskQueueOutput{}, fmt.Errorf("task.queue project total: %w", err)
+	}
+
+	rows, err := deps.DB.Query(ctx, `
+		SELECT a.id::text, a.slug, a.title, ar.slug, a.updated_at,
+		       a.body_markdown,
+		       COALESCE(a.task_meta->>'status', ''),
+		       COALESCE(a.task_meta->>'priority', ''),
+		       COALESCE(a.task_meta->>'assignee', ''),
+		       COALESCE(a.task_meta->>'due_at', ''),
+		       COALESCE(a.task_meta->>'parent_slug', '')
+		FROM artifacts a
+		JOIN projects p ON p.id = a.project_id
+		JOIN areas    ar ON ar.id = a.area_id
+		WHERE p.slug = $1
+		  AND a.type = 'Task'
+		  AND a.status <> 'archived'
+		  AND a.status <> 'superseded'
+		  AND NOT starts_with(a.slug, '_template_')
+		  AND ($2::text = '' OR ar.slug = $2)
+		  AND ($3::text = '' OR a.task_meta->>'priority' = $3)
+		  AND ($4::text = '' OR a.task_meta->>'assignee' = $4)
+		ORDER BY a.updated_at DESC
+	`, scope.ProjectSlug, strings.TrimSpace(in.AreaSlug), priority, strings.TrimSpace(assignee))
+	if err != nil {
+		return taskQueueOutput{}, fmt.Errorf("task.queue query: %w", err)
+	}
+	defer rows.Close()
+
+	statusCounts := newTaskStatusCounts()
+	areaCounts := map[string]int{}
+	priorityCounts := map[string]int{}
+	warningCounts := map[string]int{}
+	items := []taskQueueItem{}
+	truncated := false
+
+	for rows.Next() {
+		var item taskQueueItem
+		var body, rawStatus string
+		if err := rows.Scan(
+			&item.ArtifactID, &item.Slug, &item.Title, &item.AreaSlug, &item.UpdatedAt,
+			&body, &rawStatus, &item.Priority, &item.Assignee, &item.DueAt, &item.ParentSlug,
+		); err != nil {
+			return taskQueueOutput{}, fmt.Errorf("task.queue scan: %w", err)
+		}
+
+		bucket := taskStatusBucket(rawStatus)
+		statusCounts[bucket]++
+		areaCounts[item.AreaSlug]++
+		priorityCounts[taskPriorityBucket(item.Priority)]++
+		itemWarnings := taskQueueWarnings(bucket, body)
+		for _, w := range itemWarnings {
+			warningCounts[w]++
+		}
+
+		if !taskQueueStatusMatches(rawStatus, statusFilter) {
+			continue
+		}
+		if len(items) >= limit {
+			truncated = true
+			continue
+		}
+
+		item.Status = bucket
+		item.StatusBucket = bucket
+		if includeItemProjectSlug {
+			item.ProjectSlug = scope.ProjectSlug
+		}
+		if bucket == taskStatusOther {
+			item.RawStatus = strings.TrimSpace(rawStatus)
+		}
+		if bucket == taskStatusMissing {
+			item.MissingStatus = true
+		}
+		applyTaskQueueReadySignal(&item, bucket, body)
+		item.Warnings = itemWarnings
+		item.AgentRef = "pindoc://" + item.Slug
+		item.HumanURL = HumanURL(scope.ProjectSlug, scope.ProjectLocale, item.Slug)
+		item.HumanURLAbs = AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, item.Slug)
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return taskQueueOutput{}, fmt.Errorf("task.queue rows: %w", err)
+	}
+
+	total := 0
+	for _, n := range statusCounts {
+		total += n
+	}
+	assigneeOpenCount := statusCounts["open"] + statusCounts[taskStatusMissing]
+
+	return taskQueueOutput{
+		SourceSemantics:       taskQueueSemantics,
+		StatusFilter:          statusFilter,
+		DefaultFocus:          taskQueueDefaultFocus,
+		AssigneeFilteredCount: total,
+		AssigneeOpenCount:     assigneeOpenCount,
+		ProjectTotalCount:     projectTotalCount,
+		TotalCount:            total,
+		PendingCount:          assigneeOpenCount,
+		CountDeprecationNote:  "total_count is kept as an alias for assignee_filtered_count; pending_count is kept as an alias for assignee_open_count.",
+		CountLegend:           taskQueueCountLegend(),
+		StatusCounts:          statusCounts,
+		AreaCounts:            areaCounts,
+		PriorityCounts:        priorityCounts,
+		WarningCounts:         warningCounts,
+		Items:                 items,
+		Truncated:             truncated,
+		Notice:                taskQueueNotice(),
+		NextTools:             taskQueueCloseoutNextTools(scope.ProjectSlug, strings.TrimSpace(assignee)),
+	}, nil
+}
+
+func emptyTaskQueueOutput(statusFilter string) taskQueueOutput {
+	return taskQueueOutput{
+		SourceSemantics:      taskQueueSemantics,
+		StatusFilter:         statusFilter,
+		DefaultFocus:         taskQueueDefaultFocus,
+		CountDeprecationNote: "total_count is kept as an alias for assignee_filtered_count; pending_count is kept as an alias for assignee_open_count.",
+		CountLegend:          taskQueueCountLegend(),
+		StatusCounts:         newTaskStatusCounts(),
+		AreaCounts:           map[string]int{},
+		PriorityCounts:       map[string]int{},
+		WarningCounts:        map[string]int{},
+		Items:                []taskQueueItem{},
+		Notice:               taskQueueNotice(),
+	}
+}
+
+func mergeTaskQueueCounts(dst, src map[string]int) {
+	for k, v := range src {
+		dst[k] += v
+	}
+}
+
+func taskQueueMultiProjectWorkspaceWarning(ctx context.Context, deps Deps, p *auth.Principal) (taskQueueWarning, bool) {
+	defaultRes, ok := projectSlugDefaultResultFromContext(ctx)
+	if !ok || defaultRes.Via == "" {
+		return taskQueueWarning{}, false
+	}
+	slugs, err := visibleProjectSlugs(ctx, deps, p)
+	if err != nil {
+		return taskQueueWarning{}, false
+	}
+	return buildTaskQueueMultiProjectWorkspaceWarning(defaultRes, slugs)
+}
+
+func buildTaskQueueMultiProjectWorkspaceWarning(defaultRes projectSlugDefaultResult, detectedProjects []string) (taskQueueWarning, bool) {
+	detectedProjects = normalizedSlugList(detectedProjects)
+	if defaultRes.Via == "" || len(detectedProjects) <= 1 {
+		return taskQueueWarning{}, false
+	}
+	return taskQueueWarning{
+		Code:             taskWarningMultiProjectWorkspace,
+		Message:          "project_slug was omitted in a multi-project workspace; this response is scoped to the default project only.",
+		DetectedProjects: detectedProjects,
+		Hint:             `Run pindoc.task.queue with across_projects=true for the session-start sweep, or pass project_slug explicitly for a pinned project queue.`,
+	}, true
 }
 
 func normalizeTaskQueueStatusFilter(raw string) (string, bool) {

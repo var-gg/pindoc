@@ -16,7 +16,7 @@ func TestDefaultHarnessSessionBootstrapContract(t *testing.T) {
 		t.Fatal("defaultHarnessSessionBootstrap returned nil")
 	}
 
-	wantAuto := []string{"pindoc.workspace.detect"}
+	wantAuto := []string{"pindoc.workspace.detect", "pindoc.task.queue"}
 	if !reflect.DeepEqual(got.AutoCall, wantAuto) {
 		t.Fatalf("AutoCall: got %v, want %v", got.AutoCall, wantAuto)
 	}
@@ -61,8 +61,14 @@ func TestRenderPindocMDSessionBootstrapSection(t *testing.T) {
 	body := renderPindocMD("Pindoc", "00000000-0000-0000-0000-000000000000", "pindoc", "en", "en", "test", true)
 
 	for _, want := range []string{
-		"## Session bootstrap (workspace.detect)",
+		"## Session bootstrap (workspace.detect + task.queue sweep)",
 		"pindoc.workspace.detect",
+		"pindoc.task.queue",
+		"across_projects=true",
+		"projects[slug].items",
+		"total_assignee_open_count",
+		"MULTI_PROJECT_WORKSPACE",
+		"pin the specific project_slug",
 		"PINDOC.md frontmatter",
 		"workspace_path",
 		"git_remote_url",

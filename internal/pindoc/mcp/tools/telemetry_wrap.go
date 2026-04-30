@@ -57,6 +57,7 @@ func AddInstrumentedTool[I, O any](
 			return nil, zero, fmt.Errorf("auth: resolve principal for %q: %w", name, err)
 		}
 		projectDefault := applyProjectSlugDefaulting(ctx, deps, p, &input)
+		ctx = withProjectSlugDefaultResult(ctx, projectDefault)
 		if projectSlugFieldValue(input) == "" && projectDefault.Via != "" && projectDefault.ProjectSlug == "" {
 			if output, ok := projectSlugDefaultNotReady[O](projectDefault); ok {
 				output = stampToolsetVersion(output)

@@ -25,11 +25,15 @@ with code work.
 
 Before starting non-trivial work:
 
-1. Call `pindoc.project.current(project_slug="pindoc")` once to pin scope.
-2. Check assigned work with `pindoc.task.queue(project_slug="pindoc", assignee="agent:codex")`.
-3. Read the target Task context from Pindoc before editing code.
-4. Use `pindoc.area.list(project_slug="pindoc")` before creating artifacts; never invent an `area_slug`.
-5. For create-path `pindoc.artifact.propose`, call `pindoc.context.for_task` or `pindoc.artifact.search` first and pass the same-session `basis.search_receipt`.
+1. Call `pindoc.workspace.detect` once and cache the detected project slug for the session.
+2. Before pinning one project, sweep assigned work with `pindoc.task.queue(across_projects=true, compact=true)`. Review `projects[slug].items` and `total_assignee_open_count` so Tasks in sibling projects are not missed.
+3. Pin the concrete project for the work at hand. Use `project_slug="pindoc"` for this repo unless the sweep shows the target Task belongs to another project.
+4. If a scoped `pindoc.task.queue` call returns `MULTI_PROJECT_WORKSPACE`, rerun the sweep with `across_projects=true` or retry with an explicit `project_slug`.
+5. Call `pindoc.project.current(project_slug="pindoc")` once to pin scope for follow-up calls.
+6. Check this project's assigned work with `pindoc.task.queue(project_slug="pindoc", assignee="agent:codex")`.
+7. Read the target Task context from Pindoc before editing code.
+8. Use `pindoc.area.list(project_slug="pindoc")` before creating artifacts; never invent an `area_slug`.
+9. For create-path `pindoc.artifact.propose`, call `pindoc.context.for_task` or `pindoc.artifact.search` first and pass the same-session `basis.search_receipt`.
 
 ## Task Work Protocol
 

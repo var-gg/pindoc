@@ -27,6 +27,20 @@ type projectSlugDefaultResult struct {
 	Reason      string
 }
 
+type projectSlugDefaultContextKey struct{}
+
+func withProjectSlugDefaultResult(ctx context.Context, res projectSlugDefaultResult) context.Context {
+	if res.Via == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, projectSlugDefaultContextKey{}, res)
+}
+
+func projectSlugDefaultResultFromContext(ctx context.Context) (projectSlugDefaultResult, bool) {
+	res, ok := ctx.Value(projectSlugDefaultContextKey{}).(projectSlugDefaultResult)
+	return res, ok
+}
+
 // applyProjectSlugDefaulting mutates the local tool input copy before the
 // handler runs. Explicit project_slug always wins. Empty project_slug falls
 // back to PINDOC_PROJECT, then to a unique repo/workspace mapping derived
