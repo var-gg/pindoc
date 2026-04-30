@@ -13,6 +13,7 @@
 - `README.md`는 영어 기본 landing page입니다.
 - `README-ko.md`는 첫 화면에서 연결됩니다.
 - `docs/README.md`와 `docs/README-ko.md`는 언어별 documentation hub입니다.
+- `docs/26-system-requirements.md`와 `docs/26-system-requirements-ko.md`는 기본 embedding cache와 권장 host profile을 설명합니다.
 - `docs/24-record-worthy-artifact-policy-ko.md`는 무엇을 durable memory로 남기고 무엇을 제외할지 설명합니다.
 - `LICENSE`는 Apache 2.0이고 README/license 표현이 일치합니다.
 - `SECURITY.md`와 `SECURITY-ko.md`는 loopback trust, external exposure, read-only demo 제약을 설명합니다.
@@ -53,6 +54,9 @@ http://localhost:5830/
 ```
 
 기대 결과: Reader 또는 first-project onboarding이 stack trace 없이 열립니다.
+
+기본 경로는 bundled EmbeddingGemma provider로 의미 검색이 켜진 상태여야 합니다.
+stub embedding default를 문서화하거나 배포하지 않습니다.
 
 ## Public Demo
 

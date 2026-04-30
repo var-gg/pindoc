@@ -67,8 +67,18 @@ tracked in [Public Demo Story Path](docs/25-public-demo-story-path.md).
 Prerequisites:
 
 - Docker 27+
+- 2 CPU cores and 4 GB RAM recommended for local dogfood or small-team use
+- 5 GB free disk recommended for Docker images, Postgres data, and the
+  embedding cache; 2 GB is a light fresh-clone minimum
+- outbound HTTPS on first run so the bundled EmbeddingGemma model and runtime
+  can be cached
 - Go 1.25+ only for host-native development
 - Node 20.15+ and pnpm 10+ only for web development outside Docker
+
+The default Docker path includes semantic search through a bundled
+EmbeddingGemma Q4 ONNX provider, so no embedding sidecar is required. See
+[System Requirements](docs/26-system-requirements.md) for minimum and optional
+deployment profiles.
 
 ```bash
 git clone https://github.com/var-gg/pindoc.git

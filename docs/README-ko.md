@@ -14,6 +14,7 @@
 ## 먼저 볼 문서
 
 - [README](../README-ko.md) - 제품 개요, 빠른 시작, MCP 클라이언트 연결.
+- [권장 사양](26-system-requirements-ko.md) - CPU, memory, disk, cache, embedding provider profile 기준.
 - [공개 데모 운영안](22-public-demo-ko.md) - read-only demo 구조, proxy 정책, scrub 체크리스트, screenshot 규칙.
 - [공개 데모 story path](25-public-demo-story-path-ko.md) - 실제 dogfood artifact로 협업형 AI 통찰이 팀 지식이 되는 경로를 보여주는 큐레이션.
 - [Record-worthy artifact 정책](24-record-worthy-artifact-policy-ko.md) - 무엇을 기록하고, 무엇을 기록하지 않으며, 언제 새 문서보다 update/supersede를 우선할지 정합니다.

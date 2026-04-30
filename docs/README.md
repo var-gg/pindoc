@@ -15,6 +15,7 @@ original language until they become stable user-facing documentation.
 ## Start Here
 
 - [README](../README.md) - product overview, quick start, and MCP client setup.
+- [System Requirements](26-system-requirements.md) - recommended CPU, memory, disk, cache, and embedding-provider profiles.
 - [Public Demo Plan](22-public-demo.md) - read-only demo shape, proxy policy, scrub checklist, and screenshot rule.
 - [Public Demo Story Path](25-public-demo-story-path.md) - curated dogfood routes that show collaborative AI insight becoming reusable project memory.
 - [Record-worthy Artifact Policy](24-record-worthy-artifact-policy.md) - what Pindoc records, what it refuses to archive, and when to update instead of creating more docs.

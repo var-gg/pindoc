@@ -62,8 +62,18 @@ Pindoc 자체와 실제 작업 프로젝트 일부를 보여주되, write surfac
 사전 요구사항:
 
 - Docker 27+
+- 로컬 dogfood나 소규모 팀 사용은 CPU 2 core, RAM 4 GB 권장
+- Docker image, Postgres data, embedding cache를 위한 여유 disk 5 GB 권장,
+  fresh clone light smoke는 2 GB minimum
+- 첫 실행 시 bundled EmbeddingGemma model/runtime을 cache하기 위한 outbound
+  HTTPS
 - host-native 개발 시 Go 1.25+
 - web 개발 시 Node 20.15+ 및 pnpm 10+
+
+기본 Docker 경로에는 bundled EmbeddingGemma Q4 ONNX provider 기반 의미 검색이
+포함되어 있어 별도 embedding sidecar가 필요하지 않습니다. 최소/권장 사양과
+선택 배포 profile은 [권장 사양](docs/26-system-requirements-ko.md)에
+정리합니다.
 
 ```bash
 git clone https://github.com/var-gg/pindoc.git

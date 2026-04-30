@@ -13,6 +13,7 @@ public demo from the README.
 - `README.md` is the English primary landing page.
 - `README-ko.md` exists and is linked from the first screen.
 - `docs/README.md` and `docs/README-ko.md` exist as language-aware documentation hubs.
+- `docs/26-system-requirements.md` and `docs/26-system-requirements-ko.md` explain the default embedding cache and recommended host profiles.
 - `docs/24-record-worthy-artifact-policy.md` explains what becomes durable memory and what stays out.
 - `LICENSE` is Apache 2.0 and README/license references agree.
 - `SECURITY.md` explains loopback trust, external exposure, and read-only demo
@@ -55,6 +56,9 @@ http://localhost:5830/
 ```
 
 Expected: the Reader or first-project onboarding opens without a stack trace.
+
+The default path must keep semantic search enabled through the bundled
+EmbeddingGemma provider. Do not document or ship a stub embedding default.
 
 ## Public Demo
 
