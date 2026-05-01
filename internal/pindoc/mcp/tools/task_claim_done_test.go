@@ -348,6 +348,9 @@ func TestClaimDoneCloseoutNextTools(t *testing.T) {
 	if got[0].Args["project_slug"] != "pindoc" || got[0].Args["assignee"] != "agent:codex" {
 		t.Fatalf("done_check args = %+v", got[0].Args)
 	}
+	if got[0].Args["mode"] != taskDoneCheckModeCurrentOpenOnly {
+		t.Fatalf("done_check mode = %+v", got[0].Args)
+	}
 	if got[1].Tool != "pindoc.artifact.read" || got[1].Args["id_or_slug"] != "task-a" || got[1].Args["view"] != "continuation" {
 		t.Fatalf("read args = %+v", got[1])
 	}

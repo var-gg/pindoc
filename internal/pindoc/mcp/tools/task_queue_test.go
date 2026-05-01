@@ -97,6 +97,9 @@ func TestTaskQueueCloseoutNextTools(t *testing.T) {
 	if got[0].Args["project_slug"] != "pindoc" || got[0].Args["assignee"] != "agent:codex" {
 		t.Fatalf("args = %+v", got[0].Args)
 	}
+	if got[0].Args["mode"] != taskDoneCheckModeCurrentOpenOnly {
+		t.Fatalf("mode arg = %+v", got[0].Args)
+	}
 }
 
 func TestTaskQueueWarnings(t *testing.T) {

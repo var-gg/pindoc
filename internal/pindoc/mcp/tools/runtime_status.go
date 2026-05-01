@@ -14,10 +14,9 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 )
 
-// runtimeStatusInput is intentionally empty: pindoc.runtime.status is a
-// snapshot probe with no filtering. Reserved for future selectors
-// (e.g. include=ports,tools) when the response grows large.
-type runtimeStatusInput struct{}
+type runtimeStatusInput struct {
+	ClientToolsetHash string `json:"client_toolset_hash,omitempty" jsonschema:"optional client-known toolset_version for drift detection; when it differs from the live server version, client_actions explains the refresh/restart sequence"`
+}
 
 // runtimeStatusPort is one entry in the configured-ports list. healthy is
 // always true today because the listing process is the same one
@@ -50,6 +49,10 @@ type runtimeStatusOutput struct {
 	// ToolCount is len(RegisteredTools) — a redundant convenience to
 	// save callers from parsing toolset_version.
 	ToolCount int `json:"tool_count"`
+
+	RequiresResync *bool                 `json:"requires_resync,omitempty"`
+	SinceLastSeen  []string              `json:"since_last_seen,omitempty"`
+	ClientActions  []ToolsetClientAction `json:"client_actions,omitempty"`
 
 	// Source echoes the trust path that produced the calling
 	// Principal. "loopback" — process trust / 127.0.0.1; "oauth" —
@@ -114,49 +117,61 @@ func RegisterRuntimeStatus(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.runtime.status",
-			Description: "Read-only diagnostic snapshot. Returns server version, git commit (when build embedded vcs info), MCP toolset_version + tool_count, configured ports (HTTP + sidecar) with overrides, container_id / image_tag / hostname, auth_mode of the calling principal, transport, Go runtime version, and DB connectivity. After compose rebuild or suspected stale client catalog, compare this toolset_version with cached tool schemas; mismatch means restart/refresh the MCP session. Use when triaging port mix-ups (5830 vs 5832), 'restart needed?' after a tool catalog bump, or any quick environment check. No mutations.",
+			Description: "Read-only diagnostic snapshot. Returns server version, git commit (when build embedded vcs info), MCP toolset_version + tool_count, configured ports (HTTP + sidecar) with overrides, container_id / image_tag / hostname, auth_mode of the calling principal, transport, Go runtime version, and DB connectivity. Pass client_toolset_hash to compare a cached client schema version against the live server; mismatch returns client_actions for runtime.status confirmation, ToolSearch refresh, and MCP session restart. Use when triaging port mix-ups (5830 vs 5832), 'restart needed?' after a tool catalog bump, or any quick environment check. No mutations.",
 		},
-		func(ctx context.Context, p *auth.Principal, _ runtimeStatusInput) (*sdk.CallToolResult, runtimeStatusOutput, error) {
-			commit, modified := readBuildVCS()
-			source := ""
-			if p != nil {
-				source = p.Source
-			}
-			dbHealthy := false
-			if deps.DB != nil {
-				if err := deps.DB.Ping(ctx); err == nil {
-					dbHealthy = true
-				}
-			}
-			hostname, _ := os.Hostname()
-			bindAddr := strings.TrimSpace(deps.BindAddr)
-			if bindAddr == "" {
-				bindAddr = config.DefaultBindAddr
-			}
-			providers := append([]string(nil), deps.AuthProviders...)
-			if providers == nil {
-				providers = []string{}
-			}
-			return nil, runtimeStatusOutput{
-				Version:        deps.Version,
-				ServerCommit:   commit,
-				BuildModified:  modified,
-				ToolsetVersion: ToolsetVersion(),
-				ToolCount:      len(RegisteredTools),
-				Source:         source,
-				AuthProviders:  providers,
-				BindAddr:       bindAddr,
-				Ports:          configuredPorts(),
-				ContainerID:    DetectContainerID(),
-				ImageTag:       strings.TrimSpace(os.Getenv("PINDOC_IMAGE_TAG")),
-				Hostname:       hostname,
-				Transport:      deps.Transport,
-				GoVersion:      runtime.Version(),
-				DBHealthy:      dbHealthy,
-				Notice:         "Diagnostic snapshot is read-only. toolset_version mismatch between this response and the client schema cache means the tool catalog or schema changed — refresh ToolSearch or restart the MCP session.",
-			}, nil
+		func(ctx context.Context, p *auth.Principal, in runtimeStatusInput) (*sdk.CallToolResult, runtimeStatusOutput, error) {
+			return nil, buildRuntimeStatusOutput(ctx, p, deps, in), nil
 		},
 	)
+}
+
+func buildRuntimeStatusOutput(ctx context.Context, p *auth.Principal, deps Deps, in runtimeStatusInput) runtimeStatusOutput {
+	commit, modified := readBuildVCS()
+	source := ""
+	if p != nil {
+		source = p.Source
+	}
+	dbHealthy := false
+	if deps.DB != nil {
+		if err := deps.DB.Ping(ctx); err == nil {
+			dbHealthy = true
+		}
+	}
+	hostname, _ := os.Hostname()
+	bindAddr := strings.TrimSpace(deps.BindAddr)
+	if bindAddr == "" {
+		bindAddr = config.DefaultBindAddr
+	}
+	providers := append([]string(nil), deps.AuthProviders...)
+	if providers == nil {
+		providers = []string{}
+	}
+	toolsetVersion := ToolsetVersion()
+	requiresResync, sinceLastSeen := toolsetDrift(in.ClientToolsetHash, toolsetVersion)
+	out := runtimeStatusOutput{
+		Version:        deps.Version,
+		ServerCommit:   commit,
+		BuildModified:  modified,
+		ToolsetVersion: toolsetVersion,
+		ToolCount:      len(RegisteredTools),
+		RequiresResync: requiresResync,
+		SinceLastSeen:  sinceLastSeen,
+		Source:         source,
+		AuthProviders:  providers,
+		BindAddr:       bindAddr,
+		Ports:          configuredPorts(),
+		ContainerID:    DetectContainerID(),
+		ImageTag:       strings.TrimSpace(os.Getenv("PINDOC_IMAGE_TAG")),
+		Hostname:       hostname,
+		Transport:      deps.Transport,
+		GoVersion:      runtime.Version(),
+		DBHealthy:      dbHealthy,
+		Notice:         "Diagnostic snapshot is read-only. toolset_version mismatch between this response and the client schema cache means the tool catalog or schema changed; use client_actions to call runtime.status, refresh ToolSearch, and restart the MCP session when needed.",
+	}
+	if requiresResync != nil && *requiresResync {
+		out.ClientActions = toolsetDriftClientActions(in.ClientToolsetHash)
+	}
+	return out
 }
 
 // readBuildVCS reads the vcs.* settings the Go toolchain (1.18+) embeds

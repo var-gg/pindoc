@@ -13,7 +13,16 @@ import (
 // tool name. RegisteredTools catches catalog membership drift; this salt
 // catches same-name surface drift that client-side schema caches otherwise
 // cannot see.
-const ToolsetSchemaVersion = "2026-04-30-task-queue-across-projects-v1"
+const ToolsetSchemaVersion = "2026-04-30-closeout-toolset-harness-guard-v1"
+
+type ToolsetClientAction struct {
+	ID     string         `json:"id"`
+	Action string         `json:"action"`
+	Label  string         `json:"label"`
+	Tool   string         `json:"tool,omitempty"`
+	Args   map[string]any `json:"args,omitempty"`
+	Reason string         `json:"reason"`
+}
 
 // RegisteredTools is the canonical list of MCP tool names this package
 // exposes — kept in sync with the Register*(…) calls in
@@ -67,4 +76,34 @@ func ToolsetVersion() string {
 	payload := append([]string{"schema:" + ToolsetSchemaVersion}, sorted...)
 	h := sha256.Sum256([]byte(strings.Join(payload, "\n")))
 	return fmt.Sprintf("%d:%s", len(sorted), hex.EncodeToString(h[:])[:8])
+}
+
+func toolsetDriftClientActions(clientHash string) []ToolsetClientAction {
+	runtimeArgs := map[string]any{}
+	if clientHash = strings.TrimSpace(clientHash); clientHash != "" {
+		runtimeArgs["client_toolset_hash"] = clientHash
+	}
+	return []ToolsetClientAction{
+		{
+			ID:     "call_runtime_status",
+			Action: "call_tool",
+			Label:  "Call runtime.status",
+			Tool:   "pindoc.runtime.status",
+			Args:   runtimeArgs,
+			Reason: "Confirm the live toolset_version, tool_count, server commit, and transport before relying on cached schemas.",
+		},
+		{
+			ID:     "refresh_tool_search",
+			Action: "tool_search",
+			Label:  "Refresh ToolSearch",
+			Tool:   "tool_search",
+			Reason: "Reload the deferred Pindoc tool metadata so the client sees the live input and output schema.",
+		},
+		{
+			ID:     "restart_mcp_session",
+			Action: "restart_session",
+			Label:  "Restart MCP session",
+			Reason: "Reconnect or restart the MCP client session if ToolSearch still exposes stale tool schemas.",
+		},
+	}
 }

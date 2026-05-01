@@ -35,6 +35,23 @@ Before starting non-trivial work:
 8. Use `pindoc.area.list(project_slug="pindoc")` before creating artifacts; never invent an `area_slug`.
 9. For create-path `pindoc.artifact.propose`, call `pindoc.context.for_task` or `pindoc.artifact.search` first and pass the same-session `basis.search_receipt`.
 
+## Toolset Version Drift
+
+Every MCP response includes `toolset_version`. Cache the first value seen
+in the session as `pindoc.session.toolset_version`; when a later response
+differs, call `pindoc.runtime.status` with `client_toolset_hash` set to the
+cached value. Follow the returned `client_actions`: confirm the live status,
+refresh ToolSearch so deferred Pindoc schemas match the server, then restart
+the MCP session if the client still exposes stale tool definitions.
+
+## Harness Drift Guard
+
+Before replacing an existing `PINDOC.md` or `AGENTS.md`, call
+`pindoc.harness.install` with `current_pindoc_md` and
+`current_agent_settings_body`. Use `drift_status`, `drifted_sections`,
+`content_etag`, `style_snippet_etag`, and `suggested_write_targets` to patch
+the files yourself; the MCP server does not write local files.
+
 ## Task Work Protocol
 
 - Keep Task body acceptance checkboxes and `task_meta.status` consistent.

@@ -45,7 +45,7 @@
 | 2026-04-21 | **Task body schema 확정** | Tier A 중 운영 축 얽힌 타입이라 body/상태머신/pre-flight 명시. 칸반은 V1 out, 리스트+필터만. | [04 §Task](04-data-model.md), [08 §Jira대체](08-non-goals.md) |
 | 2026-04-21 | **MCP 클라 범위 2단계** | Dogfooding(M1~M3) = Claude Code only. V1 공개(M4) = Claude Code / Cursor / Codex / Cline 4개 자동 감지. 나머지 manual guide. | [03 §Harness Install](03-architecture.md), [07 §V1 Milestones](07-roadmap.md) |
 | 2026-04-21 | **Conflict threshold V1 하드코딩** | HARD 0.85 / SOFT 0.70. V1.1에 Project Settings tunable. 판정 이력은 Event 로 기록. | [05 §Conflict](05-mechanisms.md), [07 §V1.1](07-roadmap.md) |
-| 2026-04-21 | **Meta-dogfooding V1 M1 즉시 착수** | Pindoc MCP 로컬 → Pindoc 자체 repo(A:\vargg-workspace\pindoc) 에 Harness 붙여 dogfooding. 외부 공개 전 개선 사이클의 동력. | [07 §Launch Criteria](07-roadmap.md) |
+| 2026-04-21 | **Meta-dogfooding V1 M1 즉시 착수** | Pindoc MCP 로컬 → Pindoc 자체 repo에 Harness 붙여 dogfooding. 외부 공개 전 개선 사이클의 동력. | [07 §Launch Criteria](07-roadmap.md) |
 
 ---
 

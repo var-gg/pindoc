@@ -41,15 +41,16 @@ type pingOutput struct {
 	// the server grew a new tool (e.g. pindoc.scope.in_flight landed in
 	// Phase F), this value changes and the agent's schema cache is stale
 	// until the session restarts. Phase H drift notice.
-	ToolsetVersion        string               `json:"toolset_version"`
-	RequiresResync        *bool                `json:"requires_resync"`
-	SinceLastSeen         []string             `json:"since_last_seen,omitempty"`
-	CurrentProjectSummary *PingProjectSummary  `json:"current_project_summary,omitempty"`
-	ReconcileCandidates   []ReconcileCandidate `json:"reconcile_candidates,omitempty"`
-	ReconcileSummary      *ReconcileSummary    `json:"reconcile_summary,omitempty"`
-	HarnessDriftHint      *HarnessDriftHint    `json:"harness_drift_hint,omitempty"`
-	HarnessDriftHints     []HarnessDriftHint   `json:"harness_drift_hints,omitempty"`
-	HarnessBlocked        bool                 `json:"harness_blocked,omitempty"`
+	ToolsetVersion        string                `json:"toolset_version"`
+	RequiresResync        *bool                 `json:"requires_resync"`
+	SinceLastSeen         []string              `json:"since_last_seen,omitempty"`
+	ClientActions         []ToolsetClientAction `json:"client_actions,omitempty"`
+	CurrentProjectSummary *PingProjectSummary   `json:"current_project_summary,omitempty"`
+	ReconcileCandidates   []ReconcileCandidate  `json:"reconcile_candidates,omitempty"`
+	ReconcileSummary      *ReconcileSummary     `json:"reconcile_summary,omitempty"`
+	HarnessDriftHint      *HarnessDriftHint     `json:"harness_drift_hint,omitempty"`
+	HarnessDriftHints     []HarnessDriftHint    `json:"harness_drift_hints,omitempty"`
+	HarnessBlocked        bool                  `json:"harness_blocked,omitempty"`
 }
 
 type HarnessDriftHint struct {
@@ -82,7 +83,7 @@ func RegisterPing(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.ping",
-			Description: "Handshake probe. Returns pong + server version + configured user language. Use this to verify the Pindoc MCP connection is live before calling any write tools.",
+			Description: "Handshake probe. Returns pong + server version + configured user language. Use this to verify the Pindoc MCP connection is live before calling any write tools. Pass client_toolset_hash when you have a cached toolset_version; on mismatch, client_actions tells agents to call runtime.status, refresh ToolSearch, and restart the MCP session if schemas remain stale.",
 		},
 		func(ctx context.Context, p *auth.Principal, in pingInput) (*sdk.CallToolResult, pingOutput, error) {
 			echo := "pong"
@@ -99,6 +100,9 @@ func RegisterPing(server *sdk.Server, deps Deps) {
 				ToolsetVersion: toolsetVersion,
 				RequiresResync: requiresResync,
 				SinceLastSeen:  sinceLastSeen,
+			}
+			if requiresResync != nil && *requiresResync {
+				out.ClientActions = toolsetDriftClientActions(in.ClientToolsetHash)
 			}
 			projectSlug := strings.TrimSpace(in.ProjectSlug)
 			if projectSlug == "" {
@@ -156,7 +160,7 @@ func toolNamesSinceClientHash(clientHash string) []string {
 		return append([]string{}, RegisteredTools...)
 	}
 	n, err := strconv.Atoi(parts[0])
-	if err != nil || n < 0 || n >= len(RegisteredTools) {
+	if err != nil || n < 0 || n > len(RegisteredTools) {
 		return append([]string{}, RegisteredTools...)
 	}
 	return append([]string{}, RegisteredTools[n:]...)

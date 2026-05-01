@@ -9,7 +9,7 @@
 --   1. If env PINDOC_USER_NAME / PINDOC_USER_EMAIL are set and this
 --      column is NULL, upsert a users row from env and seed.
 --   2. Else if exactly one non-test users row exists (email NOT LIKE
---      '%@example.invalid'), bind it (curioustore backfill case).
+--      '%@example.invalid'), bind it (legacy loopback backfill case).
 --   3. Else leave NULL — Reader UI shows the onboarding identity
 --      form (clean install: users table is empty).
 --

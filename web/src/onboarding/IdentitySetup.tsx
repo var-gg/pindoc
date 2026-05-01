@@ -111,7 +111,7 @@ export function IdentitySetup() {
             className="cp-field__input"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="curioustore"
+            placeholder="Ada Lovelace"
             autoComplete="off"
             spellCheck={false}
             required

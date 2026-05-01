@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,36 @@ func TestToolsetDrift(t *testing.T) {
 	}
 	if len(changed) == 0 {
 		t.Fatalf("stale hash should surface changed tool names")
+	}
+
+	got, changed = toolsetDrift(fmt.Sprintf("%d:stale", len(RegisteredTools)), ToolsetVersion())
+	if got == nil || !*got {
+		t.Fatalf("same-count stale hash requires_resync = %v; want true", got)
+	}
+	if len(changed) != 0 {
+		t.Fatalf("same-count schema drift should not invent new tools: %v", changed)
+	}
+}
+
+func TestToolsetDriftClientActions(t *testing.T) {
+	actions := toolsetDriftClientActions("0:stale")
+	if len(actions) != 3 {
+		t.Fatalf("actions len = %d, want 3: %+v", len(actions), actions)
+	}
+	wantIDs := []string{"call_runtime_status", "refresh_tool_search", "restart_mcp_session"}
+	for i, want := range wantIDs {
+		if actions[i].ID != want {
+			t.Fatalf("action[%d].id = %q, want %q", i, actions[i].ID, want)
+		}
+	}
+	if actions[0].Tool != "pindoc.runtime.status" || actions[0].Args["client_toolset_hash"] != "0:stale" {
+		t.Fatalf("runtime.status action = %+v", actions[0])
+	}
+	if actions[1].Action != "tool_search" || !strings.Contains(actions[1].Reason, "deferred Pindoc tool metadata") {
+		t.Fatalf("tool_search action = %+v", actions[1])
+	}
+	if actions[2].Action != "restart_session" || !strings.Contains(actions[2].Reason, "Reconnect") {
+		t.Fatalf("restart action = %+v", actions[2])
 	}
 }
 

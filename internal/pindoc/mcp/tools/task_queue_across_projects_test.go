@@ -54,7 +54,7 @@ func TestTaskQueueAcrossProjectsIntegration(t *testing.T) {
 	}
 	deps := Deps{
 		DB:       pool,
-		RepoRoot: `A:\vargg-workspace\pindoc`,
+		RepoRoot: `C:\workspace\pindoc`,
 	}
 	principal := &auth.Principal{AgentID: "codex", Source: auth.SourceLoopback}
 	directOut, err := handleTaskQueueAcrossProjects(ctx, deps, principal, taskQueueInput{
@@ -67,7 +67,7 @@ func TestTaskQueueAcrossProjectsIntegration(t *testing.T) {
 	assertTaskQueueAcrossOutput(t, directOut, projectSlugA, projectSlugB)
 
 	toolOut := callTaskQueueForTest(t, ctx, pool, Deps{
-		RepoRoot: `A:\vargg-workspace\pindoc`,
+		RepoRoot: `C:\workspace\pindoc`,
 	}, map[string]any{
 		"across_projects": true,
 		"compact":         true,
@@ -76,7 +76,7 @@ func TestTaskQueueAcrossProjectsIntegration(t *testing.T) {
 
 	scopedOut := callTaskQueueForTest(t, ctx, pool, Deps{
 		DefaultProjectSlug: projectSlugA,
-		RepoRoot:           `A:\vargg-workspace\pindoc`,
+		RepoRoot:           `C:\workspace\pindoc`,
 	}, map[string]any{
 		"assignee": "agent:codex",
 	})
@@ -96,7 +96,7 @@ func TestTaskQueueAcrossProjectsIntegration(t *testing.T) {
 
 	explicitOut := callTaskQueueForTest(t, ctx, pool, Deps{
 		DefaultProjectSlug: projectSlugA,
-		RepoRoot:           `A:\vargg-workspace\pindoc`,
+		RepoRoot:           `C:\workspace\pindoc`,
 	}, map[string]any{
 		"project_slug": projectSlugA,
 		"assignee":     "agent:codex",

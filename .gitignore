@@ -5,17 +5,21 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 
 # Logs
 *.log
+logs/
 
 # Build/temp
 node_modules/
 dist/
 build/
 .cache/
+.tmp/
+.playwright-mcp/
 
 # Go
 /bin/
@@ -33,3 +37,6 @@ go.work.sum
 # (.mcp.json itself is project-scoped and committed — it has no secrets today)
 .env.local
 *.secret
+
+# Local QA captures generated while dogfooding the Reader UI.
+/pindoc-*.png

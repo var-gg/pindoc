@@ -7,7 +7,7 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
 }
 
 function testEmailMaskKeepsDomainButHidesLocalPart(): void {
-  assertEqual(maskEmail("rhkdwls750@naver.com"), "rh***@naver.com", "normal email mask");
+  assertEqual(maskEmail("alice@example.com"), "al***@example.com", "normal email mask");
   assertEqual(maskEmail("a@example.com"), "a***@example.com", "short local mask");
   assertEqual(maskEmail("local-only"), "lo***", "non-email fallback mask");
 }

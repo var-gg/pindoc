@@ -41,8 +41,13 @@ func TestDefaultHarnessSessionBootstrapContract(t *testing.T) {
 	if got.DriftCheckTool != "pindoc.runtime.status" {
 		t.Fatalf("drift check tool = %q", got.DriftCheckTool)
 	}
-	if len(got.DriftActions) != 2 {
-		t.Fatalf("DriftActions len = %d, want 2", len(got.DriftActions))
+	if len(got.DriftActions) != 3 {
+		t.Fatalf("DriftActions len = %d, want 3", len(got.DriftActions))
+	}
+	for _, want := range []string{"client_toolset_hash", "ToolSearch", "restart"} {
+		if !strings.Contains(strings.Join(got.DriftActions, "\n"), want) {
+			t.Fatalf("DriftActions missing %q: %+v", want, got.DriftActions)
+		}
 	}
 	if got.SessionHandoffTemplate != "_template_session_handoff" {
 		t.Fatalf("handoff template = %q", got.SessionHandoffTemplate)
@@ -76,7 +81,14 @@ func TestRenderPindocMDSessionBootstrapSection(t *testing.T) {
 		"PROJECT_SLUG_REQUIRED",
 		"pindoc.session.toolset_version",
 		"pindoc.runtime.status",
+		"client_toolset_hash",
+		"client_actions",
+		"refresh ToolSearch",
 		"stale tool descriptions",
+		"current_pindoc_md",
+		"current_agent_settings_body",
+		"drifted_sections",
+		"suggested_write_targets",
 		"_template_session_handoff",
 		"pindoc.task.done_check",
 		"### When to re-run",

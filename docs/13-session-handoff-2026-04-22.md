@@ -256,9 +256,8 @@ V1.5+로 미뤄졌지만 URL 구조는 **지금** 박아야 미래에 안 깨짐
 - **MCP 서버**: stdio, Claude Code가 필요 시 subprocess spawn. `.mcp.json` 등록됨.
 
 ### 환경
-- 저장소 루트: `A:\vargg-workspace\pindoc` (폴더명 아직 `pindoc` 이 아니라
-  레거시 `varn` 인 경우 있을 수 있음 — Windows 파일 핸들 때문에 rename 안 됨.
-  `git remote` 는 `pindoc.git`)
+- 저장소 루트: 로컬 작업 디렉터리의 Pindoc checkout (`git remote` 는
+  `pindoc.git`)
 - Go 1.26.2: `%LOCALAPPDATA%\Programs\Go\bin` (user PATH 등록 완료)
 - Node 20.15 + pnpm 10
 - Python 3.11 (embed sidecar 필요 시, 현재 stub 사용 중)

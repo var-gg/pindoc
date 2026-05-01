@@ -35,8 +35,8 @@ param(
     [string]$DatabaseURL = "postgres://pindoc:pindoc_dev@localhost:5432/pindoc?sslmode=disable",
     [string]$LogLevel    = "info",
     [string]$UserLanguage = "ko",
-    [string]$UserName    = "curioustore",
-    [string]$UserEmail   = "rhkdwls750@naver.com",
+    [string]$UserName    = $env:PINDOC_USER_NAME,
+    [string]$UserEmail   = $env:PINDOC_USER_EMAIL,
     [switch]$Reinstall
 )
 
@@ -143,13 +143,24 @@ function Install-Service {
     & $NssmExe set $ServiceName Start SERVICE_AUTO_START | Out-Null
 
     # Env. NSSM accepts repeated K=V pairs on a single set call.
+    if ([string]::IsNullOrWhiteSpace($UserName)) {
+        $UserName = (& git config --get user.name 2>$null)
+    }
+    if ([string]::IsNullOrWhiteSpace($UserEmail)) {
+        $UserEmail = (& git config --get user.email 2>$null)
+    }
+
     $envPairs = @(
         "PINDOC_DATABASE_URL=$DatabaseURL",
         "PINDOC_LOG_LEVEL=$LogLevel",
-        "PINDOC_USER_LANGUAGE=$UserLanguage",
-        "PINDOC_USER_NAME=$UserName",
-        "PINDOC_USER_EMAIL=$UserEmail"
+        "PINDOC_USER_LANGUAGE=$UserLanguage"
     )
+    if (-not [string]::IsNullOrWhiteSpace($UserName)) {
+        $envPairs += "PINDOC_USER_NAME=$UserName"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($UserEmail)) {
+        $envPairs += "PINDOC_USER_EMAIL=$UserEmail"
+    }
     & $NssmExe set $ServiceName AppEnvironmentExtra @envPairs | Out-Null
 
     # Auto-restart on exit, with a 1s throttle so a crash loop isn't

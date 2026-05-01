@@ -1,3 +1,5 @@
+//go:build cgo
+
 package embed
 
 // GemmaProvider — on-device embedding via EmbeddingGemma-300m ONNX.
@@ -17,22 +19,12 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strings"
 	"sync"
 
 	sentencepiece "github.com/eliben/go-sentencepiece"
 	ort "github.com/yalue/onnxruntime_go"
 )
-
-// GemmaDimension is the native hidden size of embeddinggemma-300m.
-// Matryoshka truncation to 512/256/128 is possible but we use the full
-// 768 to keep the existing pgvector column unchanged.
-const GemmaDimension = 768
-
-// GemmaMaxTokens is the model's effective sequence budget. Gemma 3's
-// embedding tower supports 2048 positions; we expose 512 as a
-// conservative default that matches the sentence-transformer training
-// recipe and keeps per-embed latency bounded on CPU.
-const GemmaMaxTokens = 512
 
 // Gemma's Sentence-Transformer head was trained with task-specific
 // instruction prefixes. Retrieval uses these two. Applied transparently
@@ -65,19 +57,6 @@ func ensureORTInitialized(runtimeLib string) error {
 	return ortInitErr
 }
 
-// GemmaConfig bundles the options resolved from env / defaults before
-// NewGemma is called. Caller is responsible for populating ModelPath +
-// TokenizerPath + RuntimeLib or leaving them blank to trigger the
-// automatic resolver.
-type GemmaConfig struct {
-	Variant       GemmaVariant // default Q4
-	ModelDir      string       // cache dir for gemma assets (optional)
-	RuntimeDir    string       // cache dir for onnxruntime lib (optional)
-	RuntimeLib    string       // explicit onnxruntime lib path (optional override)
-	ModelPath     string       // explicit .onnx file (optional override)
-	TokenizerPath string       // explicit tokenizer.model (optional override)
-}
-
 // GemmaProvider implements Provider using EmbeddingGemma ONNX.
 //
 // Thread model: Provider.Embed is safe for concurrent callers because
@@ -96,7 +75,7 @@ type GemmaProvider struct {
 
 // NewGemma constructs a Provider backed by local ONNX inference.
 // Resolves any missing asset paths by hitting the cache/downloader.
-func NewGemma(cfg GemmaConfig) (*GemmaProvider, error) {
+func NewGemma(cfg GemmaConfig) (Provider, error) {
 	if cfg.Variant == "" {
 		cfg.Variant = GemmaQ4
 	}
@@ -396,22 +375,7 @@ func pickGemmaOutput(infos []ort.InputOutputInfo) string {
 
 func containsAny(s string, subs ...string) bool {
 	for _, sub := range subs {
-		if len(sub) > 0 && stringContains(s, sub) {
-			return true
-		}
-	}
-	return false
-}
-
-// stringContains is a local helper to avoid an import cycle with the
-// strings package just for this package-level switch. Trivial substring
-// scan; the names we match are short.
-func stringContains(s, sub string) bool {
-	if len(sub) > len(s) {
-		return false
-	}
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
+		if sub != "" && strings.Contains(s, sub) {
 			return true
 		}
 	}

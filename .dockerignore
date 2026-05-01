@@ -1,5 +1,7 @@
 .git
 .claude
+.tmp
+.playwright-mcp
 bin
 logs
 tools
@@ -8,6 +10,7 @@ web/node_modules
 web/.vite
 web/*.tsbuildinfo
 web-vite.*.log
+pindoc-*.png
 *.log
 *.exe
 *.test

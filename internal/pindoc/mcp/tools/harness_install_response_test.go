@@ -92,10 +92,129 @@ func TestHarnessInstallMatchingETagsOmitBodiesInFullMode(t *testing.T) {
 	}
 }
 
+func TestHarnessInstallDriftCheckInSync(t *testing.T) {
+	body := renderPindocMD("Pindoc", "00000000-0000-0000-0000-000000000000", "pindoc", "en", "en", "test", true)
+	styleSnippet := testHarnessStyleSnippet()
+	settings := "@PINDOC.md\n\n" + styleSnippet
+	out := testHarnessInstallOutput(body, styleSnippet)
+
+	applyHarnessDriftCheck(&out, harnessInstallInput{
+		CurrentPindocMD:          &body,
+		CurrentAgentSettingsBody: &settings,
+	}, harnessResponseFormatFull, body, styleSnippet)
+
+	if out.DriftStatus != "in_sync" || out.InSync == nil || !*out.InSync {
+		t.Fatalf("drift status = %q in_sync=%v", out.DriftStatus, out.InSync)
+	}
+	if len(out.DriftedSections) != 0 || len(out.SuggestedWriteTargets) != 0 {
+		t.Fatalf("in_sync should not return drift guidance: sections=%+v targets=%+v", out.DriftedSections, out.SuggestedWriteTargets)
+	}
+}
+
+func TestHarnessInstallDriftCheckMissingInputs(t *testing.T) {
+	body := renderPindocMD("Pindoc", "00000000-0000-0000-0000-000000000000", "pindoc", "en", "en", "test", true)
+	styleSnippet := testHarnessStyleSnippet()
+	settings := "@PINDOC.md\n\n" + styleSnippet
+	out := testHarnessInstallOutput(body, styleSnippet)
+
+	applyHarnessDriftCheck(&out, harnessInstallInput{
+		CurrentAgentSettingsBody: &settings,
+	}, harnessResponseFormatFull, body, styleSnippet)
+
+	if out.DriftStatus != "missing" || out.InSync == nil || *out.InSync {
+		t.Fatalf("missing drift status = %q in_sync=%v", out.DriftStatus, out.InSync)
+	}
+	if len(out.Missing) != 1 || out.Missing[0] != "PINDOC.md" {
+		t.Fatalf("missing = %+v, want PINDOC.md", out.Missing)
+	}
+	if len(out.SuggestedWriteTargets) != 1 || out.SuggestedWriteTargets[0].Path != "PINDOC.md" {
+		t.Fatalf("missing suggested targets = %+v", out.SuggestedWriteTargets)
+	}
+}
+
+func TestHarnessInstallDriftCheckSessionBootstrapDrift(t *testing.T) {
+	body := renderPindocMD("Pindoc", "00000000-0000-0000-0000-000000000000", "pindoc", "en", "en", "test", true)
+	styleSnippet := testHarnessStyleSnippet()
+	staleBody := strings.Replace(body, "pindoc.task.queue(across_projects=true)", "pindoc.task.queue", 1)
+	staleSnippet := strings.Replace(styleSnippet, "artifact 본문", "artifact body", 1)
+	settings := "@PINDOC.md\n\n" + staleSnippet
+	out := testHarnessInstallOutput(body, styleSnippet)
+
+	applyHarnessDriftCheck(&out, harnessInstallInput{
+		CurrentPindocMD:          &staleBody,
+		CurrentAgentSettingsBody: &settings,
+	}, harnessResponseFormatFull, body, styleSnippet)
+
+	if out.DriftStatus != "drift" || out.InSync == nil || *out.InSync {
+		t.Fatalf("drift status = %q in_sync=%v", out.DriftStatus, out.InSync)
+	}
+	if !hasHarnessDriftSection(out.DriftedSections, "PINDOC.md", "Pre-flight Check") {
+		t.Fatalf("expected Pre-flight Check drift in %+v", out.DriftedSections)
+	}
+	if !hasHarnessDriftSection(out.DriftedSections, "agent_settings", "register_separation_snippet") {
+		t.Fatalf("expected style snippet drift in %+v", out.DriftedSections)
+	}
+	if !hasHarnessWriteTarget(out.SuggestedWriteTargets, "PINDOC.md", "pindoc_md_content") {
+		t.Fatalf("expected PINDOC.md write target in %+v", out.SuggestedWriteTargets)
+	}
+	if !hasHarnessWriteTarget(out.SuggestedWriteTargets, "CLAUDE.md | AGENTS.md | .cursorrules", "style_snippet") {
+		t.Fatalf("expected style snippet write target in %+v", out.SuggestedWriteTargets)
+	}
+}
+
+func TestHarnessInstallDriftCheckFileOnlyStillReturnsGuidance(t *testing.T) {
+	body := renderPindocMD("Pindoc", "00000000-0000-0000-0000-000000000000", "pindoc", "en", "en", "test", true)
+	styleSnippet := testHarnessStyleSnippet()
+	staleBody := strings.Replace(body, "across_projects=true", "across_projects=false", 1)
+	out := testHarnessInstallOutput(body, styleSnippet)
+
+	applyHarnessDriftCheck(&out, harnessInstallInput{
+		CurrentPindocMD: &staleBody,
+	}, harnessResponseFormatFileOnly, body, styleSnippet)
+
+	if out.DriftStatus != "missing" {
+		t.Fatalf("file_only drift status = %q, want missing due absent agent settings", out.DriftStatus)
+	}
+	if !hasHarnessWriteTargetRequiringBody(out.SuggestedWriteTargets, "PINDOC.md", "pindoc_md_content") {
+		t.Fatalf("file_only should mark PINDOC.md target as requiring body: %+v", out.SuggestedWriteTargets)
+	}
+}
+
 func TestHarnessInstallRejectsInvalidResponseFormat(t *testing.T) {
 	if _, err := normalizeHarnessResponseFormat("compact"); err == nil {
 		t.Fatalf("invalid response_format should return an error")
 	}
+}
+
+func testHarnessStyleSnippet() string {
+	return styleSnippetMarkerBegin + "\n" + styleSnippetBodyKO + "\n" + styleSnippetMarkerEnd
+}
+
+func hasHarnessDriftSection(sections []HarnessDriftedSection, target, sectionContains string) bool {
+	for _, section := range sections {
+		if section.Target == target && strings.Contains(section.Section, sectionContains) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasHarnessWriteTarget(targets []HarnessSuggestedWriteTarget, path, sourceField string) bool {
+	for _, target := range targets {
+		if target.Path == path && target.SourceField == sourceField {
+			return true
+		}
+	}
+	return false
+}
+
+func hasHarnessWriteTargetRequiringBody(targets []HarnessSuggestedWriteTarget, path, sourceField string) bool {
+	for _, target := range targets {
+		if target.Path == path && target.SourceField == sourceField && target.RequiresBody {
+			return true
+		}
+	}
+	return false
 }
 
 func testHarnessInstallOutput(body, styleSnippet string) harnessInstallOutput {

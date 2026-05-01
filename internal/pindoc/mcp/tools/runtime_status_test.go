@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"context"
+	"strings"
 	"testing"
 )
 
@@ -72,6 +74,29 @@ func TestDetectContainerIDShape(t *testing.T) {
 				t.Fatalf("isDockerShortID(%q) = %v, want %v", c.host, got, want)
 			}
 		})
+	}
+}
+
+func TestRuntimeStatusToolsetDriftActions(t *testing.T) {
+	out := buildRuntimeStatusOutput(context.Background(), nil, Deps{}, runtimeStatusInput{ClientToolsetHash: "0:stale"})
+	if out.RequiresResync == nil || !*out.RequiresResync {
+		t.Fatalf("requires_resync = %v, want true", out.RequiresResync)
+	}
+	if len(out.ClientActions) != 3 {
+		t.Fatalf("client_actions len = %d, want 3: %+v", len(out.ClientActions), out.ClientActions)
+	}
+	for _, want := range []string{"toolset_version", "client_actions", "ToolSearch", "restart"} {
+		if !strings.Contains(out.Notice, want) {
+			t.Fatalf("notice %q missing %q", out.Notice, want)
+		}
+	}
+
+	matching := buildRuntimeStatusOutput(context.Background(), nil, Deps{}, runtimeStatusInput{ClientToolsetHash: ToolsetVersion()})
+	if matching.RequiresResync == nil || *matching.RequiresResync {
+		t.Fatalf("matching requires_resync = %v, want false", matching.RequiresResync)
+	}
+	if len(matching.ClientActions) != 0 {
+		t.Fatalf("matching client_actions = %+v, want empty", matching.ClientActions)
 	}
 }
 

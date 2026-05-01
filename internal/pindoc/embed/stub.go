@@ -61,8 +61,8 @@ func hashToUnitVec(text string, dim int) []float32 {
 		}
 		off := (i % 4) * 8
 		u := binary.BigEndian.Uint64(h[off : off+8])
-		// Map uint64 → [-1, 1].
-		vec[i] = float32(float64(int64(u))/float64(1<<63)) - 0.5
+		// Map uint64 to [-1, 1).
+		vec[i] = float32((float64(u)/float64(^uint64(0)))*2 - 1)
 	}
 	// L2 normalize so cosine == dot.
 	var sum float64

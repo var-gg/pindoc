@@ -48,6 +48,13 @@ type harnessInstallInput struct {
 	// IfStyleSnippetETag applies the same conditional omission rule to the
 	// register-separation style snippet.
 	IfStyleSnippetETag string `json:"if_style_snippet_etag,omitempty" jsonschema:"previous style_snippet_etag; omit style_snippet when it still matches"`
+
+	// CurrentPindocMD and CurrentAgentSettingsBody let agents ask for a
+	// read-only drift check. The server compares these bodies to the
+	// freshly rendered harness output and returns patch guidance; it still
+	// never writes to the local filesystem.
+	CurrentPindocMD          *string `json:"current_pindoc_md,omitempty" jsonschema:"optional current PINDOC.md body for read-only drift check"`
+	CurrentAgentSettingsBody *string `json:"current_agent_settings_body,omitempty" jsonschema:"optional current CLAUDE.md / AGENTS.md / .cursorrules body for read-only drift check"`
 }
 
 type harnessInstallOutput struct {
@@ -117,6 +124,16 @@ type harnessInstallOutput struct {
 	StyleSnippetETag    string `json:"style_snippet_etag,omitempty"`
 	StyleSnippetOmitted bool   `json:"style_snippet_omitted,omitempty"`
 
+	// DriftStatus is populated only when CurrentPindocMD or
+	// CurrentAgentSettingsBody was supplied. Values: in_sync | missing |
+	// drift. The flat drifted_sections / suggested_write_targets fields
+	// let agents patch files without parsing prose.
+	DriftStatus           string                        `json:"drift_status,omitempty"`
+	InSync                *bool                         `json:"in_sync,omitempty"`
+	Missing               []string                      `json:"missing,omitempty"`
+	DriftedSections       []HarnessDriftedSection       `json:"drifted_sections,omitempty"`
+	SuggestedWriteTargets []HarnessSuggestedWriteTarget `json:"suggested_write_targets,omitempty"`
+
 	// SessionBootstrap is the machine-readable handshake every client
 	// harness should run at session start. claude-code / codex / cursor
 	// read this so PINDOC.md text and harness behaviour stay in sync —
@@ -129,6 +146,22 @@ type harnessInstallOutput struct {
 	// choices to the user.
 	RenderedFor    RenderedFor `json:"rendered_for,omitzero"`
 	ToolsetVersion string      `json:"toolset_version,omitempty"`
+}
+
+type HarnessDriftedSection struct {
+	Target       string `json:"target"`
+	Section      string `json:"section"`
+	Status       string `json:"status"`
+	Reason       string `json:"reason"`
+	ExpectedETag string `json:"expected_etag,omitempty"`
+	CurrentETag  string `json:"current_etag,omitempty"`
+}
+
+type HarnessSuggestedWriteTarget struct {
+	Path         string `json:"path"`
+	SourceField  string `json:"source_field"`
+	Reason       string `json:"reason"`
+	RequiresBody bool   `json:"requires_body,omitempty"`
 }
 
 // HarnessSessionBootstrap describes the auto-run handshake a client
@@ -205,8 +238,9 @@ func defaultHarnessSessionBootstrap() *HarnessSessionBootstrap {
 		ToolsetVersionCacheKey: "pindoc.session.toolset_version",
 		DriftCheckTool:         "pindoc.runtime.status",
 		DriftActions: []string{
-			"compare cached toolset_version with the live response",
-			"refresh ToolSearch or restart the MCP session before relying on stale schemas",
+			"call pindoc.runtime.status with the cached client_toolset_hash when the live toolset_version differs",
+			"refresh ToolSearch so deferred Pindoc tool schemas match the live server",
+			"restart the MCP session if ToolSearch still exposes stale schemas",
 		},
 		SessionHandoffTemplate: "_template_session_handoff",
 	}
@@ -257,7 +291,7 @@ func RegisterHarnessInstall(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.harness.install",
-			Description: "Return the PINDOC.md body this project should adopt and the one-line CLAUDE.md include that loads it. Write the returned body to PINDOC.md at the repo root, and append the include line to CLAUDE.md (or AGENTS.md). Re-run to regenerate after upgrading the server — the spec evolves with the server version.",
+			Description: "Return the PINDOC.md body this project should adopt and the one-line CLAUDE.md include that loads it. Write the returned body to PINDOC.md at the repo root, and append the include line to CLAUDE.md (or AGENTS.md). Re-run to regenerate after upgrading the server — the spec evolves with the server version. Optional current_pindoc_md and current_agent_settings_body perform a read-only drift check and return drift_status, drifted_sections, and suggested_write_targets; the server never writes files.",
 		},
 		func(ctx context.Context, p *auth.Principal, in harnessInstallInput) (*sdk.CallToolResult, harnessInstallOutput, error) {
 			responseFormat, err := normalizeHarnessResponseFormat(in.ResponseFormat)
@@ -323,6 +357,7 @@ func RegisterHarnessInstall(server *sdk.Server, deps Deps) {
 					Version:          deps.Version,
 				},
 			}
+			applyHarnessDriftCheck(&out, in, responseFormat, body, styleSnippet)
 			applyHarnessResponseFormat(&out, in, responseFormat, body, styleSnippet)
 			return nil, out, nil
 		},
@@ -389,6 +424,255 @@ func applyHarnessResponseFormat(out *harnessInstallOutput, in harnessInstallInpu
 	}
 }
 
+func applyHarnessDriftCheck(out *harnessInstallOutput, in harnessInstallInput, responseFormat, body, styleSnippet string) {
+	if out == nil || (in.CurrentPindocMD == nil && in.CurrentAgentSettingsBody == nil) {
+		return
+	}
+
+	missing := []string{}
+	drifted := []HarnessDriftedSection{}
+	targets := []HarnessSuggestedWriteTarget{}
+	contentETag := harnessETag(body)
+	styleSnippetETag := harnessETag(styleSnippet)
+	contentWillBeOmitted := responseFormat == harnessResponseFormatFileOnly ||
+		strings.TrimSpace(in.IfContentETag) == contentETag
+	styleWillBeOmitted := responseFormat == harnessResponseFormatFileOnly ||
+		strings.TrimSpace(in.IfStyleSnippetETag) == styleSnippetETag
+
+	if in.CurrentPindocMD == nil {
+		missing = append(missing, "PINDOC.md")
+		drifted = append(drifted, HarnessDriftedSection{
+			Target:       "PINDOC.md",
+			Section:      "file",
+			Status:       "missing",
+			Reason:       "current_pindoc_md was not provided; agent likely has no installed PINDOC.md body to compare.",
+			ExpectedETag: contentETag,
+		})
+		targets = append(targets, HarnessSuggestedWriteTarget{
+			Path:         "PINDOC.md",
+			SourceField:  "pindoc_md_content",
+			Reason:       "write the generated PINDOC.md body",
+			RequiresBody: contentWillBeOmitted,
+		})
+	} else {
+		current := *in.CurrentPindocMD
+		if normalizeHarnessCompare(current) != normalizeHarnessCompare(body) {
+			sections := compareHarnessPindocSections(current, body, contentETag)
+			if len(sections) == 0 {
+				sections = append(sections, HarnessDriftedSection{
+					Target:       "PINDOC.md",
+					Section:      "full_body",
+					Status:       "drift",
+					Reason:       "current PINDOC.md differs from the renderer output outside H2 section boundaries.",
+					ExpectedETag: contentETag,
+					CurrentETag:  harnessETag(current),
+				})
+			}
+			drifted = append(drifted, sections...)
+			targets = append(targets, HarnessSuggestedWriteTarget{
+				Path:         "PINDOC.md",
+				SourceField:  "pindoc_md_content",
+				Reason:       "replace or patch drifted generated sections using the renderer output",
+				RequiresBody: contentWillBeOmitted,
+			})
+		}
+	}
+
+	if in.CurrentAgentSettingsBody == nil {
+		missing = append(missing, "agent_settings")
+		drifted = append(drifted, HarnessDriftedSection{
+			Target:       "agent_settings",
+			Section:      "file",
+			Status:       "missing",
+			Reason:       "current_agent_settings_body was not provided; agent should inspect CLAUDE.md, AGENTS.md, or .cursorrules.",
+			ExpectedETag: styleSnippetETag,
+		})
+		targets = append(targets, HarnessSuggestedWriteTarget{
+			Path:         "CLAUDE.md | AGENTS.md | .cursorrules",
+			SourceField:  "style_snippet",
+			Reason:       "ensure @PINDOC.md and the register-separation snippet are installed",
+			RequiresBody: styleWillBeOmitted,
+		})
+	} else {
+		settings := *in.CurrentAgentSettingsBody
+		settingsSections := compareHarnessAgentSettings(settings, styleSnippet, styleSnippetETag)
+		if len(settingsSections) > 0 {
+			drifted = append(drifted, settingsSections...)
+			targets = append(targets, HarnessSuggestedWriteTarget{
+				Path:         "CLAUDE.md | AGENTS.md | .cursorrules",
+				SourceField:  "style_snippet",
+				Reason:       "insert or replace the register-separation snippet while preserving unrelated local guidance",
+				RequiresBody: styleWillBeOmitted,
+			})
+		}
+		if !strings.Contains(settings, "@PINDOC.md") {
+			drifted = append(drifted, HarnessDriftedSection{
+				Target:      "agent_settings",
+				Section:     "include_line",
+				Status:      "missing",
+				Reason:      "agent settings do not include @PINDOC.md.",
+				CurrentETag: harnessETag(settings),
+			})
+			targets = append(targets, HarnessSuggestedWriteTarget{
+				Path:        "CLAUDE.md | AGENTS.md | .cursorrules",
+				SourceField: "claude_md_include_line",
+				Reason:      "append @PINDOC.md so future sessions load the harness",
+			})
+		}
+	}
+
+	inSync := len(missing) == 0 && len(drifted) == 0
+	out.InSync = &inSync
+	out.Missing = dedupeStrings(missing)
+	out.DriftedSections = drifted
+	out.SuggestedWriteTargets = dedupeHarnessSuggestedWriteTargets(targets)
+	switch {
+	case inSync:
+		out.DriftStatus = "in_sync"
+	case len(missing) > 0:
+		out.DriftStatus = "missing"
+	default:
+		out.DriftStatus = "drift"
+	}
+}
+
+func compareHarnessPindocSections(current, expected, expectedETag string) []HarnessDriftedSection {
+	currentSections := harnessH2Sections(current)
+	expectedSections := harnessH2Sections(expected)
+	out := []HarnessDriftedSection{}
+	for heading, expectedBody := range expectedSections {
+		currentBody, ok := currentSections[heading]
+		if !ok {
+			out = append(out, HarnessDriftedSection{
+				Target:       "PINDOC.md",
+				Section:      heading,
+				Status:       "missing",
+				Reason:       "generated H2 section is missing from current PINDOC.md.",
+				ExpectedETag: expectedETag,
+			})
+			continue
+		}
+		if normalizeHarnessCompare(currentBody) != normalizeHarnessCompare(expectedBody) {
+			out = append(out, HarnessDriftedSection{
+				Target:       "PINDOC.md",
+				Section:      heading,
+				Status:       "drift",
+				Reason:       "generated H2 section differs from the renderer output.",
+				ExpectedETag: expectedETag,
+				CurrentETag:  harnessETag(currentBody),
+			})
+		}
+	}
+	return out
+}
+
+func harnessH2Sections(body string) map[string]string {
+	lines := strings.Split(normalizeHarnessCompare(body), "\n")
+	out := map[string]string{}
+	currentHeading := ""
+	var current []string
+	flush := func() {
+		if currentHeading != "" {
+			out[currentHeading] = strings.Join(current, "\n")
+		}
+	}
+	for _, line := range lines {
+		if strings.HasPrefix(line, "## ") {
+			flush()
+			currentHeading = strings.TrimSpace(strings.TrimPrefix(line, "## "))
+			current = []string{line}
+			continue
+		}
+		if currentHeading != "" {
+			current = append(current, line)
+		}
+	}
+	flush()
+	return out
+}
+
+func compareHarnessAgentSettings(current, expectedSnippet, expectedETag string) []HarnessDriftedSection {
+	region, ok := harnessMarkedRegion(current, styleSnippetMarkerBegin, styleSnippetMarkerEnd)
+	if !ok {
+		return []HarnessDriftedSection{{
+			Target:       "agent_settings",
+			Section:      "register_separation_snippet",
+			Status:       "missing",
+			Reason:       "register-separation marker block is missing.",
+			ExpectedETag: expectedETag,
+			CurrentETag:  harnessETag(current),
+		}}
+	}
+	if normalizeHarnessCompare(region) == normalizeHarnessCompare(expectedSnippet) {
+		return nil
+	}
+	return []HarnessDriftedSection{{
+		Target:       "agent_settings",
+		Section:      "register_separation_snippet",
+		Status:       "drift",
+		Reason:       "register-separation marker block differs from the current renderer snippet.",
+		ExpectedETag: expectedETag,
+		CurrentETag:  harnessETag(region),
+	}}
+}
+
+func harnessMarkedRegion(body, begin, end string) (string, bool) {
+	start := strings.Index(body, begin)
+	if start < 0 {
+		return "", false
+	}
+	afterStart := start + len(begin)
+	endRel := strings.Index(body[afterStart:], end)
+	if endRel < 0 {
+		return body[start:], true
+	}
+	endIdx := afterStart + endRel + len(end)
+	return body[start:endIdx], true
+}
+
+func normalizeHarnessCompare(body string) string {
+	body = strings.ReplaceAll(body, "\r\n", "\n")
+	body = strings.ReplaceAll(body, "\r", "\n")
+	return strings.TrimSpace(body)
+}
+
+func dedupeStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func dedupeHarnessSuggestedWriteTargets(values []HarnessSuggestedWriteTarget) []HarnessSuggestedWriteTarget {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]HarnessSuggestedWriteTarget, 0, len(values))
+	for _, value := range values {
+		key := value.Path + "\x00" + value.SourceField
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
 func harnessInstallMessage(marker string) string {
 	return strings.TrimSpace(fmt.Sprintf(`
 Write the returned body to PINDOC.md at the repo root. Then append this
@@ -407,6 +691,9 @@ agent-guidance H2 (for example "# AGENTS.md instructions" or
 If body / pindoc_md_content or style_snippet is omitted because
 response_format=file_only or an etag matched, no write is needed for that omitted
 payload; re-run with response_format=full and no matching etag to receive it.
+To check an existing install without guessing, pass current_pindoc_md and
+current_agent_settings_body; inspect drift_status, drifted_sections, and
+suggested_write_targets. The MCP server still does not write files.
 Future sessions will auto-load PINDOC.md and follow the Pindoc Harness
 rules (Pre-flight Check before writes, Referenced Confirmation when
 asking the user for approval, agent-only write surface).
@@ -620,11 +907,23 @@ clients should consume directly to drive this handshake.
 
 Every MCP tool response includes toolset_version. Keep the first value
 seen in the session under "pindoc.session.toolset_version"; if a later
-response differs, call pindoc.runtime.status and compare that live value
-against the cached one. A mismatch means the server tool catalog or schema
-changed underneath the client cache. Refresh ToolSearch or restart the MCP
-session before trusting stale tool descriptions. This drift signal is about
+response differs, call pindoc.runtime.status with client_toolset_hash set
+to the cached value and compare that live value against the cached one.
+A mismatch means the server tool catalog or schema changed underneath the
+client cache. Follow client_actions in the ping/runtime.status response:
+call runtime.status for diagnostics, refresh ToolSearch so deferred Pindoc
+tool schemas match the live server, then restart the MCP session if stale
+schemas or stale tool descriptions remain. This drift signal is about
 client schema freshness, not Task lifecycle state.
+
+## Harness install drift guard
+
+Before manually editing an existing PINDOC.md or CLAUDE.md/AGENTS.md
+install, call pindoc.harness.install with current_pindoc_md and
+current_agent_settings_body. The response includes drift_status,
+drifted_sections, content_etag, style_snippet_etag, and
+suggested_write_targets. Apply the suggested patches yourself; the MCP
+server never writes workspace files.
 
 ## Session handoff convention
 

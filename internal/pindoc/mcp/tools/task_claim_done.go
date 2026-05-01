@@ -155,7 +155,7 @@ func RegisterTaskClaimDone(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.task.claim_done",
-			Description: "Mark a Task implementation complete. Toggles every unchecked acceptance item ('- [ ]') to '[x]' and sets task_meta.status='claimed_done' in one atomic revision. Already-resolved markers ([x]/[~]/[-]) are preserved — partial / deferred judgment calls are not overwritten. Bypasses search_receipt gating (operational metadata lane). When the Task involved code/doc/config changes, pass commit_sha (7-64 hex chars, prefixed onto commit_msg as '[<short>] ...') and choose pin_strategy: auto (default) auto-pins changed files from the commit diff up to 20, allowlist auto-pins only changed_paths_allowlist entries, explicit disables commit-diff auto pins and stores only pins[]. pins[] uses the same shape as artifact.propose pins[]; duplicate pins are silently skipped. For non-code deliverables such as Decision or Analysis artifacts, pass evidence_artifacts (slug/id/pindoc://) to store relates_to=evidence edges; commit pins and evidence_artifacts can be used together. For short verification results, pass verification_notes[]; for long logs/reports, create a TC/Analysis receipt artifact and pass verification_receipts[] so they surface separately from code pins. After accepted, call pindoc.task.done_check before final user handoff. Reason is optional (stored as commit_msg).",
+			Description: "Mark a Task implementation complete. Toggles every unchecked acceptance item ('- [ ]') to '[x]' and sets task_meta.status='claimed_done' in one atomic revision. Already-resolved markers ([x]/[~]/[-]) are preserved — partial / deferred judgment calls are not overwritten. Bypasses search_receipt gating (operational metadata lane). When the Task involved code/doc/config changes, pass commit_sha (7-64 hex chars, prefixed onto commit_msg as '[<short>] ...') and choose pin_strategy: auto (default) auto-pins changed files from the commit diff up to 20, allowlist auto-pins only changed_paths_allowlist entries, explicit disables commit-diff auto pins and stores only pins[]. pins[] uses the same shape as artifact.propose pins[]; duplicate pins are silently skipped. For non-code deliverables such as Decision or Analysis artifacts, pass evidence_artifacts (slug/id/pindoc://) to store relates_to=evidence edges; commit pins and evidence_artifacts can be used together. For short verification results, pass verification_notes[]; for long logs/reports, create a TC/Analysis receipt artifact and pass verification_receipts[] so they surface separately from code pins. After accepted, call pindoc.task.done_check with mode=current_open_only before final user handoff; read the historical debt fields separately. Reason is optional (stored as commit_msg).",
 		},
 		func(ctx context.Context, p *auth.Principal, in taskClaimDoneInput) (*sdk.CallToolResult, taskClaimDoneOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -632,7 +632,7 @@ func claimOneTaskDone(
 		VerificationReceipts:           verificationReceipts,
 		VerificationReceiptEdgesStored: verificationReceiptEdgesStored,
 		NextTools:                      claimDoneCloseoutNextTools(scope.ProjectSlug, currentSlug, claimDoneCloseoutAssignee(currentTaskMeta, p)),
-		Notice:                         "Task claimed_done recorded. Run pindoc.task.done_check for the assignee before telling the user the assigned Task queue is complete.",
+		Notice:                         "Task claimed_done recorded. Run pindoc.task.done_check with mode=current_open_only for the assignee before telling the user the current assigned Task queue is complete; read historical debt fields separately.",
 		Warnings:                       outWarnings,
 	}, nil
 }
@@ -805,6 +805,7 @@ func normalizeClaimDoneVerificationNotes(values []VerificationNoteInput) ([]Veri
 func claimDoneCloseoutNextTools(projectSlug, taskSlug, assignee string) []NextToolHint {
 	args := map[string]any{
 		"project_slug": projectSlug,
+		"mode":         taskDoneCheckModeCurrentOpenOnly,
 	}
 	if strings.TrimSpace(assignee) != "" {
 		args["assignee"] = assignee
@@ -813,7 +814,7 @@ func claimDoneCloseoutNextTools(projectSlug, taskSlug, assignee string) []NextTo
 		{
 			Tool:   "pindoc.task.done_check",
 			Args:   args,
-			Reason: "verify no assigned Tasks remain open and no claimed_done Tasks retain unresolved acceptance before final handoff",
+			Reason: "verify current assigned open/missing_status work is clear before final handoff; historical acceptance debt is reported separately",
 		},
 		{
 			Tool: "pindoc.artifact.read",

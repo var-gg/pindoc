@@ -13,6 +13,7 @@ import (
 type taskDoneCheckInput struct {
 	ProjectSlug string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	Assignee    string `json:"assignee,omitempty" jsonschema:"optional exact task_meta.assignee; defaults to the calling agent id, e.g. agent:codex"`
+	Mode        string `json:"mode,omitempty" jsonschema:"optional strict | current_open_only | historical_debt; default strict. is_done keeps strict legacy semantics; mode_is_done reflects the selected closeout lens"`
 }
 
 type taskDoneCheckTaskRef struct {
@@ -36,8 +37,17 @@ type taskDoneCheckTaskRef struct {
 type taskDoneCheckOutput struct {
 	ProjectSlug string `json:"project_slug"`
 	Assignee    string `json:"assignee"`
-	IsDone      bool   `json:"is_done"`
-	Summary     string `json:"summary"`
+	Mode        string `json:"mode"`
+
+	// IsDone intentionally keeps the original strict meaning: both the
+	// current open queue and historical claimed_done acceptance debt must
+	// be clear. ModeIsDone reflects the caller-selected lens.
+	IsDone                        bool   `json:"is_done"`
+	ModeIsDone                    bool   `json:"mode_is_done"`
+	CurrentOpenWorkDone           bool   `json:"current_open_work_done"`
+	HistoricalAcceptanceDebtClear bool   `json:"historical_acceptance_debt_clear"`
+	IsDoneSemantics               string `json:"is_done_semantics,omitempty"`
+	Summary                       string `json:"summary"`
 
 	OpenTasks                     []taskDoneCheckTaskRef `json:"open_tasks"`
 	UnresolvedAcceptanceTasks     []taskDoneCheckTaskRef `json:"unresolved_acceptance_tasks"`
@@ -46,6 +56,12 @@ type taskDoneCheckOutput struct {
 
 	ToolsetVersion string `json:"toolset_version,omitempty"`
 }
+
+const (
+	taskDoneCheckModeStrict          = "strict"
+	taskDoneCheckModeCurrentOpenOnly = "current_open_only"
+	taskDoneCheckModeHistoricalDebt  = "historical_debt"
+)
 
 type taskDoneCheckRecord struct {
 	ArtifactID string
@@ -74,6 +90,10 @@ func RegisterTaskDoneCheck(server *sdk.Server, deps Deps) {
 			}
 			if assignee == "" {
 				return nil, taskDoneCheckOutput{}, fmt.Errorf("assignee is required when caller has no agent id")
+			}
+			mode, ok := normalizeTaskDoneCheckMode(in.Mode)
+			if !ok {
+				return nil, taskDoneCheckOutput{}, fmt.Errorf("mode must be one of: strict | current_open_only | historical_debt")
 			}
 
 			rows, err := deps.DB.Query(ctx, `
@@ -109,15 +129,25 @@ func RegisterTaskDoneCheck(server *sdk.Server, deps Deps) {
 				return nil, taskDoneCheckOutput{}, fmt.Errorf("task.done_check rows: %w", err)
 			}
 
-			return nil, buildTaskDoneCheckOutput(scope, deps, assignee, records), nil
+			return nil, buildTaskDoneCheckOutputForMode(scope, deps, assignee, records, mode), nil
 		},
 	)
 }
 
 func buildTaskDoneCheckOutput(scope *auth.ProjectScope, deps Deps, assignee string, records []taskDoneCheckRecord) taskDoneCheckOutput {
+	return buildTaskDoneCheckOutputForMode(scope, deps, assignee, records, taskDoneCheckModeStrict)
+}
+
+func buildTaskDoneCheckOutputForMode(scope *auth.ProjectScope, deps Deps, assignee string, records []taskDoneCheckRecord, mode string) taskDoneCheckOutput {
+	mode, ok := normalizeTaskDoneCheckMode(mode)
+	if !ok {
+		mode = taskDoneCheckModeStrict
+	}
 	out := taskDoneCheckOutput{
 		ProjectSlug:               scope.ProjectSlug,
 		Assignee:                  assignee,
+		Mode:                      mode,
+		IsDoneSemantics:           "is_done keeps strict legacy semantics: current open/missing-status work clear AND claimed_done historical acceptance debt clear.",
 		OpenTasks:                 []taskDoneCheckTaskRef{},
 		UnresolvedAcceptanceTasks: []taskDoneCheckTaskRef{},
 	}
@@ -135,8 +165,11 @@ func buildTaskDoneCheckOutput(scope *auth.ProjectScope, deps Deps, assignee stri
 	}
 	out.OpenTaskCount = len(out.OpenTasks)
 	out.UnresolvedAcceptanceTaskCount = len(out.UnresolvedAcceptanceTasks)
-	out.IsDone = out.OpenTaskCount == 0 && out.UnresolvedAcceptanceTaskCount == 0
-	out.Summary = taskDoneCheckSummary(assignee, out.OpenTaskCount, out.UnresolvedAcceptanceTaskCount)
+	out.CurrentOpenWorkDone = out.OpenTaskCount == 0
+	out.HistoricalAcceptanceDebtClear = out.UnresolvedAcceptanceTaskCount == 0
+	out.IsDone = out.CurrentOpenWorkDone && out.HistoricalAcceptanceDebtClear
+	out.ModeIsDone = taskDoneCheckModeIsDone(mode, out.CurrentOpenWorkDone, out.HistoricalAcceptanceDebtClear)
+	out.Summary = taskDoneCheckSummary(assignee, mode, out.OpenTaskCount, out.UnresolvedAcceptanceTaskCount, out.IsDone, out.ModeIsDone)
 	return out
 }
 
@@ -160,16 +193,46 @@ func taskDoneCheckRef(scope *auth.ProjectScope, deps Deps, rec taskDoneCheckReco
 	}
 }
 
-func taskDoneCheckSummary(assignee string, openCount, unresolvedCount int) string {
-	if openCount == 0 && unresolvedCount == 0 {
-		return fmt.Sprintf("All done for %s: no open Tasks and no claimed_done Tasks with unresolved acceptance.", assignee)
+func normalizeTaskDoneCheckMode(raw string) (string, bool) {
+	mode := strings.TrimSpace(strings.ToLower(raw))
+	if mode == "" {
+		return taskDoneCheckModeStrict, true
 	}
-	parts := []string{}
+	switch mode {
+	case taskDoneCheckModeStrict, taskDoneCheckModeCurrentOpenOnly, taskDoneCheckModeHistoricalDebt:
+		return mode, true
+	default:
+		return "", false
+	}
+}
+
+func taskDoneCheckModeIsDone(mode string, currentOpenDone, historicalDebtClear bool) bool {
+	switch mode {
+	case taskDoneCheckModeCurrentOpenOnly:
+		return currentOpenDone
+	case taskDoneCheckModeHistoricalDebt:
+		return historicalDebtClear
+	default:
+		return currentOpenDone && historicalDebtClear
+	}
+}
+
+func taskDoneCheckSummary(assignee, mode string, openCount, unresolvedCount int, strictDone, modeDone bool) string {
+	openPhrase := "open queue clear"
 	if openCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d open/missing_status Task(s)", openCount))
+		openPhrase = fmt.Sprintf("open queue has %d open/missing_status Task(s)", openCount)
 	}
+	debtPhrase := "historical claimed_done acceptance debt clear"
 	if unresolvedCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d claimed_done Task(s) with unresolved acceptance", unresolvedCount))
+		debtPhrase = fmt.Sprintf("historical claimed_done acceptance debt remains (%d Task(s))", unresolvedCount)
 	}
-	return fmt.Sprintf("Not done for %s: %s remain.", assignee, strings.Join(parts, " + "))
+	status := "not done"
+	if modeDone {
+		status = "clear"
+	}
+	suffix := ""
+	if mode != taskDoneCheckModeStrict && strictDone != modeDone {
+		suffix = fmt.Sprintf(" legacy is_done=%t under strict semantics.", strictDone)
+	}
+	return fmt.Sprintf("Mode %s %s for %s: %s; %s.%s", mode, status, assignee, openPhrase, debtPhrase, suffix)
 }

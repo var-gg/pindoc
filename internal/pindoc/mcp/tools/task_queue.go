@@ -633,8 +633,9 @@ func taskQueueCloseoutNextTools(projectSlug, assignee string) []NextToolHint {
 			Args: map[string]any{
 				"project_slug": projectSlug,
 				"assignee":     strings.TrimSpace(assignee),
+				"mode":         taskDoneCheckModeCurrentOpenOnly,
 			},
-			Reason: "final assigned-work closeout check before telling the user the queue is complete",
+			Reason: "final current-open-work closeout check before telling the user the assigned queue is complete; historical acceptance debt is reported separately",
 		},
 	}
 }

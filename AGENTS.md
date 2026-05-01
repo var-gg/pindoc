@@ -9,25 +9,10 @@
   visible projects, then pin the concrete project_slug for follow-up tools.
 - If a scoped task.queue call returns MULTI_PROJECT_WORKSPACE, rerun the
   sweep with across_projects=true or retry with an explicit project_slug.
-
-# Codex Local Notes
-
-## VARGG
-
-- Canonical repo: `A:\vargg-workspace\vargg`
-- Legacy source repos under `A:\vargg-workspace\10_frontend\vargg-frontend` and `A:\vargg-workspace\20_backend\vargg-backend` are reference-only unless a task explicitly calls for backport or rollback investigation
-- Current production path is GCE in project `var-gg`, not App Engine
-- Current deployment model is `prebaked base image + app-only MIG rollout`
-- Primary public hosts are `var.gg`, `www.var.gg` (Cloudflare 경유)
-- `api.var.gg`는 폐기됨 - FE->BE는 내부 네트워크 통신
-- Legacy `curioustore.com`, `www.curioustore.com` -> GCE nginx에서 301 redirect to var.gg
-- 인프라: GCE + Cloudflare (Free) - GCP LB/Cloud Armor 제거됨
-
-## 로컬 시크릿
-
-- 위치: `~/.claude/secrets.env`
-- 네이밍: `{프로젝트}_{서비스}_{용도}` (예: `VARGG_CF_DNS_TOKEN`)
-- API 토큰이 필요하면 이 파일에서 읽어서 사용
+- Before replacing PINDOC.md or this agent settings file after a harness
+  change, call pindoc.harness.install with current_pindoc_md and
+  current_agent_settings_body, then apply drifted_sections and
+  suggested_write_targets yourself. Pindoc MCP never writes local files.
 
 <!-- pindoc:register-separation:v1 BEGIN -->
 ### Register 분리 - 사용자 대화와 Pindoc artifact
