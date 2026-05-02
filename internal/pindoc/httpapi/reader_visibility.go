@@ -9,6 +9,13 @@ var readerHiddenProjectPrefixes = []string{
 	"oauth-it-",
 	"invite-http-",
 	"workspace-detect-",
+	"vis-http-",
+	"vis-mcp-",
+	"artifact-audit-",
+	"task-flow-a-",
+	"task-flow-b-",
+	"task-queue-across-a-",
+	"task-queue-across-b-",
 }
 
 func readerHiddenProjectSlug(slug string) bool {
