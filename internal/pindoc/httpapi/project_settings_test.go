@@ -19,17 +19,23 @@ import (
 
 func TestDecodeProjectSettingsPatch(t *testing.T) {
 	cases := []struct {
-		name      string
-		body      string
-		wantMode  string
-		wantError string
+		name              string
+		body              string
+		wantSensitiveOps  string // empty means unset
+		wantDefaultVis    string // empty means unset
+		wantError         string
 	}{
-		{name: "confirm", body: `{"sensitive_ops":"confirm"}`, wantMode: "confirm"},
-		{name: "trim and lower", body: `{"sensitive_ops":" AUTO "}`, wantMode: "auto"},
+		{name: "confirm", body: `{"sensitive_ops":"confirm"}`, wantSensitiveOps: "confirm"},
+		{name: "trim and lower", body: `{"sensitive_ops":" AUTO "}`, wantSensitiveOps: "auto"},
+		{name: "default visibility public", body: `{"default_artifact_visibility":"public"}`, wantDefaultVis: "public"},
+		{name: "default visibility lower", body: `{"default_artifact_visibility":" PRIVATE "}`, wantDefaultVis: "private"},
+		{name: "both fields", body: `{"sensitive_ops":"confirm","default_artifact_visibility":"public"}`, wantSensitiveOps: "confirm", wantDefaultVis: "public"},
 		{name: "empty", body: `{}`, wantError: "PROJECT_SETTINGS_EMPTY"},
 		{name: "unsupported field", body: `{"sensitive_ops":"auto","name":"x"}`, wantError: "PROJECT_SETTINGS_FIELD_UNSUPPORTED"},
-		{name: "invalid value", body: `{"sensitive_ops":"manual"}`, wantError: "SENSITIVE_OPS_INVALID"},
-		{name: "non string", body: `{"sensitive_ops":true}`, wantError: "SENSITIVE_OPS_INVALID"},
+		{name: "invalid sensitive ops", body: `{"sensitive_ops":"manual"}`, wantError: "SENSITIVE_OPS_INVALID"},
+		{name: "non string sensitive ops", body: `{"sensitive_ops":true}`, wantError: "SENSITIVE_OPS_INVALID"},
+		{name: "invalid visibility", body: `{"default_artifact_visibility":"deleted"}`, wantError: "DEFAULT_VISIBILITY_INVALID"},
+		{name: "non string visibility", body: `{"default_artifact_visibility":42}`, wantError: "DEFAULT_VISIBILITY_INVALID"},
 		{name: "bad json", body: `{`, wantError: "BAD_JSON"},
 		{name: "trailing json", body: `{"sensitive_ops":"auto"} {}`, wantError: "BAD_JSON"},
 	}
@@ -48,8 +54,19 @@ func TestDecodeProjectSettingsPatch(t *testing.T) {
 			if err != nil {
 				t.Fatalf("decode error = %+v", err)
 			}
-			if got != c.wantMode {
-				t.Fatalf("mode = %q, want %q", got, c.wantMode)
+			gotSensitive := ""
+			if got.SensitiveOps != nil {
+				gotSensitive = *got.SensitiveOps
+			}
+			if gotSensitive != c.wantSensitiveOps {
+				t.Errorf("sensitive_ops = %q, want %q", gotSensitive, c.wantSensitiveOps)
+			}
+			gotVis := ""
+			if got.DefaultArtifactVisibility != nil {
+				gotVis = *got.DefaultArtifactVisibility
+			}
+			if gotVis != c.wantDefaultVis {
+				t.Errorf("default_artifact_visibility = %q, want %q", gotVis, c.wantDefaultVis)
 			}
 		})
 	}

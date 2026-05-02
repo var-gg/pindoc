@@ -400,6 +400,32 @@ func TestOrganizationsMigrationContract(t *testing.T) {
 	}
 }
 
+func TestProjectDefaultVisibilityMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0051_project_default_visibility.sql")
+	if err != nil {
+		t.Fatalf("read project default visibility migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"ALTER TABLE projects",
+		"ADD COLUMN default_artifact_visibility TEXT NOT NULL DEFAULT 'org'",
+		"CHECK (default_artifact_visibility IN ('public', 'org', 'private'))",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("project default visibility migration Up missing %q:\n%s", want, up)
+		}
+	}
+	for _, want := range []string{
+		"-- +goose Down",
+		"DROP COLUMN IF EXISTS default_artifact_visibility",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("project default visibility migration Down missing %q", want)
+		}
+	}
+}
+
 func TestVisibilityMigrationContract(t *testing.T) {
 	raw, err := migrationsFS.ReadFile("migrations/0050_visibility.sql")
 	if err != nil {

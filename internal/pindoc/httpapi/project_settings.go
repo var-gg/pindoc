@@ -13,8 +13,9 @@ import (
 )
 
 type projectSettingsPatchResp struct {
-	Status       string `json:"status"`
-	SensitiveOps string `json:"sensitive_ops"`
+	Status                     string `json:"status"`
+	SensitiveOps               string `json:"sensitive_ops,omitempty"`
+	DefaultArtifactVisibility  string `json:"default_artifact_visibility,omitempty"`
 }
 
 type projectSettingsError struct {
@@ -23,12 +24,19 @@ type projectSettingsError struct {
 	Message   string `json:"message"`
 }
 
+// projectSettingsPatch is the parsed payload — every field is optional;
+// at least one must be present (PROJECT_SETTINGS_EMPTY otherwise).
+type projectSettingsPatch struct {
+	SensitiveOps              *string
+	DefaultArtifactVisibility *string
+}
+
 func handleProjectSettingsError(w http.ResponseWriter, err projectSettingsError) {
 	writeJSON(w, err.status, err)
 }
 
 func (d Deps) handleProjectSettingsPatch(w http.ResponseWriter, r *http.Request) {
-	mode, decodeErr := decodeProjectSettingsPatch(r.Body)
+	patch, decodeErr := decodeProjectSettingsPatch(r.Body)
 	if decodeErr != nil {
 		handleProjectSettingsError(w, *decodeErr)
 		return
@@ -72,12 +80,26 @@ func (d Deps) handleProjectSettingsPatch(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	_, err = d.DB.Exec(r.Context(), `
-		UPDATE projects
-		   SET sensitive_ops = $2
-		 WHERE id = $1::uuid
-	`, scope.ProjectID, mode)
-	if err != nil {
+	// Build a dynamic UPDATE that only touches the fields the caller
+	// actually sent. Empty patch is rejected upstream (PROJECT_SETTINGS_
+	// EMPTY), so we always have at least one assignment here.
+	sets := make([]string, 0, 2)
+	args := []any{scope.ProjectID}
+	resp := projectSettingsPatchResp{Status: "ok"}
+	if patch.SensitiveOps != nil {
+		args = append(args, *patch.SensitiveOps)
+		sets = append(sets, fmt.Sprintf("sensitive_ops = $%d", len(args)))
+		resp.SensitiveOps = *patch.SensitiveOps
+	}
+	if patch.DefaultArtifactVisibility != nil {
+		args = append(args, *patch.DefaultArtifactVisibility)
+		sets = append(sets, fmt.Sprintf("default_artifact_visibility = $%d", len(args)))
+		resp.DefaultArtifactVisibility = *patch.DefaultArtifactVisibility
+	}
+
+	q := fmt.Sprintf(`UPDATE projects SET %s WHERE id = $1::uuid`,
+		strings.Join(sets, ", "))
+	if _, err := d.DB.Exec(r.Context(), q, args...); err != nil {
 		if d.Logger != nil {
 			d.Logger.Error("project settings update", "err", err)
 		}
@@ -88,62 +110,91 @@ func (d Deps) handleProjectSettingsPatch(w http.ResponseWriter, r *http.Request)
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, projectSettingsPatchResp{
-		Status:       "ok",
-		SensitiveOps: mode,
-	})
+	writeJSON(w, http.StatusOK, resp)
 }
 
-func decodeProjectSettingsPatch(r io.Reader) (string, *projectSettingsError) {
+func decodeProjectSettingsPatch(r io.Reader) (projectSettingsPatch, *projectSettingsError) {
+	var patch projectSettingsPatch
 	var raw map[string]json.RawMessage
 	dec := json.NewDecoder(r)
 	if err := dec.Decode(&raw); err != nil {
-		return "", &projectSettingsError{
+		return patch, &projectSettingsError{
 			status:    http.StatusBadRequest,
 			ErrorCode: "BAD_JSON",
 			Message:   "could not parse request body as JSON",
 		}
 	}
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
-		return "", &projectSettingsError{
+		return patch, &projectSettingsError{
 			status:    http.StatusBadRequest,
 			ErrorCode: "BAD_JSON",
 			Message:   "request body must contain a single JSON object",
 		}
 	}
 	if len(raw) == 0 {
-		return "", &projectSettingsError{
+		return patch, &projectSettingsError{
 			status:    http.StatusBadRequest,
 			ErrorCode: "PROJECT_SETTINGS_EMPTY",
-			Message:   "sensitive_ops is required",
+			Message:   "at least one settable field is required",
 		}
 	}
-	for k := range raw {
-		if k != "sensitive_ops" {
-			return "", &projectSettingsError{
+	for k, v := range raw {
+		switch k {
+		case "sensitive_ops":
+			var rawMode string
+			if err := json.Unmarshal(v, &rawMode); err != nil {
+				return patch, &projectSettingsError{
+					status:    http.StatusBadRequest,
+					ErrorCode: "SENSITIVE_OPS_INVALID",
+					Message:   "sensitive_ops must be auto or confirm",
+				}
+			}
+			trimmed := strings.ToLower(strings.TrimSpace(rawMode))
+			switch trimmed {
+			case policy.SensitiveOpsAuto, policy.SensitiveOpsConfirm:
+				normalized := policy.NormalizeSensitiveOpsMode(trimmed)
+				patch.SensitiveOps = &normalized
+			default:
+				return patch, &projectSettingsError{
+					status:    http.StatusBadRequest,
+					ErrorCode: "SENSITIVE_OPS_INVALID",
+					Message:   "sensitive_ops must be auto or confirm",
+				}
+			}
+		case "default_artifact_visibility":
+			var rawTier string
+			if err := json.Unmarshal(v, &rawTier); err != nil {
+				return patch, &projectSettingsError{
+					status:    http.StatusBadRequest,
+					ErrorCode: "DEFAULT_VISIBILITY_INVALID",
+					Message:   "default_artifact_visibility must be public|org|private",
+				}
+			}
+			trimmed := strings.ToLower(strings.TrimSpace(rawTier))
+			switch trimmed {
+			case "public", "org", "private":
+				patch.DefaultArtifactVisibility = &trimmed
+			default:
+				return patch, &projectSettingsError{
+					status:    http.StatusBadRequest,
+					ErrorCode: "DEFAULT_VISIBILITY_INVALID",
+					Message:   "default_artifact_visibility must be public|org|private",
+				}
+			}
+		default:
+			return patch, &projectSettingsError{
 				status:    http.StatusBadRequest,
 				ErrorCode: "PROJECT_SETTINGS_FIELD_UNSUPPORTED",
 				Message:   fmt.Sprintf("unsupported project setting field %q", k),
 			}
 		}
 	}
-	var rawMode string
-	if err := json.Unmarshal(raw["sensitive_ops"], &rawMode); err != nil {
-		return "", &projectSettingsError{
+	if patch.SensitiveOps == nil && patch.DefaultArtifactVisibility == nil {
+		return patch, &projectSettingsError{
 			status:    http.StatusBadRequest,
-			ErrorCode: "SENSITIVE_OPS_INVALID",
-			Message:   "sensitive_ops must be auto or confirm",
+			ErrorCode: "PROJECT_SETTINGS_EMPTY",
+			Message:   "at least one settable field is required",
 		}
 	}
-	trimmed := strings.ToLower(strings.TrimSpace(rawMode))
-	switch trimmed {
-	case policy.SensitiveOpsAuto, policy.SensitiveOpsConfirm:
-		return policy.NormalizeSensitiveOpsMode(trimmed), nil
-	default:
-		return "", &projectSettingsError{
-			status:    http.StatusBadRequest,
-			ErrorCode: "SENSITIVE_OPS_INVALID",
-			Message:   "sensitive_ops must be auto or confirm",
-		}
-	}
+	return patch, nil
 }

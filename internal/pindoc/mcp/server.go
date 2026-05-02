@@ -165,6 +165,7 @@ func NewServer(opts Options) (*Server, error) {
 	tools.RegisterArtifactPropose(s, deps)
 	tools.RegisterArtifactWordingFix(s, deps)
 	tools.RegisterArtifactAddPin(s, deps)
+	tools.RegisterArtifactSetVisibility(s, deps)
 	tools.RegisterHarnessInstall(s, deps)
 	tools.RegisterArtifactAudit(s, deps)
 	tools.RegisterArtifactSearch(s, deps)

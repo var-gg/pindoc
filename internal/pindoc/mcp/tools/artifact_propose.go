@@ -91,6 +91,15 @@ type artifactProposeInput struct {
 	// search_receipt, expected_version, relates_to, or policy gates.
 	DryRun bool `json:"dry_run,omitempty" jsonschema:"validate without INSERT/update; does not bypass receipt requirement; use for agent self-validation and MCP regression tests"`
 
+	// Visibility controls how broadly this artifact is exposed.
+	// Cascade: explicit value > project.default_artifact_visibility >
+	// global 'org' default. Public is unauthenticated-readable at
+	// /pindoc.org/{org}/p/{slug}; org is members-only; private is the
+	// owner-only tier reserved for sensitive content (SaaS strategy,
+	// pricing, hiring memos) that must not leak even to other Org
+	// members. Empty string means "use project default".
+	Visibility string `json:"visibility,omitempty" jsonschema:"one of public|org|private; empty uses project default_artifact_visibility (which itself defaults to 'org')"`
+
 	// SupersedeOf marks the target artifact as superseded by this new one.
 	// Creates a NEW artifact (like a no-update_of call), then flips the
 	// target's status to 'superseded' and sets superseded_by to the new id.
@@ -612,13 +621,15 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			// the supersede bookkeeping just before commit.
 
 			// --- Resolve area + project ----------------------------------
-			var projectID, areaID, sensitiveOps string
+			var projectID, areaID, sensitiveOps, projectDefaultVisibility string
 			err = deps.DB.QueryRow(ctx, `
-				SELECT proj.id::text, area.id::text, COALESCE(NULLIF(proj.sensitive_ops, ''), 'auto')
+				SELECT proj.id::text, area.id::text,
+				       COALESCE(NULLIF(proj.sensitive_ops, ''), 'auto'),
+				       proj.default_artifact_visibility
 				FROM projects proj
 				JOIN areas area ON area.project_id = proj.id
 				WHERE proj.slug = $1 AND area.slug = $2
-			`, scope.ProjectSlug, in.AreaSlug).Scan(&projectID, &areaID, &sensitiveOps)
+			`, scope.ProjectSlug, in.AreaSlug).Scan(&projectID, &areaID, &sensitiveOps, &projectDefaultVisibility)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, artifactProposeOutput{
 					Status:    "not_ready",
@@ -941,6 +952,12 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			reviewState := policy.ReviewStateFor(sensitiveOps, reviewOp, policy.SensitiveContext{
 				ToCompleteness: completeness,
 			})
+			// Resolve visibility cascade: explicit value (validated) >
+			// project default > global 'org' default. Invalid explicit
+			// values fall back to the project default rather than 500ing
+			// — schema CHECK still guards against bad writes, but a
+			// typo'd visibility shouldn't tank an otherwise valid propose.
+			resolvedVisibility := resolveArtifactVisibility(in.Visibility, projectDefaultVisibility)
 			for attempt := 0; attempt < 10; attempt++ {
 				err = tx.QueryRow(ctx, `
 					INSERT INTO artifacts (
@@ -948,11 +965,11 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 						body_locale,
 						completeness, status, review_state,
 						author_kind, author_id, author_version, author_user_id,
-						task_meta, artifact_meta, published_at
-					) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'published', $15, 'agent', $10, $11, NULLIF($12, '')::uuid, $13, $14::jsonb, now())
+						task_meta, artifact_meta, visibility, published_at
+					) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'published', $15, 'agent', $10, $11, NULLIF($12, '')::uuid, $13, $14::jsonb, $16, now())
 					RETURNING id::text, published_at
 				`, projectID, areaID, finalSlug, in.Type, in.Title, in.BodyMarkdown, in.Tags,
-					bodyLocale, completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), p.UserID, taskMetaJSON, artifactMetaJSON, reviewState).Scan(&newID, &publishedAt)
+					bodyLocale, completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), p.UserID, taskMetaJSON, artifactMetaJSON, reviewState, resolvedVisibility).Scan(&newID, &publishedAt)
 				if err == nil {
 					break
 				}
