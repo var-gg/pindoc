@@ -600,6 +600,7 @@ export function ReaderShell({ view, unavailableSurface }: Props) {
         onOpenPalette={() => setPaletteOpen(true)}
         onClosePalette={() => setPaletteOpen(false)}
         onToggleMenu={() => setMenuOpen((v) => !v)}
+        menuOpen={menuOpen}
         paletteOpen={paletteOpen}
         inboxCount={reviewQueueEnabled ? inboxCount : 0}
         readerWidth={readerWidth}
@@ -1050,6 +1051,7 @@ function Body({
                     <Tooltip content={t("reader.card_select_hint")}>
                       <span className="backlink__inspect" aria-label={t("reader.card_select_hint")}>
                         <PanelRightOpen className="lucide" aria-hidden="true" />
+                        <span>{t("reader.card_preview_label")}</span>
                       </span>
                     </Tooltip>
                   </div>
@@ -1424,12 +1426,6 @@ function TaskBacklogSummary({ summary }: { summary: TaskBoardSummary }) {
   return (
     <section className="task-backlog-summary" aria-label={t("tasks.summary_label")}>
       <TaskSummaryTile
-        tone="review"
-        label={t("tasks.summary_review")}
-        value={summary.reviewQueue}
-        hint={reviewHint}
-      />
-      <TaskSummaryTile
         tone="open"
         label={t("tasks.summary_open")}
         value={summary.open}
@@ -1440,6 +1436,12 @@ function TaskBacklogSummary({ summary }: { summary: TaskBoardSummary }) {
         label={t("tasks.summary_blocked")}
         value={summary.blocked}
         hint={t("tasks.summary_blocked_hint")}
+      />
+      <TaskSummaryTile
+        tone="review"
+        label={t("tasks.summary_review")}
+        value={summary.reviewQueue}
+        hint={reviewHint}
       />
     </section>
   );
@@ -1724,6 +1726,7 @@ function TaskCard({
         <Tooltip content={t("tasks.card_select_hint")}>
           <span className="task-card__inspect">
             <PanelRightOpen className="lucide" aria-hidden="true" />
+            <span>{t("reader.card_preview_label")}</span>
           </span>
         </Tooltip>
       </div>

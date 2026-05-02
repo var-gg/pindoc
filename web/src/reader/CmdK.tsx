@@ -144,13 +144,18 @@ export function CmdK({ projectSlug, open, onClose }: Props) {
               onMouseEnter={() => setSelected(i)}
             >
               {item.kind === "artifact" ? <FileText className="lucide" /> : <GitCommit className="lucide" />}
-              <div>
-                <div>{item.kind === "artifact" ? item.hit.title : t("cmdk.commit_result", shortSha(item.sha))}</div>
+              <div className="palette__item-body">
+                <div className="palette__item-title">
+                  {item.kind === "artifact" ? item.hit.title : t("cmdk.commit_result", shortSha(item.sha))}
+                </div>
                 <div className="mono">
                   {item.kind === "artifact"
                     ? cmdkResultMeta(item.hit, t)
                     : `${item.repo.name || item.repo.id} · ${item.repo.default_branch}`}
                 </div>
+                {item.kind === "artifact" && item.hit.snippet && (
+                  <div className="palette__snippet">{item.hit.snippet}</div>
+                )}
               </div>
               <span className="mono">↵</span>
             </button>

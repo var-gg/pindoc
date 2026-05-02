@@ -762,7 +762,15 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		JOIN projects p  ON p.id  = a.project_id
 		JOIN areas    ar ON ar.id = a.area_id
 		LEFT JOIN users u ON u.id = a.author_user_id
-		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
+		WHERE p.slug = $1 AND (
+			a.id::text = $2 OR a.slug = $2 OR
+			a.id = (
+				SELECT asa.artifact_id
+				  FROM artifact_slug_aliases asa
+				 WHERE asa.project_id = p.id AND asa.old_slug = $2
+				 LIMIT 1
+			)
+		)
 		LIMIT 1
 	`, slug, ref).Scan(
 		&a.ID, &a.Slug, &a.Type, &a.Title, &a.AreaSlug,
@@ -1051,7 +1059,10 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 		)
 		SELECT
 			s.artifact_id::text, a.slug, a.type, a.title, ar.slug,
-			COALESCE(s.heading, '') , s.text, s.distance
+			COALESCE(s.heading, '') , s.text, s.distance,
+			a.updated_at, a.status, a.completeness,
+			COALESCE(a.task_meta->>'status', ''),
+			COALESCE(a.task_meta->>'priority', '')
 		FROM scored s
 		JOIN artifacts a  ON a.id  = s.artifact_id
 		JOIN areas     ar ON ar.id = a.area_id
@@ -1066,19 +1077,28 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type hit struct {
-		ArtifactID string  `json:"artifact_id"`
-		Slug       string  `json:"slug"`
-		Type       string  `json:"type"`
-		Title      string  `json:"title"`
-		AreaSlug   string  `json:"area_slug"`
-		Heading    string  `json:"heading,omitempty"`
-		Snippet    string  `json:"snippet"`
-		Distance   float64 `json:"distance"`
+		ArtifactID   string    `json:"artifact_id"`
+		Slug         string    `json:"slug"`
+		Type         string    `json:"type"`
+		Title        string    `json:"title"`
+		AreaSlug     string    `json:"area_slug"`
+		Heading      string    `json:"heading,omitempty"`
+		Snippet      string    `json:"snippet"`
+		Distance     float64   `json:"distance"`
+		UpdatedAt    time.Time `json:"updated_at"`
+		Status       string    `json:"status"`
+		Completeness string    `json:"completeness"`
+		TaskStatus   string    `json:"task_status,omitempty"`
+		TaskPriority string    `json:"task_priority,omitempty"`
 	}
 	out := []hit{}
 	for rows.Next() {
 		var h hit
-		if err := rows.Scan(&h.ArtifactID, &h.Slug, &h.Type, &h.Title, &h.AreaSlug, &h.Heading, &h.Snippet, &h.Distance); err != nil {
+		if err := rows.Scan(
+			&h.ArtifactID, &h.Slug, &h.Type, &h.Title, &h.AreaSlug,
+			&h.Heading, &h.Snippet, &h.Distance,
+			&h.UpdatedAt, &h.Status, &h.Completeness, &h.TaskStatus, &h.TaskPriority,
+		); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan failed")
 			return
 		}

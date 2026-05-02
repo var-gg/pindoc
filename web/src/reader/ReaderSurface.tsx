@@ -13,7 +13,6 @@ import { localizedAreaName } from "./areaLocale";
 import type { BadgeFilter } from "./badgeFilters";
 import { createReadTracker, readerReadingMetrics, type ReadTrackerFlushReason, type ReadTrackerSnapshot } from "./readTracker";
 import { EmptyState } from "./SurfacePrimitives";
-import { typeChipClass } from "./typeChip";
 
 type Props = {
   detail: Artifact | null;
@@ -101,9 +100,6 @@ export function ReaderSurface({
     );
   }
 
-  const publishedAt = detail.published_at
-    ? new Date(detail.published_at).toLocaleString()
-    : "—";
   const areaLabel = localizedAreaName(t, detail.area_slug, detail.area_slug);
   const legendHref =
     projectSlug
@@ -143,8 +139,6 @@ export function ReaderSurface({
           <span>{areaLabel}</span>
           <ChevronRight className="lucide" />
           <span>{detail.type}</span>
-          <ChevronRight className="lucide" />
-          <span className="current">{detail.slug}</span>
         </div>
 
         <h1 className="art-title">{detail.title}</h1>
@@ -160,15 +154,6 @@ export function ReaderSurface({
         />
 
         <div className="art-meta">
-          {detail.type === "Task" && (
-            <>
-              <span className={`chip chip--${detail.status}`}>
-                <span className={`p-dot p-dot--${detail.status}`} />
-                {detail.status}
-              </span>
-              <span className={typeChipClass(detail.type)}>{detail.type}</span>
-            </>
-          )}
           <BadgePopoverChip
             label={areaLabel}
             description={t("reader.badge_area_tip", areaLabel)}
@@ -203,10 +188,7 @@ export function ReaderSurface({
               ))}
             </span>
           )}
-          <span className="art-meta__sep">·</span>
           <ArtifactByline artifact={detail} />
-          <span className="art-meta__sep">·</span>
-          <span className="prov">{t("reader.published", publishedAt)}</span>
           <span className="art-meta__sep">·</span>
           <span className="prov art-reading-metrics">
             {t("reader.reading_metrics", readingEstimate.estimatedMinutes, readingMetrics.readMinutes, readingMetrics.completionPct)}

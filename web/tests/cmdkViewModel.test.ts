@@ -24,9 +24,13 @@ function hit(overrides: Partial<SearchHit> = {}): SearchHit {
   };
 }
 
-function t(key: string): string {
+function t(key: string, ...args: Array<string | number>): string {
   const labels: Record<string, string> = {
     "area.ui": "UI",
+    "cmdk.updated": `Updated ${args[0]}`,
+    "tasks.col_open": "Open",
+    "artifact.status.published": "Published",
+    "artifact.completeness.partial": "Partial",
   };
   return labels[key] ?? key;
 }
@@ -46,5 +50,35 @@ function testCmdKMetaDoesNotDependOnDistanceForDisplay(): void {
   assertEqual(first, second, "visible metadata should not change when only distance changes");
 }
 
+function testCmdKMetaShowsSectionContextWhenAvailable(): void {
+  const meta = cmdkResultMeta(hit({ heading: "Acceptance Criteria" }), t);
+
+  assertEqual(meta, "Task · UI · Acceptance Criteria", "CmdK result meta with heading context");
+}
+
+function testCmdKMetaShowsLifecycleSignalsWhenAvailable(): void {
+  const meta = cmdkResultMeta(hit({
+    task_status: "open",
+    task_priority: "p1",
+    updated_at: "2026-05-02T12:00:00Z",
+  }), t);
+
+  assertEqual(meta, "Task · UI · Open · P1 · Updated 2026-05-02", "CmdK result meta with task signals");
+}
+
+function testCmdKMetaShowsArtifactStatusSignalsWhenAvailable(): void {
+  const meta = cmdkResultMeta(hit({
+    type: "Decision",
+    status: "published",
+    completeness: "partial",
+    updated_at: "2026-05-02T12:00:00Z",
+  }), t);
+
+  assertEqual(meta, "Decision · UI · Published/Partial · Updated 2026-05-02", "CmdK result meta with artifact signals");
+}
+
 testCmdKMetaHidesRawDistance();
 testCmdKMetaDoesNotDependOnDistanceForDisplay();
+testCmdKMetaShowsSectionContextWhenAvailable();
+testCmdKMetaShowsLifecycleSignalsWhenAvailable();
+testCmdKMetaShowsArtifactStatusSignalsWhenAvailable();

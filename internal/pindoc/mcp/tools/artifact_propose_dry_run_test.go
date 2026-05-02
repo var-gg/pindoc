@@ -15,6 +15,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/receipts"
+	"github.com/var-gg/pindoc/internal/pindoc/settings"
 )
 
 func TestArtifactProposeDryRunIntegration(t *testing.T) {
@@ -165,12 +166,17 @@ func TestArtifactProposeDryRunDoesNotBypassReceipt(t *testing.T) {
 func newArtifactProposeTestCaller(t *testing.T, ctx context.Context, pool *db.Pool, receiptStore *receipts.Store) func(context.Context, map[string]any) artifactProposeOutput {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	settingsStore, err := settings.New(ctx, pool)
+	if err != nil {
+		t.Fatalf("settings store: %v", err)
+	}
 	server := sdk.NewServer(&sdk.Implementation{Name: "pindoc-test", Version: "test"}, nil)
 	RegisterArtifactPropose(server, Deps{
 		DB:        pool,
 		Logger:    logger,
 		AuthChain: auth.NewChain(auth.NewTrustedLocalResolver("", "agent:dry-run-test")),
 		Receipts:  receiptStore,
+		Settings:  settingsStore,
 	})
 	clientTransport, serverTransport := sdk.NewInMemoryTransports()
 	serverSession, err := server.Connect(ctx, serverTransport, nil)

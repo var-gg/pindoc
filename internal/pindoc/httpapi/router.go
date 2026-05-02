@@ -16,11 +16,14 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	pauth "github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/changegroup"
@@ -208,6 +211,7 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	// fallback handles the path.
 	mux.HandleFunc("GET /p/{project}/{locale}/{view}", d.handleLegacyReaderLocaleRedirect)
 	mux.HandleFunc("GET /p/{project}/{locale}/{view}/{rest...}", d.handleLegacyReaderLocaleRedirect)
+	mux.HandleFunc("GET /p/{project}/wiki/{idOrSlug}", d.handleReaderWikiAliasRedirect)
 
 	// Reader SPA. Catch-all `/` is the lowest-priority pattern in
 	// Go 1.22's ServeMux, so /api/..., /mcp, /health all match
@@ -303,4 +307,44 @@ func escapePathSegments(path string) string {
 		parts[i] = url.PathEscape(part)
 	}
 	return strings.Join(parts, "/")
+}
+
+func (d Deps) handleReaderWikiAliasRedirect(w http.ResponseWriter, r *http.Request) {
+	if d.DB == nil {
+		d.handleSPA(w, r)
+		return
+	}
+	projectSlug := r.PathValue("project")
+	ref := r.PathValue("idOrSlug")
+	var canonical string
+	err := d.DB.QueryRow(r.Context(), `
+		SELECT a.slug
+		  FROM artifact_slug_aliases asa
+		  JOIN projects p ON p.id = asa.project_id
+		  JOIN artifacts a ON a.id = asa.artifact_id
+		 WHERE p.slug = $1
+		   AND asa.old_slug = $2
+		   AND a.status <> 'archived'
+		 LIMIT 1
+	`, projectSlug, ref).Scan(&canonical)
+	if errors.Is(err, pgx.ErrNoRows) {
+		d.handleSPA(w, r)
+		return
+	}
+	if err != nil {
+		if d.Logger != nil {
+			d.Logger.Warn("artifact slug alias lookup failed", "project", projectSlug, "ref", ref, "err", err)
+		}
+		d.handleSPA(w, r)
+		return
+	}
+	if canonical == "" || canonical == ref {
+		d.handleSPA(w, r)
+		return
+	}
+	target := "/p/" + url.PathEscape(projectSlug) + "/wiki/" + url.PathEscape(canonical)
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	http.Redirect(w, r, target, http.StatusMovedPermanently)
 }

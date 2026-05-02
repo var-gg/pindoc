@@ -434,6 +434,11 @@ export type SearchHit = {
   heading?: string;
   snippet: string;
   distance: number;
+  updated_at?: string;
+  status?: string;
+  completeness?: string;
+  task_status?: string;
+  task_priority?: string;
 };
 
 export type RevisionRow = {

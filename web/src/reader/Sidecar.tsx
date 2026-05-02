@@ -326,9 +326,10 @@ function FocusReasonChip({ reason }: { reason: StartFocusReason }) {
 }
 
 function IdentityStrip({ detail }: { detail: Artifact }) {
+  const { t } = useI18n();
   const lifecycle = detail.type === "Task" && detail.task_meta?.status
-    ? detail.task_meta.status
-    : `${detail.status} · ${detail.completeness}`;
+    ? taskStatusLabel(detail.task_meta.status, t)
+    : `${artifactStatusLabel(detail.status, t)} · ${artifactCompletenessLabel(detail.completeness, t)}`;
   return (
     <div className="sidecar-identity">
       <span className={typeChipClass(detail.type)}>{detail.type}</span>
@@ -340,6 +341,36 @@ function IdentityStrip({ detail }: { detail: Artifact }) {
       <span className="sidecar-identity__status">{lifecycle}</span>
     </div>
   );
+}
+
+function artifactStatusLabel(value: string, t: (key: string, ...args: Array<string | number>) => string): string {
+  return enumLabel(`artifact.status.${value}`, value, t);
+}
+
+function artifactCompletenessLabel(value: string, t: (key: string, ...args: Array<string | number>) => string): string {
+  return enumLabel(`artifact.completeness.${value}`, value, t);
+}
+
+function taskStatusLabel(value: string, t: (key: string, ...args: Array<string | number>) => string): string {
+  switch (value) {
+    case "open":
+      return t("tasks.col_open");
+    case "claimed_done":
+      return t("tasks.col_claimed_done");
+    case "blocked":
+      return t("tasks.col_blocked");
+    case "cancelled":
+      return t("tasks.col_cancelled");
+    case "missing_status":
+      return t("tasks.col_no_status");
+    default:
+      return value;
+  }
+}
+
+function enumLabel(key: string, value: string, t: (key: string, ...args: Array<string | number>) => string): string {
+  const label = t(key);
+  return label === key ? value : label;
 }
 
 function QuickActions({ detail, artifactHref }: { detail: Artifact; artifactHref: string }) {
@@ -1060,7 +1091,7 @@ function MetaBlock({
       <div className="provenance__row">
         <span className="k">{t("sidecar.prov_status")}</span>
         <span className="v">
-          {status} · {completeness}
+          {artifactStatusLabel(status, t)} · {artifactCompletenessLabel(completeness, t)}
         </span>
       </div>
       <div className="provenance__row">

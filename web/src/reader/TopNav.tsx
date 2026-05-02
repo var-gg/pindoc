@@ -25,6 +25,7 @@ type Props = {
   onOpenPalette: () => void;
   onClosePalette: () => void;
   onToggleMenu: () => void;
+  menuOpen: boolean;
   paletteOpen: boolean;
   inboxCount: number;
   readerWidth: ReaderWidth;
@@ -51,6 +52,7 @@ export function TopNav({
   onOpenPalette,
   onClosePalette,
   onToggleMenu,
+  menuOpen,
   paletteOpen,
   inboxCount,
   readerWidth,
@@ -65,7 +67,6 @@ export function TopNav({
   const reviewQueueEnabled = project.sensitive_ops === "confirm";
   const showGraphSurface = isReaderDevSurfaceEnabled(location.search, import.meta.env.DEV);
   const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
-  const [mobileSurfaceMenuOpen, setMobileSurfaceMenuOpen] = useState(false);
   const opsDebug = telemetryDebugEnabled(
     location.search,
     typeof window === "undefined" ? null : window.localStorage.getItem("pindoc.ops.debug"),
@@ -75,10 +76,6 @@ export function TopNav({
   useEffect(() => {
     setProjectSwitcherOpen((open) => projectSwitcherOpenAfterPaletteChange(open, paletteOpen));
   }, [paletteOpen]);
-
-  useEffect(() => {
-    setMobileSurfaceMenuOpen(false);
-  }, [location.pathname, location.search]);
 
   function openPalette() {
     setProjectSwitcherOpen(false);
@@ -92,19 +89,14 @@ export function TopNav({
     }
   }
 
-  function toggleMobileMenu() {
-    setMobileSurfaceMenuOpen((open) => !open);
-    onToggleMenu();
-  }
-
   return (
     <>
       <div className="nav">
         <button
           className="nav__menu"
           aria-label={t("nav.mobile_menu")}
-          aria-expanded={mobileSurfaceMenuOpen}
-          onClick={toggleMobileMenu}
+          aria-expanded={menuOpen}
+          onClick={onToggleMenu}
         >
           <Menu className="lucide" />
         </button>
@@ -207,29 +199,33 @@ export function TopNav({
           onChangeLang={setLang}
         />
       </div>
-      {mobileSurfaceMenuOpen && (
-        <nav className="nav-mobile-surfaces" aria-label={t("nav.mobile_surfaces")}>
-          <NavLink to={`${baseRoute}/today`} className="nav-mobile-surfaces__item" onClick={() => setMobileSurfaceMenuOpen(false)}>
-            <CalendarDays className="lucide" />
-            <span>{t("nav.today")}</span>
+      <nav className="nav-mobile-surfaces" aria-label={t("nav.mobile_surfaces")}>
+        <NavLink to={`${baseRoute}/today`} className="nav-mobile-surfaces__item">
+          <CalendarDays className="lucide" />
+          <span>{t("nav.today")}</span>
+        </NavLink>
+        <NavLink to={`${baseRoute}/wiki`} className="nav-mobile-surfaces__item">
+          <FileText className="lucide" />
+          <span>{t("nav.wiki_reader")}</span>
+        </NavLink>
+        {reviewQueueEnabled && (
+          <NavLink to={`${baseRoute}/inbox`} className="nav-mobile-surfaces__item">
+            <Inbox className="lucide" />
+            <span>{t("nav.inbox")}</span>
+            {inboxCount > 0 && <span className="count">{inboxCount}</span>}
           </NavLink>
-          <NavLink to={`${baseRoute}/wiki`} className="nav-mobile-surfaces__item" onClick={() => setMobileSurfaceMenuOpen(false)}>
-            <FileText className="lucide" />
-            <span>{t("nav.wiki_reader")}</span>
+        )}
+        {showGraphSurface && (
+          <NavLink to={`${baseRoute}/graph${location.search || ""}`} className="nav-mobile-surfaces__item">
+            <Share2 className="lucide" />
+            <span>{t("nav.graph")}</span>
           </NavLink>
-          {reviewQueueEnabled && (
-            <NavLink to={`${baseRoute}/inbox`} className="nav-mobile-surfaces__item" onClick={() => setMobileSurfaceMenuOpen(false)}>
-              <Inbox className="lucide" />
-              <span>{t("nav.inbox")}</span>
-              {inboxCount > 0 && <span className="count">{inboxCount}</span>}
-            </NavLink>
-          )}
-          <NavLink to={`${baseRoute}/tasks`} className="nav-mobile-surfaces__item" onClick={() => setMobileSurfaceMenuOpen(false)}>
-            <FileText className="lucide" />
-            <span>{t("nav.tasks")}</span>
-          </NavLink>
-        </nav>
-      )}
+        )}
+        <NavLink to={`${baseRoute}/tasks`} className="nav-mobile-surfaces__item">
+          <FileText className="lucide" />
+          <span>{t("nav.tasks")}</span>
+        </NavLink>
+      </nav>
     </>
   );
 }
@@ -467,6 +463,26 @@ function HelpPopover({ surface }: { surface: SurfaceId }) {
                   </div>
                 );
               })}
+            </div>
+          </section>
+
+          <section className="nav-help__section">
+            <h3>{t("help.status_title")}</h3>
+            <div className="nav-help__grid nav-help__grid--status">
+              {[
+                ["status-pill--todo", t("tasks.col_open"), t("help.status.open.description")],
+                ["status-pill--blocked", t("tasks.col_blocked"), t("help.status.blocked.description")],
+                ["status-pill--done", t("tasks.col_claimed_done"), t("help.status.done.description")],
+                ["prio--p1", "P1", t("help.status.priority.description")],
+              ].map(([className, label, description]) => (
+                <div key={className} className="nav-help__card">
+                  <span className={`status-pill ${className}`}>
+                    <span className="p-dot" />
+                    {label}
+                  </span>
+                  <p>{description}</p>
+                </div>
+              ))}
             </div>
           </section>
 

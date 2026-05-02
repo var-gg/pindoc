@@ -18,6 +18,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/var-gg/pindoc/internal/pindoc/artifactlinks"
+	"github.com/var-gg/pindoc/internal/pindoc/artifactslug"
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	pgit "github.com/var-gg/pindoc/internal/pindoc/git"
@@ -646,6 +648,13 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			}
 			if err != nil {
 				return nil, artifactProposeOutput{}, fmt.Errorf("resolve scope: %w", err)
+			}
+			if normalizedBody, linkOut, err := normalizeBodyPindocLinks(ctx, deps.DB, deps, projectID, scope.ProjectSlug, scope.ProjectLocale, in.BodyMarkdown, lang); err != nil {
+				return nil, artifactProposeOutput{}, err
+			} else if linkOut != nil {
+				return nil, *linkOut, nil
+			} else {
+				in.BodyMarkdown = normalizedBody
 			}
 
 			// --- search_receipt gate (Phase 11b) -------------------------
@@ -1425,6 +1434,13 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		in.BodyMarkdown = newBody
 		patchWarnings = append(patchWarnings, w...)
 	}
+	if normalizedBody, linkOut, err := normalizeBodyPindocLinks(ctx, deps.DB, deps, projectID, scope.ProjectSlug, scope.ProjectLocale, in.BodyMarkdown, lang); err != nil {
+		return nil, artifactProposeOutput{}, err
+	} else if linkOut != nil {
+		return nil, *linkOut, nil
+	} else {
+		in.BodyMarkdown = normalizedBody
+	}
 
 	autoClaimedDone := shouldAutoClaimDone(currentType, currentTaskMetaRaw, in.BodyMarkdown)
 
@@ -1811,6 +1827,71 @@ func bodyHash(body string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+var errPindocLinkTargetNotFound = errors.New("pindoc link target not found")
+
+type pindocLinkQueryer interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func normalizeBodyPindocLinks(ctx context.Context, q pindocLinkQueryer, deps Deps, projectID, projectSlug, projectLocale, body, lang string) (string, *artifactProposeOutput, error) {
+	if !strings.Contains(body, "pindoc://") {
+		return body, nil, nil
+	}
+	cache := map[string]string{}
+	normalized, _, err := artifactlinks.RewritePindocLinks(body, func(ref string) (string, error) {
+		ref = artifactlinks.NormalizeRef(ref)
+		if ref == "" {
+			return "", errPindocLinkTargetNotFound
+		}
+		if cached, ok := cache[ref]; ok {
+			return cached, nil
+		}
+		var targetSlug string
+		err := q.QueryRow(ctx, `
+			SELECT slug
+			  FROM artifacts
+			 WHERE project_id = $1::uuid
+			   AND (id::text = $2 OR slug = $2)
+			   AND status <> 'archived'
+			 LIMIT 1
+		`, projectID, ref).Scan(&targetSlug)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", errPindocLinkTargetNotFound
+		}
+		if err != nil {
+			return "", err
+		}
+		url := AbsHumanURL(deps.Settings, projectSlug, projectLocale, targetSlug)
+		if url == "" {
+			url = HumanURL(projectSlug, projectLocale, targetSlug)
+		}
+		cache[ref] = url
+		return url, nil
+	})
+	if err == nil {
+		return normalized, nil, nil
+	}
+	var linkErr *artifactlinks.LinkError
+	if errors.As(err, &linkErr) && errors.Is(linkErr, errPindocLinkTargetNotFound) {
+		ref := strings.TrimSpace(linkErr.Ref)
+		return body, &artifactProposeOutput{
+			Status:    "not_ready",
+			ErrorCode: "PINDOC_LINK_TARGET_NOT_FOUND",
+			Failed:    []string{"PINDOC_LINK_TARGET_NOT_FOUND"},
+			Checklist: []string{
+				fmt.Sprintf("body_markdown references %q but no artifact with that id or slug exists in project %q.", "pindoc://"+ref, projectSlug),
+			},
+			SuggestedActions: []string{
+				"Replace the raw pindoc:// reference with an existing artifact ref, or create/read the target artifact first.",
+				i18n.T(lang, "suggested.list_areas"),
+			},
+			NextTools:       toolHints("pindoc.artifact.search", "pindoc.artifact.read"),
+			PatchableFields: []string{"body_markdown"},
+		}, nil
+	}
+	return body, nil, fmt.Errorf("normalize body pindoc links: %w", err)
+}
+
 // buildSourceSessionRef assembles the JSONB payload stored on
 // artifact_revisions.source_session_ref. Fields:
 //   - agent_id: server-issued identity (Phase 12c) — trusted
@@ -2169,39 +2250,8 @@ func preflight(ctx context.Context, deps Deps, projectSlug string, in *artifactP
 	return checklist, failed, code
 }
 
-// slugRegex replaces any run of characters that are NOT Unicode letters
-// or numbers with a single hyphen. This preserves Hangul / Kana / CJK /
-// Latin-ext / Cyrillic / Arabic verbatim — URL path components accept
-// all of these when percent-encoded, browsers show the decoded form in
-// the address bar, and our pgvector-based lookup is byte-exact.
-var slugRegex = regexp.MustCompile(`[^\p{L}\p{N}]+`)
-
-// slugify produces a URL-safe, human-legible slug from a title.
-//
-// Policy (revised 2026-04-22 Phase 17 follow-up):
-//   - ASCII letters lowercased.
-//   - Unicode letters (Hangul, Kana, CJK, Cyrillic, Arabic, …) preserved
-//     as-is. The earlier policy stripped them, which turned Korean titles
-//     like "Pindoc 시스템 아키텍처 — URL 스코프" into "pindoc-url" — 2
-//     tokens of meaning lost.
-//   - Any run of non-letter/non-digit characters collapses to a single "-".
-//   - Trimmed of leading/trailing hyphens.
-//   - Capped at 60 runes (not bytes) so UTF-8 doesn't get chopped mid-
-//     character; then re-trimmed in case the cut left a trailing hyphen.
-//   - Still empty after all that (e.g. title was only punctuation) → the
-//     caller falls back to a type+timestamp slug.
-//
-// Agents that want full control can pass an explicit `slug` on propose;
-// this function only runs when `slug` is omitted.
 func slugify(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	s = slugRegex.ReplaceAllString(s, "-")
-	s = strings.Trim(s, "-")
-	if utf8.RuneCountInString(s) > 60 {
-		runes := []rune(s)
-		s = strings.Trim(string(runes[:60]), "-")
-	}
-	return s
+	return artifactslug.Slugify(s)
 }
 
 // slugBrevityAdvisory was a 25-rune fixed gate before the 2026-04-28

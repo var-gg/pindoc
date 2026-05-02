@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { Bot, CalendarClock, GitBranch, Layers3, ListTree, UserRound, X } from "lucide-react";
+import { Bot, CalendarClock, GitBranch, Layers3, ListTree, PanelRightOpen, UserRound, X } from "lucide-react";
 import {
   api,
   type ArtifactRef,
@@ -541,6 +541,12 @@ function TaskFlowRowCard({
             {row.title}
           </Link>
         </Tooltip>
+        {isLocal && (
+          <span className="task-flow-card__preview-hint" aria-label={t("tasks.card_select_hint")}>
+            <PanelRightOpen className="lucide" aria-hidden="true" />
+            <span>{t("reader.card_preview_label")}</span>
+          </span>
+        )}
         <div className="task-flow-card__chips">
           <span className="task-flow-card__actor">
             {row.assignee?.startsWith("user:") || row.assignee?.startsWith("@")

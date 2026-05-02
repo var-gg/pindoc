@@ -426,6 +426,37 @@ func TestProjectDefaultVisibilityMigrationContract(t *testing.T) {
 	}
 }
 
+func TestArtifactSlugAliasesMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0052_artifact_slug_aliases.sql")
+	if err != nil {
+		t.Fatalf("read artifact slug aliases migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"CREATE TABLE artifact_slug_aliases",
+		"project_id  UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE",
+		"artifact_id UUID NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE",
+		"old_slug    TEXT NOT NULL",
+		"UNIQUE (project_id, old_slug)",
+		"CREATE INDEX idx_artifact_slug_aliases_artifact",
+		"ON artifact_slug_aliases(artifact_id)",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("artifact slug aliases migration Up missing %q:\n%s", want, up)
+		}
+	}
+	for _, want := range []string{
+		"-- +goose Down",
+		"DROP INDEX IF EXISTS idx_artifact_slug_aliases_artifact",
+		"DROP TABLE IF EXISTS artifact_slug_aliases",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("artifact slug aliases migration Down missing %q", want)
+		}
+	}
+}
+
 func TestVisibilityMigrationContract(t *testing.T) {
 	raw, err := migrationsFS.ReadFile("migrations/0050_visibility.sql")
 	if err != nil {

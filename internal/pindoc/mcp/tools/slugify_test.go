@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"strings"
 	"testing"
 	"unicode/utf8"
 )
@@ -73,10 +74,10 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
-// TestSlugifyRuneCapNoMidCodepoint makes sure the 60-rune cap never
-// leaves a dangling invalid byte sequence. Gives a long Hangul-heavy
-// title and checks the result is valid UTF-8 ≤ 60 runes.
-func TestSlugifyRuneCapNoMidCodepoint(t *testing.T) {
+// TestSlugifyWordBoundaryCap makes sure the cap never cuts through the
+// middle of a token. Gives a long Hangul-heavy title and checks the result
+// is valid UTF-8 and ends at a full token boundary.
+func TestSlugifyWordBoundaryCap(t *testing.T) {
 	// 70 runes of 한글 separated by spaces — well over the 60-rune cap.
 	long := "테스트 아주 긴 한글 제목의 슬러그 생성이 유니코드 안전하게 잘 되는지 " +
 		"확인하기 위한 시험용 입력값이며 60자보다 확실히 길게 만들어둠"
@@ -88,8 +89,19 @@ func TestSlugifyRuneCapNoMidCodepoint(t *testing.T) {
 		t.Errorf("slugify result has %d runes, want ≤ 60 (%q)",
 			utf8.RuneCountInString(got), got)
 	}
-	if got == "" {
-		t.Errorf("slugify dropped all input for long Hangul title")
+	if strings.HasSuffix(got, "-") {
+		t.Errorf("slugify cut through a token boundary: %q", got)
+	}
+}
+
+func TestSlugifyPreservesSingleLongKoreanToken(t *testing.T) {
+	longToken := "초장문한국어토큰초장문한국어토큰초장문한국어토큰초장문한국어토큰초장문한국어토큰"
+	got := slugify("prefix " + longToken)
+	if !utf8.ValidString(got) {
+		t.Fatalf("slugify produced invalid UTF-8: %q", got)
+	}
+	if !strings.HasSuffix(got, longToken) {
+		t.Fatalf("slugify(%q) = %q; want full Korean token preserved", longToken, got)
 	}
 }
 
