@@ -34,10 +34,15 @@ func TestArtifactProposeNormalizesPindocLinksIntegration(t *testing.T) {
 	areaSlug := "mcp"
 	projectID := insertContextReceiptProject(t, ctx, pool, projectSlug)
 	areaID := insertContextReceiptArea(t, ctx, pool, projectID, areaSlug)
+	var previousPublicBaseURL string
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(public_base_url, '') FROM server_settings WHERE id = 1`).Scan(&previousPublicBaseURL); err != nil {
+		t.Fatalf("read public_base_url: %v", err)
+	}
 	if _, err := pool.Exec(ctx, `UPDATE server_settings SET public_base_url = 'https://docs.example.test' WHERE id = 1`); err != nil {
 		t.Fatalf("set public_base_url: %v", err)
 	}
 	defer func() {
+		_, _ = pool.Exec(context.Background(), `UPDATE server_settings SET public_base_url = $1 WHERE id = 1`, previousPublicBaseURL)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1::uuid`, projectID)
 	}()
 
