@@ -4,7 +4,7 @@ import { Bot, CircleHelp, PanelRightOpen, UserRound, X } from "lucide-react";
 import type { Aggregate } from "./useReaderData";
 import { api, type Artifact, type ArtifactRef, type Area } from "../api/client";
 import { useI18n } from "../i18n";
-import { projectSurfacePath } from "../readerRoutes";
+import { DEFAULT_READER_ORG_SLUG, projectSurfacePath } from "../readerRoutes";
 import { InviteModal } from "../project/InviteModal";
 import { CmdK } from "./CmdK";
 import { GraphSurface } from "./Graph";
@@ -70,9 +70,10 @@ function surfaceAllows(view: ReaderView, a: ArtifactRef): boolean {
 type Props = {
   view: ReaderView;
   unavailableSurface?: string;
+  orgSlug?: string;
 };
 
-export function ReaderShell({ view, unavailableSurface }: Props) {
+export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER_ORG_SLUG }: Props) {
   const { project = "", slug } = useParams<{ project: string; slug?: string }>();
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -94,7 +95,6 @@ export function ReaderShell({ view, unavailableSurface }: Props) {
   const [taskInspectorSlug, setTaskInspectorSlug] = useState<string | null>(null);
   const [taskInspectorDetail, setTaskInspectorDetail] = useState<Artifact | null>(null);
   const [taskInspectorLoading, setTaskInspectorLoading] = useState(false);
-  const [taskInspectorReloadNonce, setTaskInspectorReloadNonce] = useState(0);
   const [inboxCount, setInboxCount] = useState(0);
   // Graph surface owns its focus through the URL `?focus=slug`. We mirror
   // it into local state so component children only see a single source of
@@ -185,7 +185,12 @@ export function ReaderShell({ view, unavailableSurface }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, view]);
 
-  const baseRoute = `/p/${project}/${view === "tasks" ? "tasks" : view === "today" ? "today" : "wiki"}`;
+  const baseRoute = projectSurfacePath(
+    project,
+    view === "tasks" ? "tasks" : view === "today" ? "today" : "wiki",
+    undefined,
+    orgSlug,
+  );
 
   function writeSearchParams(next: URLSearchParams, opts?: { toList?: boolean }) {
     const qs = next.toString();
@@ -376,7 +381,7 @@ export function ReaderShell({ view, unavailableSurface }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [view, slug, project, taskInspectorSlug, taskInspectorReloadNonce]);
+  }, [view, slug, project, taskInspectorSlug]);
 
   // Graph focus → detail. Re-fetches when graphFocusSlug changes so the
   // Sidecar shows body preview + edges for the current focus. Skipped
@@ -536,7 +541,16 @@ export function ReaderShell({ view, unavailableSurface }: Props) {
     );
   }
 
-  const { project: projectData, areas, detail, agents, users, providers, bindAddr } = state.data;
+  const { project: projectData, areas, detail, agents, users } = state.data;
+  const projectOrgSlug = projectData.organization_slug ?? DEFAULT_READER_ORG_SLUG;
+  if (orgSlug !== projectOrgSlug) {
+    return (
+      <div className="reader-state reader-state--error">
+        <strong>{t("wiki.error_title")}</strong>
+        <p>{t("surface.not_found", `/${orgSlug}/p/${project}`)}</p>
+      </div>
+    );
+  }
   const reload = state.reload;
   const reviewQueueEnabled = projectData.sensitive_ops === "confirm";
   const sidecarDetail =
@@ -571,10 +585,6 @@ export function ReaderShell({ view, unavailableSurface }: Props) {
         ? t("reader.inspector_loading")
         : t("graph.no_focus")
       : undefined;
-  function handleTaskInspectorUpdated() {
-    reload();
-    setTaskInspectorReloadNonce((n) => n + 1);
-  }
   // Override area.artifact_count with the Surface-aware recomputation so
   // the sidebar badge matches the list the user is actually looking at.
   // Acceptance #6/#7: counters respect current Surface + the *other* filter
@@ -594,6 +604,7 @@ export function ReaderShell({ view, unavailableSurface }: Props) {
     <div className="app-shell">
       <TopNav
         project={projectData}
+        orgSlug={orgSlug}
         surface={view}
         theme={theme}
         onToggleTheme={toggleTheme}
@@ -610,6 +621,7 @@ export function ReaderShell({ view, unavailableSurface }: Props) {
       <div className="main">
         <Sidebar
           projectSlug={project}
+          orgSlug={orgSlug}
           artifacts={areaCounterArtifacts}
           areas={displayAreas}
           types={typeCounts}
@@ -627,6 +639,7 @@ export function ReaderShell({ view, unavailableSurface }: Props) {
         <Body
           view={view}
           projectSlug={project}
+          orgSlug={orgSlug}
           detail={detail}
           list={filteredArtifacts}
           allList={surfaceList}
@@ -657,17 +670,13 @@ export function ReaderShell({ view, unavailableSurface }: Props) {
         />
         <Sidecar
           projectSlug={project}
+          orgSlug={orgSlug}
           detail={sidecarDetail}
           emptyMessage={sidecarEmptyMessage}
-          providers={providers}
-          bindAddr={bindAddr}
-          agents={agents}
-          users={users}
-          onArtifactUpdated={view === "tasks" ? handleTaskInspectorUpdated : reload}
           focusReason={view === "graph" ? graphFocusReason : null}
         />
       </div>
-      <CmdK projectSlug={project} open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <CmdK projectSlug={project} orgSlug={orgSlug} open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <InviteModal
         project={projectData}
         open={inviteOpen}
@@ -678,6 +687,7 @@ export function ReaderShell({ view, unavailableSurface }: Props) {
         open={shortcutsOpen}
         view={view}
         projectSlug={project}
+        orgSlug={orgSlug}
         detail={sidecarDetail}
         selectedArea={selectedArea}
         selectedType={selectedType}
@@ -773,6 +783,7 @@ function filteredReaderHref(
 function Body({
   view,
   projectSlug,
+  orgSlug,
   detail,
   list,
   allList,
@@ -803,6 +814,7 @@ function Body({
 }: {
   view: ReaderView;
   projectSlug: string;
+  orgSlug: string;
   detail: Artifact | null;
   list: ArtifactRef[];
   allList: ArtifactRef[];
@@ -834,7 +846,12 @@ function Body({
   const { t } = useI18n();
   const navigate = useNavigate();
   const [taskSurfaceMode, setTaskSurfaceMode] = useState<"flow" | "board">("flow");
-  const baseRoute = `/p/${projectSlug}/${view === "tasks" ? "tasks" : view === "today" ? "today" : "wiki"}`;
+  const baseRoute = projectSurfacePath(
+    projectSlug,
+    view === "tasks" ? "tasks" : view === "today" ? "today" : "wiki",
+    undefined,
+    orgSlug,
+  );
   const detailScope = detail && view === "reader"
     ? buildDetailScope({
         detail,
@@ -873,6 +890,7 @@ function Body({
     return (
       <UnavailableSurface
         projectSlug={projectSlug}
+        orgSlug={orgSlug}
         surface={unavailableSurface}
       />
     );
@@ -882,6 +900,7 @@ function Body({
     return (
       <GraphSurface
         projectSlug={projectSlug}
+        orgSlug={orgSlug}
         list={list}
         allCount={allList.length}
         selectedArea={selectedArea}
@@ -899,6 +918,7 @@ function Body({
     return (
       <Inbox
         projectSlug={projectSlug}
+        orgSlug={orgSlug}
         enabled={reviewQueueEnabled}
         onCountChange={onInboxCountChange}
       />
@@ -908,6 +928,7 @@ function Body({
     return (
       <Today
         projectSlug={projectSlug}
+        orgSlug={orgSlug}
         selectedArea={selectedArea}
         areaNameBySlug={areaNameBySlug}
         onSelectArea={onSelectArea}
@@ -929,6 +950,7 @@ function Body({
         emptyMessage={view === "tasks" ? t("wiki.empty_tasks_detail") : t("wiki.empty_detail")}
         scope={detailScope}
         projectSlug={projectSlug}
+        orgSlug={orgSlug}
         onApplyBadgeFilter={onApplyBadgeFilter}
         onApplyAreaFilter={onApplyAreaFilter}
         onArtifactUpdated={onArtifactUpdated}
@@ -954,6 +976,7 @@ function Body({
       return (
         <TaskFlowLens
           projectSlug={projectSlug}
+          orgSlug={orgSlug}
           list={list}
           allList={allList}
           currentSlug={currentSlug}
@@ -971,6 +994,7 @@ function Body({
     return (
       <TasksKanban
         projectSlug={projectSlug}
+        orgSlug={orgSlug}
         list={list}
         allList={allList}
         currentSlug={currentSlug}
@@ -1013,7 +1037,7 @@ function Body({
         ) : (
           <div className="artifact-list">
             {list.map((a) => {
-              const linkBase = `/p/${projectSlug}/wiki`;
+              const linkBase = projectSurfacePath(projectSlug, "wiki", undefined, orgSlug);
               const href = filteredReaderHref(linkBase, a.slug, selectedArea, selectedType, badgeFilters);
               const isActive = currentSlug === a.slug || selectedInspectorSlug === a.slug;
               return (
@@ -1115,6 +1139,7 @@ const PRIORITY_CLASS: Record<string, string> = {
 
 function TasksKanban({
   projectSlug,
+  orgSlug,
   list,
   allList,
   currentSlug,
@@ -1131,6 +1156,7 @@ function TasksKanban({
   modeSwitch,
 }: {
   projectSlug: string;
+  orgSlug: string;
   list: ArtifactRef[];
   allList: ArtifactRef[];
   currentSlug: string | undefined;
@@ -1264,6 +1290,7 @@ function TasksKanban({
               onClearFilters={onClearFilters}
               onShowMore={() => showMoreColumn(col.id)}
               projectSlug={projectSlug}
+              orgSlug={orgSlug}
               currentSlug={currentSlug}
               selectedTaskSlug={selectedTaskSlug}
               onSelectTask={onSelectTask}
@@ -1285,6 +1312,7 @@ function TasksKanban({
             onClearFilters={onClearFilters}
             onShowMore={() => showMoreColumn("no_status")}
             projectSlug={projectSlug}
+            orgSlug={orgSlug}
             currentSlug={currentSlug}
             selectedTaskSlug={selectedTaskSlug}
             onSelectTask={onSelectTask}
@@ -1299,9 +1327,11 @@ function TasksKanban({
 
 function UnavailableSurface({
   projectSlug,
+  orgSlug,
   surface,
 }: {
   projectSlug: string;
+  orgSlug: string;
   surface: string;
 }) {
   const { t } = useI18n();
@@ -1314,7 +1344,7 @@ function UnavailableSurface({
           message={t("surface.not_found", label)}
           action={{
             label: t("surface.return_today"),
-            href: projectSurfacePath(projectSlug, "today"),
+            href: projectSurfacePath(projectSlug, "today", undefined, orgSlug),
           }}
         />
       </div>
@@ -1576,6 +1606,7 @@ function TaskColumn({
   onClearFilters,
   onShowMore,
   projectSlug,
+  orgSlug,
   currentSlug,
   selectedTaskSlug,
   onSelectTask,
@@ -1592,6 +1623,7 @@ function TaskColumn({
   onClearFilters: () => void;
   onShowMore: () => void;
   projectSlug: string;
+  orgSlug: string;
   currentSlug: string | undefined;
   selectedTaskSlug: string | null;
   onSelectTask: (slug: string) => void;
@@ -1628,6 +1660,7 @@ function TaskColumn({
             key={a.id}
             artifact={a}
             projectSlug={projectSlug}
+            orgSlug={orgSlug}
             isActive={currentSlug === a.slug}
             isSelected={selectedTaskSlug === a.slug}
             onSelect={onSelectTask}
@@ -1674,6 +1707,7 @@ function TaskColumn({
 function TaskCard({
   artifact: a,
   projectSlug,
+  orgSlug,
   isActive,
   isSelected,
   onSelect,
@@ -1681,6 +1715,7 @@ function TaskCard({
 }: {
   artifact: ArtifactRef;
   projectSlug: string;
+  orgSlug: string;
   isActive: boolean;
   isSelected: boolean;
   onSelect: (slug: string) => void;
@@ -1691,7 +1726,7 @@ function TaskCard({
   const priority = a.task_meta?.priority;
   const prioClass = priority ? PRIORITY_CLASS[priority] : undefined;
   const areaLabel = areaNameBySlug.get(a.area_slug) ?? localizedAreaName(t, a.area_slug, a.area_slug);
-  const detailHref = `/p/${projectSlug}/wiki/${a.slug}`;
+  const detailHref = projectSurfacePath(projectSlug, "wiki", a.slug, orgSlug);
   const selected = isActive || isSelected;
   const assigneeLabel = taskActorLabel(a.task_meta?.assignee, t);
   const requesterLabel = requesterActorLabel(a);

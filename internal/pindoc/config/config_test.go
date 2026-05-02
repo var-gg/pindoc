@@ -29,6 +29,9 @@ func TestLoadDefaults(t *testing.T) {
 	if !cfg.IsLoopbackBind() {
 		t.Fatalf("default bind should be loopback")
 	}
+	if cfg.AssetRoot != "/var/lib/pindoc/assets" {
+		t.Fatalf("AssetRoot = %q, want default LocalFS root", cfg.AssetRoot)
+	}
 }
 
 // TestLoadProvidersCSVNormalizes verifies CSV parsing — trim, lower,
@@ -63,6 +66,18 @@ func TestLoadWithSampleFlag(t *testing.T) {
 	}
 	if !cfg.WithSample {
 		t.Fatal("PINDOC_WITH_SAMPLE=true should enable sample fixtures")
+	}
+}
+
+func TestLoadAssetRoot(t *testing.T) {
+	t.Setenv("PINDOC_ASSET_ROOT", "C:/pindoc-assets")
+	t.Setenv("PINDOC_BIND_ADDR", DefaultBindAddr)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.AssetRoot != "C:/pindoc-assets" {
+		t.Fatalf("AssetRoot = %q", cfg.AssetRoot)
 	}
 }
 

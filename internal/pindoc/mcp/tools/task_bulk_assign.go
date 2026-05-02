@@ -31,6 +31,11 @@ type taskBulkAssignInput struct {
 	// Assignee is the target assignee, same format as task.assign.
 	Assignee string `json:"assignee" jsonschema:"e.g. 'agent:codex', '@alice'; empty string explicitly clears"`
 
+	// AllowReassign explicitly opts into overwriting a non-empty current
+	// assignee. Default false keeps broad bulk "claim all open work" calls
+	// from stealing work already owned by a user or another agent.
+	AllowReassign bool `json:"allow_reassign,omitempty" jsonschema:"optional - default false; true permits overwriting non-empty current assignees in this batch"`
+
 	// Reason is the shared rationale (required, 2-200 runes). Surfaced in
 	// every generated revision's commit_msg so the diff view can explain
 	// why 12 Tasks moved together.
@@ -48,12 +53,13 @@ type taskBulkAssignInput struct {
 // (falls back to the input slug when resolution failed). ArtifactID and
 // RevisionNumber only on accepted. ErrorCode only on not_ready.
 type taskBulkAssignResult struct {
-	Slug           string `json:"slug"`
-	ArtifactID     string `json:"artifact_id,omitempty"`
-	Status         string `json:"status"` // "accepted" | "not_ready"
-	ErrorCode      string `json:"error_code,omitempty"`
-	RevisionNumber int    `json:"revision_number,omitempty"`
-	HumanURL       string `json:"human_url,omitempty"`
+	Slug            string `json:"slug"`
+	ArtifactID      string `json:"artifact_id,omitempty"`
+	Status          string `json:"status"` // "accepted" | "not_ready"
+	ErrorCode       string `json:"error_code,omitempty"`
+	CurrentAssignee string `json:"current_assignee,omitempty"`
+	RevisionNumber  int    `json:"revision_number,omitempty"`
+	HumanURL        string `json:"human_url,omitempty"`
 }
 
 type taskBulkAssignOutput struct {
@@ -85,12 +91,14 @@ type taskBulkAssignOutput struct {
 // batch-level inputs (reason length, assignee format, non-empty slugs),
 // generates a bulk_op_id, then loops over slugs calling assignOneTask.
 // Per-slug errors are captured and reported; the batch never aborts mid-
-// flight on a single failure.
+// flight on a single failure. By default it refuses to overwrite a
+// non-empty assignee; callers must set allow_reassign=true when they are
+// intentionally rebalancing already-owned work.
 func RegisterTaskBulkAssign(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.task.bulk_assign",
-			Description: "Change the assignee of multiple Tasks in one batch. Reason is required (one-line rationale shared by every revision's commit_msg). Each accepted slug produces a revision prefixed with a shared bulk_op_id for audit. Partial success allowed: per-slug failures land in results[].error_code and do not abort the batch. For a single Task use pindoc.task.assign.",
+			Description: "Change the assignee of multiple Tasks in one batch. Reason is required (one-line rationale shared by every revision's commit_msg). Default safety: Tasks with a non-empty current assignee are rejected with ASSIGNEE_ALREADY_SET unless allow_reassign=true is passed. Each accepted slug produces a revision prefixed with a shared bulk_op_id for audit. Partial success allowed: per-slug failures land in results[].error_code and do not abort the batch. For a single Task use pindoc.task.assign.",
 		},
 		func(ctx context.Context, p *auth.Principal, in taskBulkAssignInput) (*sdk.CallToolResult, taskBulkAssignOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -144,7 +152,7 @@ func RegisterTaskBulkAssign(server *sdk.Server, deps Deps) {
 			results := make([]taskBulkAssignResult, 0, len(in.Slugs))
 			successCount, failCount := 0, 0
 			for _, slug := range in.Slugs {
-				single, sErr := assignOneTask(ctx, deps, p, scope, slug, assignee, reason, in.AuthorID, in.AuthorVersion, bulkOpID)
+				single, sErr := assignOneTask(ctx, deps, p, scope, slug, assignee, reason, in.AuthorID, in.AuthorVersion, bulkOpID, in.AllowReassign)
 				if sErr != nil {
 					// Server-side fault on this slug — record and move on.
 					// Not aborting the batch because other slugs may still be
@@ -158,12 +166,13 @@ func RegisterTaskBulkAssign(server *sdk.Server, deps Deps) {
 					continue
 				}
 				r := taskBulkAssignResult{
-					Slug:           single.Slug,
-					ArtifactID:     single.ArtifactID,
-					Status:         single.Status,
-					ErrorCode:      single.ErrorCode,
-					RevisionNumber: single.RevisionNumber,
-					HumanURL:       single.HumanURL,
+					Slug:            single.Slug,
+					ArtifactID:      single.ArtifactID,
+					Status:          single.Status,
+					ErrorCode:       single.ErrorCode,
+					CurrentAssignee: single.CurrentAssignee,
+					RevisionNumber:  single.RevisionNumber,
+					HumanURL:        single.HumanURL,
 				}
 				if r.Slug == "" {
 					// Resolution failed before the target was known — surface

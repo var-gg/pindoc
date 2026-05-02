@@ -8,6 +8,7 @@ import {
   type RevisionsResp,
 } from "../api/client";
 import { useI18n } from "../i18n";
+import { DEFAULT_READER_ORG_SLUG, projectSurfacePath } from "../readerRoutes";
 import { agentAvatar } from "./avatars";
 import { authorAvatarKey, authorDisplayLabel, authorIdentityKey } from "./authorDisplay";
 import { RevisionTypeBadge } from "./RevisionTypeBadge";
@@ -40,7 +41,8 @@ const revisionTypes: RevisionType[] = [
 const rollupWindowMs = 30 * 60 * 1000;
 
 export function History() {
-  const { project = "", slug = "" } = useParams<{ project: string; slug: string }>();
+  const { org, project = "", slug = "" } = useParams<{ org?: string; project: string; slug: string }>();
+  const orgSlug = org ?? DEFAULT_READER_ORG_SLUG;
   const { t } = useI18n();
   const [state, setState] = useState<Load>({ kind: "loading" });
   const [enabledTypes, setEnabledTypes] = useState<Record<RevisionType, boolean>>({
@@ -90,7 +92,7 @@ export function History() {
     <main className="content">
       <article className="reader-article">
         <div className="crumbs">
-          <Link to={`/p/${project}/wiki/${slug}`}>{data.title}</Link>
+          <Link to={projectSurfacePath(project, "wiki", slug, orgSlug)}>{data.title}</Link>
           <ChevronRight className="lucide" />
           <span className="current">{t("history.title")}</span>
         </div>
@@ -121,6 +123,7 @@ export function History() {
               key={entry.kind === "single" ? `rev-${entry.revision.revision_number}` : entry.key}
               entry={entry}
               project={project}
+              orgSlug={orgSlug}
               slug={slug}
               allRevisions={data.revisions}
               expanded={Boolean(expanded[entry.kind === "rollup" ? entry.key : ""])}
@@ -139,6 +142,7 @@ export function History() {
 function TimelineNode({
   entry,
   project,
+  orgSlug,
   slug,
   allRevisions,
   expanded,
@@ -146,6 +150,7 @@ function TimelineNode({
 }: {
   entry: TimelineEntry;
   project: string;
+  orgSlug: string;
   slug: string;
   allRevisions: RevisionRow[];
   expanded: boolean;
@@ -157,6 +162,7 @@ function TimelineNode({
       <RevisionListItem
         revision={entry.revision}
         project={project}
+        orgSlug={orgSlug}
         slug={slug}
         previous={previousRevision(allRevisions, entry.revision)}
       />
@@ -209,6 +215,7 @@ function TimelineNode({
               key={r.revision_number}
               revision={r}
               project={project}
+              orgSlug={orgSlug}
               slug={slug}
               previous={previousRevision(allRevisions, r)}
               nested
@@ -223,12 +230,14 @@ function TimelineNode({
 function RevisionListItem({
   revision,
   project,
+  orgSlug,
   slug,
   previous,
   nested = false,
 }: {
   revision: RevisionRow;
   project: string;
+  orgSlug: string;
   slug: string;
   previous?: RevisionRow;
   nested?: boolean;
@@ -237,7 +246,7 @@ function RevisionListItem({
   const av = agentAvatar(authorAvatarKey(revision));
   const author = authorDisplayLabel(revision, t("reader.byline_unknown"));
   const diffHref = previous
-    ? `/p/${project}/wiki/${slug}/diff?from=${previous.revision_number}&to=${revision.revision_number}`
+    ? `${projectSurfacePath(project, "wiki", slug, orgSlug)}/diff?from=${previous.revision_number}&to=${revision.revision_number}`
     : null;
   const revisionType = revisionTypeOf(revision);
   const system = revisionType === "system_auto";

@@ -3,6 +3,7 @@ import { Check, RefreshCw, X } from "lucide-react";
 import { Link } from "react-router";
 import { api, type ArtifactRef } from "../api/client";
 import { useI18n } from "../i18n";
+import { projectSurfacePath } from "../readerRoutes";
 import { ArtifactByline } from "./ArtifactByline";
 import { EmptyState, SurfaceHeader } from "./SurfacePrimitives";
 import { Tooltip } from "./Tooltip";
@@ -10,13 +11,14 @@ import { ArtifactTypeChip, VisualAreaChip } from "./VisualChips";
 
 type Props = {
   projectSlug: string;
+  orgSlug: string;
   enabled?: boolean;
   onCountChange?: (count: number) => void;
 };
 
 type ReviewAction = "approve" | "reject";
 
-export function Inbox({ projectSlug, enabled = true, onCountChange }: Props) {
+export function Inbox({ projectSlug, orgSlug, enabled = true, onCountChange }: Props) {
   const { t } = useI18n();
   const [items, setItems] = useState<ArtifactRef[]>([]);
   const [loading, setLoading] = useState(true);
@@ -115,7 +117,7 @@ export function Inbox({ projectSlug, enabled = true, onCountChange }: Props) {
                   <span className="inbox-card__state">{t("inbox.pending_review")}</span>
                 </div>
                 <h2 className="inbox-card__title">
-                  <Link to={`/p/${projectSlug}/wiki/${encodeURIComponent(item.slug)}`}>
+                  <Link to={projectSurfacePath(projectSlug, "wiki", item.slug, orgSlug)}>
                     {item.title}
                   </Link>
                 </h2>

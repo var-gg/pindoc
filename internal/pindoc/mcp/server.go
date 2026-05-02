@@ -122,6 +122,7 @@ func NewServer(opts Options) (*Server, error) {
 		Receipts:              receipts.New(0), // DefaultTTL applies
 		Settings:              opts.Settings,
 		RepoRoot:              opts.Config.RepoRoot,
+		AssetRoot:             opts.Config.AssetRoot,
 		Telemetry:             opts.Telemetry,
 		DefaultProjectSlug:    opts.Config.ProjectSlug,
 		Transport:             transport,
@@ -170,6 +171,13 @@ func NewServer(opts Options) (*Server, error) {
 	tools.RegisterArtifactAudit(s, deps)
 	tools.RegisterArtifactSearch(s, deps)
 	tools.RegisterContextForTask(s, deps)
+
+	// Asset v1 — project-scoped LocalFS blobs plus revision-scoped
+	// artifact attachments. The blob itself is never exposed through the
+	// MCP output; agents get stable pindoc-asset:// refs and metadata.
+	tools.RegisterAssetUpload(s, deps)
+	tools.RegisterAssetRead(s, deps)
+	tools.RegisterAssetAttach(s, deps)
 
 	// Phase 7 revision history.
 	tools.RegisterArtifactRevisions(s, deps)

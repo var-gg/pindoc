@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router";
 import { ArrowLeft, CheckCircle2, Loader2, Settings2, ShieldAlert } from "lucide-react";
 import { api, type Project, type ProjectSensitiveOps } from "../api/client";
 import { useI18n } from "../i18n";
+import { DEFAULT_READER_ORG_SLUG, projectSurfacePath } from "../readerRoutes";
 import { EmptyState } from "./SurfacePrimitives";
 import "../styles/reader.css";
 
@@ -12,13 +13,14 @@ type Notice = {
 };
 
 export function ProjectSettingsPage() {
-  const { project = "" } = useParams<{ project: string }>();
+  const { org, project = "" } = useParams<{ org?: string; project: string }>();
   const { t } = useI18n();
   const [loadedProject, setLoadedProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const orgSlug = org ?? loadedProject?.organization_slug ?? DEFAULT_READER_ORG_SLUG;
 
   useEffect(() => {
     let cancelled = false;
@@ -77,7 +79,7 @@ export function ProjectSettingsPage() {
   return (
     <main className="project-settings-page">
       <div className="project-settings">
-        <Link to={`/p/${project}/today`} className="project-settings__back">
+        <Link to={projectSurfacePath(project, "today", undefined, orgSlug)} className="project-settings__back">
           <ArrowLeft className="lucide" aria-hidden />
           {t("settings.back_to_project")}
         </Link>

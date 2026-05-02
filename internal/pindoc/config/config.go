@@ -116,6 +116,11 @@ type Config struct {
 	// git-pinner will replace this with a real repo-aware validator.
 	RepoRoot string
 
+	// AssetRoot is the LocalFS asset blob root. Artifact bodies keep only
+	// stable Pindoc asset references; storage keys remain internal under
+	// this directory.
+	AssetRoot string
+
 	// Author identity dual (Decision `decision-author-identity-dual`,
 	// migration 0014). V1 single-user self-host reads these env vars at
 	// startup and upserts a row into the `users` table so every write
@@ -207,6 +212,7 @@ func Load() (*Config, error) {
 		ProjectSlug:                env("PINDOC_PROJECT", "pindoc"),
 		WithSample:                 envBool("PINDOC_WITH_SAMPLE", false),
 		RepoRoot:                   env("PINDOC_REPO_ROOT", ""),
+		AssetRoot:                  env("PINDOC_ASSET_ROOT", "/var/lib/pindoc/assets"),
 		UserName:                   strings.TrimSpace(env("PINDOC_USER_NAME", "")),
 		UserEmail:                  strings.TrimSpace(env("PINDOC_USER_EMAIL", "")),
 		OAuthSigningKeyPath:        env("PINDOC_OAUTH_SIGNING_KEY_PATH", "./data/oauth-signing.pem"),

@@ -81,6 +81,7 @@ services:
       PINDOC_OAUTH_REDIRECT_BASE_URL: ${PINDOC_OAUTH_REDIRECT_BASE_URL:-}
       PINDOC_GITHUB_CLIENT_ID: ${PINDOC_GITHUB_CLIENT_ID:-}
       PINDOC_GITHUB_CLIENT_SECRET: ${PINDOC_GITHUB_CLIENT_SECRET:-}
+      PINDOC_ASSET_ROOT: ${PINDOC_ASSET_ROOT:-/var/lib/pindoc/assets}
       # Do not pass host PINDOC_EMBED_PROVIDER through here. A one-off
       # `PINDOC_EMBED_PROVIDER=stub docker compose up` previously made the
       # daemon silently index with hash embeddings. Compose users must opt
@@ -100,6 +101,7 @@ services:
       - "127.0.0.1:${PINDOC_DAEMON_PORT:-5830}:5830"
     volumes:
       - pindoc_cache:/var/lib/pindoc/cache
+      - pindoc_assets:/var/lib/pindoc/assets
       - .:/workspace/pindoc:ro
     depends_on:
       db:
@@ -168,5 +170,7 @@ volumes:
     name: pindoc_db
   pindoc_cache:
     name: pindoc_cache
+  pindoc_assets:
+    name: pindoc_assets
   pindoc_embed_cache:
     name: pindoc_embed_cache

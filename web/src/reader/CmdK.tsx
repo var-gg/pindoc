@@ -5,14 +5,16 @@ import { api, type GitRepoSummary, type SearchHit } from "../api/client";
 import { useI18n } from "../i18n";
 import { gitCommitPath, isCommitQuery, shortSha } from "../git/routes";
 import { cmdkResultMeta } from "./cmdkViewModel";
+import { projectRoutePrefix, projectSurfacePath } from "../readerRoutes";
 
 type Props = {
   projectSlug: string;
+  orgSlug: string;
   open: boolean;
   onClose: () => void;
 };
 
-export function CmdK({ projectSlug, open, onClose }: Props) {
+export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -94,7 +96,7 @@ export function CmdK({ projectSlug, open, onClose }: Props) {
         e.preventDefault();
         const item = items[selected];
         if (item?.kind === "artifact") {
-          navigate(`/p/${projectSlug}/wiki/${item.hit.slug}`);
+          navigate(projectSurfacePath(projectSlug, "wiki", item.hit.slug, orgSlug));
           onClose();
         }
         if (item?.kind === "commit") {
@@ -105,7 +107,7 @@ export function CmdK({ projectSlug, open, onClose }: Props) {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, items, selected, navigate, onClose, projectSlug]);
+  }, [open, items, selected, navigate, onClose, projectSlug, orgSlug]);
 
   if (!open) return null;
 
@@ -135,7 +137,7 @@ export function CmdK({ projectSlug, open, onClose }: Props) {
               className={`palette__item${i === selected ? " selected" : ""}`}
               onClick={() => {
                 if (item.kind === "artifact") {
-                  navigate(`/p/${projectSlug}/wiki/${item.hit.slug}`);
+                  navigate(projectSurfacePath(projectSlug, "wiki", item.hit.slug, orgSlug));
                 } else {
                   navigate(gitCommitPath(projectSlug, item.repo.id, item.sha));
                 }
@@ -150,7 +152,7 @@ export function CmdK({ projectSlug, open, onClose }: Props) {
                 </div>
                 <div className="mono">
                   {item.kind === "artifact"
-                    ? cmdkResultMeta(item.hit, t)
+                    ? `${projectRoutePrefix(projectSlug, orgSlug)} · ${cmdkResultMeta(item.hit, t)}`
                     : `${item.repo.name || item.repo.id} · ${item.repo.default_branch}`}
                 </div>
                 {item.kind === "artifact" && item.hit.snippet && (

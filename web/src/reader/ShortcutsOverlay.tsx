@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import type { Artifact } from "../api/client";
 import { useI18n } from "../i18n";
+import { projectSurfacePath } from "../readerRoutes";
 import type { BadgeFilter } from "./badgeFilters";
 import { typeChipClass } from "./typeChip";
 
@@ -48,6 +49,7 @@ type Props = {
   open: boolean;
   view: ReaderView;
   projectSlug: string;
+  orgSlug: string;
   detail: Artifact | null;
   selectedArea: string | null;
   selectedType: string | null;
@@ -60,6 +62,7 @@ export function ShortcutsOverlay({
   open,
   view,
   projectSlug,
+  orgSlug,
   detail,
   selectedArea,
   selectedType,
@@ -81,7 +84,7 @@ export function ShortcutsOverlay({
     areaNameBySlug,
     t,
   });
-  const legendHref = `/p/${projectSlug}/wiki/visual-language-reference`;
+  const legendHref = projectSurfacePath(projectSlug, "wiki", "visual-language-reference", orgSlug);
 
   return (
     <div

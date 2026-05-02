@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { api, type Artifact, type ArtifactRef } from "../api/client";
 import { useI18n } from "../i18n";
+import { projectSurfacePath } from "../readerRoutes";
 import { EmptyState, SurfaceHeader } from "./SurfacePrimitives";
 import { AtlasMinimap } from "./AtlasMinimap";
 import { computeAtlas } from "./atlas";
@@ -29,6 +30,7 @@ import {
 
 type Props = {
   projectSlug: string;
+  orgSlug: string;
   list: ArtifactRef[];
   allCount: number;
   selectedArea: string | null;
@@ -69,6 +71,7 @@ const QUIET_TOUR_OFFSET = 32;
 
 export function GraphSurface({
   projectSlug,
+  orgSlug,
   list,
   allCount,
   selectedArea,
@@ -428,7 +431,7 @@ export function GraphSurface({
                 const fog = depthFogFor(distance);
                 const isFocus = focusId === node.id;
                 const isHover = hoverId === node.id;
-                const href = graphNodeHref(projectSlug, node.slug, selectedArea, selectedType, badgeFilters);
+                const href = graphNodeHref(projectSlug, orgSlug, node.slug, selectedArea, selectedType, badgeFilters);
                 return (
                   <a
                     key={node.id}
@@ -515,7 +518,7 @@ export function GraphSurface({
                 <div className="graph-peek__title">{hoverDetail.title}</div>
                 <a
                   className="graph-peek__open"
-                  href={graphNodeHref(projectSlug, hoverDetail.slug, selectedArea, selectedType, badgeFilters)}
+                  href={graphNodeHref(projectSlug, orgSlug, hoverDetail.slug, selectedArea, selectedType, badgeFilters)}
                   onClick={(event) => {
                     if (
                       event.button !== 0 ||
@@ -527,7 +530,7 @@ export function GraphSurface({
                       return;
                     event.preventDefault();
                     navigate(
-                      graphNodeHref(projectSlug, hoverDetail.slug, selectedArea, selectedType, badgeFilters),
+                      graphNodeHref(projectSlug, orgSlug, hoverDetail.slug, selectedArea, selectedType, badgeFilters),
                     );
                   }}
                 >
@@ -550,6 +553,7 @@ export function GraphSurface({
 
 function graphNodeHref(
   projectSlug: string,
+  orgSlug: string,
   slug: string,
   selectedArea: string | null,
   selectedType: string | null,
@@ -560,7 +564,7 @@ function graphNodeHref(
   if (selectedType) params.set("type", selectedType);
   appendBadgeFilters(params, badgeFilters);
   const qs = params.toString();
-  return `/p/${projectSlug}/wiki/${slug}${qs ? `?${qs}` : ""}`;
+  return `${projectSurfacePath(projectSlug, "wiki", slug, orgSlug)}${qs ? `?${qs}` : ""}`;
 }
 
 function graphFilterSummary(

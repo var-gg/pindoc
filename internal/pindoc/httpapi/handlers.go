@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,14 +20,16 @@ import (
 )
 
 type projectInfo struct {
-	ID              string `json:"id"`
-	Slug            string `json:"slug"`
-	Name            string `json:"name"`
-	Description     string `json:"description,omitempty"`
-	Color           string `json:"color,omitempty"`
-	PrimaryLanguage string `json:"primary_language"`
-	SensitiveOps    string `json:"sensitive_ops"`
-	CurrentRole     string `json:"current_role,omitempty"`
+	ID               string `json:"id"`
+	Slug             string `json:"slug"`
+	OrgSlug          string `json:"org_slug,omitempty"`
+	OrganizationSlug string `json:"organization_slug,omitempty"`
+	Name             string `json:"name"`
+	Description      string `json:"description,omitempty"`
+	Color            string `json:"color,omitempty"`
+	PrimaryLanguage  string `json:"primary_language"`
+	SensitiveOps     string `json:"sensitive_ops"`
+	CurrentRole      string `json:"current_role,omitempty"`
 	// Locale is a compatibility alias for PrimaryLanguage. Locale is no
 	// longer part of project identity or Reader URLs after task-canonical-
 	// locale-migration.
@@ -204,15 +207,17 @@ func (d Deps) principalForRequest(r *http.Request) *pauth.Principal {
 }
 
 type projectListRow struct {
-	ID              string    `json:"id"`
-	Slug            string    `json:"slug"`
-	Name            string    `json:"name"`
-	Description     string    `json:"description,omitempty"`
-	Color           string    `json:"color,omitempty"`
-	PrimaryLanguage string    `json:"primary_language"`
-	ArtifactsCount  int       `json:"artifacts_count"`
-	CreatedAt       time.Time `json:"created_at"`
-	ReaderHidden    bool      `json:"reader_hidden,omitempty"`
+	ID               string    `json:"id"`
+	Slug             string    `json:"slug"`
+	OrgSlug          string    `json:"org_slug,omitempty"`
+	OrganizationSlug string    `json:"organization_slug,omitempty"`
+	Name             string    `json:"name"`
+	Description      string    `json:"description,omitempty"`
+	Color            string    `json:"color,omitempty"`
+	PrimaryLanguage  string    `json:"primary_language"`
+	ArtifactsCount   int       `json:"artifacts_count"`
+	CreatedAt        time.Time `json:"created_at"`
+	ReaderHidden     bool      `json:"reader_hidden,omitempty"`
 }
 
 // userRow is the thin projection of users table rows TaskControls needs
@@ -332,10 +337,11 @@ func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
 	includeHidden := includeReaderHiddenProjects(r)
 	rows, err := d.DB.Query(r.Context(), `
 		SELECT
-			p.id::text, p.slug, p.name, p.description, p.color,
+			p.id::text, p.slug, o.slug, p.name, p.description, p.color,
 			p.primary_language, p.created_at,
 			(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
 		FROM projects p
+		LEFT JOIN organizations o ON o.id = p.organization_id
 		ORDER BY p.created_at
 	`)
 	if err != nil {
@@ -350,7 +356,7 @@ func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
 		var p projectListRow
 		var desc, color *string
 		if err := rows.Scan(
-			&p.ID, &p.Slug, &p.Name, &desc, &color,
+			&p.ID, &p.Slug, &p.OrganizationSlug, &p.Name, &desc, &color,
 			&p.PrimaryLanguage, &p.CreatedAt, &p.ArtifactsCount,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan failed")
@@ -362,6 +368,7 @@ func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
 		if color != nil {
 			p.Color = *color
 		}
+		p.OrgSlug = p.OrganizationSlug
 		p.ReaderHidden = readerHiddenProjectSlug(p.Slug)
 		if p.ReaderHidden && !includeHidden {
 			continue
@@ -376,18 +383,20 @@ func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
-	slug := projectSlugFrom(r)
+	projectPredicate, projectArg := projectLookupPredicate(r, "p", 1)
 	var out projectInfo
 	var desc, color *string
-	err := d.DB.QueryRow(r.Context(), `
+	err := d.DB.QueryRow(r.Context(), fmt.Sprintf(`
 		SELECT
-			p.id::text, p.slug, p.name, p.description, p.color,
+			p.id::text, p.slug, o.slug, p.name, p.description, p.color,
 			p.primary_language, p.primary_language, COALESCE(NULLIF(p.sensitive_ops, ''), 'auto'), p.created_at,
 			(SELECT count(*) FROM areas     WHERE project_id = p.id),
 			(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
-		FROM projects p WHERE p.slug = $1
-	`, slug).Scan(
-		&out.ID, &out.Slug, &out.Name, &desc, &color,
+		FROM projects p
+		LEFT JOIN organizations o ON o.id = p.organization_id
+		WHERE %s
+	`, projectPredicate), projectArg).Scan(
+		&out.ID, &out.Slug, &out.OrganizationSlug, &out.Name, &desc, &color,
 		&out.PrimaryLanguage, &out.Locale, &out.SensitiveOps, &out.CreatedAt,
 		&out.AreasCount, &out.ArtifactsCount,
 	)
@@ -406,6 +415,7 @@ func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
 	if color != nil {
 		out.Color = *color
 	}
+	out.OrgSlug = out.OrganizationSlug
 	out.Rendering = pindocRenderingCaps
 	out.Capabilities = ProjectCaps{ReviewQueueSupported: true}
 	out.CurrentRole = d.currentProjectRole(r.Context(), r, out.Slug)
@@ -449,20 +459,24 @@ type areaRow struct {
 
 func (d Deps) handleAreas(w http.ResponseWriter, r *http.Request) {
 	slug := projectSlugFrom(r)
+	projectPredicate, projectArg := projectLookupPredicate(r, "projects", 1)
+	visibilityPredicate, visibilityArgs := artifactVisibilityPredicate(r, "x", 3)
 	// include_templates=true counts _template_* artifacts in artifact_count.
 	// Must stay in lockstep with handleArtifactList's filter so Sidebar
 	// counts == list cardinality. Fixing the Phase 13 regression where
 	// counts included templates but the list excluded them.
 	includeTemplates := r.URL.Query().Get("include_templates") == "true"
-	rows, err := d.DB.Query(r.Context(), `
-		WITH p AS (SELECT id FROM projects WHERE slug = $1)
+	args := append([]any{projectArg, includeTemplates}, visibilityArgs...)
+	rows, err := d.DB.Query(r.Context(), fmt.Sprintf(`
+		WITH p AS (SELECT id FROM projects WHERE %s)
 		SELECT
 			a.id::text, a.slug, a.name, a.description,
 			parent.slug, a.is_cross_cutting,
 			(SELECT count(*) FROM artifacts x
 			  WHERE x.area_id = a.id
 			    AND x.status <> 'archived'
-			    AND ($2::bool OR NOT starts_with(x.slug, '_template_'))),
+			    AND ($2::bool OR NOT starts_with(x.slug, '_template_'))
+			    AND %s),
 			COALESCE(ARRAY(
 			  SELECT c.slug FROM areas c
 			  WHERE c.parent_id = a.id
@@ -472,7 +486,7 @@ func (d Deps) handleAreas(w http.ResponseWriter, r *http.Request) {
 		JOIN p ON a.project_id = p.id
 		LEFT JOIN areas parent ON parent.id = a.parent_id
 		ORDER BY a.is_cross_cutting, a.slug
-	`, slug, includeTemplates)
+	`, projectPredicate, visibilityPredicate), args...)
 	if err != nil {
 		d.Logger.Error("areas query", "err", err)
 		writeError(w, http.StatusInternalServerError, "query failed")
@@ -500,10 +514,15 @@ func (d Deps) handleAreas(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, a)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"project_slug": slug,
 		"areas":        out,
-	})
+	}
+	if org := orgSlugFrom(r); org != "" {
+		body["org_slug"] = org
+		body["organization_slug"] = org
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 type artifactRow struct {
@@ -553,13 +572,16 @@ type authorUserRef struct {
 
 func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 	slug := projectSlugFrom(r)
+	projectPredicate, projectArg := projectLookupPredicate(r, "p", 1)
+	visibilityPredicate, visibilityArgs := artifactVisibilityPredicate(r, "a", 5)
 	areaSlug := r.URL.Query().Get("area")
 	typeFilter := r.URL.Query().Get("type")
 	// include_templates=true surfaces _template_* artifacts (Phase 13).
 	// Default hides them so the reader list stays focused on real docs.
 	includeTemplates := r.URL.Query().Get("include_templates") == "true"
+	args := append([]any{projectArg, areaSlug, typeFilter, includeTemplates}, visibilityArgs...)
 
-	rows, err := d.DB.Query(r.Context(), `
+	rows, err := d.DB.Query(r.Context(), fmt.Sprintf(`
 		SELECT
 			a.id::text, a.slug, a.type, a.title, ar.slug,
 			COALESCE(NULLIF(a.body_locale, ''), NULLIF(p.primary_language, ''), 'en'),
@@ -589,14 +611,15 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 				 LIMIT 5
 			) e
 		) wr ON true
-		WHERE p.slug = $1
+		WHERE %s
 		  AND a.status <> 'archived'
 		  AND ($2 = '' OR ar.slug = $2)
 		  AND ($3 = '' OR a.type  = $3)
 		  AND ($4::bool OR NOT starts_with(a.slug, '_template_'))
+		  AND %s
 		ORDER BY a.updated_at DESC
 		LIMIT 200
-	`, slug, areaSlug, typeFilter, includeTemplates)
+	`, projectPredicate, visibilityPredicate), args...)
 	if err != nil {
 		d.Logger.Error("artifact list", "err", err)
 		writeError(w, http.StatusInternalServerError, "query failed")
@@ -645,10 +668,15 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, a)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"project_slug": slug,
 		"artifacts":    out,
-	})
+	}
+	if org := orgSlugFrom(r); org != "" {
+		body["org_slug"] = org
+		body["organization_slug"] = org
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 type artifactDetail struct {
@@ -675,6 +703,7 @@ type artifactDetail struct {
 	// empty when the artifact has no pins / the agent didn't report a
 	// session.
 	Pins                 []pinRow              `json:"pins,omitempty"`
+	Assets               []assetDetailRow      `json:"assets,omitempty"`
 	SourceSessionRef     json.RawMessage       `json:"source_session_ref,omitempty"`
 	VerificationNotes    []verificationNoteRow `json:"verification_notes,omitempty"`
 	VerificationReceipts []string              `json:"verification_receipts,omitempty"`
@@ -740,6 +769,8 @@ type verificationNoteRow struct {
 
 func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	slug := projectSlugFrom(r)
+	projectPredicate, projectArg := projectLookupPredicate(r, "p", 1)
+	visibilityPredicate, visibilityArgs := artifactVisibilityPredicate(r, "a", 3)
 	ref := r.PathValue("idOrSlug")
 	if ref == "" {
 		writeError(w, http.StatusBadRequest, "missing id or slug")
@@ -751,7 +782,8 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	var authorVer *string
 	var taskMeta, artifactMeta, sourceSessionRef []byte
 	var userID, userDisplay, userGithub *string
-	err := d.DB.QueryRow(r.Context(), `
+	args := append([]any{projectArg, ref}, visibilityArgs...)
+	err := d.DB.QueryRow(r.Context(), fmt.Sprintf(`
 		SELECT
 			a.id::text, a.slug, a.type, a.title, ar.slug,
 			COALESCE(NULLIF(a.body_locale, ''), NULLIF(p.primary_language, ''), 'en'),
@@ -766,7 +798,7 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		JOIN projects p  ON p.id  = a.project_id
 		JOIN areas    ar ON ar.id = a.area_id
 		LEFT JOIN users u ON u.id = a.author_user_id
-		WHERE p.slug = $1 AND (
+		WHERE %s AND (
 			a.id::text = $2 OR a.slug = $2 OR
 			a.id = (
 				SELECT asa.artifact_id
@@ -775,8 +807,9 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 				 LIMIT 1
 			)
 		)
+		  AND %s
 		LIMIT 1
-	`, slug, ref).Scan(
+	`, projectPredicate, visibilityPredicate), args...).Scan(
 		&a.ID, &a.Slug, &a.Type, &a.Title, &a.AreaSlug,
 		&a.BodyLocale, &a.Visibility,
 		&a.Completeness, &a.Status, &a.ReviewState,
@@ -840,6 +873,11 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		d.Logger.Warn("pins lookup failed", "artifact_id", a.ID, "err", err)
 	} else {
 		a.Pins = pins
+	}
+	if assetRows, err := d.loadArtifactAssets(r.Context(), slug, a.ID, a.RevisionNumber); err != nil {
+		d.Logger.Warn("asset relation lookup failed", "artifact_id", a.ID, "err", err)
+	} else {
+		a.Assets = assetRows
 	}
 	if warnings, err := d.loadRecentWarnings(r.Context(), a.ID); err != nil {
 		d.Logger.Warn("recent warnings lookup failed", "artifact_id", a.ID, "err", err)

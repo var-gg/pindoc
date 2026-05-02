@@ -55,14 +55,15 @@ type taskAssignOutput struct {
 	SuggestedActions []string             `json:"suggested_actions,omitempty"`
 
 	// Populated on accepted paths.
-	ArtifactID     string `json:"artifact_id,omitempty"`
-	Slug           string `json:"slug,omitempty"`
-	AgentRef       string `json:"agent_ref,omitempty"`
-	RevisionNumber int    `json:"revision_number,omitempty"`
-	HumanURL       string `json:"human_url,omitempty"`
-	HumanURLAbs    string `json:"human_url_abs,omitempty"`
-	NewAssignee    string `json:"new_assignee,omitempty"`
-	ToolsetVersion string `json:"toolset_version,omitempty"`
+	ArtifactID      string `json:"artifact_id,omitempty"`
+	Slug            string `json:"slug,omitempty"`
+	AgentRef        string `json:"agent_ref,omitempty"`
+	RevisionNumber  int    `json:"revision_number,omitempty"`
+	HumanURL        string `json:"human_url,omitempty"`
+	HumanURLAbs     string `json:"human_url_abs,omitempty"`
+	CurrentAssignee string `json:"current_assignee,omitempty"`
+	NewAssignee     string `json:"new_assignee,omitempty"`
+	ToolsetVersion  string `json:"toolset_version,omitempty"`
 }
 
 // assigneePattern accepts the three principal shapes defined by Decision
@@ -126,7 +127,7 @@ func RegisterTaskAssign(server *sdk.Server, deps Deps) {
 					Checklist: []string{"assignee must match agent:<id> | user:<id> | @<handle>, or be empty string to clear"},
 				}, nil
 			}
-			res, err := assignOneTask(ctx, deps, p, scope, in.SlugOrID, assignee, in.Reason, in.AuthorID, in.AuthorVersion, "")
+			res, err := assignOneTask(ctx, deps, p, scope, in.SlugOrID, assignee, in.Reason, in.AuthorID, in.AuthorVersion, "", true)
 			if err != nil {
 				return nil, taskAssignOutput{}, err
 			}
@@ -135,9 +136,12 @@ func RegisterTaskAssign(server *sdk.Server, deps Deps) {
 	)
 }
 
-// assignOneTask resolves slug/ID, reads current head revision, and calls
-// handleUpdateMetaPatch with task_meta.assignee set. Shared by task.assign
-// (bulkOpID="") and task.bulk_assign (bulkOpID="<hex>"). Returns a
+// assignOneTask resolves slug/ID, reads current head revision/current
+// assignee, and calls handleUpdateMetaPatch with task_meta.assignee set.
+// Shared by task.assign (bulkOpID="") and task.bulk_assign
+// (bulkOpID="<hex>"). Bulk calls pass allowReassign=false by default so
+// broad batches cannot steal already-owned work without explicit intent.
+// Returns a
 // populated taskAssignOutput with either accepted fields or a stable
 // error code; err is reserved for actual server faults (DB down, etc.)
 // that callers should surface as 5xx-equivalent.
@@ -147,6 +151,7 @@ func assignOneTask(
 	p *auth.Principal,
 	scope *auth.ProjectScope,
 	slugOrID, assignee, reason, authorID, authorVersion, bulkOpID string,
+	allowReassign bool,
 ) (taskAssignOutput, error) {
 	ref := normalizeRef(slugOrID)
 	if ref == "" {
@@ -161,17 +166,17 @@ func assignOneTask(
 	// Resolve target: must exist, must be Task, capture revision number
 	// for the optimistic-lock check handleUpdateMetaPatch runs.
 	var (
-		artifactID, resolvedSlug, artifactType string
-		lastRev                                int
+		artifactID, resolvedSlug, artifactType, currentAssignee string
+		lastRev                                                 int
 	)
 	err := deps.DB.QueryRow(ctx, `
-		SELECT a.id::text, a.slug, a.type,
+		SELECT a.id::text, a.slug, a.type, COALESCE(a.task_meta->>'assignee', ''),
 		       COALESCE((SELECT max(revision_number) FROM artifact_revisions WHERE artifact_id = a.id), 0)
 		FROM artifacts a
 		JOIN projects p ON p.id = a.project_id
 		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 		LIMIT 1
-	`, scope.ProjectSlug, ref).Scan(&artifactID, &resolvedSlug, &artifactType, &lastRev)
+	`, scope.ProjectSlug, ref).Scan(&artifactID, &resolvedSlug, &artifactType, &currentAssignee, &lastRev)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return taskAssignOutput{
 			Status:    "not_ready",
@@ -189,6 +194,19 @@ func assignOneTask(
 			ErrorCode: "ASSIGN_NOT_A_TASK",
 			Failed:    []string{"ASSIGN_NOT_A_TASK"},
 			Checklist: []string{fmt.Sprintf("target %q has type=%s; task.assign accepts Task artifacts only", resolvedSlug, artifactType)},
+		}, nil
+	}
+	if taskBulkReassignBlocked(currentAssignee, assignee, allowReassign) {
+		return taskAssignOutput{
+			Status:           "not_ready",
+			ErrorCode:        "ASSIGNEE_ALREADY_SET",
+			Failed:           []string{"ASSIGNEE_ALREADY_SET"},
+			Checklist:        []string{fmt.Sprintf("Task %q already has assignee %q; pass allow_reassign=true only for intentional rebalancing", resolvedSlug, currentAssignee)},
+			SuggestedActions: []string{"Use pindoc.task.assign for one explicit Task, or retry bulk_assign with allow_reassign=true after confirming the project scope and current owner."},
+			ArtifactID:       artifactID,
+			Slug:             resolvedSlug,
+			CurrentAssignee:  currentAssignee,
+			NewAssignee:      assignee,
 		}, nil
 	}
 
@@ -248,18 +266,31 @@ func assignOneTask(
 			SuggestedActions: out.SuggestedActions,
 			ArtifactID:       artifactID,
 			Slug:             resolvedSlug,
+			CurrentAssignee:  currentAssignee,
 		}, nil
 	}
 	return taskAssignOutput{
-		Status:         "accepted",
-		ArtifactID:     out.ArtifactID,
-		Slug:           out.Slug,
-		AgentRef:       out.AgentRef,
-		RevisionNumber: out.RevisionNumber,
-		HumanURL:       out.HumanURL,
-		HumanURLAbs:    out.HumanURLAbs,
-		NewAssignee:    assignee,
+		Status:          "accepted",
+		ArtifactID:      out.ArtifactID,
+		Slug:            out.Slug,
+		AgentRef:        out.AgentRef,
+		RevisionNumber:  out.RevisionNumber,
+		HumanURL:        out.HumanURL,
+		HumanURLAbs:     out.HumanURLAbs,
+		CurrentAssignee: currentAssignee,
+		NewAssignee:     assignee,
 	}, nil
+}
+
+func taskBulkReassignBlocked(currentAssignee, newAssignee string, allowReassign bool) bool {
+	if allowReassign {
+		return false
+	}
+	currentAssignee = strings.TrimSpace(currentAssignee)
+	if currentAssignee == "" {
+		return false
+	}
+	return currentAssignee != strings.TrimSpace(newAssignee)
 }
 
 // displayAssignee returns a human-readable form for commit messages. Used

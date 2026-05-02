@@ -67,6 +67,8 @@ export type OnboardingIdentityError = {
 export type Project = {
   id: string;
   slug: string;
+  org_slug?: string;
+  organization_slug?: string;
   name: string;
   description?: string;
   color?: string;
@@ -100,6 +102,8 @@ export type ProjectSettingsPatchResp = {
 export type ProjectListItem = {
   id: string;
   slug: string;
+  org_slug?: string;
+  organization_slug?: string;
   name: string;
   description?: string;
   color?: string;
@@ -243,6 +247,28 @@ export type PinRef = {
   path: string;
   lines_start?: number;
   lines_end?: number;
+};
+
+export type AssetProjection = {
+  alt_text?: string;
+  caption?: string;
+  ocr_text?: string;
+  layout_summary?: string;
+};
+
+export type AssetRef = {
+  id: string;
+  asset_ref: string;
+  role: "inline_image" | "attachment" | "evidence" | "generated_output";
+  mime_type: string;
+  size_bytes: number;
+  original_filename?: string;
+  blob_url: string;
+  is_image: boolean;
+  projection: AssetProjection;
+  display_order: number;
+  created_by?: string;
+  created_at?: string;
 };
 
 export type GitPreviewEnvelope = {
@@ -424,6 +450,7 @@ export type Artifact = ArtifactRef & {
   relates_to?: EdgeRef[];
   related_by?: EdgeRef[];
   pins?: PinRef[];
+  assets?: AssetRef[];
   source_session_ref?: SourceSessionRef;
   recent_warnings?: RecentWarning[];
   can_edit_visibility?: boolean;

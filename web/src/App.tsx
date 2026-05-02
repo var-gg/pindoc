@@ -11,10 +11,10 @@ import { Diff } from "./reader/Diff";
 import { History } from "./reader/History";
 import { PindocTooltipProvider } from "./reader/Tooltip";
 import { ProjectSettingsPage } from "./reader/ProjectSettingsPage";
-import { ReaderShell } from "./reader/ReaderShell";
+import { ReaderShell, type ReaderView } from "./reader/ReaderShell";
 import { SignupCompletePage } from "./signup/SignupCompletePage";
 import { SignupPage } from "./signup/SignupPage";
-import { isReaderDevSurfaceEnabled, normalizeReaderSurfaceSegment, projectSurfacePath } from "./readerRoutes";
+import { DEFAULT_READER_ORG_SLUG, isReaderDevSurfaceEnabled, normalizeReaderSurfaceSegment, projectSurfacePath } from "./readerRoutes";
 import { findSurface, previews, uiKits } from "./surfaces";
 
 export function App() {
@@ -32,17 +32,32 @@ export function App() {
 
       {/* Canonical project-scoped surfaces. Locale is project metadata, not
           route identity, after task-canonical-locale-migration. */}
-      <Route path="/p/:project/today" element={<ReaderShell view="today" />} />
-      <Route path="/p/:project/wiki" element={<ReaderShell view="reader" />} />
-      <Route path="/p/:project/wiki/:slug" element={<ReaderShell view="reader" />} />
+      <Route path="/:org/p/:project/today" element={<ReaderRoute view="today" />} />
+      <Route path="/:org/p/:project/wiki" element={<ReaderRoute view="reader" />} />
+      <Route path="/:org/p/:project/wiki/:slug" element={<ReaderRoute view="reader" />} />
+      <Route path="/:org/p/:project/wiki/:slug/history" element={<History />} />
+      <Route path="/:org/p/:project/wiki/:slug/diff" element={<Diff />} />
+      <Route path="/:org/p/:project/task" element={<ProjectSurfaceRedirect segment="task" />} />
+      <Route path="/:org/p/:project/task/:slug" element={<ProjectSurfaceRedirect segment="task" />} />
+      <Route path="/:org/p/:project/tasks" element={<ReaderRoute view="tasks" />} />
+      <Route path="/:org/p/:project/tasks/:slug" element={<ReaderRoute view="tasks" />} />
+      <Route path="/:org/p/:project/graph" element={<GraphSurfaceGate />} />
+      <Route path="/:org/p/:project/inbox" element={<ReaderRoute view="inbox" />} />
+      <Route path="/:org/p/:project/settings" element={<ProjectSettingsPage />} />
+      <Route path="/:org/p/:project/git/:repoId/commit/:sha" element={<CommitDetailPage />} />
+      <Route path="/:org/p/:project/:surface" element={<ProjectSurfaceNotFound />} />
+      <Route path="/:org/p/:project/:surface/*" element={<ProjectSurfaceNotFound />} />
+      <Route path="/p/:project/today" element={<ReaderRoute view="today" />} />
+      <Route path="/p/:project/wiki" element={<ReaderRoute view="reader" />} />
+      <Route path="/p/:project/wiki/:slug" element={<ReaderRoute view="reader" />} />
       <Route path="/p/:project/wiki/:slug/history" element={<History />} />
       <Route path="/p/:project/wiki/:slug/diff" element={<Diff />} />
       <Route path="/p/:project/task" element={<ProjectSurfaceRedirect segment="task" />} />
       <Route path="/p/:project/task/:slug" element={<ProjectSurfaceRedirect segment="task" />} />
-      <Route path="/p/:project/tasks" element={<ReaderShell view="tasks" />} />
-      <Route path="/p/:project/tasks/:slug" element={<ReaderShell view="tasks" />} />
+      <Route path="/p/:project/tasks" element={<ReaderRoute view="tasks" />} />
+      <Route path="/p/:project/tasks/:slug" element={<ReaderRoute view="tasks" />} />
       <Route path="/p/:project/graph" element={<GraphSurfaceGate />} />
-      <Route path="/p/:project/inbox" element={<ReaderShell view="inbox" />} />
+      <Route path="/p/:project/inbox" element={<ReaderRoute view="inbox" />} />
       <Route path="/p/:project/settings" element={<ProjectSettingsPage />} />
       <Route path="/p/:project/git/:repoId/commit/:sha" element={<CommitDetailPage />} />
       <Route path="/p/:project/:surface" element={<ProjectSurfaceNotFound />} />
@@ -112,19 +127,19 @@ function DesignSurfaceGate() {
 function GraphSurfaceGate() {
   const location = useLocation();
   if (isReaderDevSurfaceEnabled(location.search, import.meta.env.DEV)) {
-    return <ReaderShell view="graph" />;
+    return <ReaderRoute view="graph" />;
   }
-  return <ReaderShell view="reader" unavailableSurface="graph" />;
+  return <ReaderRoute view="reader" unavailableSurface="graph" />;
 }
 
 function ProjectSurfaceRedirect({ segment }: { segment: string }) {
-  const { project = "", slug } = useParams<{ project: string; slug?: string }>();
+  const { org, project = "", slug } = useParams<{ org?: string; project: string; slug?: string }>();
   const location = useLocation();
   const surface = normalizeReaderSurfaceSegment(segment);
   if (!surface) return <ProjectSurfaceNotFound surfaceOverride={segment} />;
   return (
     <Navigate
-      to={`${projectSurfacePath(project, surface, slug)}${location.search || ""}`}
+      to={`${projectSurfacePath(project, surface, slug, org ?? DEFAULT_READER_ORG_SLUG)}${location.search || ""}`}
       replace
     />
   );
@@ -132,7 +147,12 @@ function ProjectSurfaceRedirect({ segment }: { segment: string }) {
 
 function ProjectSurfaceNotFound({ surfaceOverride }: { surfaceOverride?: string }) {
   const { surface = surfaceOverride ?? "" } = useParams<{ surface?: string }>();
-  return <ReaderShell view="reader" unavailableSurface={surfaceOverride ?? surface} />;
+  return <ReaderRoute view="reader" unavailableSurface={surfaceOverride ?? surface} />;
+}
+
+function ReaderRoute(props: { view: ReaderView; unavailableSurface?: string }) {
+  const { org } = useParams<{ org?: string }>();
+  return <ReaderShell {...props} orgSlug={org ?? DEFAULT_READER_ORG_SLUG} />;
 }
 
 function ShellLayout() {

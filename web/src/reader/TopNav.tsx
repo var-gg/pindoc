@@ -14,11 +14,12 @@ import { visualIconComponent } from "./visualLanguageIcons";
 import { Tooltip } from "./Tooltip";
 import { canShowTelemetryNav, telemetryDebugEnabled } from "./opsAccess";
 import { paletteOpenAfterProjectSwitcherToggle, projectSwitcherOpenAfterPaletteChange } from "./overlayStack";
-import { isReaderDevSurfaceEnabled } from "../readerRoutes";
+import { isReaderDevSurfaceEnabled, projectRoutePrefix, projectSurfacePath } from "../readerRoutes";
 import { maskEmail } from "./profilePrivacy";
 
 type Props = {
   project: Project;
+  orgSlug: string;
   surface: SurfaceId;
   theme: Theme;
   onToggleTheme: () => void;
@@ -46,6 +47,7 @@ const WIDTH_OPTIONS: Array<{ mode: ReaderWidth; icon: ComponentType<{ className?
 
 export function TopNav({
   project,
+  orgSlug,
   surface,
   theme,
   onToggleTheme,
@@ -62,7 +64,7 @@ export function TopNav({
   const { t, lang, setLang } = useI18n();
   const location = useLocation();
   const nextLang: Lang = lang === "ko" ? "en" : "ko";
-  const baseRoute = `/p/${project.slug}`;
+  const baseRoute = projectRoutePrefix(project.slug, orgSlug);
   const canInvite = project.current_role === "owner" && Boolean(onOpenInvite);
   const reviewQueueEnabled = project.sensitive_ops === "confirm";
   const showGraphSurface = isReaderDevSurfaceEnabled(location.search, import.meta.env.DEV);
@@ -111,6 +113,7 @@ export function TopNav({
 
       <ProjectSwitcher
         project={project}
+        orgSlug={orgSlug}
         open={projectSwitcherOpen}
         onOpenChange={setProjectSwitcher}
         showHiddenProjects={opsDebug}
@@ -193,6 +196,7 @@ export function TopNav({
 
         <UserProfileMenu
           project={project}
+          orgSlug={orgSlug}
           theme={theme}
           nextLang={nextLang}
           onToggleTheme={onToggleTheme}
@@ -232,12 +236,14 @@ export function TopNav({
 
 function UserProfileMenu({
   project,
+  orgSlug,
   theme,
   nextLang,
   onToggleTheme,
   onChangeLang,
 }: {
   project: Project;
+  orgSlug: string;
   theme: Theme;
   nextLang: Lang;
   onToggleTheme: () => void;
@@ -285,7 +291,7 @@ function UserProfileMenu({
   const email = user?.email ? maskEmail(user.email) : t("profile.fallback_email");
   const initials = profileInitials(user?.display_name || user?.email || project.slug);
   const canSignOut = authMode === "oauth_github";
-  const settingsHref = `/p/${project.slug}/settings`;
+  const settingsHref = `${projectRoutePrefix(project.slug, orgSlug)}/settings`;
 
   async function handleSignOut() {
     if (!canSignOut || signingOut) return;
@@ -509,11 +515,13 @@ function HelpPopover({ surface }: { surface: SurfaceId }) {
 // pindoc.project.create. The "+ new project" row surfaces that hint.
 function ProjectSwitcher({
   project,
+  orgSlug,
   open,
   onOpenChange,
   showHiddenProjects,
 }: {
   project: Project;
+  orgSlug: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   showHiddenProjects: boolean;
@@ -574,6 +582,7 @@ function ProjectSwitcher({
         onClick={() => onOpenChange(!open)}
       >
         <span>{project.slug}</span>
+        <span className="nav__project-org">{orgSlug}</span>
         <ChevronDown className="lucide" />
       </button>
       {open && (
@@ -603,7 +612,7 @@ function ProjectSwitcher({
           {projects?.map((p) => (
             <a
               key={p.id}
-              href={`/p/${p.slug}/wiki`}
+              href={projectSurfacePath(p.slug, "wiki", undefined, p.organization_slug ?? orgSlug)}
               role="option"
               aria-selected={p.slug === project.slug}
               style={{

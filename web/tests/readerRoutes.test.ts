@@ -1,5 +1,7 @@
 import {
+  DEFAULT_READER_ORG_SLUG,
   isReaderDevSurfaceEnabled,
+  matchReaderRoutePath,
   normalizeReaderSurfaceSegment,
   projectSurfacePath,
 } from "../src/readerRoutes";
@@ -39,6 +41,35 @@ function testProjectSurfacePathPreservesCanonicalTasks(): void {
   );
 }
 
+function testProjectSurfacePathAddsOrgContextWhenPresent(): void {
+  assertEqual(
+    projectSurfacePath("pindoc", "wiki", "artifact-a", "curioustore"),
+    "/curioustore/p/pindoc/wiki/artifact-a",
+    "org-scoped wiki detail route",
+  );
+  assertEqual(
+    projectSurfacePath("pin doc", "wiki", "a/b", "curio store"),
+    "/curio%20store/p/pin%20doc/wiki/a%2Fb",
+    "org-scoped route segments should be encoded independently",
+  );
+}
+
+function testReaderRouteMatchAcceptsOrgScopedAndLegacyPaths(): void {
+  const orgScoped = matchReaderRoutePath("/curioustore/p/pindoc/wiki/artifact-a");
+  assertEqual(orgScoped?.orgSlug, "curioustore", "org-scoped route org slug");
+  assertEqual(orgScoped?.projectSlug, "pindoc", "org-scoped route project slug");
+  assertEqual(orgScoped?.surface, "wiki", "org-scoped route surface");
+  assertEqual(orgScoped?.slug, "artifact-a", "org-scoped route artifact slug");
+  assertEqual(orgScoped?.legacyProjectRoute, false, "org-scoped route should not be legacy");
+
+  const legacy = matchReaderRoutePath("/p/pindoc/wiki/artifact-a");
+  assertEqual(legacy?.orgSlug, DEFAULT_READER_ORG_SLUG, "legacy route default org fallback");
+  assertEqual(legacy?.projectSlug, "pindoc", "legacy route project slug");
+  assertEqual(legacy?.surface, "wiki", "legacy route surface");
+  assertEqual(legacy?.slug, "artifact-a", "legacy route artifact slug");
+  assertEqual(legacy?.legacyProjectRoute, true, "legacy route marker");
+}
+
 function testDevSurfaceGateRequiresDevQueryInProduction(): void {
   assertEqual(
     isReaderDevSurfaceEnabled("", false),
@@ -60,4 +91,6 @@ function testDevSurfaceGateRequiresDevQueryInProduction(): void {
 testTaskAliasNormalizesToTasks();
 testUnknownSurfaceFallsThrough();
 testProjectSurfacePathPreservesCanonicalTasks();
+testProjectSurfacePathAddsOrgContextWhenPresent();
+testReaderRouteMatchAcceptsOrgScopedAndLegacyPaths();
 testDevSurfaceGateRequiresDevQueryInProduction();

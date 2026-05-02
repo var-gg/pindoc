@@ -37,12 +37,14 @@ type projectCurrentOutput struct {
 	MessageLocale    string               `json:"message_locale,omitempty" jsonschema:"locale used for checklist/checklist_items.message after fallback"`
 	SuggestedActions []string             `json:"suggested_actions,omitempty"`
 
-	ID              string `json:"id,omitempty"`
-	Slug            string `json:"slug,omitempty"`
-	Name            string `json:"name,omitempty"`
-	Description     string `json:"description,omitempty"`
-	Color           string `json:"color,omitempty"`
-	PrimaryLanguage string `json:"primary_language,omitempty"`
+	ID               string `json:"id,omitempty"`
+	Slug             string `json:"slug,omitempty"`
+	OrgSlug          string `json:"org_slug,omitempty"`
+	OrganizationSlug string `json:"organization_slug,omitempty"`
+	Name             string `json:"name,omitempty"`
+	Description      string `json:"description,omitempty"`
+	Color            string `json:"color,omitempty"`
+	PrimaryLanguage  string `json:"primary_language,omitempty"`
 	// Locale is a compatibility alias for PrimaryLanguage. Locale is no
 	// longer part of project identity after task-canonical-locale-
 	// migration; clients should treat project_slug as the canonical key.
@@ -198,6 +200,7 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 				SELECT
 					p.id::text,
 					p.slug,
+					o.slug,
 					p.name,
 					p.description,
 					p.color,
@@ -207,9 +210,10 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 					(SELECT count(*) FROM areas     WHERE project_id = p.id),
 					(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
 				FROM projects p
+				LEFT JOIN organizations o ON o.id = p.organization_id
 				WHERE p.slug = $1
 			`, scope.ProjectSlug).Scan(
-				&out.ID, &out.Slug, &out.Name,
+				&out.ID, &out.Slug, &out.OrgSlug, &out.Name,
 				&desc, &color,
 				&out.PrimaryLanguage, &out.Locale, &out.CreatedAt,
 				&out.AreasCount, &out.ArtifactsCount,
@@ -233,6 +237,7 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 			if color != nil {
 				out.Color = *color
 			}
+			out.OrganizationSlug = out.OrgSlug
 			out.Status = "accepted"
 			out.Rendering = pindocRenderingCaps
 			out.Capabilities = buildCapabilities(deps, princ, deriveMultiProject(ctx, deps, princ))

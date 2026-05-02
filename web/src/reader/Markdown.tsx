@@ -69,10 +69,12 @@ function queueMermaidRender(render: () => Promise<void>): Promise<void> {
 export function PindocMarkdown({
   source,
   projectSlug,
+  orgSlug,
   collapseStructureSections = false,
 }: {
   source: string;
   projectSlug?: string;
+  orgSlug?: string;
   collapseStructureSections?: boolean;
 }) {
   const { blocks, hiddenSections } = useMemo(
@@ -88,12 +90,14 @@ export function PindocMarkdown({
           source={block.source}
           headingSlugs={block.headingSlugs}
           projectSlug={projectSlug}
+          orgSlug={orgSlug}
         />
       ))}
       {hiddenSections.length > 0 && (
         <OriginalStructureSections
           sections={hiddenSections}
           projectSlug={projectSlug}
+          orgSlug={orgSlug}
         />
       )}
     </>
@@ -104,17 +108,19 @@ function MarkdownBlock({
   source,
   headingSlugs,
   projectSlug,
+  orgSlug,
 }: {
   source: string;
   headingSlugs: string[];
   projectSlug?: string;
+  orgSlug?: string;
 }) {
   let headingIndex = 0;
 
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      urlTransform={(url) => pindocUrlTransform(url, projectSlug)}
+      urlTransform={(url) => pindocUrlTransform(url, projectSlug, orgSlug)}
       components={{
         pre: MarkdownPre,
         code: MarkdownCode,
@@ -253,9 +259,11 @@ function markdownBlocks(
 function OriginalStructureSections({
   sections,
   projectSlug,
+  orgSlug,
 }: {
   sections: StructureOverlapSection[];
   projectSlug?: string;
+  orgSlug?: string;
 }) {
   const { t } = useI18n();
   return (
@@ -266,7 +274,7 @@ function OriginalStructureSections({
           <section key={section.slug} id={section.slug} className="reader-original-structure__section">
             <h2>{section.title}</h2>
             {section.body ? (
-              <MarkdownBlock source={section.body} headingSlugs={[]} projectSlug={projectSlug} />
+              <MarkdownBlock source={section.body} headingSlugs={[]} projectSlug={projectSlug} orgSlug={orgSlug} />
             ) : (
               <p>{t("reader.structure_empty")}</p>
             )}

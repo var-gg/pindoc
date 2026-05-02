@@ -489,6 +489,40 @@ func TestArtifactRevisionAuthorUserMigrationContract(t *testing.T) {
 	}
 }
 
+func TestAssetsMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0054_assets.sql")
+	if err != nil {
+		t.Fatalf("read assets migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"CREATE TABLE assets",
+		"project_id        UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE",
+		"sha256            TEXT NOT NULL",
+		"storage_driver    TEXT NOT NULL",
+		"storage_key       TEXT NOT NULL",
+		"UNIQUE (project_id, sha256)",
+		"CREATE TABLE artifact_assets",
+		"artifact_revision_id UUID NOT NULL REFERENCES artifact_revisions(id) ON DELETE CASCADE",
+		"role                 TEXT NOT NULL CHECK (role IN ('inline_image', 'attachment', 'evidence', 'generated_output'))",
+		"UNIQUE (artifact_revision_id, asset_id, role)",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("assets migration Up missing %q:\n%s", want, up)
+		}
+	}
+	for _, want := range []string{
+		"-- +goose Down",
+		"DROP TABLE IF EXISTS artifact_assets",
+		"DROP TABLE IF EXISTS assets",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("assets migration Down missing %q", want)
+		}
+	}
+}
+
 func TestDropProjectsOwnerIDMigrationContract(t *testing.T) {
 	raw, err := migrationsFS.ReadFile("migrations/0055_drop_projects_owner_id.sql")
 	if err != nil {
@@ -517,6 +551,7 @@ func TestDropProjectsOwnerIDMigrationContract(t *testing.T) {
 		}
 	}
 }
+
 func TestVisibilityMigrationContract(t *testing.T) {
 	raw, err := migrationsFS.ReadFile("migrations/0050_visibility.sql")
 	if err != nil {

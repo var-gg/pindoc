@@ -35,7 +35,7 @@ RUN apt-get update \
 
 RUN groupadd --system pindoc \
     && useradd --system --gid pindoc --home-dir /var/lib/pindoc --create-home pindoc \
-    && mkdir -p /var/lib/pindoc/cache /app/web/dist \
+    && mkdir -p /var/lib/pindoc/cache /var/lib/pindoc/assets /app/web/dist \
     && chown -R pindoc:pindoc /var/lib/pindoc /app
 
 WORKDIR /app
@@ -48,10 +48,11 @@ ENV PINDOC_DATABASE_URL=postgres://pindoc:pindoc_dev@db:5432/pindoc?sslmode=disa
 ENV PINDOC_HTTP_MCP_ADDR=0.0.0.0:5830
 ENV PINDOC_PROJECT=pindoc
 ENV PINDOC_SPA_DIST=/app/web/dist
+ENV PINDOC_ASSET_ROOT=/var/lib/pindoc/assets
 ENV XDG_CACHE_HOME=/var/lib/pindoc/cache
 
 EXPOSE 5830
-VOLUME ["/var/lib/pindoc/cache"]
+VOLUME ["/var/lib/pindoc/cache", "/var/lib/pindoc/assets"]
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=12 \
     CMD curl -fsS http://127.0.0.1:5830/health || exit 1

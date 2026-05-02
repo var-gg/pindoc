@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router";
 import { ChevronRight } from "lucide-react";
 import { api, type AcceptanceChecklist, type DiffResp, type MetaDeltaEntry } from "../api/client";
 import { useI18n } from "../i18n";
+import { DEFAULT_READER_ORG_SLUG, projectSurfacePath } from "../readerRoutes";
 import { authorDisplayLabel } from "./authorDisplay";
 import { RevisionTypeBadge } from "./RevisionTypeBadge";
 import { SurfaceHeader } from "./SurfacePrimitives";
@@ -13,7 +14,8 @@ type Load =
   | { kind: "ready"; data: DiffResp };
 
 export function Diff() {
-  const { project = "", slug = "" } = useParams<{ project: string; slug: string }>();
+  const { org, project = "", slug = "" } = useParams<{ org?: string; project: string; slug: string }>();
+  const orgSlug = org ?? DEFAULT_READER_ORG_SLUG;
   const [search] = useSearchParams();
   const fromRev = Number(search.get("from")) || undefined;
   const toRev = Number(search.get("to")) || undefined;
@@ -60,9 +62,9 @@ export function Diff() {
     <main className="content">
       <article className="reader-article" style={{ maxWidth: 980 }}>
         <div className="crumbs">
-          <Link to={`/p/${project}/wiki/${slug}`}>{data.to.title}</Link>
+          <Link to={projectSurfacePath(project, "wiki", slug, orgSlug)}>{data.to.title}</Link>
           <ChevronRight className="lucide" />
-          <Link to={`/p/${project}/wiki/${slug}/history`}>{t("history.title")}</Link>
+          <Link to={`${projectSurfacePath(project, "wiki", slug, orgSlug)}/history`}>{t("history.title")}</Link>
           <ChevronRight className="lucide" />
           <span className="current">
             rev {data.from.revision_number} → rev {data.to.revision_number}

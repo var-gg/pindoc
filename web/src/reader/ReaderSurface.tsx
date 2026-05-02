@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
-import { Building2, ChevronDown, ChevronLeft, ChevronRight, Globe2, Languages, ListFilter, Loader2, Lock } from "lucide-react";
-import { api, type Artifact, type ArtifactReadState, type ArtifactRef, type VisibilityTier } from "../api/client";
+import { Building2, ChevronDown, ChevronLeft, ChevronRight, Download, FileText, Globe2, ImageIcon, Languages, ListFilter, Loader2, Lock, Paperclip } from "lucide-react";
+import { api, type Artifact, type ArtifactReadState, type ArtifactRef, type AssetRef, type VisibilityTier } from "../api/client";
 import { useI18n } from "../i18n";
 import { estimateReadingTime } from "../utils/readingTime";
 import { ArtifactByline } from "./ArtifactByline";
@@ -10,6 +10,7 @@ import { PindocMarkdown } from "./Markdown";
 import { TrustCard } from "./TrustCard";
 import { Tooltip } from "./Tooltip";
 import { localizedAreaName } from "./areaLocale";
+import { projectSurfacePath } from "../readerRoutes";
 import type { BadgeFilter } from "./badgeFilters";
 import { createReadTracker, readerReadingMetrics, type ReadTrackerFlushReason, type ReadTrackerSnapshot } from "./readTracker";
 import { EmptyState } from "./SurfacePrimitives";
@@ -27,6 +28,7 @@ type Props = {
   emptyMessage: string;
   scope?: DetailScope | null;
   projectSlug?: string;
+  orgSlug?: string;
   onApplyBadgeFilter?: (filter: BadgeFilter) => void;
   onApplyAreaFilter?: (areaSlug: string) => void;
   onArtifactUpdated?: () => void;
@@ -47,6 +49,7 @@ export function ReaderSurface({
   emptyMessage,
   scope,
   projectSlug,
+  orgSlug,
   onApplyBadgeFilter,
   onApplyAreaFilter,
   onArtifactUpdated,
@@ -113,7 +116,7 @@ export function ReaderSurface({
   const areaLabel = localizedAreaName(t, detail.area_slug, detail.area_slug);
   const legendHref =
     projectSlug
-      ? `/p/${projectSlug}/wiki/visual-language-reference`
+      ? projectSurfacePath(projectSlug, "wiki", "visual-language-reference", orgSlug)
       : undefined;
   // Locale chips are driven by what actually exists: the artifact's own
   // body_locale plus any translation_of edges that resolve to a sibling
@@ -146,6 +149,14 @@ export function ReaderSurface({
         <DetailScopeBar scope={scope ?? null} />
 
         <div className="crumbs">
+          {projectSlug && orgSlug && (
+            <>
+              <span>{orgSlug}</span>
+              <ChevronRight className="lucide" />
+              <span>{projectSlug}</span>
+              <ChevronRight className="lucide" />
+            </>
+          )}
           <span>{areaLabel}</span>
           <ChevronRight className="lucide" />
           <span>{detail.type}</span>
@@ -192,7 +203,7 @@ export function ReaderSurface({
                 ) : (
                   <Tooltip key={option.locale} content={option.title}>
                     <Link
-                      to={`/p/${projectSlug}/wiki/${option.slug}`}
+                      to={projectSurfacePath(projectSlug, "wiki", option.slug, orgSlug)}
                       className="translate-toggle__option"
                       aria-label={t("reader.open_translation", option.locale.toUpperCase())}
                     >
@@ -214,12 +225,84 @@ export function ReaderSurface({
           <PindocMarkdown
             source={detail.body_markdown}
             projectSlug={projectSlug}
+            orgSlug={orgSlug}
             collapseStructureSections
           />
         </div>
+        <ArtifactAssets assets={detail.assets ?? []} />
       </article>
     </main>
   );
+}
+
+function ArtifactAssets({ assets }: { assets: AssetRef[] }) {
+  const { t } = useI18n();
+  const visibleAssets = assets.filter((asset) => !(asset.role === "inline_image" && asset.is_image));
+  if (visibleAssets.length === 0) return null;
+  return (
+    <section className="artifact-assets" aria-label={t("reader.assets_title")}>
+      <div className="artifact-assets__head">
+        <PaperclipIcon />
+        <h2>{t("reader.assets_title")}</h2>
+      </div>
+      <div className="artifact-assets__list">
+        {visibleAssets.map((asset) => {
+          const Icon = asset.is_image ? ImageIcon : FileText;
+          const label = asset.original_filename || asset.id;
+          return (
+            <a
+              key={`${asset.role}-${asset.id}-${asset.display_order}`}
+              className="artifact-asset"
+              href={asset.blob_url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <span className="artifact-asset__icon">
+                <Icon className="lucide" aria-hidden="true" />
+              </span>
+              <span className="artifact-asset__body">
+                <span className="artifact-asset__name">{label}</span>
+                <span className="artifact-asset__meta">
+                  {assetRoleLabel(asset.role, t)} · {asset.mime_type} · {formatAssetBytes(asset.size_bytes)}
+                </span>
+              </span>
+              <Download className="lucide artifact-asset__download" aria-hidden="true" />
+            </a>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function PaperclipIcon() {
+  return <Paperclip className="lucide artifact-assets__paperclip" aria-hidden="true" />;
+}
+
+function assetRoleLabel(role: AssetRef["role"], t: ReturnType<typeof useI18n>["t"]): string {
+  switch (role) {
+    case "inline_image":
+      return t("reader.asset_role_inline_image");
+    case "evidence":
+      return t("reader.asset_role_evidence");
+    case "generated_output":
+      return t("reader.asset_role_generated_output");
+    case "attachment":
+    default:
+      return t("reader.asset_role_attachment");
+  }
+}
+
+function formatAssetBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
 }
 
 function VisibilityControl({

@@ -13,6 +13,7 @@ import { buildAreaUnreadOwnCounts, subtreeUnreadCount } from "./sidebarUnread";
 
 type Props = {
   projectSlug: string;
+  orgSlug: string;
   artifacts: ArtifactRef[];
   areas: Area[];
   types: Aggregate[];
@@ -79,6 +80,7 @@ function containsSelected(node: AreaNode, selectedArea: string | null): boolean 
 
 export function Sidebar({
   projectSlug,
+  orgSlug,
   artifacts,
   areas,
   types,
@@ -122,6 +124,10 @@ export function Sidebar({
 
   return (
     <aside className={`sidebar${open ? " open" : ""}`}>
+      <div className="sidebar-scope" aria-label={t("sidebar.scope_label")}>
+        <span className="sidebar-scope__label">{t("sidebar.scope_label")}</span>
+        <span className="sidebar-scope__path">/{orgSlug}/p/{projectSlug}</span>
+      </div>
       <div className="side-section">{t("wiki.section_areas")}</div>
       <button
         type="button"

@@ -342,6 +342,7 @@ func main() {
 			Version:              version,
 			BuildCommit:          commit,
 			RepoRoot:             cfg.RepoRoot,
+			AssetRoot:            cfg.AssetRoot,
 			StartTime:            startTime,
 			SPADistDir:           spaDist,
 		})

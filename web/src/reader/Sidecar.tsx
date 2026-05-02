@@ -16,16 +16,12 @@ import {
   type EdgeRef,
   type PinRef,
   type RevisionRow,
-  type ServerConfig,
   type SourceSessionRef,
-  type UserRef,
 } from "../api/client";
-import type { Aggregate } from "./useReaderData";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
 import { authorAvatarKey, authorDisplayLabel } from "./authorDisplay";
 import { localizedAreaName } from "./areaLocale";
-import { TaskControls } from "./TaskControls";
 import { Toc } from "./Toc";
 import { headingsFromBody } from "./slug";
 import { isStructureOverlapHeading, structureOverlapSectionsFromBody } from "./structureSections";
@@ -53,32 +49,13 @@ import {
   type StartFocusReason,
 } from "./graphSvg";
 import { isGeneratedAgentId } from "./readerInternalVisibility";
+import { projectSurfacePath } from "../readerRoutes";
 
 type Props = {
   projectSlug: string;
+  orgSlug: string;
   detail: Artifact | null;
   emptyMessage?: string;
-  // providers + bindAddr replace the deprecated auth_mode prop the
-  // Reader used to thread through to TaskControls (Decision
-  // `decision-auth-model-loopback-and-providers`). Empty providers
-  // means no IdP is wired so the Reader user is the operator on a
-  // loopback box and TaskControls can edit inline. Undefined = config
-  // not yet loaded — treat as "stay read-only until we know".
-  providers?: ServerConfig["providers"];
-  bindAddr?: ServerConfig["bind_addr"];
-  // agents is the author_id aggregate across the current project's
-  // artifact list. TaskControls surfaces it as the "assigned to an
-  // agent" half of the assignee dropdown.
-  agents?: Aggregate[];
-  // users is the instance-wide users table projection. Combined with
-  // agents to build the assignee dropdown — null when the /api/users
-  // fetch failed (Reader still renders, TaskControls hides the users
-  // section).
-  users?: UserRef[] | null;
-  // onArtifactUpdated is called after a successful task-meta write so
-  // the Reader refetches the detail and the revision rail / TaskControls
-  // reflect the new head.
-  onArtifactUpdated?: () => void;
   // focusReason explains why the graph surface picked this artifact as
   // the current focus. Rendered as a chip just below IdentityStrip
   // when present (graph mode only — Wiki/Tasks/Today leave it null).
@@ -101,13 +78,9 @@ const DEFAULT_COLLAPSED_STATE: CollapsedState = {
 
 export function Sidecar({
   projectSlug,
+  orgSlug,
   detail,
   emptyMessage,
-  providers,
-  bindAddr,
-  agents,
-  users,
-  onArtifactUpdated,
   focusReason,
 }: Props) {
   const { t } = useI18n();
@@ -146,7 +119,7 @@ export function Sidecar({
     ? new Date(detail.published_at).toLocaleString()
     : "—";
   const areaLabel = localizedAreaName(t, detail.area_slug, detail.area_slug);
-  const artifactHref = `/p/${projectSlug}/wiki/${detail.slug}`;
+  const artifactHref = projectSurfacePath(projectSlug, "wiki", detail.slug, orgSlug);
 
   // Supersede is still a dedicated head field; typed artifact_edges come
   // through relates_to / related_by and are split below by relation role.
@@ -170,29 +143,18 @@ export function Sidecar({
 
       {detail.type === "Task" && <TaskInspectorSummary detail={detail} areaLabel={areaLabel} />}
 
-      {detail.type === "Task" && (
-        <TaskControls
-          projectSlug={projectSlug}
-          detail={detail}
-          providers={providers}
-          bindAddr={bindAddr}
-          agents={agents ?? []}
-          users={users ?? []}
-          onUpdated={() => onArtifactUpdated?.()}
-        />
-      )}
-
       <div className="graph-wrap">
-        <MiniGraph detail={detail} projectSlug={projectSlug} />
+        <MiniGraph detail={detail} projectSlug={projectSlug} orgSlug={orgSlug} />
       </div>
 
       <SidecarStaticSection heading={t("sidecar.relations")}>
         {bodyOverlapSections.length > 0 && (
           <BodyOverlapLink count={bodyOverlapSections.length} />
         )}
-        <ConnectedArtifacts
-          projectSlug={projectSlug}
-          relates={regularRelates}
+          <ConnectedArtifacts
+            projectSlug={projectSlug}
+            orgSlug={orgSlug}
+            relates={regularRelates}
           relatedBy={regularRelatedBy}
           hasSupersedes={hasSupersedes}
           supersededBy={detail.superseded_by ?? ""}
@@ -203,6 +165,7 @@ export function Sidecar({
         <SidecarStaticSection heading={t("sidecar.evidence")}>
           <ConnectedArtifacts
             projectSlug={projectSlug}
+            orgSlug={orgSlug}
             relates={evidenceRelates}
             relatedBy={evidenceRelatedBy}
             hasSupersedes={false}
@@ -243,7 +206,7 @@ export function Sidecar({
         collapsed={collapsed.timeline}
         onToggle={toggleSection}
       >
-        <RecentChanges projectSlug={projectSlug} slug={detail.slug} />
+        <RecentChanges projectSlug={projectSlug} orgSlug={orgSlug} slug={detail.slug} />
       </SidecarCollapsibleSection>
 
       <SidecarCollapsibleSection
@@ -468,11 +431,40 @@ function TaskInspectorSummary({ detail, areaLabel }: { detail: Artifact; areaLab
   const edges = (detail.relates_to?.length ?? 0) + (detail.related_by?.length ?? 0);
   const updatedAt = detail.updated_at ? new Date(detail.updated_at).toLocaleString() : "—";
   const author = authorDisplayLabel(detail, t("reader.byline_unknown"));
+  const status = detail.task_meta?.status ?? "missing_status";
+  const priority = taskPriority(detail.task_meta?.priority);
+  const assignee = taskAssigneeDisplay(detail.task_meta?.assignee, t);
+  const assigneeAvatar = assignee.avatarKey ? agentAvatar(assignee.avatarKey) : null;
   return (
     <div className="task-inspector-summary">
+      <div className="task-inspector-summary__head">
+        <span>{t("task_inspector.heading")}</span>
+      </div>
       <div className="task-inspector-summary__grid">
         <span>{t("task_inspector.status")}</span>
-        <strong>{detail.task_meta?.status ?? t("tasks.col_no_status")}</strong>
+        <strong className="task-inspector-summary__value">
+          <span className={`task-state-chip task-state-chip--${taskStateTone(status)}`}>
+            {taskStatusLabel(status, t)}
+          </span>
+        </strong>
+        <span>{t("task_inspector.priority")}</span>
+        <strong className="task-inspector-summary__value">
+          {priority ? (
+            <span className={`prio prio--${priority}`}>
+              <span className="dot" />
+              {priority}
+            </span>
+          ) : "—"}
+        </strong>
+        <span>{t("task_inspector.assignee")}</span>
+        <strong className="task-inspector-summary__value task-inspector-assignee">
+          {assigneeAvatar && (
+            <span className={assigneeAvatar.className}>
+              {assigneeAvatar.initials}
+            </span>
+          )}
+          <span>{assignee.label}</span>
+        </strong>
         <span>{t("task_inspector.area")}</span>
         <strong>{areaLabel}</strong>
         <span>{t("task_inspector.due_at")}</span>
@@ -495,6 +487,46 @@ function TaskInspectorSummary({ detail, areaLabel }: { detail: Artifact; areaLab
       </div>
     </div>
   );
+}
+
+function taskPriority(value: string | undefined): "p0" | "p1" | "p2" | "p3" | "" {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "p0" || normalized === "p1" || normalized === "p2" || normalized === "p3"
+    ? normalized
+    : "";
+}
+
+function taskStateTone(value: string): "open" | "claimed-done" | "blocked" | "cancelled" | "missing" {
+  switch (value) {
+    case "open":
+      return "open";
+    case "claimed_done":
+      return "claimed-done";
+    case "blocked":
+      return "blocked";
+    case "cancelled":
+      return "cancelled";
+    default:
+      return "missing";
+  }
+}
+
+function taskAssigneeDisplay(
+  value: string | undefined,
+  t: (key: string, ...args: Array<string | number>) => string,
+): { label: string; avatarKey: string } {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return { label: t("tasks.assignee_unassigned"), avatarKey: "" };
+  if (trimmed.startsWith("agent:")) {
+    const rawAgent = trimmed.slice("agent:".length);
+    if (isGeneratedAgentId(rawAgent)) {
+      return { label: t("sidebar.agent_generated"), avatarKey: "system" };
+    }
+    return { label: trimmed, avatarKey: rawAgent };
+  }
+  if (trimmed.startsWith("@")) return { label: trimmed, avatarKey: trimmed.slice(1) };
+  if (trimmed.startsWith("user:")) return { label: trimmed.slice("user:".length), avatarKey: trimmed };
+  return { label: trimmed, avatarKey: trimmed };
 }
 
 function acceptanceStats(body: string): { resolved: number; total: number } {
@@ -553,7 +585,7 @@ function SidecarCollapsibleSection({
   );
 }
 
-function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: string }) {
+function RecentChanges({ projectSlug, orgSlug, slug }: { projectSlug: string; orgSlug: string; slug: string }) {
   const { t } = useI18n();
   const [revs, setRevs] = useState<RevisionRow[] | null>(null);
 
@@ -581,7 +613,7 @@ function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: strin
       <div className="sidecar-timeline-head">
         <span>{t("history.recent_changes")}</span>
         <Link
-          to={`/p/${projectSlug}/wiki/${slug}/history`}
+          to={`${projectSurfacePath(projectSlug, "wiki", slug, orgSlug)}/history`}
           className="sidecar-timeline-head__link"
         >
           <HistoryIcon className="lucide" style={{ width: 11, height: 11 }} />
@@ -617,7 +649,7 @@ function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: strin
       })}
       {remainder > 0 && (
         <Link
-          to={`/p/${projectSlug}/wiki/${slug}/history`}
+          to={`${projectSurfacePath(projectSlug, "wiki", slug, orgSlug)}/history`}
           style={{ fontSize: 11, color: "var(--fg-3)", fontFamily: "var(--font-mono)", textDecoration: "none" }}
         >
           {t("history.more_revisions", remainder)}
@@ -637,9 +669,11 @@ type MiniGraphEdge = {
 function MiniGraph({
   detail,
   projectSlug,
+  orgSlug,
 }: {
   detail: Artifact;
   projectSlug: string;
+  orgSlug: string;
 }) {
   const { t, lang } = useI18n();
   const allEdges: MiniGraphEdge[] = [
@@ -698,7 +732,7 @@ function MiniGraph({
       </svg>
       <Tooltip content={detail.title}>
         <Link
-          to={`/p/${projectSlug}/wiki/${detail.slug}`}
+          to={projectSurfacePath(projectSlug, "wiki", detail.slug, orgSlug)}
           className={`mini-graph__node mini-graph__node--center mini-graph__node--${graphTypeClassSuffix(detail.type)}`}
           style={{ left: MINI_GRAPH_CENTER.x, top: MINI_GRAPH_CENTER.y }}
         >
@@ -709,7 +743,7 @@ function MiniGraph({
       {visible.map(({ edge }, i) => (
         <Tooltip key={`${edge.artifact_id}-${edge.relation}-${i}`} content={`${edge.title} (${edge.type})`}>
           <Link
-            to={`/p/${projectSlug}/wiki/${edge.slug}`}
+            to={projectSurfacePath(projectSlug, "wiki", edge.slug, orgSlug)}
             className={`mini-graph__node mini-graph__node--${graphTypeClassSuffix(edge.type)}`}
             style={{ left: positions[i].x, top: positions[i].y }}
           >
@@ -719,7 +753,7 @@ function MiniGraph({
         </Tooltip>
       ))}
       {hidden > 0 && (
-        <Link to={`/p/${projectSlug}/graph`} className="mini-graph__more">
+        <Link to={projectSurfacePath(projectSlug, "graph", undefined, orgSlug)} className="mini-graph__more">
           {t("sidecar.more_relations", hidden)}
         </Link>
       )}
@@ -735,12 +769,14 @@ function MiniGraph({
 // plain edge.
 function ConnectedArtifacts({
   projectSlug,
+  orgSlug,
   relates,
   relatedBy,
   hasSupersedes,
   supersededBy,
 }: {
   projectSlug: string;
+  orgSlug: string;
   relates: EdgeRef[];
   relatedBy: EdgeRef[];
   hasSupersedes: boolean;
@@ -788,7 +824,7 @@ function ConnectedArtifacts({
             <li key={`${direction}-${edge.relation}-${edge.artifact_id}`}>
               <Tooltip content={tip}>
                 <Link
-                  to={`/p/${projectSlug}/wiki/${edge.slug}`}
+                  to={projectSurfacePath(projectSlug, "wiki", edge.slug, orgSlug)}
                   className="relation-card"
                   aria-label={`${arrow} ${relLabel}: ${edge.title}`}
                 >

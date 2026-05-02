@@ -1,8 +1,16 @@
 import { defaultUrlTransform } from "react-markdown";
+import { transformPindocAssetURL } from "./assetReferences";
+import { DEFAULT_READER_ORG_SLUG, projectSurfacePath } from "../readerRoutes";
 
 const pindocScheme = "pindoc://";
 
-export function pindocUrlTransform(url: string, projectSlug?: string): string {
+export function pindocUrlTransform(
+  url: string,
+  projectSlug?: string,
+  orgSlug = DEFAULT_READER_ORG_SLUG,
+): string {
+  const assetURL = transformPindocAssetURL(url, projectSlug);
+  if (assetURL !== null) return assetURL;
   if (!url.startsWith(pindocScheme)) {
     return defaultUrlTransform(url);
   }
@@ -19,5 +27,5 @@ export function pindocUrlTransform(url: string, projectSlug?: string): string {
   if (!slug) {
     return "";
   }
-  return `/p/${projectSlug}/wiki/${slug}${hash}`;
+  return `${projectSurfacePath(projectSlug, "wiki", slug, orgSlug)}${hash}`;
 }

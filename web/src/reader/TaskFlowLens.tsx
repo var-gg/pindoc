@@ -10,6 +10,7 @@ import {
   type TaskFlowRow,
 } from "../api/client";
 import { useI18n } from "../i18n";
+import { projectSurfacePath } from "../readerRoutes";
 import { EmptyState, SurfaceHeader } from "./SurfacePrimitives";
 import { Tooltip } from "./Tooltip";
 import { localizedAreaName } from "./areaLocale";
@@ -26,6 +27,7 @@ type TaskFlowActorMode = "all_visible" | "my" | "assignee" | "agent" | "team";
 
 type Props = {
   projectSlug: string;
+  orgSlug: string;
   list: ArtifactRef[];
   allList: ArtifactRef[];
   currentSlug: string | undefined;
@@ -59,6 +61,7 @@ type TaskFlowLane = {
 
 export function TaskFlowLens({
   projectSlug,
+  orgSlug,
   list,
   allList,
   currentSlug,
@@ -290,6 +293,7 @@ export function TaskFlowLens({
               lanes={buildStageLanes(rows, t)}
               railKind="stage"
               projectSlug={projectSlug}
+              orgSlug={orgSlug}
               currentSlug={currentSlug}
               selectedTaskSlug={selectedTaskSlug}
               areaNameBySlug={areaNameBySlug}
@@ -308,6 +312,7 @@ export function TaskFlowLens({
               }))}
               railKind="project"
               projectSlug={projectSlug}
+              orgSlug={orgSlug}
               currentSlug={currentSlug}
               selectedTaskSlug={selectedTaskSlug}
               areaNameBySlug={areaNameBySlug}
@@ -321,6 +326,7 @@ export function TaskFlowLens({
               lanes={buildStageLanes(rows, t)}
               railKind="stage"
               projectSlug={projectSlug}
+              orgSlug={orgSlug}
               currentSlug={currentSlug}
               selectedTaskSlug={selectedTaskSlug}
               areaNameBySlug={areaNameBySlug}
@@ -413,6 +419,7 @@ function TaskFlowRail({
   lanes,
   railKind,
   projectSlug,
+  orgSlug,
   currentSlug,
   selectedTaskSlug,
   areaNameBySlug,
@@ -423,6 +430,7 @@ function TaskFlowRail({
   lanes: TaskFlowLane[];
   railKind: "stage" | "project";
   projectSlug: string;
+  orgSlug: string;
   currentSlug: string | undefined;
   selectedTaskSlug: string | null;
   areaNameBySlug: ReadonlyMap<string, string>;
@@ -451,6 +459,7 @@ function TaskFlowRail({
                   key={`${lane.key}:${row.project_slug}:${row.slug}`}
                   row={row}
                   projectSlug={projectSlug}
+                  orgSlug={orgSlug}
                   currentSlug={currentSlug}
                   selectedTaskSlug={selectedTaskSlug}
                   areaNameBySlug={areaNameBySlug}
@@ -468,6 +477,7 @@ function TaskFlowRail({
 function TaskFlowRowCard({
   row,
   projectSlug,
+  orgSlug,
   currentSlug,
   selectedTaskSlug,
   areaNameBySlug,
@@ -475,6 +485,7 @@ function TaskFlowRowCard({
 }: {
   row: TaskFlowRow;
   projectSlug: string;
+  orgSlug: string;
   currentSlug: string | undefined;
   selectedTaskSlug: string | null;
   areaNameBySlug: ReadonlyMap<string, string>;
@@ -486,7 +497,9 @@ function TaskFlowRowCard({
   const priorityClass = row.priority ? `prio prio--${row.priority}` : "";
   const statusPill = statusPillClass(row.status);
   const areaLabel = areaNameBySlug.get(row.area_slug) ?? localizedAreaName(t, row.area_slug, row.area_slug);
-  const href = row.human_url || `/p/${row.project_slug}/wiki/${row.slug}`;
+  const href = isLocal
+    ? projectSurfacePath(row.project_slug, "wiki", row.slug, orgSlug)
+    : row.human_url || `/p/${row.project_slug}/wiki/${row.slug}`;
   const blockers = row.blockers ?? [];
   const blocked = row.stage === "blocked" || blockers.length > 0;
   return (
@@ -571,7 +584,9 @@ function TaskFlowRowCard({
             {blockers.map((blocker) => (
               <Link
                 key={`${blocker.project_slug}:${blocker.slug}`}
-                to={`/p/${blocker.project_slug}/wiki/${blocker.slug}`}
+                to={blocker.project_slug === projectSlug
+                  ? projectSurfacePath(blocker.project_slug, "wiki", blocker.slug, orgSlug)
+                  : `/p/${blocker.project_slug}/wiki/${blocker.slug}`}
               >
                 {blocker.title}
               </Link>

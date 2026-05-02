@@ -234,7 +234,7 @@ func defaultHarnessSessionBootstrap() *HarnessSessionBootstrap {
 			"user_switched_workspace",
 			"tool_returned_PROJECT_SLUG_REQUIRED",
 		},
-		Notes:                  "Run once per MCP session before yielding to the agent. Cache the resolved project_slug, sweep task.queue with across_projects=true, then pin a concrete project_slug for follow-up tools.",
+		Notes:                  "Run once per MCP session before yielding to the agent. Cache the resolved project_slug, sweep task.queue with across_projects=true as read-only assigned-work inventory, then pin a concrete project_slug for follow-up tools.",
 		ToolsetVersionCacheKey: "pindoc.session.toolset_version",
 		DriftCheckTool:         "pindoc.runtime.status",
 		DriftActions: []string{
@@ -782,7 +782,10 @@ pindoc.task.assign for a single Task assignee change; use
 pindoc.task.bulk_assign when multiple Tasks move together and share one
 audit reason. Both tools are semantic shortcuts over the Task meta_patch
 lane, so they do not require a search receipt and do not rewrite the
-artifact body.
+artifact body. bulk_assign is conservative by default: if a Task already
+has a non-empty assignee, the row is rejected with ASSIGNEE_ALREADY_SET
+unless allow_reassign=true is passed. Use allow_reassign only after
+confirming the project scope and current owner.
 
 Examples:
 
@@ -795,7 +798,8 @@ Examples:
     pindoc.task.bulk_assign(
       slugs=["task-a", "task-b"],
       assignee="@alice",
-      reason="Rebalance UI verification tasks to Alice"
+      reason="Rebalance UI verification tasks to Alice",
+      allow_reassign=true
     )
 
 Use pindoc.task.claim_done when the implementation is finished. It
@@ -882,6 +886,12 @@ before the agent pins a single project for implementation. The flow:
    or the slug from the project that owns the Task being handled. Do not
    keep relying on implicit defaulting once a concrete project is known.
 
+The across-project sweep is read-only inventory. It must not be treated as
+permission to claim, bulk-assign, edit, or close sibling project Tasks. For
+workspace-local work, every write tool uses the cached workspace.detect slug
+unless the user explicitly names another project or a Task URL from that
+project.
+
 ### When to re-run
 
 - The user explicitly switches workspaces ("열려 있는 다른 프로젝트로
@@ -941,8 +951,10 @@ Before calling pindoc.artifact.propose:
 0. (Auto, see "Session bootstrap" above) pindoc.workspace.detect already
    ran and pindoc.task.queue(across_projects=true) already swept assigned
    Tasks across visible projects. Review that sweep before implementation,
-   then pin a concrete project_slug for the current Task. If the cached
-   slug is missing, re-bootstrap before continuing.
+   then pin a concrete project_slug for the current Task. Treat the sweep
+   as read-only inventory; do not mutate sibling projects unless the user
+   explicitly scoped the work there. If the cached slug is missing,
+   re-bootstrap before continuing.
 1. Call pindoc.project.current once per session to pin scope.
 2. Call pindoc.area.list and pick an existing area_slug; use 'misc' if
    nothing fits. Never invent an area_slug.

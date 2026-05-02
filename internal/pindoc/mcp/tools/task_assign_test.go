@@ -67,3 +67,28 @@ func TestNewBulkOpID(t *testing.T) {
 		t.Fatalf("newBulkOpID returned identical values twice: %q", a)
 	}
 }
+
+func TestTaskBulkReassignBlocked(t *testing.T) {
+	cases := []struct {
+		name          string
+		current       string
+		next          string
+		allowReassign bool
+		wantBlocked   bool
+	}{
+		{name: "unassigned claim", current: "", next: "agent:codex", wantBlocked: false},
+		{name: "same assignee idempotent", current: "agent:codex", next: "agent:codex", wantBlocked: false},
+		{name: "different assignee blocked", current: "agent:claude", next: "agent:codex", wantBlocked: true},
+		{name: "clear assigned blocked", current: "user:user-1", next: "", wantBlocked: true},
+		{name: "explicit reassign allowed", current: "agent:claude", next: "agent:codex", allowReassign: true, wantBlocked: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := taskBulkReassignBlocked(c.current, c.next, c.allowReassign)
+			if got != c.wantBlocked {
+				t.Fatalf("taskBulkReassignBlocked(%q, %q, %v) = %v, want %v",
+					c.current, c.next, c.allowReassign, got, c.wantBlocked)
+			}
+		})
+	}
+}

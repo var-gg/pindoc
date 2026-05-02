@@ -40,3 +40,6 @@ go.work.sum
 
 # Local QA captures generated while dogfooding the Reader UI.
 /pindoc-*.png
+/qa-*.png
+/qa-*-snapshot.md
+/sidecar-task-ops-*.png

@@ -117,6 +117,10 @@ type Deps struct {
 	// — Instrument() no-ops when absent, so tests that don't care
 	// about observability can leave it unset.
 	Telemetry *telemetry.Store
+
+	// AssetRoot is the LocalFS blob root used by pindoc.asset.* tools.
+	// Empty falls back to assets.DefaultRoot inside the storage factory.
+	AssetRoot string
 }
 
 func gitRemoteFromWorkdir(ctx context.Context, deps Deps, workdir string) (string, error) {

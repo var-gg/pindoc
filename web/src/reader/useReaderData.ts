@@ -3,11 +3,9 @@
 // Derives type/agent counts from the artifact list so the sidebar doesn't
 // need a separate endpoint.
 //
-// providers + bindAddr piggyback on the /api/config call so the
-// Reader's TaskControls can flip read-only without a second fetch.
-// reload() lets the TaskControls refetch the artifact detail after a
-// meta_patch write so the Sidecar shows the new revision + task_meta
-// without a full page navigation.
+// reload() lets local write surfaces such as visibility changes refetch
+// artifact detail so the sidecar and revision rail refresh without a
+// full page navigation.
 
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -16,7 +14,6 @@ import {
   type Artifact,
   type ArtifactRef,
   type Project,
-  type ServerConfig,
   type UserRef,
 } from "../api/client";
 
@@ -33,15 +30,8 @@ export type ReaderData = {
   agents: Aggregate[];
   /** instance-wide users list (migration 0014). Empty array while the
    * endpoint is reachable but returned no rows; null when the fetch
-   * failed so the UI can fall back without blocking the rest of the
-   * shell. TaskControls combines this with `agents` to build the
-   * assignee datalist. */
+   * failed so the UI can fall back without blocking the rest of the shell. */
   users: UserRef[] | null;
-  /** Active IdP list — empty list = loopback / no IdP path active.
-   * Decision `decision-auth-model-loopback-and-providers`. */
-  providers?: ServerConfig["providers"];
-  /** Daemon bind addr — loopback host = single-user trust boundary. */
-  bindAddr?: ServerConfig["bind_addr"];
 };
 
 export type LoadState =
@@ -52,8 +42,7 @@ export type LoadState =
 export function useReaderData(projectSlug: string, slug?: string, includeTemplates = false): LoadState {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   // nonce bump forces the fetch effect to re-run without restarting the
-  // whole shell. TaskControls calls reload() after a successful meta_patch
-  // so the detail view and recent-changes list refresh in place.
+  // whole shell.
   const [reloadNonce, setReloadNonce] = useState(0);
 
   const reload = useCallback(() => setReloadNonce((n) => n + 1), []);
@@ -62,11 +51,10 @@ export function useReaderData(projectSlug: string, slug?: string, includeTemplat
     let cancelled = false;
     (async () => {
       try {
-        const [project, areasResp, listResp, cfg, usersResp] = await Promise.all([
+        const [project, areasResp, listResp, usersResp] = await Promise.all([
           api.project(projectSlug),
           api.areas(projectSlug, { includeTemplates }),
           api.artifacts(projectSlug, { includeTemplates }),
-          api.config().catch(() => null),
           api.users().catch(() => null),
         ]);
         // Only load detail when a slug is explicitly requested. The
@@ -90,8 +78,6 @@ export function useReaderData(projectSlug: string, slug?: string, includeTemplat
             types: aggregate(listResp.artifacts, (a) => a.type),
             agents: aggregate(listResp.artifacts, (a) => a.author_id),
             users: usersResp?.users ?? null,
-            providers: cfg?.providers,
-            bindAddr: cfg?.bind_addr,
           },
           reload,
         });

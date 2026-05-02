@@ -15,8 +15,10 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -30,6 +32,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
+	"github.com/var-gg/pindoc/internal/pindoc/projects"
 	"github.com/var-gg/pindoc/internal/pindoc/providers"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
 	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
@@ -84,6 +87,10 @@ type Deps struct {
 	// the NSSM-managed service hasn't been silently restart-looped.
 	// Zero value is OK — the health handler reports uptime_sec=0.
 	StartTime time.Time
+
+	// AssetRoot is the LocalFS blob root used by /api/p/{project}/assets
+	// routes. Empty falls back to /var/lib/pindoc/assets.
+	AssetRoot string
 
 	// SPADistDir is the absolute filesystem path to the Reader UI build
 	// output (web/dist). When set, the daemon serves /, /assets/...,
@@ -197,6 +204,47 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/p/{project}/git/commits/{sha}/referencing-artifacts", d.handleGitCommitReferences)
 	mux.HandleFunc("GET /api/p/{project}/git/blob", d.handleGitBlob)
 	mux.HandleFunc("GET /api/p/{project}/git/diff", d.handleGitDiff)
+	mux.HandleFunc("GET /api/p/{project}/assets/{assetID}/blob", d.handleAssetBlob)
+
+	// Org-scoped project routes. Public-safe reads resolve
+	// (organization_slug, project_slug) first, then apply artifact
+	// visibility filters in the handlers below. Rich operational surfaces
+	// stay member-only until each endpoint has an explicit public
+	// projection, so the cascade route exists without accidentally
+	// widening data exposure.
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}", d.handleOrgProjectPublic(d.handleProjectCurrent))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/areas", d.handleOrgProjectPublic(d.handleAreas))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/artifacts", d.handleOrgProjectPublic(d.handleArtifactList))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/artifacts/{idOrSlug}", d.handleOrgProjectPublic(d.handleArtifactGet))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/assets/{assetID}/blob", d.handleOrgProjectPublic(d.handleAssetBlob))
+	mux.HandleFunc("PATCH /api/orgs/{org}/p/{project}/settings", d.handleOrgProjectMember(d.handleProjectSettingsPatch))
+	mux.HandleFunc("PATCH /api/orgs/{org}/p/{project}/artifacts/{idOrSlug}", d.handleOrgProjectMember(d.handleArtifactPatch))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/artifacts/{idOrSlug}/revisions", d.handleOrgProjectMember(d.handleArtifactRevisions))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/artifacts/{idOrSlug}/diff", d.handleOrgProjectMember(d.handleArtifactDiff))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/task-flow", d.handleOrgProjectMember(d.handleTaskFlow))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/search", d.handleOrgProjectMember(d.handleSearch))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/change-groups", d.handleOrgProjectMember(d.handleChangeGroups))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/inbox", d.handleOrgProjectMember(d.handleInbox))
+	mux.HandleFunc("POST /api/orgs/{org}/p/{project}/inbox/{idOrSlug}/review", d.handleOrgProjectMember(d.handleInboxReview))
+	mux.HandleFunc("POST /api/orgs/{org}/p/{project}/invite", d.handleOrgProjectMember(d.handleInviteIssue))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/members", d.handleOrgProjectMember(d.handleMembersList))
+	mux.HandleFunc("DELETE /api/orgs/{org}/p/{project}/members/{user_id}", d.handleOrgProjectMember(d.handleMemberRemove))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/invites", d.handleOrgProjectMember(d.handleInvitesList))
+	mux.HandleFunc("POST /api/orgs/{org}/p/{project}/invites/{token_hash}/extend", d.handleOrgProjectMember(d.handleInviteExtend))
+	mux.HandleFunc("DELETE /api/orgs/{org}/p/{project}/invites/{token_hash}", d.handleOrgProjectMember(d.handleInviteRevoke))
+	mux.HandleFunc("POST /api/orgs/{org}/p/{project}/read-mark", d.handleOrgProjectMember(d.handleReadMark))
+	mux.HandleFunc("POST /api/orgs/{org}/p/{project}/read-events", d.handleOrgProjectMember(d.handleReadEvent))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/read-states", d.handleOrgProjectMember(d.handleReadStates))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/artifacts/{idOrSlug}/read-state", d.handleOrgProjectMember(d.handleArtifactReadState))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/export", d.handleOrgProjectMember(d.handleProjectExport))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/git/repos", d.handleOrgProjectMember(d.handleGitRepos))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/git/changed-files", d.handleOrgProjectMember(d.handleGitChangedFiles))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/git/commit", d.handleOrgProjectMember(d.handleGitCommit))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/git/commits/{sha}/referencing-artifacts", d.handleOrgProjectMember(d.handleGitCommitReferences))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/git/blob", d.handleOrgProjectMember(d.handleGitBlob))
+	mux.HandleFunc("GET /api/orgs/{org}/p/{project}/git/diff", d.handleOrgProjectMember(d.handleGitDiff))
+	mux.HandleFunc("POST /api/orgs/{org}/p/{project}/artifacts/{idOrSlug}/task-meta", d.handleOrgProjectMember(d.handleTaskMetaPatch))
+	mux.HandleFunc("POST /api/orgs/{org}/p/{project}/artifacts/{idOrSlug}/task-assign", d.handleOrgProjectMember(d.handleTaskAssign))
 
 	// Operational metadata edit — the one write surface the HTTP API
 	// exposes. Scope is locked to task_meta.status / assignee / priority /
@@ -269,7 +317,223 @@ func withRecover(h http.Handler, logger *slog.Logger) http.Handler {
 // if the route had no project segment (shouldn't happen for scoped routes
 // but keeps the helper crash-safe).
 func projectSlugFrom(r *http.Request) string {
+	if scope, ok := projectRouteContextFrom(r); ok && scope.ProjectSlug != "" {
+		return scope.ProjectSlug
+	}
 	return r.PathValue("project")
+}
+
+type orgProjectRouteAccess string
+
+const (
+	orgProjectRouteAccessPublic  orgProjectRouteAccess = "public"
+	orgProjectRouteAccessMember  orgProjectRouteAccess = "member"
+	orgProjectRouteAccessTrusted orgProjectRouteAccess = "trusted"
+)
+
+type projectRouteContextKey struct{}
+
+type projectRouteContext struct {
+	OrgScoped   bool
+	OrgID       string
+	OrgSlug     string
+	ProjectID   string
+	ProjectSlug string
+	UserID      string
+	Access      orgProjectRouteAccess
+}
+
+func projectRouteContextFrom(r *http.Request) (projectRouteContext, bool) {
+	if r == nil {
+		return projectRouteContext{}, false
+	}
+	scope, ok := r.Context().Value(projectRouteContextKey{}).(projectRouteContext)
+	return scope, ok
+}
+
+func orgSlugFrom(r *http.Request) string {
+	if scope, ok := projectRouteContextFrom(r); ok {
+		return scope.OrgSlug
+	}
+	return r.PathValue("org")
+}
+
+func projectLookupPredicate(r *http.Request, alias string, placeholder int) (string, any) {
+	if placeholder <= 0 {
+		placeholder = 1
+	}
+	projectCol := sqlColumn(alias, "slug")
+	if scope, ok := projectRouteContextFrom(r); ok && scope.ProjectID != "" {
+		return fmt.Sprintf("%s = $%d::uuid", sqlColumn(alias, "id"), placeholder), scope.ProjectID
+	}
+	return fmt.Sprintf("%s = $%d", projectCol, placeholder), projectSlugFrom(r)
+}
+
+func artifactVisibilityPredicate(r *http.Request, alias string, startPlaceholder int) (string, []any) {
+	scope, ok := projectRouteContextFrom(r)
+	if !ok || !scope.OrgScoped || scope.Access == orgProjectRouteAccessTrusted {
+		return "TRUE", nil
+	}
+	if startPlaceholder <= 0 {
+		startPlaceholder = 1
+	}
+	visibilityCol := sqlColumn(alias, "visibility")
+	authorCol := sqlColumn(alias, "author_user_id")
+	switch scope.Access {
+	case orgProjectRouteAccessMember:
+		next := startPlaceholder
+		parts := []string{
+			fmt.Sprintf("%s = $%d", visibilityCol, next),
+			fmt.Sprintf("%s = $%d", visibilityCol, next+1),
+		}
+		args := []any{projects.VisibilityPublic, projects.VisibilityOrg}
+		next += 2
+		if strings.TrimSpace(scope.UserID) != "" {
+			parts = append(parts, fmt.Sprintf("(%s = $%d AND %s::text = $%d)", visibilityCol, next, authorCol, next+1))
+			args = append(args, projects.VisibilityPrivate, scope.UserID)
+		}
+		return "(" + strings.Join(parts, " OR ") + ")", args
+	default:
+		return fmt.Sprintf("%s = $%d", visibilityCol, startPlaceholder), []any{projects.VisibilityPublic}
+	}
+}
+
+func sqlColumn(alias, column string) string {
+	alias = strings.TrimSpace(alias)
+	column = strings.TrimSpace(column)
+	if alias == "" {
+		return column
+	}
+	return alias + "." + column
+}
+
+func (d Deps) handleOrgProjectPublic(next http.HandlerFunc) http.HandlerFunc {
+	return d.handleOrgProject(next, false)
+}
+
+func (d Deps) handleOrgProjectMember(next http.HandlerFunc) http.HandlerFunc {
+	return d.handleOrgProject(next, true)
+}
+
+func (d Deps) handleOrgProject(next http.HandlerFunc, requireMember bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if d.DB == nil {
+			writeError(w, http.StatusInternalServerError, "database unavailable")
+			return
+		}
+		orgSlug := strings.TrimSpace(r.PathValue("org"))
+		projectSlug := strings.TrimSpace(r.PathValue("project"))
+		resolved, err := projects.ResolveByOrgAndSlug(r.Context(), d.DB, orgSlug, projectSlug)
+		if errors.Is(err, projects.ErrProjectNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		if err != nil {
+			if d.Logger != nil {
+				d.Logger.Error("org project resolve", "err", err, "org", orgSlug, "project", projectSlug)
+			}
+			writeError(w, http.StatusInternalServerError, "project lookup failed")
+			return
+		}
+
+		access, userID, canRead, err := d.resolveOrgProjectAccess(r.Context(), r, resolved)
+		if err != nil {
+			if d.Logger != nil {
+				d.Logger.Warn("org project access resolve", "err", err, "org", orgSlug, "project", projectSlug)
+			}
+			writeError(w, http.StatusInternalServerError, "project access check failed")
+			return
+		}
+		if !canRead || (requireMember && access == orgProjectRouteAccessPublic) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+
+		scope := projectRouteContext{
+			OrgScoped:   true,
+			OrgID:       resolved.OrgID,
+			OrgSlug:     resolved.OrgSlug,
+			ProjectID:   resolved.ProjectID,
+			ProjectSlug: resolved.ProjectSlug,
+			UserID:      userID,
+			Access:      access,
+		}
+		ctx := context.WithValue(r.Context(), projectRouteContextKey{}, scope)
+		next(w, r.WithContext(ctx))
+	}
+}
+
+func (d Deps) resolveOrgProjectAccess(ctx context.Context, r *http.Request, resolved *projects.ResolveResult) (orgProjectRouteAccess, string, bool, error) {
+	principal := d.principalForRequest(r)
+	if principal == nil {
+		return orgProjectRouteAccessPublic, "", resolved.IsAccessibleAnonymously(), nil
+	}
+	userID := strings.TrimSpace(principal.UserID)
+	if principal.IsLoopback() {
+		return orgProjectRouteAccessTrusted, userID, true, nil
+	}
+
+	projectMember, orgMember, err := d.orgProjectMembership(ctx, userID, resolved.ProjectID, resolved.OrgID)
+	if err != nil {
+		return orgProjectRouteAccessPublic, userID, false, err
+	}
+	memberAccess := projectMember || orgMember
+	switch resolved.ProjectVisibility {
+	case projects.VisibilityPublic:
+		if memberAccess {
+			return orgProjectRouteAccessMember, userID, true, nil
+		}
+		return orgProjectRouteAccessPublic, userID, true, nil
+	case projects.VisibilityOrg:
+		if memberAccess {
+			return orgProjectRouteAccessMember, userID, true, nil
+		}
+	case projects.VisibilityPrivate:
+		if projectMember {
+			return orgProjectRouteAccessMember, userID, true, nil
+		}
+	}
+	return orgProjectRouteAccessPublic, userID, false, nil
+}
+
+func (d Deps) orgProjectMembership(ctx context.Context, userID, projectID, orgID string) (bool, bool, error) {
+	userID = strings.TrimSpace(userID)
+	projectID = strings.TrimSpace(projectID)
+	orgID = strings.TrimSpace(orgID)
+	if userID == "" {
+		return false, false, nil
+	}
+
+	var projectMember bool
+	if projectID != "" {
+		err := d.DB.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				  FROM project_members
+				 WHERE project_id = $1::uuid
+				   AND user_id = $2::uuid
+			)
+		`, projectID, userID).Scan(&projectMember)
+		if err != nil {
+			return false, false, err
+		}
+	}
+
+	var orgMember bool
+	if orgID != "" {
+		err := d.DB.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				  FROM organization_members
+				 WHERE organization_id = $1::uuid
+				   AND user_id = $2::uuid
+			)
+		`, orgID, userID).Scan(&orgMember)
+		if err != nil {
+			return false, false, err
+		}
+	}
+	return projectMember, orgMember, nil
 }
 
 func (d Deps) handleLegacyReaderLocaleRedirect(w http.ResponseWriter, r *http.Request) {

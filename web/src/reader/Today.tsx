@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router";
 import { api, type ArtifactReadState, type ChangeGroup, type GitRepoSummary, type TodayResp } from "../api/client";
 import { useI18n } from "../i18n";
 import { gitCommitPath, isCommitQuery, shortSha } from "../git/routes";
+import { projectSurfacePath } from "../readerRoutes";
 import { EmptyState } from "./SurfacePrimitives";
 import { Tooltip } from "./Tooltip";
 import { buildChangeGroupCardView, buildTodayBrief } from "./todayViewModel";
@@ -12,6 +13,7 @@ import { readStateLabel } from "./readStateLabel";
 
 type Props = {
   projectSlug: string;
+  orgSlug: string;
   selectedArea: string | null;
   areaNameBySlug: ReadonlyMap<string, string>;
   onSelectArea: (areaSlug: string) => void;
@@ -29,6 +31,7 @@ type KindFilter =
 
 export function Today({
   projectSlug,
+  orgSlug,
   selectedArea,
   areaNameBySlug,
   onSelectArea,
@@ -275,6 +278,7 @@ export function Today({
               key={group.group_id}
               group={group}
               projectSlug={projectSlug}
+              orgSlug={orgSlug}
               areaNameBySlug={areaNameBySlug}
               onSelectArea={onSelectArea}
               selectedArtifactSlug={selectedArtifactSlug}
@@ -294,6 +298,7 @@ export function Today({
                   key={group.group_id}
                   group={group}
                   projectSlug={projectSlug}
+                  orgSlug={orgSlug}
                   areaNameBySlug={areaNameBySlug}
                   onSelectArea={onSelectArea}
                   selectedArtifactSlug={selectedArtifactSlug}
@@ -343,6 +348,7 @@ function commitTargetFromGroup(
 function ChangeGroupCard({
   group,
   projectSlug,
+  orgSlug,
   areaNameBySlug,
   onSelectArea,
   selectedArtifactSlug,
@@ -353,6 +359,7 @@ function ChangeGroupCard({
 }: {
   group: ChangeGroup;
   projectSlug: string;
+  orgSlug: string;
   areaNameBySlug: ReadonlyMap<string, string>;
   onSelectArea: (areaSlug: string) => void;
   selectedArtifactSlug: string | null;
@@ -365,7 +372,7 @@ function ChangeGroupCard({
   const navigate = useNavigate();
   const firstArea = group.areas[0];
   const firstArtifact = group.first_artifact;
-  const detailHref = firstArtifact ? `/p/${projectSlug}/wiki/${firstArtifact.slug}` : null;
+  const detailHref = firstArtifact ? projectSurfacePath(projectSlug, "wiki", firstArtifact.slug, orgSlug) : null;
   const isActive = Boolean(firstArtifact && selectedArtifactSlug === firstArtifact.slug);
   const isInteractive = Boolean(firstArtifact);
   const card = useMemo(() => buildChangeGroupCardView(group, t), [group, t]);
@@ -462,7 +469,7 @@ function ChangeGroupCard({
             <span>{t("today.open_commit", shortSha(commitTarget.sha))}</span>
           </Link>
         )}
-        {firstArea && <Link to={`/p/${projectSlug}/wiki?area=${encodeURIComponent(firstArea)}`}>{t("today.open_area")}</Link>}
+        {firstArea && <Link to={`${projectSurfacePath(projectSlug, "wiki", undefined, orgSlug)}?area=${encodeURIComponent(firstArea)}`}>{t("today.open_area")}</Link>}
         {firstArea && <ExportButton url={api.exportProjectUrl(projectSlug, { area: firstArea })} label={t("today.export_area")} />}
       </div>
     </article>
