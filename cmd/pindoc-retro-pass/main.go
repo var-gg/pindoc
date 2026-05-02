@@ -43,12 +43,14 @@ type planItem struct {
 
 func main() {
 	var (
-		dsn          string
-		projects     string
-		apply        bool
-		limit        int
-		actor        string
-		rewriteSlugs bool
+		dsn                 string
+		projects            string
+		apply               bool
+		limit               int
+		actor               string
+		rewriteSlugs        bool
+		scanAcceptanceVerbs bool
+		acceptanceReport    string
 	)
 	flag.StringVar(&dsn, "database-url", "", "Postgres DSN; defaults to PINDOC_DATABASE_URL/config default")
 	flag.StringVar(&projects, "projects", "", "comma-separated project slugs; empty means all projects")
@@ -56,6 +58,8 @@ func main() {
 	flag.IntVar(&limit, "limit", 0, "maximum artifacts to scan; 0 means no limit")
 	flag.StringVar(&actor, "actor", "pindoc-retro-pass", "author_id for generated revisions")
 	flag.BoolVar(&rewriteSlugs, "rewrite-slugs", false, "also regenerate slugs from titles and write old_slug aliases; default only normalizes body links")
+	flag.BoolVar(&scanAcceptanceVerbs, "scan-acceptance-verbs", false, "scan Task acceptance checklists for forbidden action verbs and write a report")
+	flag.StringVar(&acceptanceReport, "acceptance-report", "artifacts/retro-pass/acceptance-verb-lint.md", "report path for -scan-acceptance-verbs; use '-' for stdout")
 	flag.Parse()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -82,6 +86,18 @@ func main() {
 	}
 
 	projectFilter := splitCSV(projects)
+	if scanAcceptanceVerbs {
+		findings, err := loadAcceptanceVerbFindings(ctx, pool, projectFilter, limit)
+		if err != nil {
+			log.Fatalf("load acceptance verb findings: %v", err)
+		}
+		if err := writeAcceptanceVerbReport(acceptanceReport, findings); err != nil {
+			log.Fatalf("write acceptance verb report: %v", err)
+		}
+		printAcceptanceVerbReportSummary(acceptanceReport, findings)
+		return
+	}
+
 	rows, err := loadArtifacts(ctx, pool, projectFilter, limit)
 	if err != nil {
 		log.Fatalf("load artifacts: %v", err)

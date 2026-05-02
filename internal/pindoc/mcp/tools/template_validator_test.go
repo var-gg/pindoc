@@ -184,6 +184,57 @@ func TestTaskCodeCoordinateExemptionsAreExplicitMeta(t *testing.T) {
 	}
 }
 
+func TestTaskAcceptanceVerbLintBlocksForbiddenVerbs(t *testing.T) {
+	body := taskBodyWithCodeCoordinate("`internal/pindoc/mcp/tools/artifact_propose.go`")
+	body = strings.Replace(body, "- [ ] acceptance criterion is explicit.", "- [ ] 기존 Task를 확인한다.", 1)
+	in := artifactProposeInput{
+		Type: "Task", Title: "verb lint task", AreaSlug: "mcp", AuthorID: "test-agent",
+		BodyMarkdown: body,
+	}
+	_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "ko")
+	if !containsString(failed, "TASK_ACCEPTANCE_FORBIDDEN_VERB") {
+		t.Fatalf("forbidden acceptance verb should fail preflight: %v", failed)
+	}
+	actions := suggestedActionsForNotReady("ko", "Task", failed, nil)
+	if !containsSubstring(actions, "Example:") {
+		t.Fatalf("forbidden verb lint should include rewrite examples: %v", actions)
+	}
+}
+
+func TestTaskAcceptanceVerbLintExemptionsAreExplicitMeta(t *testing.T) {
+	body := taskBodyWithCodeCoordinate("`internal/pindoc/mcp/tools/artifact_propose.go`")
+	body = strings.Replace(body, "- [ ] acceptance criterion is explicit.", "- [ ] 기존 Task를 확인합니다.", 1)
+	cases := []struct {
+		name string
+		in   artifactProposeInput
+	}{
+		{
+			name: "task meta",
+			in: artifactProposeInput{
+				Type: "Task", Title: "legacy task", AreaSlug: "mcp", AuthorID: "test-agent",
+				BodyMarkdown: body,
+				TaskMeta:     &TaskMetaInput{AcceptanceVerbLintExempt: true},
+			},
+		},
+		{
+			name: "artifact meta",
+			in: artifactProposeInput{
+				Type: "Task", Title: "policy task", AreaSlug: "mcp", AuthorID: "test-agent",
+				BodyMarkdown: body,
+				ArtifactMeta: &ArtifactMetaInput{AcceptanceVerbLintExempt: true},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, failed, _ := preflight(context.Background(), Deps{}, "", &tc.in, "ko")
+			if containsString(failed, "TASK_ACCEPTANCE_FORBIDDEN_VERB") {
+				t.Fatalf("explicit verb lint exemption should suppress gate: %v", failed)
+			}
+		})
+	}
+}
+
 func TestBodyPatchUpdateSkipsStructurePreflightUntilMaterialized(t *testing.T) {
 	version := 1
 	in := artifactProposeInput{

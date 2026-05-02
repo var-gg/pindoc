@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	artifactpreflight "github.com/var-gg/pindoc/internal/pindoc/artifact/preflight"
 	"github.com/var-gg/pindoc/internal/pindoc/artifactlinks"
 	"github.com/var-gg/pindoc/internal/pindoc/artifactslug"
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
@@ -258,12 +259,13 @@ func normalizePinInputs(pins []ArtifactPinInput) {
 type TaskMetaInput struct {
 	// Status is the Task lifecycle enum. `claimed_done` is the settled
 	// completion state after acceptance criteria land.
-	Status               string `json:"status,omitempty" jsonschema:"open | claimed_done | blocked | cancelled"`
-	Priority             string `json:"priority,omitempty" jsonschema:"p0 release blocker; p1 must close before release; p2 next round; p3 backlog. Project-specific priority policy wins when present."`
-	Assignee             string `json:"assignee,omitempty"`
-	DueAt                string `json:"due_at,omitempty" jsonschema:"RFC3339 timestamp"`
-	ParentSlug           string `json:"parent_slug,omitempty" jsonschema:"slug of parent Task artifact"`
-	CodeCoordinateExempt bool   `json:"code_coordinate_exempt,omitempty" jsonschema:"true only for policy/vision Tasks that intentionally have no code coordinates"`
+	Status                   string `json:"status,omitempty" jsonschema:"open | claimed_done | blocked | cancelled"`
+	Priority                 string `json:"priority,omitempty" jsonschema:"p0 release blocker; p1 must close before release; p2 next round; p3 backlog. Project-specific priority policy wins when present."`
+	Assignee                 string `json:"assignee,omitempty"`
+	DueAt                    string `json:"due_at,omitempty" jsonschema:"RFC3339 timestamp"`
+	ParentSlug               string `json:"parent_slug,omitempty" jsonschema:"slug of parent Task artifact"`
+	CodeCoordinateExempt     bool   `json:"code_coordinate_exempt,omitempty" jsonschema:"true only for policy/vision Tasks that intentionally have no code coordinates"`
+	AcceptanceVerbLintExempt bool   `json:"acceptance_verb_lint_exempt,omitempty" jsonschema:"true only for legacy/policy Tasks that intentionally use action verbs in acceptance criteria"`
 
 	assigneeSet bool
 }
@@ -274,12 +276,13 @@ type TaskMetaInput struct {
 // while explicit "" means clear the assignee.
 func (tm *TaskMetaInput) UnmarshalJSON(data []byte) error {
 	type wireTaskMetaInput struct {
-		Status               string `json:"status,omitempty"`
-		Priority             string `json:"priority,omitempty"`
-		Assignee             string `json:"assignee,omitempty"`
-		DueAt                string `json:"due_at,omitempty"`
-		ParentSlug           string `json:"parent_slug,omitempty"`
-		CodeCoordinateExempt bool   `json:"code_coordinate_exempt,omitempty"`
+		Status                   string `json:"status,omitempty"`
+		Priority                 string `json:"priority,omitempty"`
+		Assignee                 string `json:"assignee,omitempty"`
+		DueAt                    string `json:"due_at,omitempty"`
+		ParentSlug               string `json:"parent_slug,omitempty"`
+		CodeCoordinateExempt     bool   `json:"code_coordinate_exempt,omitempty"`
+		AcceptanceVerbLintExempt bool   `json:"acceptance_verb_lint_exempt,omitempty"`
 	}
 	var wire wireTaskMetaInput
 	if err := json.Unmarshal(data, &wire); err != nil {
@@ -290,13 +293,14 @@ func (tm *TaskMetaInput) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*tm = TaskMetaInput{
-		Status:               wire.Status,
-		Priority:             wire.Priority,
-		Assignee:             wire.Assignee,
-		DueAt:                wire.DueAt,
-		ParentSlug:           wire.ParentSlug,
-		CodeCoordinateExempt: wire.CodeCoordinateExempt,
-		assigneeSet:          raw != nil && raw["assignee"] != nil,
+		Status:                   wire.Status,
+		Priority:                 wire.Priority,
+		Assignee:                 wire.Assignee,
+		DueAt:                    wire.DueAt,
+		ParentSlug:               wire.ParentSlug,
+		CodeCoordinateExempt:     wire.CodeCoordinateExempt,
+		AcceptanceVerbLintExempt: wire.AcceptanceVerbLintExempt,
+		assigneeSet:              raw != nil && raw["assignee"] != nil,
 	}
 	return nil
 }
@@ -322,6 +326,9 @@ func (tm TaskMetaInput) MarshalJSON() ([]byte, error) {
 	}
 	if tm.CodeCoordinateExempt {
 		payload["code_coordinate_exempt"] = true
+	}
+	if tm.AcceptanceVerbLintExempt {
+		payload["acceptance_verb_lint_exempt"] = true
 	}
 	return json.Marshal(payload)
 }
@@ -354,17 +361,18 @@ var (
 // field is optional; resolveArtifactMeta fills defaults based on pins,
 // update path, and body heuristics.
 type ArtifactMetaInput struct {
-	SourceType           string   `json:"source_type,omitempty" jsonschema:"code | artifact | user_chat | external | mixed"`
-	ConsentState         string   `json:"consent_state,omitempty" jsonschema:"not_needed | requested | granted | denied"`
-	Confidence           string   `json:"confidence,omitempty" jsonschema:"low | medium | high"`
-	Audience             string   `json:"audience,omitempty" jsonschema:"owner_only | approvers | project_readers"`
-	NextContextPolicy    string   `json:"next_context_policy,omitempty" jsonschema:"default | opt_in | excluded"`
-	VerificationState    string   `json:"verification_state,omitempty" jsonschema:"verified | partially_verified | unverified"`
-	AppliesToAreas       []string `json:"applies_to_areas,omitempty" jsonschema:"area_slug list; wildcard scopes like ui/* supported"`
-	AppliesToTypes       []string `json:"applies_to_types,omitempty" jsonschema:"artifact type list; omitted or empty means all types"`
-	RuleSeverity         string   `json:"rule_severity,omitempty" jsonschema:"binding | guidance | reference; presence marks this artifact as an applicable rule"`
-	RuleExcerpt          string   `json:"rule_excerpt,omitempty" jsonschema:"short excerpt returned by context.for_task applicable_rules; default derives from the first H2 section"`
-	CodeCoordinateExempt bool     `json:"code_coordinate_exempt,omitempty" jsonschema:"true only for policy/vision Tasks that intentionally have no code coordinates"`
+	SourceType               string   `json:"source_type,omitempty" jsonschema:"code | artifact | user_chat | external | mixed"`
+	ConsentState             string   `json:"consent_state,omitempty" jsonschema:"not_needed | requested | granted | denied"`
+	Confidence               string   `json:"confidence,omitempty" jsonschema:"low | medium | high"`
+	Audience                 string   `json:"audience,omitempty" jsonschema:"owner_only | approvers | project_readers"`
+	NextContextPolicy        string   `json:"next_context_policy,omitempty" jsonschema:"default | opt_in | excluded"`
+	VerificationState        string   `json:"verification_state,omitempty" jsonschema:"verified | partially_verified | unverified"`
+	AppliesToAreas           []string `json:"applies_to_areas,omitempty" jsonschema:"area_slug list; wildcard scopes like ui/* supported"`
+	AppliesToTypes           []string `json:"applies_to_types,omitempty" jsonschema:"artifact type list; omitted or empty means all types"`
+	RuleSeverity             string   `json:"rule_severity,omitempty" jsonschema:"binding | guidance | reference; presence marks this artifact as an applicable rule"`
+	RuleExcerpt              string   `json:"rule_excerpt,omitempty" jsonschema:"short excerpt returned by context.for_task applicable_rules; default derives from the first H2 section"`
+	CodeCoordinateExempt     bool     `json:"code_coordinate_exempt,omitempty" jsonschema:"true only for policy/vision Tasks that intentionally have no code coordinates"`
+	AcceptanceVerbLintExempt bool     `json:"acceptance_verb_lint_exempt,omitempty" jsonschema:"true only for legacy/policy Tasks that intentionally use action verbs in acceptance criteria"`
 }
 
 var validSourceTypes = map[string]struct{}{
@@ -2131,6 +2139,19 @@ func preflight(ctx context.Context, deps Deps, projectSlug string, in *artifactP
 			if !taskCodeCoordinateExempt(in) && !taskBodyHasCodeCoordinate(in.BodyMarkdown) {
 				push(i18n.T(lang, "preflight.task_code_coordinate_missing"), "TASK_CODE_COORDINATE_MISSING")
 			}
+			if !taskAcceptanceVerbLintExempt(in) {
+				findings := artifactpreflight.LintAcceptanceVerbs(in.BodyMarkdown)
+				for i, finding := range findings {
+					if i >= 5 {
+						push(fmt.Sprintf(i18n.T(lang, "preflight.task_acceptance_forbidden_verb_more"), len(findings)-i), "TASK_ACCEPTANCE_FORBIDDEN_VERB")
+						break
+					}
+					push(
+						fmt.Sprintf(i18n.T(lang, "preflight.task_acceptance_forbidden_verb"), finding.Verb, finding.LineNumber, finding.Text),
+						"TASK_ACCEPTANCE_FORBIDDEN_VERB",
+					)
+				}
+			}
 		case "Decision":
 			if hints != nil && len(hints.RequiredKeywords) > 0 {
 				if !bodyContainsAllKeywords(in.BodyMarkdown, hints.RequiredKeywords) {
@@ -2619,6 +2640,9 @@ func suggestedActionsForNotReady(lang, artifactType string, failed []string, bas
 		"PATCH_APPEND_EMPTY") {
 		out = append(out, bodyPatchSuggestedAction())
 	}
+	if hasAnyStableCode(failed, "TASK_ACCEPTANCE_FORBIDDEN_VERB") {
+		out = append(out, artifactpreflight.SuggestedRewriteActions(3)...)
+	}
 	if !needsTemplateSelfHealHint(failed) {
 		return out
 	}
@@ -2991,6 +3015,9 @@ func taskMetaToJSON(artifactType string, tm *TaskMetaInput) any {
 	if tm.CodeCoordinateExempt {
 		payload["code_coordinate_exempt"] = true
 	}
+	if tm.AcceptanceVerbLintExempt {
+		payload["acceptance_verb_lint_exempt"] = true
+	}
 	buf, err := json.Marshal(payload)
 	if err != nil {
 		return nil
@@ -3073,18 +3100,19 @@ func shouldAutoClaimDone(artifactType string, taskMetaRaw []byte, body string) b
 // warnings slice describing heuristic decisions so agents can see why a
 // default was chosen (e.g. "source_type inferred from pins").
 type ResolvedArtifactMeta struct {
-	SourceType           string   `json:"source_type,omitempty"`
-	ConsentState         string   `json:"consent_state,omitempty"`
-	Confidence           string   `json:"confidence,omitempty"`
-	Audience             string   `json:"audience,omitempty"`
-	NextContextPolicy    string   `json:"next_context_policy,omitempty"`
-	VerificationState    string   `json:"verification_state,omitempty"`
-	AppliesToAreas       []string `json:"applies_to_areas,omitempty"`
-	AppliesToTypes       []string `json:"applies_to_types,omitempty"`
-	RuleSeverity         string   `json:"rule_severity,omitempty"`
-	RuleExcerpt          string   `json:"rule_excerpt,omitempty"`
-	CodeCoordinateExempt bool     `json:"code_coordinate_exempt,omitempty"`
-	Warnings             []string `json:"-"`
+	SourceType               string   `json:"source_type,omitempty"`
+	ConsentState             string   `json:"consent_state,omitempty"`
+	Confidence               string   `json:"confidence,omitempty"`
+	Audience                 string   `json:"audience,omitempty"`
+	NextContextPolicy        string   `json:"next_context_policy,omitempty"`
+	VerificationState        string   `json:"verification_state,omitempty"`
+	AppliesToAreas           []string `json:"applies_to_areas,omitempty"`
+	AppliesToTypes           []string `json:"applies_to_types,omitempty"`
+	RuleSeverity             string   `json:"rule_severity,omitempty"`
+	RuleExcerpt              string   `json:"rule_excerpt,omitempty"`
+	CodeCoordinateExempt     bool     `json:"code_coordinate_exempt,omitempty"`
+	AcceptanceVerbLintExempt bool     `json:"acceptance_verb_lint_exempt,omitempty"`
+	Warnings                 []string `json:"-"`
 }
 
 // userChatQuotePattern matches body substrates likely derived from a user
@@ -3127,6 +3155,7 @@ func resolveArtifactMeta(in *ArtifactMetaInput, pins []ArtifactPinInput, body st
 		out.RuleSeverity = strings.TrimSpace(in.RuleSeverity)
 		out.RuleExcerpt = strings.TrimSpace(in.RuleExcerpt)
 		out.CodeCoordinateExempt = in.CodeCoordinateExempt
+		out.AcceptanceVerbLintExempt = in.AcceptanceVerbLintExempt
 	}
 
 	hasCodePin := false
@@ -3219,6 +3248,9 @@ func artifactMetaToJSON(r ResolvedArtifactMeta) string {
 	}
 	if r.CodeCoordinateExempt {
 		payload["code_coordinate_exempt"] = true
+	}
+	if r.AcceptanceVerbLintExempt {
+		payload["acceptance_verb_lint_exempt"] = true
 	}
 	buf, err := json.Marshal(payload)
 	if err != nil {
@@ -4351,6 +4383,16 @@ func taskCodeCoordinateExempt(in *artifactProposeInput) bool {
 		return true
 	}
 	return in.ArtifactMeta != nil && in.ArtifactMeta.CodeCoordinateExempt
+}
+
+func taskAcceptanceVerbLintExempt(in *artifactProposeInput) bool {
+	if in == nil {
+		return false
+	}
+	if in.TaskMeta != nil && in.TaskMeta.AcceptanceVerbLintExempt {
+		return true
+	}
+	return in.ArtifactMeta != nil && in.ArtifactMeta.AcceptanceVerbLintExempt
 }
 
 func h2SectionContentForSlot(body string, slot requiredH2Slot) (string, bool) {
