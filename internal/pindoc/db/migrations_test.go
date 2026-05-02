@@ -342,3 +342,91 @@ func TestPinRepoIDAndKindVocabularyMigrationContract(t *testing.T) {
 		}
 	}
 }
+
+func TestOrganizationsMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0049_organizations.sql")
+	if err != nil {
+		t.Fatalf("read organizations migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"CREATE TABLE organizations",
+		"id              UUID PRIMARY KEY DEFAULT gen_random_uuid()",
+		"slug            TEXT NOT NULL UNIQUE",
+		"name            TEXT NOT NULL",
+		"kind            TEXT NOT NULL DEFAULT 'team'",
+		"CHECK (kind IN ('personal', 'team'))",
+		"owner_user_id   UUID REFERENCES users(id) ON DELETE SET NULL",
+		"deleted_at      TIMESTAMPTZ NULL",
+		"CREATE UNIQUE INDEX idx_organizations_personal_one_per_user",
+		"WHERE kind = 'personal' AND deleted_at IS NULL",
+		"CREATE TABLE organization_members",
+		"organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE",
+		"user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE",
+		"role            TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'member'))",
+		"PRIMARY KEY (organization_id, user_id)",
+		"ALTER TABLE users",
+		"ADD COLUMN username TEXT",
+		"CREATE UNIQUE INDEX idx_users_username_unique",
+		"WHERE username IS NOT NULL AND deleted_at IS NULL",
+		"ALTER TABLE projects",
+		"ADD COLUMN organization_id UUID REFERENCES organizations(id) ON DELETE RESTRICT",
+		"INSERT INTO organizations (slug, name, kind, description)",
+		"'default'",
+		"UPDATE projects",
+		"SET organization_id = (SELECT id FROM organizations WHERE slug = 'default')",
+		"ALTER COLUMN organization_id SET NOT NULL",
+		"CREATE UNIQUE INDEX idx_projects_org_slug",
+		"ON projects (organization_id, slug)",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("organizations migration Up missing %q:\n---\n%s\n---", want, up)
+		}
+	}
+	for _, want := range []string{
+		"-- +goose Down",
+		"DROP INDEX IF EXISTS idx_projects_org",
+		"DROP INDEX IF EXISTS idx_projects_org_slug",
+		"DROP COLUMN IF EXISTS organization_id",
+		"DROP INDEX IF EXISTS idx_users_username_unique",
+		"DROP COLUMN IF EXISTS username",
+		"DROP TABLE IF EXISTS organization_members",
+		"DROP TABLE IF EXISTS organizations",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("organizations migration Down missing %q", want)
+		}
+	}
+}
+
+func TestVisibilityMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0050_visibility.sql")
+	if err != nil {
+		t.Fatalf("read visibility migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"ALTER TABLE projects",
+		"ADD COLUMN visibility TEXT NOT NULL DEFAULT 'org'",
+		"CHECK (visibility IN ('public', 'org', 'private'))",
+		"ALTER TABLE artifacts",
+		"CREATE INDEX idx_projects_visibility ON projects(visibility)",
+		"CREATE INDEX idx_artifacts_visibility ON artifacts(visibility)",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("visibility migration Up missing %q:\n%s", want, up)
+		}
+	}
+	for _, want := range []string{
+		"-- +goose Down",
+		"DROP INDEX IF EXISTS idx_artifacts_visibility",
+		"DROP INDEX IF EXISTS idx_projects_visibility",
+		"DROP COLUMN IF EXISTS visibility",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("visibility migration Down missing %q", want)
+		}
+	}
+}

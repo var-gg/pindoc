@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/var-gg/pindoc/internal/pindoc/organizations"
 )
 
 // SupportedLanguages is the V1 enum every entrypoint must enforce. The
@@ -178,12 +180,21 @@ func CreateProject(
 		colorPtr = &color
 	}
 
+	// Resolve the legacy owner_id label to an organizations.id UUID. The
+	// transition window keeps both columns populated (migration 0049
+	// header for the rationale): owner_id remains the user-facing input
+	// surface, organization_id is the FK every new query path will use.
+	orgID, err := organizations.ResolveForOwnerLabel(ctx, tx, ownerID)
+	if err != nil {
+		return zero, fmt.Errorf("resolve organization for owner %q: %w", ownerID, err)
+	}
+
 	var projectID string
 	err = tx.QueryRow(ctx, `
-		INSERT INTO projects (owner_id, slug, name, description, color, primary_language)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO projects (owner_id, organization_id, slug, name, description, color, primary_language)
+		VALUES ($1, $2::uuid, $3, $4, $5, $6, $7)
 		RETURNING id::text
-	`, ownerID, slug, name, descPtr, colorPtr, lang).Scan(&projectID)
+	`, ownerID, orgID, slug, name, descPtr, colorPtr, lang).Scan(&projectID)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
