@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/var-gg/pindoc/internal/pindoc/taskassignee"
 	"github.com/var-gg/pindoc/internal/pindoc/telemetry"
 )
 
@@ -103,18 +104,10 @@ var validTaskStatuses = map[string]struct{}{
 	"open": {}, "claimed_done": {}, "blocked": {}, "cancelled": {},
 }
 
-var validTaskAssignee = regexp.MustCompile(`^(agent:[a-zA-Z0-9_\-:.]+|user:[a-zA-Z0-9_\-]+|@[a-zA-Z0-9_\-.]+)$`)
 var taskAcceptanceLine = regexp.MustCompile(`^\s*[-*+]\s+\[([ xX~-])\]\s+`)
 
 func normalizeTaskAssignee(assignee string) (string, bool) {
-	a := strings.TrimSpace(assignee)
-	if a == "" {
-		return "", true
-	}
-	if !validTaskAssignee.MatchString(a) {
-		return "", false
-	}
-	return a, true
+	return taskassignee.ValidFormat(assignee)
 }
 
 func countTaskAcceptanceResolution(body string) (resolved, total int) {
@@ -206,12 +199,19 @@ func (d Deps) handleTaskAssign(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, errBody)
 		return
 	}
-	assignee, ok := normalizeTaskAssignee(in.Assignee)
-	if !ok {
+	assignee, problem, err := taskassignee.NormalizeWithDB(r.Context(), d.DB, in.Assignee)
+	if err != nil {
+		d.Logger.Error("task-assign normalize assignee", "err", err)
+		errBody := taskMetaError{ErrorCode: "DB_ERROR", Message: "assignee user lookup failed"}
+		d.recordTaskAssignTelemetry(start, projectSlug, in, errBody, errBody.ErrorCode)
+		writeJSON(w, http.StatusInternalServerError, errBody)
+		return
+	}
+	if problem != nil {
 		errBody := taskMetaError{
-			ErrorCode: "ASSIGNEE_FORMAT_INVALID",
-			Message:   "assignee must match agent:<id> | user:<id> | @<handle>, or be empty to clear",
-			Failed:    []string{"ASSIGNEE_FORMAT_INVALID"},
+			ErrorCode: problem.Code,
+			Message:   problem.Message,
+			Failed:    []string{problem.Code},
 		}
 		d.recordTaskAssignTelemetry(start, projectSlug, in, errBody, errBody.ErrorCode)
 		writeJSON(w, http.StatusBadRequest, errBody)

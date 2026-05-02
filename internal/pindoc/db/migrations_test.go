@@ -552,6 +552,36 @@ func TestDropProjectsOwnerIDMigrationContract(t *testing.T) {
 	}
 }
 
+func TestNormalizeTaskAssigneeUserUUIDMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0056_normalize_task_assignee_user_uuid.sql")
+	if err != nil {
+		t.Fatalf("read normalize task assignee migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"JOIN users u",
+		"a.type = 'Task'",
+		"u.deleted_at IS NULL",
+		"a.task_meta->>'assignee' ~* '^user:[0-9a-f]{8}-",
+		"jsonb_set(",
+		"to_jsonb(r.normalized_assignee)",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("normalize task assignee migration Up missing %q:\n%s", want, up)
+		}
+	}
+	for _, want := range []string{
+		"-- +goose Down",
+		"Irreversible data cleanup",
+		"SELECT 1",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("normalize task assignee migration Down missing %q", want)
+		}
+	}
+}
+
 func TestVisibilityMigrationContract(t *testing.T) {
 	raw, err := migrationsFS.ReadFile("migrations/0050_visibility.sql")
 	if err != nil {

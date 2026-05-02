@@ -11,6 +11,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
+	"github.com/var-gg/pindoc/internal/pindoc/taskassignee"
 )
 
 // taskBulkAssignInput is the agent-facing shape for pindoc.task.bulk_assign.
@@ -29,7 +30,7 @@ type taskBulkAssignInput struct {
 	Slugs []string `json:"slugs" jsonschema:"list of Task slugs or IDs (min 1, recommended ≤ 50 per call)"`
 
 	// Assignee is the target assignee, same format as task.assign.
-	Assignee string `json:"assignee" jsonschema:"e.g. 'agent:codex', '@alice'; empty string explicitly clears"`
+	Assignee string `json:"assignee" jsonschema:"e.g. 'agent:codex', '@alice', or a user UUID; empty string explicitly clears"`
 
 	// AllowReassign explicitly opts into overwriting a non-empty current
 	// assignee. Default false keeps broad bulk "claim all open work" calls
@@ -132,13 +133,16 @@ func RegisterTaskBulkAssign(server *sdk.Server, deps Deps) {
 					Checklist: []string{"slugs[] must contain at least one entry"},
 				}, nil
 			}
-			assignee, ok := validateAssignee(in.Assignee)
-			if !ok {
+			assignee, problem, err := taskassignee.NormalizeWithDB(ctx, deps.DB, in.Assignee)
+			if err != nil {
+				return nil, taskBulkAssignOutput{}, fmt.Errorf("normalize task.bulk_assign assignee: %w", err)
+			}
+			if problem != nil {
 				return nil, taskBulkAssignOutput{
 					Status:    "not_ready",
-					ErrorCode: "ASSIGNEE_FORMAT_INVALID",
-					Failed:    []string{"ASSIGNEE_FORMAT_INVALID"},
-					Checklist: []string{"assignee must match agent:<id> | user:<id> | @<handle>, or be empty to clear"},
+					ErrorCode: problem.Code,
+					Failed:    []string{problem.Code},
+					Checklist: []string{problem.Message},
 				}, nil
 			}
 

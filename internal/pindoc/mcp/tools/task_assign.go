@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
+	"github.com/var-gg/pindoc/internal/pindoc/taskassignee"
 )
 
 // taskAssignInput is the agent-facing shape for pindoc.task.assign.
@@ -26,9 +26,10 @@ type taskAssignInput struct {
 	// pindoc://slug URL.
 	SlugOrID string `json:"slug_or_id" jsonschema:"Task artifact UUID, slug, or pindoc:// URL"`
 
-	// Assignee is the new assignee value. Must match agent:<id> | user:<id>
-	// | @<handle>, or empty string to explicitly clear.
-	Assignee string `json:"assignee" jsonschema:"e.g. 'agent:codex', 'agent:claude', '@alice'; empty string explicitly clears"`
+	// Assignee is the new assignee value. Must match agent:<id> |
+	// user:<display_name-or-id> | @<handle>, a bare user UUID, or empty
+	// string to explicitly clear.
+	Assignee string `json:"assignee" jsonschema:"e.g. 'agent:codex', 'agent:claude', '@alice', or a user UUID; empty string explicitly clears"`
 
 	// Reason is optional free-form rationale; stored as the revision
 	// commit_msg. Empty string falls back to an auto-generated message.
@@ -66,16 +67,14 @@ type taskAssignOutput struct {
 	ToolsetVersion  string `json:"toolset_version,omitempty"`
 }
 
-// assigneePattern accepts the three principal shapes defined by Decision
+// validateAssignee accepts the principal shapes defined by Decision
 // task-operation-tools-task-assign-단건-task-bulk-assign-배치-reas:
 //   - agent:<id>   — MCP-subprocess identities (agent:codex, agent:claude-code)
-//   - user:<id>    — user-table references, typically UUIDs
+//   - user:<name>  — user-table display-name references
 //   - @<handle>    — free-form human handles
 //
 // Empty string is permitted separately (explicit clear) and is not run
 // against this regex.
-var assigneePattern = regexp.MustCompile(`^(agent:[a-zA-Z0-9_\-:.]+|user:[a-zA-Z0-9_\-]+|@[a-zA-Z0-9_\-.]+)$`)
-
 const (
 	// reasonMinLen / reasonMaxLen gate the bulk_assign reason field. Decision
 	// Open questions permit contentless strings like "ok" — length is the
@@ -92,14 +91,7 @@ const (
 // handleUpdateMetaPatch writes JSON null and jsonb_strip_nulls removes
 // the field after the shallow merge.
 func validateAssignee(assignee string) (string, bool) {
-	a := strings.TrimSpace(assignee)
-	if a == "" {
-		return "", true
-	}
-	if !assigneePattern.MatchString(a) {
-		return "", false
-	}
-	return a, true
+	return taskassignee.ValidFormat(assignee)
 }
 
 // RegisterTaskAssign wires pindoc.task.assign. The handler validates the
@@ -118,14 +110,12 @@ func RegisterTaskAssign(server *sdk.Server, deps Deps) {
 			if err != nil {
 				return nil, taskAssignOutput{}, fmt.Errorf("task.assign: %w", err)
 			}
-			assignee, ok := validateAssignee(in.Assignee)
-			if !ok {
-				return nil, taskAssignOutput{
-					Status:    "not_ready",
-					ErrorCode: "ASSIGNEE_FORMAT_INVALID",
-					Failed:    []string{"ASSIGNEE_FORMAT_INVALID"},
-					Checklist: []string{"assignee must match agent:<id> | user:<id> | @<handle>, or be empty string to clear"},
-				}, nil
+			assignee, problem, err := taskassignee.NormalizeWithDB(ctx, deps.DB, in.Assignee)
+			if err != nil {
+				return nil, taskAssignOutput{}, fmt.Errorf("normalize task.assign assignee: %w", err)
+			}
+			if problem != nil {
+				return nil, taskAssignProblemOutput(problem), nil
 			}
 			res, err := assignOneTask(ctx, deps, p, scope, in.SlugOrID, assignee, in.Reason, in.AuthorID, in.AuthorVersion, "", true)
 			if err != nil {
@@ -134,6 +124,15 @@ func RegisterTaskAssign(server *sdk.Server, deps Deps) {
 			return nil, res, nil
 		},
 	)
+}
+
+func taskAssignProblemOutput(problem *taskassignee.Problem) taskAssignOutput {
+	return taskAssignOutput{
+		Status:    "not_ready",
+		ErrorCode: problem.Code,
+		Failed:    []string{problem.Code},
+		Checklist: []string{problem.Message},
+	}
 }
 
 // assignOneTask resolves slug/ID, reads current head revision/current

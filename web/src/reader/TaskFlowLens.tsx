@@ -14,6 +14,7 @@ import { projectSurfacePath } from "../readerRoutes";
 import { EmptyState, SurfaceHeader } from "./SurfacePrimitives";
 import { Tooltip } from "./Tooltip";
 import { localizedAreaName } from "./areaLocale";
+import { taskAssigneeLabel } from "./assigneeDisplay";
 import {
   TASK_FLOW_STAGES,
   groupTaskFlowByProject,
@@ -84,7 +85,7 @@ export function TaskFlowLens({
   const [currentUser, setCurrentUser] = useState<CurrentUserResp | null>(null);
   const [state, setState] = useState<FlowState>({ kind: "loading" });
 
-  const assigneeOptions = useMemo(() => buildAssigneeOptions(allList, currentUser), [allList, currentUser]);
+  const assigneeOptions = useMemo(() => buildAssigneeOptions(allList, currentUser, t), [allList, currentUser, t]);
   const agentOptions = useMemo(() => assigneeOptions.filter((option) => option.value.startsWith("agent:")), [assigneeOptions]);
   const actorConfig = useMemo(
     () => buildActorConfig(actorMode, actorValue, teamValue, currentUser),
@@ -565,7 +566,7 @@ function TaskFlowRowCard({
             {row.assignee?.startsWith("user:") || row.assignee?.startsWith("@")
               ? <UserRound className="lucide" aria-hidden="true" />
               : <Bot className="lucide" aria-hidden="true" />}
-            <span>{row.assignee || t("tasks.assignee_unassigned")}</span>
+            <span>{taskAssigneeLabel(row.assignee, t)}</span>
           </span>
           <span className="chip-area">{areaLabel}</span>
           <span className="task-flow-project-chip">{row.project_slug}</span>
@@ -621,20 +622,24 @@ function formatTaskFlowDate(value: string): string {
   return new Date(value).toLocaleDateString();
 }
 
-function buildAssigneeOptions(list: ArtifactRef[], currentUser: CurrentUserResp | null): Array<{ value: string; label: string }> {
+function buildAssigneeOptions(
+  list: ArtifactRef[],
+  currentUser: CurrentUserResp | null,
+  t: (key: string, ...args: Array<string | number>) => string,
+): Array<{ value: string; label: string }> {
   const seen = new Set<string>();
   const out: Array<{ value: string; label: string }> = [];
   for (const id of currentUserActorIDs(currentUser)) {
     if (!seen.has(id)) {
       seen.add(id);
-      out.push({ value: id, label: id });
+      out.push({ value: id, label: taskAssigneeLabel(id, t) });
     }
   }
   for (const artifact of list) {
     const assignee = artifact.task_meta?.assignee?.trim();
     if (!assignee || seen.has(assignee)) continue;
     seen.add(assignee);
-    out.push({ value: assignee, label: assignee });
+    out.push({ value: assignee, label: taskAssigneeLabel(assignee, t) });
   }
   return out.sort((a, b) => a.value.localeCompare(b.value));
 }
@@ -680,6 +685,9 @@ function currentUserActorIDs(currentUser: CurrentUserResp | null): string[] {
   const user = currentUser?.user;
   if (!user?.id) return [];
   const ids = [`user:${user.id}`];
+  if (user.display_name) {
+    ids.push(`user:${user.display_name}`);
+  }
   if (user.github_handle) {
     const handle = user.github_handle.startsWith("@") ? user.github_handle : `@${user.github_handle}`;
     ids.push(handle);

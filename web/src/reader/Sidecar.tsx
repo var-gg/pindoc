@@ -40,6 +40,7 @@ import {
 } from "./visualLanguage";
 import { visualIconComponent } from "./visualLanguageIcons";
 import { splitEvidenceEdges } from "./sidecarEvidence";
+import { taskAssigneeLabel } from "./assigneeDisplay";
 import {
   MINI_GRAPH_CENTER,
   graphRadialPositions,
@@ -525,8 +526,7 @@ function taskAssigneeDisplay(
     return { label: trimmed, avatarKey: rawAgent };
   }
   if (trimmed.startsWith("@")) return { label: trimmed, avatarKey: trimmed.slice(1) };
-  if (trimmed.startsWith("user:")) return { label: trimmed.slice("user:".length), avatarKey: trimmed };
-  return { label: trimmed, avatarKey: trimmed };
+  return { label: taskAssigneeLabel(trimmed, t), avatarKey: trimmed };
 }
 
 function acceptanceStats(body: string): { resolved: number; total: number } {

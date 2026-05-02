@@ -20,6 +20,7 @@ func TestValidateAssignee(t *testing.T) {
 		{"agent:claude-code", "agent:claude-code", true, "agent-with-dash"},
 		{"agent:codex:session-42", "agent:codex:session-42", true, "agent-with-colon"},
 		{"user:6f676d29-0d22-43fa-87af", "user:6f676d29-0d22-43fa-87af", true, "user-uuid-prefix"},
+		{"user:Alice Smith", "user:Alice Smith", true, "user-display-name-with-space"},
 		{"@alice", "@alice", true, "handle-plain"},
 		{"@alice.bob", "@alice.bob", true, "handle-with-dot"},
 		{"not_a_principal", "", false, "no-scheme"},

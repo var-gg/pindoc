@@ -31,6 +31,7 @@ import { useReaderData } from "./useReaderData";
 import { initReaderWidth, setReaderWidth as applyReaderWidth, type ReaderWidth } from "./readerWidth";
 import { telemetryDebugEnabled } from "./opsAccess";
 import { localizedAreaName } from "./areaLocale";
+import { taskAssigneeActorKey, taskAssigneeLabel } from "./assigneeDisplay";
 import {
   countPendingTasks,
   groupTasksByStatus,
@@ -1728,11 +1729,11 @@ function TaskCard({
   const areaLabel = areaNameBySlug.get(a.area_slug) ?? localizedAreaName(t, a.area_slug, a.area_slug);
   const detailHref = projectSurfacePath(projectSlug, "wiki", a.slug, orgSlug);
   const selected = isActive || isSelected;
-  const assigneeLabel = taskActorLabel(a.task_meta?.assignee, t);
+  const assigneeLabel = taskAssigneeLabel(a.task_meta?.assignee, t);
   const requesterLabel = requesterActorLabel(a);
   const showRequester =
     requesterLabel &&
-    actorKey(requesterLabel) !== actorKey(assigneeLabel);
+    taskAssigneeActorKey(requesterLabel) !== taskAssigneeActorKey(assigneeLabel);
   return (
     <article
       tabIndex={0}
@@ -1808,10 +1809,6 @@ function TaskCard({
   );
 }
 
-function taskActorLabel(value: string | undefined, t: (key: string, ...args: Array<string | number>) => string): string {
-  return value?.trim() || t("tasks.assignee_unassigned");
-}
-
 function requesterActorLabel(a: ArtifactRef): string {
   const user = a.author_user;
   const raw =
@@ -1820,12 +1817,4 @@ function requesterActorLabel(a: ArtifactRef): string {
     a.author_id.trim();
   if (!raw) return "";
   return raw.startsWith("@") ? raw : `@${raw}`;
-}
-
-function actorKey(value: string | undefined): string {
-  return (value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/^@/, "")
-    .replace(/^agent:/, "");
 }
