@@ -20,16 +20,17 @@ import (
 )
 
 type projectInfo struct {
-	ID               string `json:"id"`
-	Slug             string `json:"slug"`
-	OrgSlug          string `json:"org_slug,omitempty"`
-	OrganizationSlug string `json:"organization_slug,omitempty"`
-	Name             string `json:"name"`
-	Description      string `json:"description,omitempty"`
-	Color            string `json:"color,omitempty"`
-	PrimaryLanguage  string `json:"primary_language"`
-	SensitiveOps     string `json:"sensitive_ops"`
-	CurrentRole      string `json:"current_role,omitempty"`
+	ID                        string `json:"id"`
+	Slug                      string `json:"slug"`
+	OrgSlug                   string `json:"org_slug,omitempty"`
+	OrganizationSlug          string `json:"organization_slug,omitempty"`
+	Name                      string `json:"name"`
+	Description               string `json:"description,omitempty"`
+	Color                     string `json:"color,omitempty"`
+	PrimaryLanguage           string `json:"primary_language"`
+	SensitiveOps              string `json:"sensitive_ops"`
+	DefaultArtifactVisibility string `json:"default_artifact_visibility"`
+	CurrentRole               string `json:"current_role,omitempty"`
 	// Locale is a compatibility alias for PrimaryLanguage. Locale is no
 	// longer part of project identity or Reader URLs after task-canonical-
 	// locale-migration.
@@ -389,7 +390,8 @@ func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
 	err := d.DB.QueryRow(r.Context(), fmt.Sprintf(`
 		SELECT
 			p.id::text, p.slug, o.slug, p.name, p.description, p.color,
-			p.primary_language, p.primary_language, COALESCE(NULLIF(p.sensitive_ops, ''), 'auto'), p.created_at,
+			p.primary_language, p.primary_language, COALESCE(NULLIF(p.sensitive_ops, ''), 'auto'),
+			COALESCE(NULLIF(p.default_artifact_visibility, ''), 'org'), p.created_at,
 			(SELECT count(*) FROM areas     WHERE project_id = p.id),
 			(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
 		FROM projects p
@@ -397,7 +399,8 @@ func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
 		WHERE %s
 	`, projectPredicate), projectArg).Scan(
 		&out.ID, &out.Slug, &out.OrganizationSlug, &out.Name, &desc, &color,
-		&out.PrimaryLanguage, &out.Locale, &out.SensitiveOps, &out.CreatedAt,
+		&out.PrimaryLanguage, &out.Locale, &out.SensitiveOps,
+		&out.DefaultArtifactVisibility, &out.CreatedAt,
 		&out.AreasCount, &out.ArtifactsCount,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {

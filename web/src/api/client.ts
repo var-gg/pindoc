@@ -74,6 +74,7 @@ export type Project = {
   color?: string;
   primary_language: string;
   sensitive_ops?: ProjectSensitiveOps;
+  default_artifact_visibility?: VisibilityTier;
   current_role?: "owner" | "editor" | "viewer";
   // Compatibility alias for primary_language. Locale is metadata, not a
   // route or identity key.
@@ -91,12 +92,14 @@ export type ProjectSensitiveOps = "auto" | "confirm";
 export type VisibilityTier = "public" | "org" | "private";
 
 export type ProjectSettingsPatchInput = {
-  sensitive_ops: ProjectSensitiveOps;
+  sensitive_ops?: ProjectSensitiveOps;
+  default_artifact_visibility?: VisibilityTier;
 };
 
 export type ProjectSettingsPatchResp = {
   status: "ok";
-  sensitive_ops: ProjectSensitiveOps;
+  sensitive_ops?: ProjectSensitiveOps;
+  default_artifact_visibility?: VisibilityTier;
 };
 
 export type ProjectListItem = {

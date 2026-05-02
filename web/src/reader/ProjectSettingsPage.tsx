@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { ArrowLeft, CheckCircle2, Loader2, Settings2, ShieldAlert } from "lucide-react";
-import { api, type Project, type ProjectSensitiveOps } from "../api/client";
+import { api, type Project, type ProjectSensitiveOps, type VisibilityTier } from "../api/client";
 import { useI18n } from "../i18n";
 import { DEFAULT_READER_ORG_SLUG, projectSurfacePath } from "../readerRoutes";
 import { EmptyState } from "./SurfacePrimitives";
+import { ProjectSettingsVisibilityPanel } from "./ProjectSettingsVisibilityPanel";
+import { normalizeVisibilityTier } from "./visibility";
 import "../styles/reader.css";
 
 type Notice = {
@@ -17,7 +19,7 @@ export function ProjectSettingsPage() {
   const { t } = useI18n();
   const [loadedProject, setLoadedProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState<"review_queue" | "visibility" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const orgSlug = org ?? loadedProject?.organization_slug ?? DEFAULT_READER_ORG_SLUG;
@@ -47,18 +49,19 @@ export function ProjectSettingsPage() {
 
   const sensitiveOps: ProjectSensitiveOps = loadedProject?.sensitive_ops ?? "auto";
   const reviewQueueEnabled = sensitiveOps === "confirm";
+  const defaultVisibility = normalizeVisibilityTier(loadedProject?.default_artifact_visibility);
   const canEdit = loadedProject?.current_role === "owner";
 
   async function setReviewQueueEnabled(nextEnabled: boolean) {
     if (!loadedProject || saving || !canEdit) return;
     const nextMode: ProjectSensitiveOps = nextEnabled ? "confirm" : "auto";
-    setSaving(true);
+    setSaving("review_queue");
     setNotice(null);
     try {
       const resp = await api.projectSettingsPatch(project, {
         sensitive_ops: nextMode,
       });
-      setLoadedProject({ ...loadedProject, sensitive_ops: resp.sensitive_ops });
+      setLoadedProject({ ...loadedProject, sensitive_ops: resp.sensitive_ops ?? nextMode });
       setNotice({
         kind: "ok",
         message: nextEnabled ? t("settings.saved_on") : t("settings.saved_off"),
@@ -72,7 +75,36 @@ export function ProjectSettingsPage() {
           : t("settings.save_error"),
       });
     } finally {
-      setSaving(false);
+      setSaving(null);
+    }
+  }
+
+  async function setDefaultVisibility(nextVisibility: VisibilityTier) {
+    if (!loadedProject || saving || !canEdit || nextVisibility === defaultVisibility) return;
+    setSaving("visibility");
+    setNotice(null);
+    try {
+      const resp = await api.projectSettingsPatch(project, {
+        default_artifact_visibility: nextVisibility,
+      });
+      setLoadedProject({
+        ...loadedProject,
+        default_artifact_visibility: resp.default_artifact_visibility ?? nextVisibility,
+      });
+      setNotice({
+        kind: "ok",
+        message: t("settings.visibility_saved"),
+      });
+    } catch (e) {
+      const tagged = e as Error & { error_code?: string };
+      setNotice({
+        kind: "err",
+        message: tagged.error_code
+          ? `${tagged.error_code}: ${tagged.message}`
+          : t("settings.save_error"),
+      });
+    } finally {
+      setSaving(null);
     }
   }
 
@@ -125,21 +157,31 @@ export function ProjectSettingsPage() {
                 className="sr-only"
                 type="checkbox"
                 checked={reviewQueueEnabled}
-                disabled={!canEdit || saving}
+                disabled={!canEdit || saving !== null}
                 onChange={(e) => void setReviewQueueEnabled(e.target.checked)}
               />
               <span className="project-settings__switch" aria-hidden>
                 <span />
               </span>
               <span className="project-settings__switch-state">
-                {saving && <Loader2 className="lucide project-settings__spinner" aria-hidden />}
-                {!saving && reviewQueueEnabled && <CheckCircle2 className="lucide" aria-hidden />}
+                {saving === "review_queue" && <Loader2 className="lucide project-settings__spinner" aria-hidden />}
+                {saving !== "review_queue" && reviewQueueEnabled && <CheckCircle2 className="lucide" aria-hidden />}
                 {reviewQueueEnabled
                   ? t("settings.review_queue_on")
                   : t("settings.review_queue_off")}
               </span>
             </label>
           </section>
+        )}
+
+        {!loading && loadedProject && (
+          <ProjectSettingsVisibilityPanel
+            canEdit={canEdit}
+            defaultVisibility={defaultVisibility}
+            saving={saving === "visibility"}
+            t={t}
+            onChange={(tier) => void setDefaultVisibility(tier)}
+          />
         )}
 
         {notice && (

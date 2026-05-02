@@ -19,11 +19,11 @@ import (
 
 func TestDecodeProjectSettingsPatch(t *testing.T) {
 	cases := []struct {
-		name              string
-		body              string
-		wantSensitiveOps  string // empty means unset
-		wantDefaultVis    string // empty means unset
-		wantError         string
+		name             string
+		body             string
+		wantSensitiveOps string // empty means unset
+		wantDefaultVis   string // empty means unset
+		wantError        string
 	}{
 		{name: "confirm", body: `{"sensitive_ops":"confirm"}`, wantSensitiveOps: "confirm"},
 		{name: "trim and lower", body: `{"sensitive_ops":" AUTO "}`, wantSensitiveOps: "auto"},
@@ -143,6 +143,31 @@ func TestProjectSettingsPatchIntegration(t *testing.T) {
 	}
 	assertProjectSensitiveOps(t, ctx, pool, projectID, "confirm")
 
+	ownerDefaultPrivate := doInviteRequest(t, handler, oauthSvc, ownerID, http.MethodPatch, "/api/p/"+slug+"/settings", `{"default_artifact_visibility":"private"}`)
+	if ownerDefaultPrivate.Code != http.StatusOK {
+		t.Fatalf("owner default visibility status = %d, want 200; body=%s", ownerDefaultPrivate.Code, ownerDefaultPrivate.Body.String())
+	}
+	var defaultOut projectSettingsPatchResp
+	if err := json.NewDecoder(ownerDefaultPrivate.Body).Decode(&defaultOut); err != nil {
+		t.Fatalf("decode owner default visibility: %v", err)
+	}
+	if defaultOut.Status != "ok" || defaultOut.DefaultArtifactVisibility != "private" {
+		t.Fatalf("owner default visibility resp = %+v", defaultOut)
+	}
+	assertProjectDefaultVisibility(t, ctx, pool, projectID, "private")
+
+	ownerCurrent := doInviteRequest(t, handler, oauthSvc, ownerID, http.MethodGet, "/api/p/"+slug, "")
+	if ownerCurrent.Code != http.StatusOK {
+		t.Fatalf("owner project current status = %d, want 200; body=%s", ownerCurrent.Code, ownerCurrent.Body.String())
+	}
+	var current projectInfo
+	if err := json.NewDecoder(ownerCurrent.Body).Decode(&current); err != nil {
+		t.Fatalf("decode owner project current: %v", err)
+	}
+	if current.DefaultArtifactVisibility != "private" {
+		t.Fatalf("project current default_artifact_visibility = %q, want private", current.DefaultArtifactVisibility)
+	}
+
 	viewerAuto := doInviteRequest(t, handler, oauthSvc, viewerID, http.MethodPatch, "/api/p/"+slug+"/settings", `{"sensitive_ops":"auto"}`)
 	if viewerAuto.Code != http.StatusForbidden {
 		t.Fatalf("viewer patch status = %d, want 403; body=%s", viewerAuto.Code, viewerAuto.Body.String())
@@ -173,5 +198,20 @@ func assertProjectSensitiveOps(t *testing.T, ctx context.Context, pool *db.Pool,
 	}
 	if got != want {
 		t.Fatalf("sensitive_ops = %q, want %q", got, want)
+	}
+}
+
+func assertProjectDefaultVisibility(t *testing.T, ctx context.Context, pool *db.Pool, projectID, want string) {
+	t.Helper()
+	var got string
+	if err := pool.QueryRow(ctx, `
+		SELECT default_artifact_visibility
+		  FROM projects
+		 WHERE id = $1::uuid
+	`, projectID).Scan(&got); err != nil {
+		t.Fatalf("select default_artifact_visibility: %v", err)
+	}
+	if got != want {
+		t.Fatalf("default_artifact_visibility = %q, want %q", got, want)
 	}
 }

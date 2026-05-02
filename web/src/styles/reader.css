@@ -2265,6 +2265,9 @@
   border-radius: var(--r-2);
   background: var(--bg-1);
 }
+.project-settings__panel + .project-settings__panel {
+  margin-top: 14px;
+}
 .project-settings__copy {
   display: grid;
   gap: 8px;
@@ -2355,6 +2358,67 @@
 }
 .project-settings__spinner {
   animation: cp-spin 1s linear infinite;
+}
+.project-settings__visibility-group {
+  display: grid;
+  gap: 8px;
+  min-width: min(360px, 100%);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.project-settings__visibility-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-1);
+  background: var(--bg-2);
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.project-settings__visibility-option--selected {
+  border-color: color-mix(in oklch, var(--accent) 54%, var(--border-strong));
+  background: color-mix(in oklch, var(--accent) 10%, var(--bg-2));
+}
+.project-settings__visibility-option--disabled {
+  cursor: default;
+  opacity: 0.76;
+}
+.project-settings__visibility-option input {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+.project-settings__visibility-option input:focus-visible {
+  outline: 3px solid color-mix(in oklch, var(--accent) 24%, transparent);
+  outline-offset: 2px;
+}
+.project-settings__visibility-option-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--fg-3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.project-settings__visibility-option-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+}
+.project-settings__visibility-option-title .lucide {
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
 }
 .project-settings__notice {
   margin-top: 14px;
@@ -3624,6 +3688,10 @@
   }
   .project-settings__switch-row {
     justify-content: space-between;
+    width: 100%;
+  }
+  .project-settings__visibility-group {
+    min-width: 0;
     width: 100%;
   }
   .graph-surface__head {
