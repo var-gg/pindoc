@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	artifactpreflight "github.com/var-gg/pindoc/internal/pindoc/artifact/preflight"
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	pgit "github.com/var-gg/pindoc/internal/pindoc/git"
 	pinmodel "github.com/var-gg/pindoc/internal/pindoc/pins"
@@ -155,7 +156,7 @@ func RegisterTaskClaimDone(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.task.claim_done",
-			Description: "Mark a Task implementation complete. Toggles every unchecked acceptance item ('- [ ]') to '[x]' and sets task_meta.status='claimed_done' in one atomic revision. Already-resolved markers ([x]/[~]/[-]) are preserved — partial / deferred judgment calls are not overwritten. Bypasses search_receipt gating (operational metadata lane). When the Task involved code/doc/config changes, pass commit_sha (7-64 hex chars, prefixed onto commit_msg as '[<short>] ...') and choose pin_strategy: auto (default) auto-pins changed files from the commit diff up to 20, allowlist auto-pins only changed_paths_allowlist entries, explicit disables commit-diff auto pins and stores only pins[]. pins[] uses the same shape as artifact.propose pins[]; duplicate pins are silently skipped. For non-code deliverables such as Decision or Analysis artifacts, pass evidence_artifacts (slug/id/pindoc://) to store relates_to=evidence edges; commit pins and evidence_artifacts can be used together. For short verification results, pass verification_notes[]; for long logs/reports, create a TC/Analysis receipt artifact and pass verification_receipts[] so they surface separately from code pins. After accepted, call pindoc.task.done_check with mode=current_open_only before final user handoff; read the historical debt fields separately. Reason is optional (stored as commit_msg).",
+			Description: "Mark a Task implementation complete. Requires the Task body to contain an Outcome H2 section with key result, commit/PR evidence unless outcome_commit_exempt is set, and a regression statement. Toggles every unchecked acceptance item ('- [ ]') to '[x]' and sets task_meta.status='claimed_done' in one atomic revision. Already-resolved markers ([x]/[~]/[-]) are preserved — partial / deferred judgment calls are not overwritten. Bypasses search_receipt gating (operational metadata lane). When the Task involved code/doc/config changes, pass commit_sha (7-64 hex chars, prefixed onto commit_msg as '[<short>] ...') and choose pin_strategy: auto (default) auto-pins changed files from the commit diff up to 20, allowlist auto-pins only changed_paths_allowlist entries, explicit disables commit-diff auto pins and stores only pins[]. pins[] uses the same shape as artifact.propose pins[]; duplicate pins are silently skipped. For non-code deliverables such as Decision or Analysis artifacts, pass evidence_artifacts (slug/id/pindoc://) to store relates_to=evidence edges; commit pins and evidence_artifacts can be used together. For short verification results, pass verification_notes[]; for long logs/reports, create a TC/Analysis receipt artifact and pass verification_receipts[] so they surface separately from code pins. After accepted, call pindoc.task.done_check with mode=current_open_only before final user handoff; read the historical debt fields separately. Reason is optional (stored as commit_msg).",
 		},
 		func(ctx context.Context, p *auth.Principal, in taskClaimDoneInput) (*sdk.CallToolResult, taskClaimDoneOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -270,13 +271,14 @@ func claimOneTaskDone(
 		artifactID, projectID, currentBody, currentTitle, currentType, currentSlug string
 		currentTags                                                                []string
 		currentCompleteness                                                        string
-		currentTaskMetaJSON                                                        []byte
+		currentTaskMetaJSON, currentArtifactMetaJSON                               []byte
 		lastRev                                                                    int
 	)
 	err := deps.DB.QueryRow(ctx, `
 		SELECT a.id::text, a.project_id::text, a.body_markdown, a.title, a.type, a.slug,
 		       a.tags, a.completeness,
 		       COALESCE(a.task_meta, '{}'::jsonb)::text,
+		       COALESCE(a.artifact_meta, '{}'::jsonb)::text,
 		       COALESCE((SELECT max(revision_number) FROM artifact_revisions WHERE artifact_id = a.id), 0)
 		FROM artifacts a
 		JOIN projects p ON p.id = a.project_id
@@ -284,7 +286,7 @@ func claimOneTaskDone(
 		LIMIT 1
 	`, scope.ProjectSlug, ref).Scan(
 		&artifactID, &projectID, &currentBody, &currentTitle, &currentType, &currentSlug,
-		&currentTags, &currentCompleteness, &currentTaskMetaJSON, &lastRev,
+		&currentTags, &currentCompleteness, &currentTaskMetaJSON, &currentArtifactMetaJSON, &lastRev,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return taskClaimDoneOutput{
@@ -338,6 +340,12 @@ func claimOneTaskDone(
 			Slug:       currentSlug,
 			PrevStatus: prevStatus,
 		}, nil
+	}
+	if out := claimDoneOutcomePreflightOutput(currentBody, currentTaskMeta, currentArtifactMetaJSON); out != nil {
+		out.ArtifactID = artifactID
+		out.Slug = currentSlug
+		out.PrevStatus = prevStatus
+		return *out, nil
 	}
 
 	newBody, changedCount := markUncheckedAsDone(currentBody)
@@ -637,6 +645,43 @@ func claimOneTaskDone(
 		Notice:                         "Task claimed_done recorded. Run pindoc.task.done_check with mode=current_open_only for the assignee before telling the user the current assigned Task queue is complete; read historical debt fields separately.",
 		Warnings:                       outWarnings,
 	}, nil
+}
+
+func claimDoneOutcomePreflightOutput(body string, taskMeta map[string]any, artifactMetaRaw []byte) *taskClaimDoneOutput {
+	commitRequired := !claimDoneOutcomeCommitExempt(taskMeta, artifactMetaRaw)
+	result := artifactpreflight.CheckOutcomeSection(body, artifactpreflight.OutcomeCheckOptions{
+		CommitRequired: commitRequired,
+	})
+	if result.OK() {
+		return nil
+	}
+	return &taskClaimDoneOutput{
+		Status:           "not_ready",
+		ErrorCode:        result.Codes[0],
+		Failed:           result.Codes,
+		Checklist:        result.Checklist,
+		SuggestedActions: artifactpreflight.OutcomeTemplateSuggestedActions(),
+	}
+}
+
+func claimDoneOutcomeCommitExempt(taskMeta map[string]any, artifactMetaRaw []byte) bool {
+	if metaBool(taskMeta, "outcome_commit_exempt") || metaBool(taskMeta, "code_coordinate_exempt") {
+		return true
+	}
+	artifactMeta := map[string]any{}
+	if len(artifactMetaRaw) > 0 {
+		_ = json.Unmarshal(artifactMetaRaw, &artifactMeta)
+	}
+	return metaBool(artifactMeta, "outcome_commit_exempt") || metaBool(artifactMeta, "code_coordinate_exempt")
+}
+
+func metaBool(meta map[string]any, key string) bool {
+	v, ok := meta[key]
+	if !ok {
+		return false
+	}
+	b, ok := v.(bool)
+	return ok && b
 }
 
 const (

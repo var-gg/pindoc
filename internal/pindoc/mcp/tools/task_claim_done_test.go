@@ -305,6 +305,54 @@ func TestValidateClaimDonePins(t *testing.T) {
 	})
 }
 
+func TestClaimDoneOutcomePreflight(t *testing.T) {
+	valid := "## Outcome\n\n" +
+		"- 핵심 결과: outcome gate가 구현됨.\n" +
+		"- 코드 변경: commit `36f85c5bc5f4269e4e6e20102befd711b1692779`.\n" +
+		"- 회귀 진술: 기존 claim_done pin tests regression 없음.\n"
+	if out := claimDoneOutcomePreflightOutput(valid, nil, nil); out != nil {
+		t.Fatalf("valid Outcome should pass, got %+v", out)
+	}
+
+	missing := "## TC / DoD\n\n- go test ./..."
+	out := claimDoneOutcomePreflightOutput(missing, nil, nil)
+	if out == nil || out.ErrorCode != "OUTCOME_SECTION_MISSING" {
+		t.Fatalf("missing Outcome should fail with OUTCOME_SECTION_MISSING, got %+v", out)
+	}
+	if len(out.SuggestedActions) == 0 || !strings.Contains(strings.Join(out.SuggestedActions, "\n"), "## Outcome") {
+		t.Fatalf("missing Outcome should include template suggestion: %+v", out)
+	}
+
+	partial := "## Outcome\n\n- 핵심 결과: 문서 정책이 정리됨.\n"
+	out = claimDoneOutcomePreflightOutput(partial, nil, nil)
+	if out == nil || !containsString(out.Failed, "OUTCOME_COMMIT_MISSING") || !containsString(out.Failed, "OUTCOME_REGRESSION_MISSING") {
+		t.Fatalf("partial Outcome should fail commit/regression checks, got %+v", out)
+	}
+}
+
+func TestClaimDoneOutcomeCommitExemption(t *testing.T) {
+	body := "## Outcome\n\n" +
+		"- 핵심 결과: 정책 예외가 기록됨.\n" +
+		"- 회귀 진술: 기존 정책 링크 regression 없음.\n"
+	cases := []struct {
+		name            string
+		taskMeta        map[string]any
+		artifactMetaRaw []byte
+	}{
+		{name: "task meta outcome exempt", taskMeta: map[string]any{"outcome_commit_exempt": true}},
+		{name: "task meta code coordinate exempt", taskMeta: map[string]any{"code_coordinate_exempt": true}},
+		{name: "artifact meta outcome exempt", artifactMetaRaw: []byte(`{"outcome_commit_exempt":true}`)},
+		{name: "artifact meta code coordinate exempt", artifactMetaRaw: []byte(`{"code_coordinate_exempt":true}`)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if out := claimDoneOutcomePreflightOutput(body, tc.taskMeta, tc.artifactMetaRaw); out != nil {
+				t.Fatalf("commit-exempt Outcome should pass, got %+v", out)
+			}
+		})
+	}
+}
+
 func TestNormalizeClaimDoneVerificationNotes(t *testing.T) {
 	notes, code, msg := normalizeClaimDoneVerificationNotes([]VerificationNoteInput{
 		{Kind: " TEST ", Status: " PASSED ", Command: " go test ./... ", Summary: " unit tests passed "},

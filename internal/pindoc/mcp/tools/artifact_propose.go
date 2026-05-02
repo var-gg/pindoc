@@ -266,6 +266,7 @@ type TaskMetaInput struct {
 	ParentSlug               string `json:"parent_slug,omitempty" jsonschema:"slug of parent Task artifact"`
 	CodeCoordinateExempt     bool   `json:"code_coordinate_exempt,omitempty" jsonschema:"true only for policy/vision Tasks that intentionally have no code coordinates"`
 	AcceptanceVerbLintExempt bool   `json:"acceptance_verb_lint_exempt,omitempty" jsonschema:"true only for legacy/policy Tasks that intentionally use action verbs in acceptance criteria"`
+	OutcomeCommitExempt      bool   `json:"outcome_commit_exempt,omitempty" jsonschema:"true only for policy/research/non-code Tasks whose Outcome does not need commit or PR evidence"`
 
 	assigneeSet bool
 }
@@ -283,6 +284,7 @@ func (tm *TaskMetaInput) UnmarshalJSON(data []byte) error {
 		ParentSlug               string `json:"parent_slug,omitempty"`
 		CodeCoordinateExempt     bool   `json:"code_coordinate_exempt,omitempty"`
 		AcceptanceVerbLintExempt bool   `json:"acceptance_verb_lint_exempt,omitempty"`
+		OutcomeCommitExempt      bool   `json:"outcome_commit_exempt,omitempty"`
 	}
 	var wire wireTaskMetaInput
 	if err := json.Unmarshal(data, &wire); err != nil {
@@ -300,6 +302,7 @@ func (tm *TaskMetaInput) UnmarshalJSON(data []byte) error {
 		ParentSlug:               wire.ParentSlug,
 		CodeCoordinateExempt:     wire.CodeCoordinateExempt,
 		AcceptanceVerbLintExempt: wire.AcceptanceVerbLintExempt,
+		OutcomeCommitExempt:      wire.OutcomeCommitExempt,
 		assigneeSet:              raw != nil && raw["assignee"] != nil,
 	}
 	return nil
@@ -329,6 +332,9 @@ func (tm TaskMetaInput) MarshalJSON() ([]byte, error) {
 	}
 	if tm.AcceptanceVerbLintExempt {
 		payload["acceptance_verb_lint_exempt"] = true
+	}
+	if tm.OutcomeCommitExempt {
+		payload["outcome_commit_exempt"] = true
 	}
 	return json.Marshal(payload)
 }
@@ -373,6 +379,7 @@ type ArtifactMetaInput struct {
 	RuleExcerpt              string   `json:"rule_excerpt,omitempty" jsonschema:"short excerpt returned by context.for_task applicable_rules; default derives from the first H2 section"`
 	CodeCoordinateExempt     bool     `json:"code_coordinate_exempt,omitempty" jsonschema:"true only for policy/vision Tasks that intentionally have no code coordinates"`
 	AcceptanceVerbLintExempt bool     `json:"acceptance_verb_lint_exempt,omitempty" jsonschema:"true only for legacy/policy Tasks that intentionally use action verbs in acceptance criteria"`
+	OutcomeCommitExempt      bool     `json:"outcome_commit_exempt,omitempty" jsonschema:"true only for policy/research/non-code Tasks whose Outcome does not need commit or PR evidence"`
 }
 
 var validSourceTypes = map[string]struct{}{
@@ -3018,6 +3025,9 @@ func taskMetaToJSON(artifactType string, tm *TaskMetaInput) any {
 	if tm.AcceptanceVerbLintExempt {
 		payload["acceptance_verb_lint_exempt"] = true
 	}
+	if tm.OutcomeCommitExempt {
+		payload["outcome_commit_exempt"] = true
+	}
 	buf, err := json.Marshal(payload)
 	if err != nil {
 		return nil
@@ -3112,6 +3122,7 @@ type ResolvedArtifactMeta struct {
 	RuleExcerpt              string   `json:"rule_excerpt,omitempty"`
 	CodeCoordinateExempt     bool     `json:"code_coordinate_exempt,omitempty"`
 	AcceptanceVerbLintExempt bool     `json:"acceptance_verb_lint_exempt,omitempty"`
+	OutcomeCommitExempt      bool     `json:"outcome_commit_exempt,omitempty"`
 	Warnings                 []string `json:"-"`
 }
 
@@ -3156,6 +3167,7 @@ func resolveArtifactMeta(in *ArtifactMetaInput, pins []ArtifactPinInput, body st
 		out.RuleExcerpt = strings.TrimSpace(in.RuleExcerpt)
 		out.CodeCoordinateExempt = in.CodeCoordinateExempt
 		out.AcceptanceVerbLintExempt = in.AcceptanceVerbLintExempt
+		out.OutcomeCommitExempt = in.OutcomeCommitExempt
 	}
 
 	hasCodePin := false
@@ -3251,6 +3263,9 @@ func artifactMetaToJSON(r ResolvedArtifactMeta) string {
 	}
 	if r.AcceptanceVerbLintExempt {
 		payload["acceptance_verb_lint_exempt"] = true
+	}
+	if r.OutcomeCommitExempt {
+		payload["outcome_commit_exempt"] = true
 	}
 	buf, err := json.Marshal(payload)
 	if err != nil {
