@@ -216,6 +216,8 @@ OAuth를 거친다. 4-mode "협업 모드 전환" 흐름은 폐기됐다.
 
 > Reader 는 Surface(뷰 모드) 를 최상위 축으로, Type 과 Area 를 그 위에 얹는 보조 필터 축으로 둔다. Surface 는 URL segment(`/p/:project/wiki` vs `/tasks`) 가 truth 이고, Area·Type 은 `?area=…&type=…` query string 으로 왕복한다 — 링크를 공유하면 필터 조합까지 그대로 복원된다. Wiki Surface 는 Task 를 제외한 모든 type 의 자연 집합이고 Tasks Surface 는 type=Task 로 고정되어 Sidebar 의 Type 섹션이 "Task · locked" 라벨로 바뀐다. Sidebar Area/Type 카운터는 "현재 Surface + 다른 축 필터" 기준으로 재계산되어 "UI 8" 뱃지인데 본문 6개 같은 counter drift 가 구조적으로 생기지 않는다(Linear / GitHub Issues 관습). Surface 전환 시 Area 는 탐색 연속성을 위해 유지되고 Type 은 Wiki↔Tasks 의미가 달라 리셋된다. Graph Surface 는 M1.5 React-ify 전까지 iframe stub 이라 필터 연동은 동일 시점에 들어온다. Decision `decision-reader-ia-hierarchy` + Task `task-reader-ia-refactor` 참조.
 
+Tasks Surface의 기본 뷰는 Flow Lens다. 이는 날짜 캘린더가 아니라 `stage / ordinal / readiness` 기반의 derived sequence를 보여주며, `due_at`은 정렬 기준이 아닌 deadline marker로만 표시한다. 같은 화면에서 Project scope와 caller-visible scope를 전환하고, 내 관련/assignee/agent/team 필터로 전체 흐름을 압축한다. 기존 Kanban board는 상태 검토용 보조 모드로 남겨 둔다.
+
 Tasks Surface 는 필터 적용 상태를 본문 상단에서 다시 선언한다. `Type=Task` 는 고정 chip 으로 보여 주고 Area 필터는 해제 가능한 chip 으로 표시한다. 필터 때문에 칸반 컬럼이나 전체 결과가 비면 "현재 필터에는 없음"과 "전체에는 몇 건 있음"을 함께 보여 주며, chip의 해제 버튼 또는 `Esc` 로 즉시 전체 scope 로 되돌아가게 한다. 이렇게 sidebar 선택 음영만으로 필터를 암시하지 않고, Task 탭 제목도 `Task · <scope> · 대기 N / 전체 M` 형태로 현재 scope 와 count 를 자기선언한다.
 
 Tasks 칸반 카드는 dual-action으로 동작한다. 카드 body 클릭은 URL을 바꾸지 않고 우측 Inspector를 채워 status, priority, assignee, due date 같은 operational metadata를 제자리 편집하게 한다. 제목 클릭, `Enter`, double-click은 전체 Wiki 상세로 진입한다. `↑`/`↓`는 현재 필터 내 카드 선택을 이동하며, 선택이 없을 때 우측 패널은 "카드를 클릭하면 Inspector가 채워집니다" empty state를 보여 준다. Status 편집은 `open` / `claimed_done` / `blocked` / `cancelled`만 허용한다.

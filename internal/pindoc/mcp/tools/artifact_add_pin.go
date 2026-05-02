@@ -190,6 +190,7 @@ func addPinToArtifact(ctx context.Context, deps Deps, p *auth.Principal, scope *
 	}
 
 	warnings := append([]string{"ADD_PIN_APPLIED"}, repoWarnings...)
+	warnings = append(warnings, pinPathWarnings(deps, []ArtifactPinInput{pin})...)
 	warnings = sortWarningsBySeverity(warnings)
 	severities := make([]string, len(warnings))
 	for i, w := range warnings {
@@ -206,6 +207,8 @@ func addPinToArtifact(ctx context.Context, deps Deps, p *auth.Principal, scope *
 		Created:           false,
 		RevisionNumber:    newRev,
 		PinsStored:        pinsStored,
+		SuggestedActions:  pinDiagnosticSuggestedActions(warnings),
+		NextTools:         pinDiagnosticNextTools(warnings),
 		Warnings:          warnings,
 		WarningSeverities: severities,
 		ToolsetVersion:    ToolsetVersion(),

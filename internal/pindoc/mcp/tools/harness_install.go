@@ -1153,10 +1153,13 @@ docs/CONTRIBUTING_LOCALE.md).
   "various", "general", "기타", "처리", "내용") — the embedded baseline
   flags many of these as TITLE_GENERIC_TOKENS. Project-specific jargon
   ("Layer N", "Phase D") may be added to the override set.
-- For non-English primary_language projects, prefer the project language
-  for titles. English-only titles fragment Cmd+K keyword search and weaken
-  cross-lingual semantic distance; mixed Korean/Japanese + English dev
+- For non-English primary_language projects, include a project-language
+  script anchor in titles. English-only titles fragment Cmd+K keyword search
+  and weaken cross-lingual semantic distance; mixed Korean/Japanese + English dev
   terms is acceptable and recommended.
+- Body language tags use Pindoc's BCP 47 safe subset: ko, en, ja,
+  ko-KR, en-US, en-GB, ja-JP. Omit body_locale to use the project's
+  primary_language.
 - Distinctive keywords up front. Put the noun the artifact is *about*
   near the start. Embedding retrieval gives early tokens stronger
   weight, and Cmd+K matches prefixes faster.

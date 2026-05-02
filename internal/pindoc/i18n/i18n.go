@@ -16,6 +16,7 @@ type Bundle map[string]map[string]string // lang → key → template
 var bundle = Bundle{
 	"en": {
 		"preflight.title_empty":               "✗ title is empty",
+		"preflight.body_locale_invalid":       "✗ body_locale %q is not in the supported BCP 47 safe subset: ko | en | ja | ko-KR | en-US | en-GB | ja-JP",
 		"preflight.body_empty":                "✗ body_markdown is empty",
 		"preflight.area_empty":                "✗ area_slug is empty — call pindoc.area.list and pick one",
 		"preflight.author_empty":              "✗ author_id is empty (use 'claude-code', 'cursor', 'codex', ...)",
@@ -108,6 +109,7 @@ var bundle = Bundle{
 	},
 	"ko": {
 		"preflight.title_empty":               "✗ title이 비어 있음",
+		"preflight.body_locale_invalid":       "✗ body_locale %q 는 지원하는 BCP 47 safe subset이 아님: ko | en | ja | ko-KR | en-US | en-GB | ja-JP",
 		"preflight.body_empty":                "✗ body_markdown이 비어 있음",
 		"preflight.area_empty":                "✗ area_slug가 비어 있음 — pindoc.area.list 호출 후 하나 고르기",
 		"preflight.author_empty":              "✗ author_id가 비어 있음 ('claude-code', 'cursor', 'codex' 등 사용)",

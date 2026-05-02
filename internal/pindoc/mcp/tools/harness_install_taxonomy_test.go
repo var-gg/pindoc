@@ -72,10 +72,13 @@ func TestRenderPindocMDTitleLocaleGuidance(t *testing.T) {
 
 	for _, want := range []string{
 		"non-English primary_language",
-		"prefer the project language",
+		"project-language",
+		"script anchor",
 		"English-only titles fragment Cmd+K keyword search",
 		"cross-lingual semantic distance",
 		"mixed Korean/Japanese + English dev",
+		"BCP 47 safe subset",
+		"ko-KR, en-US, en-GB, ja-JP",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("rendered PINDOC.md missing title locale guidance %q", want)

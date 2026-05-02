@@ -47,9 +47,9 @@ type artifactProposeInput struct {
 	ProjectSlug   string   `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	Type          string   `json:"type" jsonschema:"one of Decision|Analysis|Debug|Flow|Task|TC|Glossary|Feature|APIEndpoint|Screen|DataModel"`
 	AreaSlug      string   `json:"area_slug" jsonschema:"slug from pindoc.area.list; use 'misc' or '_unsorted' if unsure"`
-	Title         string   `json:"title" jsonschema:"concise artifact title. For non-English primary_language projects, prefer the project language for title; English-only titles fragment Cmd+K keyword search and weaken cross-lingual semantic distance. Mixed Korean/Japanese + English dev terms is acceptable and recommended."`
-	BodyMarkdown  string   `json:"body_markdown" jsonschema:"main content in markdown"`
-	BodyLocale    string   `json:"body_locale,omitempty" jsonschema:"BCP 47 body language tag; default = project primary_language"`
+	Title         string   `json:"title" jsonschema:"concise artifact title. For non-English primary_language projects, include a project-language script anchor in the title; English-only titles fragment Cmd+K keyword search and weaken cross-lingual semantic distance. Mixed Korean/Japanese + English dev terms is acceptable and recommended."`
+	BodyMarkdown  string   `json:"body_markdown,omitempty" jsonschema:"main content in markdown; omit on update_of when body_patch is supplied"`
+	BodyLocale    string   `json:"body_locale,omitempty" jsonschema:"BCP 47 safe subset body language tag; allowed: ko, en, ja, ko-KR, en-US, en-GB, ja-JP; default = project primary_language"`
 	Slug          string   `json:"slug,omitempty" jsonschema:"optional; auto-generated from title if absent"`
 	Tags          []string `json:"tags,omitempty"`
 	Completeness  string   `json:"completeness,omitempty" jsonschema:"draft|partial|settled; default partial"`
@@ -544,11 +544,13 @@ type RelatedRef struct {
 //
 // Accepted propose calls auto-publish (review_state=auto_published,
 // status=published). Review Queue (sensitive ops) lands in Phase 2.x+.
+const artifactProposeToolDescription = "Propose a new artifact (the only write path humans use — always via an agent). Create path (both update_of and supersede_of omitted) requires basis.search_receipt from pindoc.artifact.search or pindoc.context.for_task in the same session; update/supersede paths do not. Update path may send body_patch instead of body_markdown: use update_of + expected_version + body_patch, omit body_markdown, and set shape=body_patch or omit shape. dry_run=true validates without INSERT/update and does not bypass receipt, expected_version, relates_to, or policy gates; use it for agent self-validation and MCP regression tests, then retry with dry_run=false to publish. For shape=acceptance_transition, checkbox_label_match is a fuzzy unresolved-label selector; use checkbox_index when exactness matters. For Task creates, omitted task_meta.assignee means unassigned; explicit assignee claims ownership, and explicit task_meta.assignee=\"\" clears on update. Task priority meanings: p0 release blocker, p1 must close before release, p2 next round, p3 backlog; project-specific priority policy wins when present. Use pins[] for concrete code/file/URL evidence; use relates_to relation=evidence when the supporting source is another Pindoc artifact. Returns Status=accepted + artifact_id on success, or Status=not_ready + checklist + suggested_actions if Pre-flight fails. Always read the checklist; never surface the raw error to the user without trying the suggested actions first."
+
 func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.artifact.propose",
-			Description: "Propose a new artifact (the only write path humans use — always via an agent). Create path (both update_of and supersede_of omitted) requires basis.search_receipt from pindoc.artifact.search or pindoc.context.for_task in the same session; update/supersede paths do not. dry_run=true validates without INSERT/update and does not bypass receipt, expected_version, relates_to, or policy gates; use it for agent self-validation and MCP regression tests, then retry with dry_run=false to publish. For shape=acceptance_transition, checkbox_label_match is a fuzzy unresolved-label selector; use checkbox_index when exactness matters. For Task creates, omitted task_meta.assignee means unassigned; explicit assignee claims ownership, and explicit task_meta.assignee=\"\" clears on update. Task priority meanings: p0 release blocker, p1 must close before release, p2 next round, p3 backlog; project-specific priority policy wins when present. Use pins[] for concrete code/file/URL evidence; use relates_to relation=evidence when the supporting source is another Pindoc artifact. Returns Status=accepted + artifact_id on success, or Status=not_ready + checklist + suggested_actions if Pre-flight fails. Always read the checklist; never surface the raw error to the user without trying the suggested actions first.",
+			Description: artifactProposeToolDescription,
 		},
 		func(ctx context.Context, p *auth.Principal, in artifactProposeInput) (*sdk.CallToolResult, artifactProposeOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -642,12 +644,12 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			// the gate entirely (test fixtures).
 			isCreatePath := strings.TrimSpace(in.UpdateOf) == "" && strings.TrimSpace(in.SupersedeOf) == ""
 			var receiptExempted *ReceiptExemptionSignal
+			var receiptSnapshots []receipts.ArtifactRef
 			if isCreatePath && deps.Receipts != nil {
 				receipt := ""
 				if in.Basis != nil {
 					receipt = strings.TrimSpace(in.Basis.SearchReceipt)
 				}
-				var receiptSnapshots []receipts.ArtifactRef
 				if receipt == "" {
 					exemption, ok, err := maybeExemptMissingReceipt(ctx, deps, projectID, areaID, in.AuthorID)
 					if err != nil {
@@ -747,9 +749,9 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 								"New Task create path must expose active same-area Task acceptance through the search_receipt snapshot.",
 							},
 							SuggestedActions: []string{
-								"Call pindoc.artifact.search with type=Task and the same area, or read the related Task(s), then retry with a fresh receipt.",
+								"Read the related active Task acceptance, then call pindoc.artifact.search with type=Task in the same area so the retry receipt contains those Task snapshots.",
 							},
-							NextTools:       toolHints("pindoc.artifact.search", "pindoc.artifact.read"),
+							NextTools:       activeTaskContextNextTools(scope.ProjectSlug, in.AreaSlug, related),
 							PatchableFields: []string{"basis.search_receipt"},
 							Related:         related,
 						}, nil
@@ -917,6 +919,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			if bodyLocale == "" {
 				bodyLocale = "en"
 			}
+			in.BodyLocale = bodyLocale
 			commitMsgWarnings := applyCreateCommitMsgFallback(&in)
 
 			// --- INSERT + event in one tx --------------------------------
@@ -1062,7 +1065,8 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				return nil, artifactProposeOutput{}, fmt.Errorf("commit: %w", err)
 			}
 
-			warnings := createWarnings(ctx, deps, projectID, in.Title, in.BodyMarkdown)
+			warningDetails := createWarningDetails(ctx, deps, scope, projectID, in.Title, in.BodyMarkdown, receiptSnapshots, newID)
+			warnings := append([]string{}, warningDetails.Warnings...)
 			warnings = append(warnings, repoWarnings...)
 			warnings = append(warnings, commitMsgWarnings...)
 			warnings = append(warnings, pinPathWarnings(deps, in.Pins)...)
@@ -1074,9 +1078,11 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			warnings = append(warnings, decisionSubjectAreaWarnings(in)...)
 			slugWarnings, slugSuggestedActions := slugBrevityAdvisory(in, finalSlug)
 			warnings = append(warnings, slugWarnings...)
-			suggestedActions := append([]string{}, slugSuggestedActions...)
+			suggestedActions := append([]string{}, warningDetails.SuggestedActions...)
+			suggestedActions = append(suggestedActions, slugSuggestedActions...)
 			suggestedActions = append(suggestedActions, sectionDuplicatesEdgesSuggestedActions(warnings)...)
 			suggestedActions = append(suggestedActions, titleLocaleMismatchSuggestedActions(warnings)...)
+			suggestedActions = append(suggestedActions, pinDiagnosticSuggestedActions(warnings)...)
 			if detectUnclassifiedUserChat(resolvedMeta, in.Pins, in.BodyMarkdown) {
 				warnings = append(warnings, "SOURCE_TYPE_UNCLASSIFIED")
 			}
@@ -1119,6 +1125,8 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				EdgesStored:       edgesStored,
 				Superseded:        supersededFlag,
 				SuggestedActions:  suggestedActions,
+				NextTools:         appendUniqueNextTools(warningDetails.NextTools, pinDiagnosticNextTools(warnings)...),
+				Related:           warningDetails.Related,
 				Warnings:          sortedWarnings,
 				WarningSeverities: severities,
 				EmbedderUsed:      embedderInfo(deps),
@@ -1388,10 +1396,13 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		newBody, w, patchErr := applyBodyPatch(currentBody, in.BodyPatch)
 		if patchErr != "" {
 			return nil, artifactProposeOutput{
-				Status:    "not_ready",
-				ErrorCode: patchErr,
-				Failed:    []string{patchErr},
-				Checklist: []string{patchExplain(patchErr)},
+				Status:           "not_ready",
+				ErrorCode:        patchErr,
+				Failed:           []string{patchErr},
+				Checklist:        []string{patchExplain(patchErr)},
+				SuggestedActions: []string{bodyPatchSuggestedAction()},
+				NextTools:        defaultNextTools(patchErr),
+				PatchableFields:  patchFieldsFor(patchErr),
 			}, nil
 		}
 		in.BodyMarkdown = newBody
@@ -1877,6 +1888,9 @@ func preflight(ctx context.Context, deps Deps, projectSlug string, in *artifactP
 	}
 	if strings.TrimSpace(in.Title) == "" {
 		push(i18n.T(lang, "preflight.title_empty"), "TITLE_EMPTY")
+	}
+	if locale := strings.TrimSpace(in.BodyLocale); locale != "" && !validBodyLocale(locale) {
+		push(fmt.Sprintf(i18n.T(lang, "preflight.body_locale_invalid"), in.BodyLocale), "BODY_LOCALE_INVALID")
 	}
 	// body_patch / body_markdown mutual exclusion + path gating.
 	// body_patch is an update_of-only convenience — create and supersede
@@ -2380,6 +2394,29 @@ func defaultNextTools(code string) []NextToolHint {
 	switch code {
 	case "NO_SRCH", "RECEIPT_UNKNOWN", "RECEIPT_EXPIRED", "RECEIPT_WRONG_PROJECT", "RECEIPT_SUPERSEDED":
 		return toolHints("pindoc.artifact.search", "pindoc.context.for_task")
+	case "PATCH_EXCLUSIVE", "PATCH_UPDATE_ONLY",
+		"PATCH_MODE_INVALID", "PATCH_HEADING_EMPTY", "PATCH_SECTION_NOT_FOUND",
+		"PATCH_CHECKBOX_INDEX_REQUIRED", "PATCH_CHECKBOX_STATE_REQUIRED",
+		"PATCH_CHECKBOX_INDEX_NEGATIVE", "PATCH_CHECKBOX_OUT_OF_RANGE",
+		"PATCH_APPEND_EMPTY":
+		return []NextToolHint{
+			{
+				Tool:   "pindoc.artifact.read",
+				Reason: "Read the target artifact to get the current body and revision before retrying update_of + body_patch.",
+			},
+			{
+				Tool: "pindoc.artifact.propose",
+				Args: map[string]any{
+					"shape":            "body_patch",
+					"update_of":        "<artifact slug or id>",
+					"expected_version": "<current revision_number>",
+					"body_patch": map[string]any{
+						"mode": "section_replace | checkbox_toggle | append",
+					},
+				},
+				Reason: "Retry as a patch update; omit body_markdown when body_patch is supplied.",
+			},
+		}
 	case "CONFLICT_EXACT_TITLE", "POSSIBLE_DUP", "TASK_SUPERSEDE_REQUIRED", "TASK_ACTIVE_CONTEXT_REQUIRED":
 		return toolHints("pindoc.artifact.read", "pindoc.artifact.propose")
 	case "VER_CONFLICT", "FIELD_VALUE_RESERVED":
@@ -2397,6 +2434,10 @@ func defaultNextTools(code string) []NextToolHint {
 	}
 }
 
+func bodyPatchSuggestedAction() string {
+	return "For a patch update, send update_of + expected_version + body_patch and omit body_markdown. body_patch.mode must be section_replace, checkbox_toggle, or append."
+}
+
 func toolHints(names ...string) []NextToolHint {
 	out := make([]NextToolHint, 0, len(names))
 	for _, name := range names {
@@ -2405,6 +2446,30 @@ func toolHints(names ...string) []NextToolHint {
 			continue
 		}
 		out = append(out, NextToolHint{Tool: name})
+	}
+	return out
+}
+
+func appendUniqueNextTools(base []NextToolHint, extras ...NextToolHint) []NextToolHint {
+	out := append([]NextToolHint{}, base...)
+	for _, hint := range extras {
+		hint.Tool = strings.TrimSpace(hint.Tool)
+		if hint.Tool == "" {
+			continue
+		}
+		dup := false
+		for _, existing := range out {
+			if existing.Tool != hint.Tool {
+				continue
+			}
+			if sameIDOrSlug(existing.Args, hint.Args) || fmt.Sprint(existing.Args) == fmt.Sprint(hint.Args) {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			out = append(out, hint)
+		}
 	}
 	return out
 }
@@ -2451,6 +2516,13 @@ func sameIDOrSlug(a, b map[string]any) bool {
 
 func suggestedActionsForNotReady(lang, artifactType string, failed []string, base []string) []string {
 	out := append([]string{}, base...)
+	if hasAnyStableCode(failed, "PATCH_EXCLUSIVE", "PATCH_UPDATE_ONLY",
+		"PATCH_MODE_INVALID", "PATCH_HEADING_EMPTY", "PATCH_SECTION_NOT_FOUND",
+		"PATCH_CHECKBOX_INDEX_REQUIRED", "PATCH_CHECKBOX_STATE_REQUIRED",
+		"PATCH_CHECKBOX_INDEX_NEGATIVE", "PATCH_CHECKBOX_OUT_OF_RANGE",
+		"PATCH_APPEND_EMPTY") {
+		out = append(out, bodyPatchSuggestedAction())
+	}
 	if !needsTemplateSelfHealHint(failed) {
 		return out
 	}
@@ -2458,6 +2530,22 @@ func suggestedActionsForNotReady(lang, artifactType string, failed []string, bas
 		out = append(out, fmt.Sprintf(i18n.T(lang, "suggested.read_template_self_heal"), slug))
 	}
 	return out
+}
+
+func hasAnyStableCode(codes []string, targets ...string) bool {
+	if len(codes) == 0 || len(targets) == 0 {
+		return false
+	}
+	want := map[string]struct{}{}
+	for _, target := range targets {
+		want[target] = struct{}{}
+	}
+	for _, code := range codes {
+		if _, ok := want[stableMCPErrorCode(code)]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func expectedForNotReady(ctx context.Context, deps Deps, projectSlug, artifactType string, failed []string) *ExpectedShape {
@@ -2559,6 +2647,20 @@ func patchFieldsFor(code string) []string {
 		return []string{"expected_version", "body_markdown", "title"}
 	case "SHAPE_INVALID", "SHAPE_REQUIRES_UPDATE", "SHAPE_NOT_IMPLEMENTED":
 		return []string{"shape"}
+	case "PATCH_EXCLUSIVE":
+		return []string{"body_markdown", "body_patch"}
+	case "PATCH_UPDATE_ONLY":
+		return []string{"update_of", "expected_version", "body_patch"}
+	case "PATCH_MODE_INVALID":
+		return []string{"body_patch.mode"}
+	case "PATCH_HEADING_EMPTY", "PATCH_SECTION_NOT_FOUND":
+		return []string{"body_patch.section_heading", "body_patch.replacement"}
+	case "PATCH_CHECKBOX_INDEX_REQUIRED", "PATCH_CHECKBOX_INDEX_NEGATIVE", "PATCH_CHECKBOX_OUT_OF_RANGE":
+		return []string{"body_patch.checkbox_index"}
+	case "PATCH_CHECKBOX_STATE_REQUIRED":
+		return []string{"body_patch.checkbox_state"}
+	case "PATCH_APPEND_EMPTY":
+		return []string{"body_patch.append_text"}
 	case "META_PATCH_HAS_BODY":
 		return []string{"body_markdown", "body_patch", "shape"}
 	case "META_PATCH_EMPTY":
@@ -2604,6 +2706,8 @@ func patchFieldsFor(code string) []string {
 		return []string{"body_markdown"}
 	case "TITLE_EMPTY":
 		return []string{"title"}
+	case "BODY_LOCALE_INVALID":
+		return []string{"body_locale"}
 	case "BODY_EMPTY":
 		return []string{"body_markdown"}
 	case "AUTHOR_EMPTY":
@@ -2701,7 +2805,7 @@ func insertPins(ctx context.Context, tx pgx.Tx, projectID, artifactID string, pi
 			return n, warnings, fmt.Errorf("pin repo resolve: %w", err)
 		}
 		if !repoMatched && kind == "code" {
-			warnings = append(warnings, "RECOMMEND_REPO_REGISTRATION:"+strings.TrimSpace(p.Path))
+			warnings = append(warnings, pinRepoMappingWarnings(ctx, tx, projectID, p, repo, repoRoot)...)
 		}
 		var repoIDArg any
 		if repoID != "" {
@@ -3296,24 +3400,137 @@ func filterTaskSemanticCandidates(ctx context.Context, deps Deps, projectID, are
 	return out, rows.Err()
 }
 
+type createWarningResult struct {
+	Warnings         []string
+	Related          []RelatedRef
+	NextTools        []NextToolHint
+	SuggestedActions []string
+}
+
 // createWarnings runs a best-effort advisory vector check after an accepted
 // create and returns any soft warnings. Non-blocking — failure here never
-// rejects the write. We report close neighbours, including non-Task
-// matches that would have been hard conflicts before the Task-only
-// supersede gate, to nudge "you might want to supersede this next time".
+// rejects the write. Kept as a narrow wrapper for older unit tests; the
+// production path uses createWarningDetails so agent callers can self-heal
+// without guessing which artifact the warning refers to.
 func createWarnings(ctx context.Context, deps Deps, projectID, title, body string) []string {
+	return createWarningDetails(ctx, deps, nil, projectID, title, body, nil, "").Warnings
+}
+
+func createWarningDetails(ctx context.Context, deps Deps, scope *auth.ProjectScope, projectID, title, body string, receiptSnapshots []receipts.ArtifactRef, excludeArtifactID string) createWarningResult {
 	if deps.Embedder == nil || deps.Embedder.Info().Name == "stub" {
-		return nil
+		return createWarningResult{}
 	}
+	var candidates []semanticCandidate
 	conflicts, err := findSemanticConflicts(ctx, deps, projectID, title, body)
 	if err == nil && len(conflicts) > 0 {
-		return []string{"RECOMMEND_READ_BEFORE_CREATE"}
+		candidates = conflicts
+	} else if err != nil {
+		return createWarningResult{}
 	}
-	cands, err := findSemanticAdvisories(ctx, deps, projectID, title, body)
-	if err != nil || len(cands) == 0 {
-		return nil
+	if len(candidates) == 0 {
+		cands, err := findSemanticAdvisories(ctx, deps, projectID, title, body)
+		if err != nil || len(cands) == 0 {
+			return createWarningResult{}
+		}
+		candidates = cands
 	}
-	return []string{"RECOMMEND_READ_BEFORE_CREATE"}
+	candidates = filterSemanticCandidatesByID(candidates, excludeArtifactID)
+	return readBeforeCreateWarningResult(deps, scope, candidates, receiptSnapshots)
+}
+
+func filterSemanticCandidatesByID(candidates []semanticCandidate, excludeArtifactID string) []semanticCandidate {
+	excludeArtifactID = strings.TrimSpace(excludeArtifactID)
+	if excludeArtifactID == "" || len(candidates) == 0 {
+		return candidates
+	}
+	out := candidates[:0]
+	for _, c := range candidates {
+		if strings.TrimSpace(c.ArtifactID) == excludeArtifactID {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+func readBeforeCreateWarningResult(deps Deps, scope *auth.ProjectScope, candidates []semanticCandidate, receiptSnapshots []receipts.ArtifactRef) createWarningResult {
+	if len(candidates) == 0 {
+		return createWarningResult{}
+	}
+	out := createWarningResult{Warnings: []string{"RECOMMEND_READ_BEFORE_CREATE"}}
+	seen := receiptSnapshotsContainAny(receiptSnapshots, candidates)
+	limit := semanticConflictLimit
+	if len(candidates) < limit {
+		limit = len(candidates)
+	}
+	for _, c := range candidates[:limit] {
+		related := RelatedRef{
+			ID:       c.ArtifactID,
+			Slug:     c.Slug,
+			Type:     c.Type,
+			Title:    c.Title,
+			AgentRef: "pindoc://" + c.Slug,
+			Reason:   fmt.Sprintf("read-before-create advisory candidate; cosine distance %.3f", c.Distance),
+		}
+		if scope != nil {
+			related.HumanURL = HumanURL(scope.ProjectSlug, scope.ProjectLocale, c.Slug)
+			related.HumanURLAbs = AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, c.Slug)
+		}
+		out.Related = append(out.Related, related)
+		args := map[string]any{"id_or_slug": c.Slug}
+		if scope != nil {
+			args["project_slug"] = scope.ProjectSlug
+		}
+		out.NextTools = append(out.NextTools, NextToolHint{
+			Tool:   "pindoc.artifact.read",
+			Args:   args,
+			Reason: "Read this near-match if the new artifact should update or supersede existing context.",
+		})
+	}
+	if seen {
+		out.SuggestedActions = append(out.SuggestedActions, "RECOMMEND_READ_BEFORE_CREATE: the receipt already exposed the near-match candidate; read it if this create should instead be update_of or supersede_of.")
+	} else if len(out.Related) > 0 {
+		out.SuggestedActions = append(out.SuggestedActions, fmt.Sprintf("RECOMMEND_READ_BEFORE_CREATE: read `%s` before creating more artifacts on this topic; use update_of or supersede_of if it is the same work.", out.Related[0].Slug))
+	}
+	return out
+}
+
+func activeTaskContextNextTools(projectSlug, areaSlug string, related []RelatedRef) []NextToolHint {
+	var out []NextToolHint
+	if len(related) > 0 {
+		out = append(out, NextToolHint{
+			Tool: "pindoc.artifact.read",
+			Args: map[string]any{
+				"project_slug": projectSlug,
+				"id_or_slug":   related[0].Slug,
+			},
+			Reason: "Read the active same-area Task acceptance before creating another Task.",
+		})
+	}
+	queryParts := make([]string, 0, len(related)*2)
+	for _, r := range related {
+		if r.Slug != "" {
+			queryParts = append(queryParts, r.Slug)
+		}
+		if r.Title != "" {
+			queryParts = append(queryParts, r.Title)
+		}
+	}
+	if len(queryParts) == 0 {
+		queryParts = append(queryParts, "active same-area Task acceptance")
+	}
+	out = append(out, NextToolHint{
+		Tool: "pindoc.artifact.search",
+		Args: map[string]any{
+			"project_slug": projectSlug,
+			"areas":        []string{strings.TrimSpace(areaSlug)},
+			"types":        []string{"Task"},
+			"query":        strings.Join(queryParts, " "),
+			"top_k":        10,
+		},
+		Reason: "Get a fresh receipt that explicitly snapshots active Tasks in this area, then retry artifact.propose.",
+	})
+	return out
 }
 
 // pinPathWarnings checks every repo-backed pin path against the configured
@@ -3328,6 +3545,7 @@ func pinPathWarnings(deps Deps, pins []ArtifactPinInput) []string {
 		return nil
 	}
 	var out []string
+	repoRoot := cleanAbsPath(deps.RepoRoot)
 	for _, p := range pins {
 		kind := pinmodel.NormalizeKind(p.Kind, p.Path)
 		if kind == "resource" || kind == "url" {
@@ -3338,18 +3556,155 @@ func pinPathWarnings(deps Deps, pins []ArtifactPinInput) []string {
 		if path == "" {
 			continue
 		}
-		// Refuse traversal. Pin paths are repo-relative; absolute or parent-
-		// escaping paths are a mistake the agent should see.
-		if strings.Contains(path, "..") || filepath.IsAbs(path) {
-			out = append(out, "PIN_PATH_REJECTED:"+path)
+		checkPath, label, ok := pinPathCheckTarget(repoRoot, path)
+		if !ok {
+			out = append(out, label)
 			continue
 		}
-		full := filepath.Join(deps.RepoRoot, filepath.FromSlash(path))
-		if _, err := os.Stat(full); err != nil {
-			out = append(out, "PIN_PATH_NOT_FOUND:"+path)
+		if _, err := os.Stat(checkPath); err != nil {
+			out = append(out, "PIN_PATH_NOT_FOUND:"+label)
 		}
 	}
 	return out
+}
+
+func pinPathCheckTarget(repoRoot, pinPath string) (string, string, bool) {
+	path := strings.TrimSpace(pinPath)
+	if repoRoot == "" {
+		return "", "", false
+	}
+	if filepath.IsAbs(path) {
+		abs := cleanAbsPath(path)
+		if abs == "" {
+			return "", "PIN_PATH_REJECTED:" + safePinPathLabel(path, repoRoot), false
+		}
+		if rel, ok := relPathWithinRoot(repoRoot, abs); ok {
+			return abs, rel, true
+		}
+		return "", "PIN_PATH_OUTSIDE_REPO:" + safePinPathLabel(path, repoRoot), false
+	}
+	clean := filepath.Clean(filepath.FromSlash(path))
+	if clean == "." || clean == string(filepath.Separator) || clean == "" ||
+		strings.HasPrefix(clean, ".."+string(filepath.Separator)) || clean == ".." {
+		return "", "PIN_PATH_REJECTED:" + safePinPathLabel(path, repoRoot), false
+	}
+	return filepath.Join(repoRoot, clean), filepath.ToSlash(clean), true
+}
+
+func relPathWithinRoot(root, abs string) (string, bool) {
+	root = cleanAbsPath(root)
+	abs = cleanAbsPath(abs)
+	if root == "" || abs == "" {
+		return "", false
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." || filepath.IsAbs(rel) {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
+}
+
+func cleanAbsPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return ""
+	}
+	return filepath.Clean(abs)
+}
+
+func safePinPathLabel(path, repoRoot string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "<empty>"
+	}
+	if filepath.IsAbs(path) {
+		if rel, ok := relPathWithinRoot(repoRoot, path); ok {
+			return rel
+		}
+		base := filepath.Base(filepath.Clean(path))
+		if base == "." || base == string(filepath.Separator) || base == "" {
+			return "<absolute-path>"
+		}
+		return "absolute:" + base
+	}
+	clean := filepath.Clean(filepath.FromSlash(path))
+	return filepath.ToSlash(clean)
+}
+
+func pinRepoMappingWarnings(ctx context.Context, q pgit.RepoQueryer, projectID string, pin ArtifactPinInput, repoName, repoRoot string) []string {
+	if q == nil {
+		return nil
+	}
+	label := safePinPathLabel(pin.Path, repoRoot)
+	if strings.TrimSpace(pin.RepoID) != "" {
+		return []string{"PIN_REPO_ID_NOT_FOUND:" + shortDiagnosticToken(pin.RepoID)}
+	}
+	repos, err := pgit.LoadProjectRepos(ctx, q, projectID)
+	if err != nil {
+		return []string{"PIN_REPO_MAPPING_DIAGNOSTIC_FAILED:" + label}
+	}
+	if len(repos) == 0 {
+		return []string{"PIN_REPO_NOT_REGISTERED:" + label}
+	}
+	hasLocalPath := false
+	for _, repo := range repos {
+		if len(repo.LocalPaths) > 0 {
+			hasLocalPath = true
+			break
+		}
+	}
+	if !hasLocalPath && strings.TrimSpace(repoRoot) == "" {
+		return []string{"PIN_REPO_LOCAL_PATHS_MISSING:" + strings.TrimSpace(repoName)}
+	}
+	return []string{"PIN_REPO_MAPPING_UNRESOLVED:" + label}
+}
+
+func shortDiagnosticToken(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "<empty>"
+	}
+	if len(raw) <= 12 {
+		return raw
+	}
+	return raw[:12]
+}
+
+func pinDiagnosticSuggestedActions(warnings []string) []string {
+	if !hasWarningPrefix(warnings, "PIN_REPO_") && !hasWarningPrefix(warnings, "PIN_PATH_") && !hasWarningPrefix(warnings, "RECOMMEND_REPO_REGISTRATION") {
+		return nil
+	}
+	var out []string
+	if hasWarningPrefix(warnings, "PIN_REPO_") || hasWarningPrefix(warnings, "RECOMMEND_REPO_REGISTRATION") {
+		out = append(out, "Pin repo diagnostics: run pindoc.workspace.detect and ensure the project has a project_repos row with name/remote/local_paths matching this workspace.")
+	}
+	if hasWarningPrefix(warnings, "PIN_PATH_") {
+		out = append(out, "Pin path diagnostics: use repo-relative paths when possible; absolute paths are accepted only when they are inside the mapped repo root and are not written back to artifact bodies.")
+	}
+	return out
+}
+
+func pinDiagnosticNextTools(warnings []string) []NextToolHint {
+	if !hasWarningPrefix(warnings, "PIN_REPO_") && !hasWarningPrefix(warnings, "RECOMMEND_REPO_REGISTRATION") {
+		return nil
+	}
+	return []NextToolHint{{
+		Tool:   "pindoc.workspace.detect",
+		Reason: "Refresh workspace-to-project mapping before retrying pin attachment.",
+	}}
+}
+
+func hasWarningPrefix(warnings []string, prefix string) bool {
+	for _, warning := range warnings {
+		if strings.HasPrefix(warning, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // titleQualityWarnings runs the locale-aware title evaluation defined in
@@ -3378,30 +3733,105 @@ func titleLocaleMismatchWarnings(projectLocale, title string) []string {
 	if lang == "" || strings.HasPrefix(lang, "en") {
 		return nil
 	}
-	if !isASCIIEnglishOnlyTitle(title) {
+	if hasProjectLanguageTitleAnchor(lang, title) || !hasLatinLetter(title) || hasTechnicalEnglishTitleAnchor(title) {
 		return nil
 	}
 	return []string{titleLocaleMismatchWarning}
 }
 
-func isASCIIEnglishOnlyTitle(title string) bool {
-	title = strings.TrimSpace(title)
-	if title == "" {
+func hasProjectLanguageTitleAnchor(lang, title string) bool {
+	switch {
+	case strings.HasPrefix(lang, "ko"):
+		for _, r := range title {
+			if unicode.In(r, unicode.Hangul) {
+				return true
+			}
+		}
+	case strings.HasPrefix(lang, "ja"):
+		for _, r := range title {
+			if unicode.In(r, unicode.Hiragana, unicode.Katakana, unicode.Han) {
+				return true
+			}
+		}
+	default:
+		return true
+	}
+	return false
+}
+
+func hasLatinLetter(title string) bool {
+	for _, r := range title {
+		if unicode.In(r, unicode.Latin) && unicode.IsLetter(r) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasTechnicalEnglishTitleAnchor(title string) bool {
+	tokens := titleWordTokens(title)
+	if len(tokens) == 0 {
 		return false
 	}
-	hasASCIILetter := false
-	for _, r := range title {
-		if unicode.In(r, unicode.Hangul, unicode.Han, unicode.Hiragana, unicode.Katakana) {
-			return false
+	if isGenericEnglishActionVerb(tokens[0]) {
+		return false
+	}
+	strong := 0
+	consecutiveStrong := 0
+	for _, token := range tokens {
+		if isTechnicalTitleToken(token) {
+			strong++
+			consecutiveStrong++
+			if consecutiveStrong >= 2 || strong >= 3 {
+				return true
+			}
+			continue
 		}
-		if r > unicode.MaxASCII {
-			return false
-		}
-		if ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') {
-			hasASCIILetter = true
+		consecutiveStrong = 0
+	}
+	return false
+}
+
+func titleWordTokens(title string) []string {
+	return regexp.MustCompile(`[A-Za-z][A-Za-z0-9_.-]*`).FindAllString(title, -1)
+}
+
+func isTechnicalTitleToken(token string) bool {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return false
+	}
+	if strings.ContainsAny(token, "._-") {
+		return true
+	}
+	hasUpper, hasLower, hasDigit := false, false, false
+	for _, r := range token {
+		switch {
+		case 'A' <= r && r <= 'Z':
+			hasUpper = true
+		case 'a' <= r && r <= 'z':
+			hasLower = true
+		case '0' <= r && r <= '9':
+			hasDigit = true
 		}
 	}
-	return hasASCIILetter
+	if hasDigit {
+		return true
+	}
+	if hasUpper && !hasLower && utf8.RuneCountInString(token) >= 2 {
+		return true
+	}
+	runes := []rune(token)
+	return len(runes) >= 2 && unicode.IsUpper(runes[0]) && hasLower
+}
+
+func isGenericEnglishActionVerb(token string) bool {
+	switch strings.ToLower(strings.TrimSpace(token)) {
+	case "add", "build", "create", "design", "document", "fix", "implement", "improve", "make", "remove", "update", "write":
+		return true
+	default:
+		return false
+	}
 }
 
 func titleLocaleMismatchSuggestedActions(warnings []string) []string {

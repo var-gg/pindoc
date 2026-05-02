@@ -13,7 +13,7 @@ import (
 // tool name. RegisteredTools catches catalog membership drift; this salt
 // catches same-name surface drift that client-side schema caches otherwise
 // cannot see.
-const ToolsetSchemaVersion = "2026-04-30-closeout-toolset-harness-guard-v1"
+const ToolsetSchemaVersion = "2026-05-01-mcp-dx-hot-path-v1"
 
 type ToolsetClientAction struct {
 	ID     string         `json:"id"`
@@ -47,6 +47,7 @@ var RegisteredTools = []string{
 	"pindoc.artifact.wording_fix",
 	"pindoc.artifact.add_pin",
 	"pindoc.harness.install",
+	"pindoc.artifact.audit",
 	"pindoc.artifact.search",
 	"pindoc.context.for_task",
 	"pindoc.artifact.revisions",
@@ -57,6 +58,8 @@ var RegisteredTools = []string{
 	"pindoc.user.update",
 	"pindoc.scope.in_flight",
 	"pindoc.task.queue",
+	"pindoc.task.flow",
+	"pindoc.task.next",
 	"pindoc.task.acceptance.transition",
 	"pindoc.task.assign",
 	"pindoc.task.bulk_assign",

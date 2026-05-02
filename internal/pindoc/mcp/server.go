@@ -166,6 +166,7 @@ func NewServer(opts Options) (*Server, error) {
 	tools.RegisterArtifactWordingFix(s, deps)
 	tools.RegisterArtifactAddPin(s, deps)
 	tools.RegisterHarnessInstall(s, deps)
+	tools.RegisterArtifactAudit(s, deps)
 	tools.RegisterArtifactSearch(s, deps)
 	tools.RegisterContextForTask(s, deps)
 
@@ -186,6 +187,8 @@ func NewServer(opts Options) (*Server, error) {
 	// task.queue is the Reader-parity read model agents should call before
 	// claiming the pending Task queue is empty.
 	tools.RegisterTaskQueue(s, deps)
+	tools.RegisterTaskFlow(s, deps)
+	tools.RegisterTaskNext(s, deps)
 	tools.RegisterTaskAcceptanceTransition(s, deps)
 	tools.RegisterTaskAssign(s, deps)
 	tools.RegisterTaskBulkAssign(s, deps)

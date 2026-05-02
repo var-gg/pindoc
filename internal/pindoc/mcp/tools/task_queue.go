@@ -180,6 +180,9 @@ legacy pending_count), and project_total_count is the active Task total
 for the whole project. Legacy total_count and pending_count remain for
 backward compatibility; count_legend repeats these meanings in the
 response.
+When multiple open Tasks match, queue may include a pindoc.task.next
+next_tool: queue is the lifecycle/count surface, while task.next chooses
+likely next executable work from dependency and blocker ordering.
 `),
 		},
 		func(ctx context.Context, p *auth.Principal, in taskQueueInput) (*sdk.CallToolResult, taskQueueOutput, error) {
@@ -311,6 +314,7 @@ func handleTaskQueueAcrossProjects(ctx context.Context, deps Deps, p *auth.Princ
 		Items:                  items,
 		Truncated:              truncated,
 		Notice:                 taskQueueNotice(),
+		NextTools:              taskQueueAcrossProjectsNextTools(assignee, strings.TrimSpace(in.AreaSlug), priority, statusFilter, totalAssigneeOpen, priorityCounts),
 	}, nil
 }
 
@@ -435,7 +439,15 @@ func buildTaskQueueForProject(ctx context.Context, deps Deps, p *auth.Principal,
 		Items:                 items,
 		Truncated:             truncated,
 		Notice:                taskQueueNotice(),
-		NextTools:             taskQueueCloseoutNextTools(scope.ProjectSlug, strings.TrimSpace(assignee)),
+		NextTools: taskQueueNextTools(
+			scope.ProjectSlug,
+			strings.TrimSpace(assignee),
+			strings.TrimSpace(in.AreaSlug),
+			priority,
+			statusFilter,
+			assigneeOpenCount,
+			priorityCounts,
+		),
 	}, nil
 }
 
@@ -638,6 +650,87 @@ func taskQueueCloseoutNextTools(projectSlug, assignee string) []NextToolHint {
 			Reason: "final current-open-work closeout check before telling the user the assigned queue is complete; historical acceptance debt is reported separately",
 		},
 	}
+}
+
+func taskQueueNextTools(projectSlug, assignee, areaSlug, priority, statusFilter string, assigneeOpenCount int, priorityCounts map[string]int) []NextToolHint {
+	out := taskQueueRecommendationNextTools(projectSlug, assignee, areaSlug, priority, statusFilter, assigneeOpenCount, priorityCounts)
+	return appendUniqueNextTools(out, taskQueueCloseoutNextTools(projectSlug, assignee)...)
+}
+
+func taskQueueRecommendationNextTools(projectSlug, assignee, areaSlug, priority, statusFilter string, assigneeOpenCount int, priorityCounts map[string]int) []NextToolHint {
+	if statusFilter != "pending" && statusFilter != "open" && statusFilter != taskStatusMissing && statusFilter != "all" {
+		return nil
+	}
+	if assigneeOpenCount <= 1 {
+		return nil
+	}
+	p1Count := 0
+	if priorityCounts != nil {
+		p1Count = priorityCounts["p1"]
+	}
+	reason := "Use task.next when queue has multiple open Tasks; it orders ready work by dependency/blocker state instead of priority alone."
+	if p1Count > 1 {
+		reason = "Multiple p1 Tasks are open; use task.next to choose the next ready Task from dependency/blocker ordering instead of priority alone."
+	}
+	args := map[string]any{
+		"project_slug": projectSlug,
+		"limit":        5,
+	}
+	if areaSlug != "" {
+		args["area_slug"] = areaSlug
+	}
+	if priority != "" {
+		args["priority"] = priority
+	}
+	if assignee != "" {
+		args["actor_scope"] = "assignee"
+		args["actor_id"] = assignee
+	} else {
+		args["actor_scope"] = "all_visible"
+	}
+	return []NextToolHint{{
+		Tool:   "pindoc.task.next",
+		Args:   args,
+		Reason: reason,
+	}}
+}
+
+func taskQueueAcrossProjectsNextTools(assignee, areaSlug, priority, statusFilter string, assigneeOpenCount int, priorityCounts map[string]int) []NextToolHint {
+	if statusFilter != "pending" && statusFilter != "open" && statusFilter != taskStatusMissing && statusFilter != "all" {
+		return nil
+	}
+	if assigneeOpenCount <= 1 {
+		return nil
+	}
+	p1Count := 0
+	if priorityCounts != nil {
+		p1Count = priorityCounts["p1"]
+	}
+	reason := "Use task.next with project_scope=visible when multiple open Tasks span projects; it orders ready work by dependency/blocker state."
+	if p1Count > 1 {
+		reason = "Multiple p1 Tasks are open across visible projects; use task.next with project_scope=visible to choose ready work by dependency/blocker ordering."
+	}
+	args := map[string]any{
+		"project_scope": "visible",
+		"limit":         5,
+	}
+	if areaSlug != "" {
+		args["area_slug"] = areaSlug
+	}
+	if priority != "" {
+		args["priority"] = priority
+	}
+	if assignee != "" {
+		args["actor_scope"] = "assignee"
+		args["actor_id"] = assignee
+	} else {
+		args["actor_scope"] = "all_visible"
+	}
+	return []NextToolHint{{
+		Tool:   "pindoc.task.next",
+		Args:   args,
+		Reason: reason,
+	}}
 }
 
 func taskQueueCountLegend() map[string]string {

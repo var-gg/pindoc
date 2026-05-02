@@ -37,6 +37,7 @@ UI mirror. 프로젝트 스코프 = URL 접두사.
 | `GET /api/p/:project` | 단일 프로젝트 detail (이전 `/api/projects/current`) |
 | `GET /api/p/:project/areas` | |
 | `GET /api/p/:project/artifacts` · `/:idOrSlug` · `/:idOrSlug/revisions` · `/:idOrSlug/diff` | |
+| `GET /api/p/:project/task-flow` | Reader Task Flow Lens. `project_scope=current|visible`, `actor_scope`, `flow_scope` query로 MCP `pindoc.task.flow`와 같은 derived sequence를 읽는다. |
 | `GET /api/p/:project/search?q=` | 프로젝트 스코프 의미 검색 |
 | `GET /api/health` | 인스턴스 헬스 |
 

@@ -102,6 +102,36 @@ func TestTaskQueueCloseoutNextTools(t *testing.T) {
 	}
 }
 
+func TestTaskQueueRecommendationNextTools(t *testing.T) {
+	got := taskQueueRecommendationNextTools("pindoc", "agent:codex", "mcp", "", "pending", 3, map[string]int{"p1": 2})
+	if len(got) != 1 {
+		t.Fatalf("next recommendation len = %d, want 1: %+v", len(got), got)
+	}
+	if got[0].Tool != "pindoc.task.next" {
+		t.Fatalf("tool = %q", got[0].Tool)
+	}
+	if got[0].Args["project_slug"] != "pindoc" || got[0].Args["actor_id"] != "agent:codex" || got[0].Args["area_slug"] != "mcp" {
+		t.Fatalf("args = %+v", got[0].Args)
+	}
+	if !strings.Contains(got[0].Reason, "Multiple p1") || !strings.Contains(got[0].Reason, "dependency") {
+		t.Fatalf("reason should explain p1/dependency ordering: %q", got[0].Reason)
+	}
+
+	if got := taskQueueRecommendationNextTools("pindoc", "", "", "", "pending", 1, nil); got != nil {
+		t.Fatalf("single open task should not emit task.next hint: %+v", got)
+	}
+}
+
+func TestTaskQueueNextToolsKeepsCloseoutAndRecommendation(t *testing.T) {
+	got := taskQueueNextTools("pindoc", "agent:codex", "", "", "pending", 2, map[string]int{"p2": 2})
+	if len(got) != 2 {
+		t.Fatalf("next tools len = %d, want recommendation + closeout: %+v", len(got), got)
+	}
+	if got[0].Tool != "pindoc.task.next" || got[1].Tool != "pindoc.task.done_check" {
+		t.Fatalf("unexpected next_tools order: %+v", got)
+	}
+}
+
 func TestTaskQueueWarnings(t *testing.T) {
 	bodyDone := "## Acceptance\n- [x] implemented\n- [-] deferred with reason\n"
 	got := taskQueueWarnings("open", bodyDone)

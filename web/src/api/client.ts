@@ -138,6 +138,70 @@ export type TaskMeta = {
   parent_slug?: string;
 };
 
+export type TaskFlowReadiness = "ready" | "blocked" | "blocked_status" | "done" | "other";
+
+export type TaskFlowStage = "ready" | "blocked" | "done" | "other";
+
+export type TaskFlowBlocker = {
+  project_slug: string;
+  artifact_id: string;
+  slug: string;
+  title: string;
+  status: string;
+  priority?: "p0" | "p1" | "p2" | "p3";
+  assignee?: string;
+  human_url_abs?: string;
+};
+
+export type TaskFlowRow = {
+  project_slug: string;
+  artifact_id: string;
+  slug: string;
+  title: string;
+  area_slug: string;
+  status: "open" | "claimed_done" | "blocked" | "cancelled" | "missing_status" | "other";
+  raw_status?: string;
+  priority?: "p0" | "p1" | "p2" | "p3";
+  assignee?: string;
+  due_at?: string;
+  stage: TaskFlowStage;
+  ordinal: number;
+  readiness: TaskFlowReadiness;
+  blockers?: TaskFlowBlocker[] | null;
+  updated_at: string;
+  agent_ref: string;
+  human_url: string;
+  human_url_abs?: string;
+};
+
+export type TaskFlowResp = {
+  mode: "derived";
+  project_scope: "current" | "list" | "visible";
+  project_slugs: string[];
+  actor_scope: "all_visible" | "assignee" | "agent" | "user" | "requester" | "team";
+  actor_ids?: string[];
+  include_unassigned?: boolean;
+  flow_scope: "active" | "all" | "ready" | "blocked";
+  items: TaskFlowRow[];
+  count: number;
+  truncated?: boolean;
+  notice: string;
+};
+
+export type TaskFlowParams = {
+  project_scope?: "current" | "list" | "visible" | "caller_visible";
+  project_slugs?: string[];
+  actor_scope?: TaskFlowResp["actor_scope"];
+  actor_id?: string;
+  actor_ids?: string[];
+  include_unassigned?: boolean;
+  flow_scope?: TaskFlowResp["flow_scope"];
+  area_slug?: string;
+  priority?: "p0" | "p1" | "p2" | "p3";
+  status?: "pending" | "all" | "open" | "missing_status" | "missing" | "claimed_done" | "blocked" | "cancelled";
+  limit?: number;
+};
+
 // ArtifactMeta carries the epistemic axes persisted via migration 0012
 // (artifact_meta JSONB). Every field is optional — the server omits axes
 // the resolver didn't set, and legacy rows arrive as an empty object.
@@ -631,6 +695,22 @@ function gitQuery(params: Record<string, string | undefined>): string {
   return qs.toString();
 }
 
+function taskFlowQuery(params: TaskFlowParams = {}): string {
+  const qs = new URLSearchParams();
+  if (params.project_scope) qs.set("project_scope", params.project_scope);
+  for (const slug of params.project_slugs ?? []) qs.append("project_slugs", slug);
+  if (params.actor_scope) qs.set("actor_scope", params.actor_scope);
+  if (params.actor_id) qs.set("actor_id", params.actor_id);
+  for (const id of params.actor_ids ?? []) qs.append("actor_ids", id);
+  if (params.include_unassigned !== undefined) qs.set("include_unassigned", String(params.include_unassigned));
+  if (params.flow_scope) qs.set("flow_scope", params.flow_scope);
+  if (params.area_slug) qs.set("area_slug", params.area_slug);
+  if (params.priority) qs.set("priority", params.priority);
+  if (params.status) qs.set("status", params.status);
+  if (params.limit) qs.set("limit", String(params.limit));
+  return qs.toString();
+}
+
 export function projectListPath(options: ProjectListOptions = {}): string {
   if (!options.includeHidden) return "/api/projects";
   const qs = new URLSearchParams();
@@ -1044,6 +1124,10 @@ export const api = {
     return j<{ project_slug: string; artifacts: ArtifactRef[] }>(
       `${p(project)}/artifacts${q ? `?${q}` : ""}`,
     );
+  },
+  taskFlow: (project: string, params?: TaskFlowParams) => {
+    const q = taskFlowQuery(params);
+    return j<TaskFlowResp>(`${p(project)}/task-flow${q ? `?${q}` : ""}`);
   },
   artifact: (project: string, idOrSlug: string) =>
     j<Artifact>(`${p(project)}/artifacts/${encodeURIComponent(idOrSlug)}`),

@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -167,5 +168,31 @@ func TestApplyBodyPatchInvalidMode(t *testing.T) {
 	_, _, code := applyBodyPatch("body\n", &BodyPatchInput{Mode: "foo"})
 	if code != "PATCH_MODE_INVALID" {
 		t.Fatalf("expected PATCH_MODE_INVALID, got %q", code)
+	}
+}
+
+func TestBodyPatchNotReadyHintsAreActionable(t *testing.T) {
+	in := artifactProposeInput{
+		Type:       "Decision",
+		AreaSlug:   "mcp",
+		Title:      "Patch misuse fixture",
+		AuthorID:   "codex-test",
+		BodyPatch:  &BodyPatchInput{Mode: "append", AppendText: "x"},
+		BodyLocale: "en",
+	}
+	_, failed, code := preflight(context.Background(), Deps{}, "pindoc", &in, "en")
+	if code != "PATCH_UPDATE_ONLY" {
+		t.Fatalf("preflight first code = %q failed=%v, want PATCH_UPDATE_ONLY", code, failed)
+	}
+	tools := nextToolsForNotReady(code, in.Type, failed)
+	joinedTools := ""
+	for _, tool := range tools {
+		joinedTools += tool.Tool + " " + tool.Reason + " "
+	}
+	if !strings.Contains(joinedTools, "pindoc.artifact.read") || !strings.Contains(joinedTools, "pindoc.artifact.propose") || !strings.Contains(joinedTools, "body_patch") {
+		t.Fatalf("patch misuse next_tools not actionable: %+v", tools)
+	}
+	if got := patchFieldsFor("PATCH_CHECKBOX_STATE_REQUIRED"); len(got) != 1 || got[0] != "body_patch.checkbox_state" {
+		t.Fatalf("patchFieldsFor checkbox state = %v", got)
 	}
 }

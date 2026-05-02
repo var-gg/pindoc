@@ -171,3 +171,12 @@ func loadTranslateSource(ctx context.Context, deps Deps, projectSlug, idOrSlug s
 func normalizeBodyLocale(raw string) string {
 	return strings.ToLower(strings.TrimSpace(raw))
 }
+
+func validBodyLocale(raw string) bool {
+	switch normalizeBodyLocale(raw) {
+	case "ko", "en", "ja", "ko-kr", "en-us", "en-gb", "ja-jp":
+		return true
+	default:
+		return false
+	}
+}

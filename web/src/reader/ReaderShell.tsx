@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { Bot, CircleHelp, PanelRightOpen, UserRound, X } from "lucide-react";
 import type { Aggregate } from "./useReaderData";
@@ -21,6 +21,7 @@ import { Sidebar } from "./Sidebar";
 import { Sidecar } from "./Sidecar";
 import { ShortcutsOverlay } from "./ShortcutsOverlay";
 import { EmptyState, SurfaceHeader, surfaceDisplayName } from "./SurfacePrimitives";
+import { TaskFlowLens } from "./TaskFlowLens";
 import { Tooltip } from "./Tooltip";
 import { Today } from "./Today";
 import { TopNav } from "./TopNav";
@@ -828,6 +829,7 @@ function Body({
 }) {
   const { t } = useI18n();
   const navigate = useNavigate();
+  const [taskSurfaceMode, setTaskSurfaceMode] = useState<"flow" | "board">("flow");
   const baseRoute = `/p/${projectSlug}/${view === "tasks" ? "tasks" : view === "today" ? "today" : "wiki"}`;
   const detailScope = detail && view === "reader"
     ? buildDetailScope({
@@ -937,6 +939,30 @@ function Body({
       : t("wiki.empty_list");
 
   if (view === "tasks") {
+    const modeSwitch = (
+      <TaskModeSwitch
+        mode={taskSurfaceMode}
+        onChange={setTaskSurfaceMode}
+      />
+    );
+    if (taskSurfaceMode === "flow") {
+      return (
+        <TaskFlowLens
+          projectSlug={projectSlug}
+          list={list}
+          allList={allList}
+          currentSlug={currentSlug}
+          selectedArea={selectedArea}
+          badgeFilters={badgeFilters}
+          areaNameBySlug={areaNameBySlug}
+          selectedTaskSlug={selectedTaskSlug}
+          onSelectTask={onSelectTask}
+          onClearAreaFilter={onClearAreaFilter}
+          onClearBadgeFilter={onClearBadgeFilter}
+          modeSwitch={modeSwitch}
+        />
+      );
+    }
     return (
       <TasksKanban
         projectSlug={projectSlug}
@@ -953,6 +979,7 @@ function Body({
         onClearAreaFilter={onClearAreaFilter}
         onClearBadgeFilter={onClearBadgeFilter}
         onClearFilters={onClearFilters}
+        modeSwitch={modeSwitch}
       />
     );
   }
@@ -1095,6 +1122,7 @@ function TasksKanban({
   onClearAreaFilter,
   onClearBadgeFilter,
   onClearFilters,
+  modeSwitch,
 }: {
   projectSlug: string;
   list: ArtifactRef[];
@@ -1110,6 +1138,7 @@ function TasksKanban({
   onClearAreaFilter: () => void;
   onClearBadgeFilter: (key: BadgeFilterKey) => void;
   onClearFilters: () => void;
+  modeSwitch?: ReactNode;
 }) {
   const { t } = useI18n();
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
@@ -1172,6 +1201,7 @@ function TasksKanban({
   if (allList.length === 0) {
     return (
       <main className="content">
+        {modeSwitch}
         <div className="reader-article">
           <TaskBoardHeader
             scopeLabel={scopeLabel}
@@ -1191,6 +1221,7 @@ function TasksKanban({
 
   return (
     <main className="content">
+      {modeSwitch}
       <TaskBoardHeader
         scopeLabel={scopeLabel}
         totalCount={allList.length}
@@ -1282,6 +1313,36 @@ function UnavailableSurface({
         />
       </div>
     </main>
+  );
+}
+
+function TaskModeSwitch({
+  mode,
+  onChange,
+}: {
+  mode: "flow" | "board";
+  onChange: (mode: "flow" | "board") => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="task-mode-switch" role="group" aria-label={t("tasks.mode_switch")}>
+      <button
+        type="button"
+        className={mode === "flow" ? "is-active" : ""}
+        onClick={() => onChange("flow")}
+        aria-pressed={mode === "flow"}
+      >
+        {t("tasks.mode_flow")}
+      </button>
+      <button
+        type="button"
+        className={mode === "board" ? "is-active" : ""}
+        onClick={() => onChange("board")}
+        aria-pressed={mode === "board"}
+      >
+        {t("tasks.mode_board")}
+      </button>
+    </div>
   );
 }
 
