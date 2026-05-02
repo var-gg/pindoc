@@ -21,7 +21,6 @@ type projectCreateRequest struct {
 	Color           string `json:"color,omitempty"`
 	PrimaryLanguage string `json:"primary_language"`
 	GitRemoteURL    string `json:"git_remote_url,omitempty"`
-	OwnerID         string `json:"owner_id,omitempty"`
 }
 
 // projectCreateResponse is the 201 success envelope. Fields are flat
@@ -85,7 +84,6 @@ func (d Deps) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 		Color:           in.Color,
 		PrimaryLanguage: in.PrimaryLanguage,
 		GitRemoteURL:    in.GitRemoteURL,
-		OwnerID:         in.OwnerID,
 	})
 	if err != nil {
 		status, code := mapProjectCreateError(err)

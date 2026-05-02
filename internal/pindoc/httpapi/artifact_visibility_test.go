@@ -88,7 +88,6 @@ func TestArtifactVisibilityPatchIntegration(t *testing.T) {
 		Slug:            slug,
 		Name:            "Visibility HTTP " + suffix,
 		PrimaryLanguage: "en",
-		OwnerID:         "vis-http-" + suffix,
 		OwnerUserID:     ownerID,
 	})
 	if err != nil {

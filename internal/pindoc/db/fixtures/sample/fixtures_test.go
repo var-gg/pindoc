@@ -135,21 +135,20 @@ func TestSeedIdempotentIntegration(t *testing.T) {
 	}
 
 	var (
-		ownerID                   string
 		orgSlug                   string
 		visibility                string
 		defaultArtifactVisibility string
 	)
 	if err := pool.QueryRow(ctx, `
-		SELECT p.owner_id, o.slug, p.visibility, p.default_artifact_visibility
+		SELECT o.slug, p.visibility, p.default_artifact_visibility
 		  FROM projects p
 		  JOIN organizations o ON o.id = p.organization_id
 		 WHERE p.slug = $1
-	`, ProjectSlug).Scan(&ownerID, &orgSlug, &visibility, &defaultArtifactVisibility); err != nil {
+	`, ProjectSlug).Scan(&orgSlug, &visibility, &defaultArtifactVisibility); err != nil {
 		t.Fatalf("lookup sample project: %v", err)
 	}
-	if ownerID != sampleOwnerSlug || orgSlug != sampleOwnerSlug {
-		t.Fatalf("sample project owner/org = %q/%q, want %q", ownerID, orgSlug, sampleOwnerSlug)
+	if orgSlug != sampleOwnerSlug {
+		t.Fatalf("sample project org = %q, want %q", orgSlug, sampleOwnerSlug)
 	}
 	if visibility != projects.VisibilityPublic || defaultArtifactVisibility != projects.VisibilityPublic {
 		t.Fatalf("sample project visibility = %q/%q, want public", visibility, defaultArtifactVisibility)

@@ -30,8 +30,8 @@ type ResolveResult struct {
 // with the given project slug. Used by the future /pindoc.org/{org}/p/{slug}
 // route family (and any current handler that wants to be Org-aware).
 //
-// Joins on organizations.slug rather than projects.owner_id because
-// organization_id is the authoritative FK now (migration 0049). The
+// Joins on organizations.slug through projects.organization_id because
+// organization_id is the authoritative FK. The
 // query filters on deleted_at IS NULL on both sides so soft-deleted
 // orgs/projects don't surface.
 func ResolveByOrgAndSlug(ctx context.Context, q queryer, orgSlug, projectSlug string) (*ResolveResult, error) {

@@ -20,18 +20,12 @@ import (
 // would lose the docstrings, so the wrapper-level type stays separate from
 // the package-level input.
 type projectCreateInput struct {
-	Slug            string `json:"slug" jsonschema:"lowercase kebab-case slug, 2-40 chars, unique per owner"`
+	Slug            string `json:"slug" jsonschema:"lowercase kebab-case slug, 2-40 chars, unique project slug"`
 	Name            string `json:"name" jsonschema:"human-readable display name"`
 	PrimaryLanguage string `json:"primary_language" jsonschema:"required; one of en | ko | ja. Must be explicitly confirmed with the user; no default. Immutable after create — recreate the project if wrong"`
 	Description     string `json:"description,omitempty" jsonschema:"one-line description shown on the project switcher; optional"`
 	Color           string `json:"color,omitempty" jsonschema:"CSS color string (hex or oklch) used for the sidebar accent; optional"`
 	GitRemoteURL    string `json:"git_remote_url,omitempty" jsonschema:"optional git remote URL; normalized into project_repos for workspace detection"`
-	// OwnerID is optional; defaults to 'default' for single-owner self-
-	// host deployments. Larger deployments (multiple users sharing one
-	// instance) set this to the logical owner identifier. Not a user
-	// table reference today — just a string the server stores so future
-	// permission scopes have something to hang off.
-	OwnerID string `json:"owner_id,omitempty" jsonschema:"optional owner identifier; defaults to 'default'"`
 }
 
 type projectCreateOutput struct {
@@ -100,7 +94,6 @@ func RegisterProjectCreate(server *sdk.Server, deps Deps) {
 				Color:           in.Color,
 				PrimaryLanguage: in.PrimaryLanguage,
 				GitRemoteURL:    in.GitRemoteURL,
-				OwnerID:         in.OwnerID,
 				OwnerUserID:     principalUserID(p),
 			})
 			if err != nil {

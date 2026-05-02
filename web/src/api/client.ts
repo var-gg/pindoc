@@ -802,7 +802,6 @@ export type CreateProjectInput = {
   description?: string;
   color?: string;
   git_remote_url?: string;
-  owner_id?: string;
 };
 
 export type CreateProjectResp = {

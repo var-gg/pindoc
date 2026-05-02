@@ -66,7 +66,7 @@ type CreateProjectInput struct {
 	Color           string // optional CSS color
 	PrimaryLanguage string // required, one of SupportedLanguages
 	GitRemoteURL    string // optional; stored in project_repos as name=origin
-	OwnerID         string // optional, defaults to "default"
+	OrganizationID  string // optional organizations.id; defaults to the bootstrap default Org
 	OwnerUserID     string // optional users.id; creates project_members owner row when present
 }
 
@@ -151,10 +151,7 @@ func CreateProject(
 	desc := strings.TrimSpace(in.Description)
 	color := strings.TrimSpace(in.Color)
 	gitRemoteURL := strings.TrimSpace(in.GitRemoteURL)
-	ownerID := strings.TrimSpace(in.OwnerID)
-	if ownerID == "" {
-		ownerID = "default"
-	}
+	orgID := strings.TrimSpace(in.OrganizationID)
 
 	if err := ValidateProjectSlug(slug); err != nil {
 		return zero, err
@@ -180,25 +177,25 @@ func CreateProject(
 		colorPtr = &color
 	}
 
-	// Resolve the legacy owner_id label to an organizations.id UUID. The
-	// transition window keeps both columns populated (migration 0049
-	// header for the rationale): owner_id remains the user-facing input
-	// surface, organization_id is the FK every new query path will use.
-	orgID, err := organizations.ResolveForOwnerLabel(ctx, tx, ownerID)
-	if err != nil {
-		return zero, fmt.Errorf("resolve organization for owner %q: %w", ownerID, err)
+	if orgID == "" {
+		orgID, err = organizations.ResolveDefaultID(ctx, tx)
+		if err != nil {
+			return zero, fmt.Errorf("resolve default organization: %w", err)
+		}
+	} else if _, err := organizations.ResolveByID(ctx, tx, orgID); err != nil {
+		return zero, fmt.Errorf("resolve organization %q: %w", orgID, err)
 	}
 
 	var projectID string
 	err = tx.QueryRow(ctx, `
-		INSERT INTO projects (owner_id, organization_id, slug, name, description, color, primary_language)
-		VALUES ($1, $2::uuid, $3, $4, $5, $6, $7)
+		INSERT INTO projects (organization_id, slug, name, description, color, primary_language)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6)
 		RETURNING id::text
-	`, ownerID, orgID, slug, name, descPtr, colorPtr, lang).Scan(&projectID)
+	`, orgID, slug, name, descPtr, colorPtr, lang).Scan(&projectID)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return zero, fmt.Errorf("%w: project slug %q already exists under owner %q — pick a different slug", ErrSlugTaken, slug, ownerID)
+			return zero, fmt.Errorf("%w: project slug %q already exists — pick a different slug", ErrSlugTaken, slug)
 		}
 		return zero, fmt.Errorf("project insert: %w", err)
 	}

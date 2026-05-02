@@ -244,10 +244,10 @@ func insertInviteHTTPProject(t *testing.T, ctx context.Context, pool *db.Pool, s
 	t.Helper()
 	var projectID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO projects (slug, name, owner_id, primary_language)
-		VALUES ($1, $2, $3, 'en')
+		INSERT INTO projects (slug, name, organization_id, primary_language)
+		VALUES ($1, $2, (SELECT id FROM organizations WHERE slug = 'default' LIMIT 1), 'en')
 		RETURNING id::text
-	`, slug, "Invite HTTP "+slug, "owner-"+slug).Scan(&projectID); err != nil {
+	`, slug, "Invite HTTP "+slug).Scan(&projectID); err != nil {
 		t.Fatalf("insert project: %v", err)
 	}
 	insertInviteHTTPMember(t, ctx, pool, projectID, ownerID, pauth.RoleOwner)

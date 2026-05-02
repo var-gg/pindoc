@@ -183,16 +183,17 @@ func validateManifest(m Manifest) error {
 
 func ensureSampleProject(ctx context.Context, tx pgx.Tx, meta ProjectMeta, ownerUserID string) (projectID string, created bool, err error) {
 	slug := strings.TrimSpace(meta.Slug)
-	if err := ensureSampleOrganization(ctx, tx, ownerUserID); err != nil {
+	sampleOrgID, err := ensureSampleOrganization(ctx, tx, ownerUserID)
+	if err != nil {
 		return "", false, err
 	}
-	var ownerID string
+	var projectOrgID string
 	err = tx.QueryRow(ctx, `
-		SELECT id::text, owner_id FROM projects WHERE slug = $1
-	`, slug).Scan(&projectID, &ownerID)
+		SELECT id::text, organization_id::text FROM projects WHERE slug = $1
+	`, slug).Scan(&projectID, &projectOrgID)
 	if err == nil {
-		if ownerID != sampleOwnerSlug {
-			return "", false, fmt.Errorf("sample project slug %q already exists outside sample owner %q", slug, sampleOwnerSlug)
+		if projectOrgID != sampleOrgID {
+			return "", false, fmt.Errorf("sample project slug %q already exists outside sample organization %q", slug, sampleOwnerSlug)
 		}
 		if err := markSampleProjectPublic(ctx, tx, projectID, meta); err != nil {
 			return "", false, err
@@ -208,7 +209,7 @@ func ensureSampleProject(ctx context.Context, tx pgx.Tx, meta ProjectMeta, owner
 		Name:            meta.Name,
 		Description:     meta.Description,
 		PrimaryLanguage: meta.PrimaryLanguage,
-		OwnerID:         sampleOwnerSlug,
+		OrganizationID:  sampleOrgID,
 		OwnerUserID:     ownerUserID,
 	})
 	if err != nil {
@@ -220,22 +221,23 @@ func ensureSampleProject(ctx context.Context, tx pgx.Tx, meta ProjectMeta, owner
 	return out.ID, true, nil
 }
 
-func ensureSampleOrganization(ctx context.Context, tx pgx.Tx, ownerUserID string) error {
-	if _, err := organizations.ResolveBySlug(ctx, tx, sampleOwnerSlug); err == nil {
-		return nil
+func ensureSampleOrganization(ctx context.Context, tx pgx.Tx, ownerUserID string) (string, error) {
+	if org, err := organizations.ResolveBySlug(ctx, tx, sampleOwnerSlug); err == nil {
+		return org.ID, nil
 	} else if !errors.Is(err, organizations.ErrNotFound) {
-		return fmt.Errorf("lookup sample organization: %w", err)
+		return "", fmt.Errorf("lookup sample organization: %w", err)
 	}
-	if _, err := organizations.Create(ctx, tx, organizations.CreateInput{
+	org, err := organizations.Create(ctx, tx, organizations.CreateInput{
 		Slug:        sampleOwnerSlug,
 		Name:        "Pindoc Sample",
 		Kind:        organizations.KindTeam,
 		Description: "System-owned namespace for optional Pindoc sample fixtures.",
 		OwnerUserID: ownerUserID,
-	}); err != nil {
-		return fmt.Errorf("create sample organization: %w", err)
+	})
+	if err != nil {
+		return "", fmt.Errorf("create sample organization: %w", err)
 	}
-	return nil
+	return org.ID, nil
 }
 
 func markSampleProjectPublic(ctx context.Context, tx pgx.Tx, projectID string, meta ProjectMeta) error {

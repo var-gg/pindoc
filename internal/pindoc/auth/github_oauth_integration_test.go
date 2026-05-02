@@ -288,10 +288,10 @@ func insertGitHubInviteProject(t *testing.T, ctx context.Context, pool *db.Pool,
 	slug := "github-invite-" + suffix
 	var projectID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO projects (slug, name, owner_id, primary_language)
-		VALUES ($1, $2, $3, 'en')
+		INSERT INTO projects (slug, name, organization_id, primary_language)
+		VALUES ($1, $2, (SELECT id FROM organizations WHERE slug = 'default' LIMIT 1), 'en')
 		RETURNING id::text
-	`, slug, "GitHub Invite "+suffix, "owner-"+suffix).Scan(&projectID); err != nil {
+	`, slug, "GitHub Invite "+suffix).Scan(&projectID); err != nil {
 		t.Fatalf("insert invite project: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `

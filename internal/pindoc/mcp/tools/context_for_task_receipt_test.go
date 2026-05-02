@@ -132,9 +132,8 @@ func insertContextReceiptProject(t *testing.T, ctx context.Context, pool *db.Poo
 	t.Helper()
 	var id string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO projects (owner_id, organization_id, slug, name, primary_language)
+		INSERT INTO projects (organization_id, slug, name, primary_language)
 		VALUES (
-			'default',
 			(SELECT id FROM organizations WHERE slug = 'default' LIMIT 1),
 			$1, $2, 'en'
 		)

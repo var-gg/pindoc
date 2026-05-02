@@ -194,10 +194,10 @@ func insertOAuthTestProject(t *testing.T, ctx context.Context, pool *db.Pool, su
 	slug := "oauth-it-" + suffix
 	var projectID string
 	err := pool.QueryRow(ctx, `
-		INSERT INTO projects (slug, name, owner_id, primary_language)
-		VALUES ($1, $2, $3, 'en')
+		INSERT INTO projects (slug, name, organization_id, primary_language)
+		VALUES ($1, $2, (SELECT id FROM organizations WHERE slug = 'default' LIMIT 1), 'en')
 		RETURNING id::text
-	`, slug, "OAuth IT "+suffix, "owner-"+suffix).Scan(&projectID)
+	`, slug, "OAuth IT "+suffix).Scan(&projectID)
 	if err != nil {
 		t.Fatalf("insert project: %v", err)
 	}

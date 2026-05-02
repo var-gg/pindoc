@@ -346,7 +346,6 @@ func runProjectCreate(ctx context.Context, pool *db.Pool, args []string) error {
 	description := fs.String("description", "", "optional one-line description")
 	color := fs.String("color", "", "optional sidebar accent color (hex / oklch / css color)")
 	gitRemoteURL := fs.String("git-remote-url", "", "optional git remote URL to store in project_repos")
-	owner := fs.String("owner", "", "optional owner identifier; defaults to 'default'")
 
 	// Slug is the first positional arg. Push everything before the
 	// first flag into a single positional slot so the FlagSet can
@@ -380,7 +379,6 @@ func runProjectCreate(ctx context.Context, pool *db.Pool, args []string) error {
 		Color:           *color,
 		PrimaryLanguage: *language,
 		GitRemoteURL:    *gitRemoteURL,
-		OwnerID:         *owner,
 	})
 	if err != nil {
 		// Map sentinel errors to errProjectValidation so main()

@@ -489,6 +489,34 @@ func TestArtifactRevisionAuthorUserMigrationContract(t *testing.T) {
 	}
 }
 
+func TestDropProjectsOwnerIDMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0055_drop_projects_owner_id.sql")
+	if err != nil {
+		t.Fatalf("read drop projects owner_id migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"DROP CONSTRAINT IF EXISTS projects_owner_slug_locale_unique",
+		"DROP CONSTRAINT IF EXISTS projects_owner_slug_key",
+		"DROP INDEX IF EXISTS idx_projects_owner",
+		"DROP COLUMN IF EXISTS owner_id",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("drop projects owner_id migration Up missing %q:\n%s", want, up)
+		}
+	}
+	for _, want := range []string{
+		"-- +goose Down",
+		"ADD COLUMN IF NOT EXISTS owner_id TEXT NOT NULL DEFAULT 'default'",
+		"CREATE INDEX IF NOT EXISTS idx_projects_owner ON projects(owner_id)",
+		"ADD CONSTRAINT projects_owner_slug_key UNIQUE (owner_id, slug)",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("drop projects owner_id migration Down missing %q", want)
+		}
+	}
+}
 func TestVisibilityMigrationContract(t *testing.T) {
 	raw, err := migrationsFS.ReadFile("migrations/0050_visibility.sql")
 	if err != nil {

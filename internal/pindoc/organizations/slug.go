@@ -4,12 +4,9 @@
 // every Project hangs off exactly one Org, and per-seat plans attach to
 // an Org (not a User) once the SaaS layer lands.
 //
-// The schema (migration 0049) keeps two parallel ownership columns on
-// projects during the transition window: legacy projects.owner_id (TEXT,
-// exposed on MCP/REST input surface) and the new projects.organization_id
-// (UUID FK). Code paths populate both — owner_id mirrors the Org's slug
-// — until the API surface is migrated and a follow-up migration drops
-// owner_id.
+// The schema hangs projects from projects.organization_id (UUID FK).
+// The old owner-label transition column was removed after the API
+// surfaces moved to the Organization model.
 package organizations
 
 import (

@@ -96,8 +96,8 @@ func ResolveByID(ctx context.Context, q LookupQueryer, id string) (*Org, error) 
 
 // ResolveDefaultID returns the UUID of the bootstrap 'default' Org seeded
 // by migration 0049. Project create/upsert paths that don't yet have a
-// real Organization context fall back to this — populates organization_id
-// without breaking the legacy owner_id='default' assumption.
+// real Organization context fall back to this so organization_id stays
+// populated without a caller-visible owner label.
 func ResolveDefaultID(ctx context.Context, q LookupQueryer) (string, error) {
 	var id string
 	err := q.QueryRow(ctx, `
@@ -112,30 +112,4 @@ func ResolveDefaultID(ctx context.Context, q LookupQueryer) (string, error) {
 		return "", fmt.Errorf("lookup default org id: %w", err)
 	}
 	return id, nil
-}
-
-// ResolveForOwnerLabel maps the legacy projects.owner_id TEXT (default
-// 'default', or a custom owner sentinel a self-host operator picked) to
-// the matching organizations.id. The mapping rule is direct: owner_id
-// is treated as the Org slug. Unknown owner_id values fall back to the
-// default Org so existing self-host data keeps working.
-//
-// This function is the bridge during the transition window where both
-// owner_id and organization_id coexist on projects. Once the API surface
-// is migrated, owner_id and this resolver get removed together.
-func ResolveForOwnerLabel(ctx context.Context, q LookupQueryer, ownerLabel string) (string, error) {
-	if ownerLabel == "" {
-		ownerLabel = DefaultOrgSlug
-	}
-	org, err := ResolveBySlug(ctx, q, ownerLabel)
-	if err == nil {
-		return org.ID, nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return "", err
-	}
-	// Unknown owner label — fall back to default. This keeps create
-	// flows that pass a free-form owner string (legacy MCP/REST API)
-	// from breaking when the value isn't a real Org slug yet.
-	return ResolveDefaultID(ctx, q)
 }

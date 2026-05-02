@@ -40,7 +40,6 @@ type projectCurrentOutput struct {
 	ID              string `json:"id,omitempty"`
 	Slug            string `json:"slug,omitempty"`
 	Name            string `json:"name,omitempty"`
-	OwnerID         string `json:"owner_id,omitempty"`
 	Description     string `json:"description,omitempty"`
 	Color           string `json:"color,omitempty"`
 	PrimaryLanguage string `json:"primary_language,omitempty"`
@@ -200,7 +199,6 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 					p.id::text,
 					p.slug,
 					p.name,
-					p.owner_id,
 					p.description,
 					p.color,
 					p.primary_language,
@@ -211,7 +209,7 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 				FROM projects p
 				WHERE p.slug = $1
 			`, scope.ProjectSlug).Scan(
-				&out.ID, &out.Slug, &out.Name, &out.OwnerID,
+				&out.ID, &out.Slug, &out.Name,
 				&desc, &color,
 				&out.PrimaryLanguage, &out.Locale, &out.CreatedAt,
 				&out.AreasCount, &out.ArtifactsCount,

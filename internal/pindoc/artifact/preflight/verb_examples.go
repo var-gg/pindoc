@@ -13,8 +13,8 @@ var ForbiddenAcceptanceVerbs = []ForbiddenVerb{
 		Key:           "research",
 		Canonical:     "조사한다",
 		Variants:      []string{"조사한다", "조사했다", "조사합니다"},
-		ExampleBefore: "레거시 owner_id 사용처를 조사한다.",
-		ExampleAfter:  "레거시 owner_id 사용처 목록이 report에 존재한다.",
+		ExampleBefore: "레거시 locale 사용처를 조사한다.",
+		ExampleAfter:  "레거시 locale 사용처 목록이 report에 존재한다.",
 	},
 	{
 		Key:           "organize",
