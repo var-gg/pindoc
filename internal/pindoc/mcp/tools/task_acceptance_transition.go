@@ -245,11 +245,11 @@ func RegisterTaskAcceptanceTransition(server *sdk.Server, deps Deps) {
 				INSERT INTO artifact_revisions (
 					artifact_id, revision_number, title, body_markdown, body_hash, tags,
 					completeness, author_kind, author_id, author_version, commit_msg,
-					source_session_ref, revision_shape, shape_payload
-				) VALUES ($1, $2, $3, $4, $5, $6, $7, 'agent', $8, $9, $10, $11, 'acceptance_transition', $12::jsonb)
+					author_user_id, source_session_ref, revision_shape, shape_payload
+				) VALUES ($1, $2, $3, $4, $5, $6, $7, 'agent', $8, $9, $10, NULLIF($11, '')::uuid, $12, 'acceptance_transition', $13::jsonb)
 			`, artifactID, newRev, currentTitle, newBody, bodyHash(newBody), currentTags,
 				currentCompleteness, effAuthorID, nullIfEmpty(in.AuthorVersion), commitMsg,
-				buildSourceSessionRef(p, artifactProposeInput{AuthorID: effAuthorID}), string(shapePayload),
+				principalUserID(p), buildSourceSessionRef(p, artifactProposeInput{AuthorID: effAuthorID}), string(shapePayload),
 			); err != nil {
 				return nil, taskAcceptanceTransitionOutput{}, fmt.Errorf("insert revision: %w", err)
 			}
@@ -264,10 +264,11 @@ func RegisterTaskAcceptanceTransition(server *sdk.Server, deps Deps) {
 				           WHEN $5::bool THEN jsonb_set(COALESCE(task_meta, '{}'::jsonb), '{status}', '"claimed_done"')
 				           ELSE task_meta
 				       END,
-				       updated_at = now()
+				       updated_at = now(),
+				       author_user_id = COALESCE(NULLIF($6, '')::uuid, author_user_id)
 				 WHERE id = $1
 				RETURNING COALESCE(published_at, now())
-			`, artifactID, newBody, effAuthorID, nullIfEmpty(in.AuthorVersion), autoClaimedDone).Scan(&publishedAt); err != nil {
+			`, artifactID, newBody, effAuthorID, nullIfEmpty(in.AuthorVersion), autoClaimedDone, principalUserID(p)).Scan(&publishedAt); err != nil {
 				return nil, taskAcceptanceTransitionOutput{}, fmt.Errorf("update task: %w", err)
 			}
 

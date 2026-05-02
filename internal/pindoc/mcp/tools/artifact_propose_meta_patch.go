@@ -228,10 +228,10 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 		INSERT INTO artifact_revisions (
 			artifact_id, revision_number, title, body_markdown, body_hash,
 			tags, completeness, author_kind, author_id, author_version,
-			commit_msg, source_session_ref, revision_shape, shape_payload
-		) VALUES ($1, $2, $3, NULL, $4, $5, $6, 'agent', $7, $8, $9, $10, 'meta_patch', $11::jsonb)
+			author_user_id, commit_msg, source_session_ref, revision_shape, shape_payload
+		) VALUES ($1, $2, $3, NULL, $4, $5, $6, 'agent', $7, $8, NULLIF($9, '')::uuid, $10, $11, 'meta_patch', $12::jsonb)
 	`, artifactID, newRev, currentTitle, prevBodyHash, effectiveTags, effectiveCompleteness,
-		in.AuthorID, nullIfEmpty(in.AuthorVersion), in.CommitMsg,
+		in.AuthorID, nullIfEmpty(in.AuthorVersion), principalUserID(p), in.CommitMsg,
 		buildSourceSessionRef(p, in), string(shapePayloadJSON),
 	); err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("insert meta_patch revision: %w", err)
@@ -256,12 +256,13 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 		       END,
 		       author_id      = $6,
 		       author_version = $7,
+		       author_user_id = COALESCE(NULLIF($9, '')::uuid, author_user_id),
 		       updated_at     = now()
 		 WHERE id = $1
 	`, artifactID, effectiveTags, effectiveCompleteness,
 		taskMetaPatch, artifactMetaPatch,
 		in.AuthorID, nullIfEmpty(in.AuthorVersion),
-		reviewState,
+		reviewState, principalUserID(p),
 	); err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("update artifact head meta: %w", err)
 	}

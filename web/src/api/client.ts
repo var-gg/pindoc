@@ -446,6 +446,7 @@ export type RevisionRow = {
   title: string;
   body_hash: string;
   author_id: string;
+  author_user?: AuthorUserRef;
   author_version?: string;
   commit_msg?: string;
   completeness: string;
@@ -467,6 +468,7 @@ export type DiffRevMeta = {
   title: string;
   body_hash?: string;
   author_id: string;
+  author_user?: AuthorUserRef;
   author_version?: string;
   commit_msg?: string;
   revision_shape?: RevisionShape;

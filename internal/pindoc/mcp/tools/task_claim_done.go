@@ -542,11 +542,11 @@ func claimOneTaskDone(
 		INSERT INTO artifact_revisions (
 			artifact_id, revision_number, title, body_markdown, body_hash,
 			tags, completeness, author_kind, author_id, author_version,
-			commit_msg, source_session_ref, revision_shape, shape_payload
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'agent', $8, $9, $10, $11, 'body_patch', $12::jsonb)
+			author_user_id, commit_msg, source_session_ref, revision_shape, shape_payload
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'agent', $8, $9, NULLIF($10, '')::uuid, $11, $12, 'body_patch', $13::jsonb)
 	`, artifactID, newRev, currentTitle, revBody, revBodyHash,
 		currentTags, currentCompleteness,
-		effAuthorID, nullIfEmpty(in.AuthorVersion), commitMsg,
+		effAuthorID, nullIfEmpty(in.AuthorVersion), principalUserID(p), commitMsg,
 		sourceSessionRef, string(shapePayloadJSON),
 	); err != nil {
 		return taskClaimDoneOutput{}, fmt.Errorf("insert claim_done revision: %w", err)
@@ -563,9 +563,10 @@ func claimOneTaskDone(
 			                        || jsonb_build_object('status', 'claimed_done'),
 			       author_id      = $3,
 			       author_version = $4,
+			       author_user_id = COALESCE(NULLIF($5, '')::uuid, author_user_id),
 			       updated_at     = now()
 			 WHERE id = $1
-		`, artifactID, newBody, effAuthorID, nullIfEmpty(in.AuthorVersion)); err != nil {
+		`, artifactID, newBody, effAuthorID, nullIfEmpty(in.AuthorVersion), principalUserID(p)); err != nil {
 			return taskClaimDoneOutput{}, fmt.Errorf("update artifact head body+meta: %w", err)
 		}
 	} else {
@@ -575,9 +576,10 @@ func claimOneTaskDone(
 			                        || jsonb_build_object('status', 'claimed_done'),
 			       author_id      = $2,
 			       author_version = $3,
+			       author_user_id = COALESCE(NULLIF($4, '')::uuid, author_user_id),
 			       updated_at     = now()
 			 WHERE id = $1
-		`, artifactID, effAuthorID, nullIfEmpty(in.AuthorVersion)); err != nil {
+		`, artifactID, effAuthorID, nullIfEmpty(in.AuthorVersion), principalUserID(p)); err != nil {
 			return taskClaimDoneOutput{}, fmt.Errorf("update artifact head meta: %w", err)
 		}
 	}

@@ -9,6 +9,7 @@ import {
 } from "../api/client";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
+import { authorAvatarKey, authorDisplayLabel, authorIdentityKey } from "./authorDisplay";
 import { RevisionTypeBadge } from "./RevisionTypeBadge";
 import { SurfaceHeader } from "./SurfacePrimitives";
 
@@ -24,7 +25,7 @@ type TimelineEntry =
       key: string;
       revisions: RevisionRow[];
       revisionType: RevisionType;
-      authorId: string;
+      author: RevisionRow;
       bulkOpId?: string;
     };
 
@@ -164,7 +165,8 @@ function TimelineNode({
 
   const newest = entry.revisions[0]!;
   const oldest = entry.revisions[entry.revisions.length - 1]!;
-  const av = agentAvatar(entry.authorId);
+  const av = agentAvatar(authorAvatarKey(entry.author));
+  const author = authorDisplayLabel(entry.author, t("reader.byline_unknown"));
   const label = entry.bulkOpId
     ? t("history.rollup_bulk", entry.revisions.length)
     : t("history.rollup_acceptance", entry.revisions.length);
@@ -190,7 +192,7 @@ function TimelineNode({
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--fg-3)" }}>
             <span className={av.className} style={{ width: 14, height: 14, fontSize: 8 }}>{av.initials}</span>
-            <span>{entry.authorId}</span>
+            <span>{author}</span>
             <span>·</span>
             <span>{formatTimeRange(oldest.created_at, newest.created_at)}</span>
           </div>
@@ -232,7 +234,8 @@ function RevisionListItem({
   nested?: boolean;
 }) {
   const { t } = useI18n();
-  const av = agentAvatar(revision.author_id);
+  const av = agentAvatar(authorAvatarKey(revision));
+  const author = authorDisplayLabel(revision, t("reader.byline_unknown"));
   const diffHref = previous
     ? `/p/${project}/wiki/${slug}/diff?from=${previous.revision_number}&to=${revision.revision_number}`
     : null;
@@ -260,7 +263,7 @@ function RevisionListItem({
         <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--fg-3)", flexWrap: "wrap" }}>
           <RevisionTypeBadge revisionType={revisionType} compact />
           <span className={av.className} style={{ width: 14, height: 14, fontSize: 8 }}>{av.initials}</span>
-          <span>{revision.author_id}{revision.author_version ? `@${revision.author_version}` : ""}</span>
+          <span>{author}</span>
           {revision.bulk_op_id && <span className="chip chip--area">bulk:{revision.bulk_op_id.slice(0, 8)}</span>}
           <span>·</span>
           <span>{new Date(revision.created_at).toLocaleString()}</span>
@@ -288,7 +291,7 @@ function rollupRevisions(revisions: RevisionRow[]): TimelineEntry[] {
         key: `bulk-${current.bulk_op_id}-${current.revision_number}`,
         revisions: bulkGroup,
         revisionType: revisionTypeOf(current),
-        authorId: current.author_id,
+        author: current,
         bulkOpId: current.bulk_op_id,
       });
       i += bulkGroup.length;
@@ -302,7 +305,7 @@ function rollupRevisions(revisions: RevisionRow[]): TimelineEntry[] {
         key: `acceptance-${current.revision_number}-${acceptanceGroup[acceptanceGroup.length - 1]!.revision_number}`,
         revisions: acceptanceGroup,
         revisionType: "acceptance_toggle",
-        authorId: current.author_id,
+        author: current,
       });
       i += acceptanceGroup.length;
       continue;
@@ -334,7 +337,7 @@ function collectAcceptanceGroup(revisions: RevisionRow[], start: number): Revisi
     const next = revisions[i]!;
     const prev = group[group.length - 1]!;
     if (revisionTypeOf(next) !== "acceptance_toggle") break;
-    if (next.author_id !== first.author_id) break;
+    if (authorIdentityKey(next) !== authorIdentityKey(first)) break;
     if (Math.abs(new Date(prev.created_at).getTime() - new Date(next.created_at).getTime()) > rollupWindowMs) break;
     group.push(next);
   }

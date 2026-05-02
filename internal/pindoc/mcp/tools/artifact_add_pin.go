@@ -147,10 +147,10 @@ func addPinToArtifact(ctx context.Context, deps Deps, p *auth.Principal, scope *
 		INSERT INTO artifact_revisions (
 			artifact_id, revision_number, title, body_markdown, body_hash,
 			tags, completeness, author_kind, author_id, author_version,
-			commit_msg, source_session_ref, revision_shape, shape_payload
-		) VALUES ($1, $2, $3, NULL, $4, $5, $6, 'agent', $7, $8, $9, $10, 'meta_patch', $11::jsonb)
+			author_user_id, commit_msg, source_session_ref, revision_shape, shape_payload
+		) VALUES ($1, $2, $3, NULL, $4, $5, $6, 'agent', $7, $8, NULLIF($9, '')::uuid, $10, $11, 'meta_patch', $12::jsonb)
 	`, target.ArtifactID, newRev, target.Title, target.BodyHash, target.Tags, target.Completeness,
-		authorID, nullIfEmpty(in.AuthorVersion), commitMsg,
+		authorID, nullIfEmpty(in.AuthorVersion), principalUserID(p), commitMsg,
 		buildSourceSessionRef(p, artifactProposeInput{AuthorID: authorID, CommitMsg: commitMsg, AddPin: true}),
 		string(shapePayloadJSON),
 	); err != nil {
@@ -162,10 +162,11 @@ func addPinToArtifact(ctx context.Context, deps Deps, p *auth.Principal, scope *
 		UPDATE artifacts
 		   SET author_id = $2,
 		       author_version = $3,
+		       author_user_id = COALESCE(NULLIF($4, '')::uuid, author_user_id),
 		       updated_at = now()
 		 WHERE id = $1
 		RETURNING COALESCE(published_at, now())
-	`, target.ArtifactID, authorID, nullIfEmpty(in.AuthorVersion)).Scan(&publishedAt); err != nil {
+	`, target.ArtifactID, authorID, nullIfEmpty(in.AuthorVersion), principalUserID(p)).Scan(&publishedAt); err != nil {
 		return artifactProposeOutput{}, fmt.Errorf("update artifact add_pin head: %w", err)
 	}
 

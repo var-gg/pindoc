@@ -1072,12 +1072,12 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO artifact_revisions (
 					artifact_id, revision_number, title, body_markdown, body_hash, tags,
-					completeness, author_kind, author_id, author_version, commit_msg,
+					completeness, author_kind, author_id, author_version, author_user_id, commit_msg,
 					source_session_ref, revision_shape
-				) VALUES ($1, 1, $2, $3, $4, $5, $6, 'agent', $7, $8, $9, $10, 'body_patch')
+				) VALUES ($1, 1, $2, $3, $4, $5, $6, 'agent', $7, $8, NULLIF($9, '')::uuid, $10, $11, 'body_patch')
 			`, newID, in.Title, in.BodyMarkdown, bodyHash(in.BodyMarkdown), in.Tags,
 				completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion),
-				in.CommitMsg,
+				principalUserID(p), in.CommitMsg,
 				buildSourceSessionRef(p, in),
 			); err != nil {
 				return nil, artifactProposeOutput{}, fmt.Errorf("initial revision insert: %w", err)
@@ -1529,13 +1529,13 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	err = tx.QueryRow(ctx, `
 		INSERT INTO artifact_revisions (
 			artifact_id, revision_number, title, body_markdown, body_hash, tags,
-			completeness, author_kind, author_id, author_version, commit_msg,
+			completeness, author_kind, author_id, author_version, author_user_id, commit_msg,
 			source_session_ref, revision_shape, shape_payload
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'agent', $8, $9, $10, $11, $12, $13::jsonb)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'agent', $8, $9, NULLIF($10, '')::uuid, $11, $12, $13, $14::jsonb)
 		RETURNING id::text
 	`, artifactID, newRev, in.Title, in.BodyMarkdown, bodyHash(in.BodyMarkdown),
-		in.Tags, completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), in.CommitMsg,
-		buildSourceSessionRef(p, in), string(shape), shapePayloadArg,
+		in.Tags, completeness, in.AuthorID, nullIfEmpty(in.AuthorVersion), principalUserID(p),
+		in.CommitMsg, buildSourceSessionRef(p, in), string(shape), shapePayloadArg,
 	).Scan(&revID)
 	if err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("insert revision: %w", err)
@@ -1566,6 +1566,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		       completeness   = $5,
 		       author_id      = $6,
 		       author_version = $7,
+		       author_user_id = COALESCE(NULLIF($12, '')::uuid, author_user_id),
 		       task_meta      = CASE
 		           WHEN $10::bool THEN jsonb_set(COALESCE(task_meta, '{}'::jsonb), '{status}', '"claimed_done"')
 		           ELSE COALESCE($8, task_meta)
@@ -1580,7 +1581,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		RETURNING slug, COALESCE(published_at, now())
 	`, artifactID, in.Title, in.BodyMarkdown, in.Tags, completeness,
 		in.AuthorID, nullIfEmpty(in.AuthorVersion), taskMetaPatch, artifactMetaPatch, autoClaimedDone,
-		reviewState,
+		reviewState, principalUserID(p),
 	).Scan(&slug, &publishedAt)
 	if err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("update head: %w", err)

@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router";
 import { ChevronRight } from "lucide-react";
 import { api, type AcceptanceChecklist, type DiffResp, type MetaDeltaEntry } from "../api/client";
 import { useI18n } from "../i18n";
+import { authorDisplayLabel } from "./authorDisplay";
 import { RevisionTypeBadge } from "./RevisionTypeBadge";
 import { SurfaceHeader } from "./SurfacePrimitives";
 
@@ -46,6 +47,8 @@ export function Diff() {
   const { data } = state;
   const metaDelta = data.meta_delta ?? [];
   const revisionType = data.revision_type ?? data.to.revision_type;
+  const fromAuthor = authorDisplayLabel(data.from, t("reader.byline_unknown"));
+  const toAuthor = authorDisplayLabel(data.to, t("reader.byline_unknown"));
   const acceptanceChecklist = data.acceptance_checklist;
   const showAcceptanceChecklist = Boolean(
     acceptanceChecklist?.has_change &&
@@ -68,7 +71,7 @@ export function Diff() {
         <SurfaceHeader name="diff" count={data.stats.lines_added + data.stats.lines_removed} />
 
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", color: "var(--fg-3)", fontFamily: "var(--font-mono)", fontSize: 12, marginBottom: 32, paddingBottom: 20, borderBottom: "1px solid var(--border)" }}>
-          <span>{data.from.author_id} → {data.to.author_id}</span>
+          <span>{fromAuthor} → {toAuthor}</span>
           <span>·</span>
           <RevisionTypeBadge revisionType={revisionType} />
           {revisionType && <span>·</span>}

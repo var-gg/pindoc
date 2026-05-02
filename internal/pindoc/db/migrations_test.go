@@ -457,6 +457,38 @@ func TestArtifactSlugAliasesMigrationContract(t *testing.T) {
 	}
 }
 
+func TestArtifactRevisionAuthorUserMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0053_artifact_revision_author_user.sql")
+	if err != nil {
+		t.Fatalf("read artifact revision author user migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"ALTER TABLE artifact_revisions",
+		"ADD COLUMN IF NOT EXISTS author_user_id UUID",
+		"artifact_revisions_author_user_id_fkey",
+		"FOREIGN KEY (author_user_id) REFERENCES users(id) ON DELETE SET NULL",
+		"CREATE INDEX IF NOT EXISTS idx_artifact_revisions_author_user",
+		"UPDATE artifact_revisions r",
+		"SET author_user_id = a.author_user_id",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("artifact revision author user migration Up missing %q:\n%s", want, up)
+		}
+	}
+	for _, want := range []string{
+		"-- +goose Down",
+		"DROP INDEX IF EXISTS idx_artifact_revisions_author_user",
+		"DROP CONSTRAINT IF EXISTS artifact_revisions_author_user_id_fkey",
+		"DROP COLUMN IF EXISTS author_user_id",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("artifact revision author user migration Down missing %q", want)
+		}
+	}
+}
+
 func TestVisibilityMigrationContract(t *testing.T) {
 	raw, err := migrationsFS.ReadFile("migrations/0050_visibility.sql")
 	if err != nil {

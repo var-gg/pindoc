@@ -1,5 +1,6 @@
 import type { ArtifactRef } from "../api/client";
 import { agentAvatar } from "./avatars";
+import { authorAvatarKey, authorDisplayLabel, visibleAgentLabel } from "./authorDisplay";
 import { useI18n } from "../i18n";
 
 // ArtifactByline renders the dual-identity header line for an artifact:
@@ -23,11 +24,9 @@ type Props = {
 
 export function ArtifactByline({ artifact, variant = "inline" }: Props) {
   const { t } = useI18n();
-  const display = artifact.author_user?.display_name ?? t("reader.byline_unknown");
-  const av = agentAvatar(artifact.author_user?.github_handle ?? artifact.author_id);
-  const agent = artifact.author_version
-    ? `${artifact.author_id} (${artifact.author_version})`
-    : artifact.author_id;
+  const display = authorDisplayLabel(artifact, t("reader.byline_unknown"));
+  const av = agentAvatar(authorAvatarKey(artifact));
+  const agent = visibleAgentLabel(artifact);
 
   if (variant === "list") {
     return (
@@ -36,8 +35,12 @@ export function ArtifactByline({ artifact, variant = "inline" }: Props) {
           {av.initials}
         </span>
         <span>{display}</span>
-        <span className="byline__sep">·</span>
-        <span className="byline__agent">{agent}</span>
+        {agent && (
+          <>
+            <span className="byline__sep">·</span>
+            <span className="byline__agent">{agent}</span>
+          </>
+        )}
       </span>
     );
   }
@@ -48,10 +51,14 @@ export function ArtifactByline({ artifact, variant = "inline" }: Props) {
         {av.initials}
       </span>
       <span className="byline__name">{display}</span>
-      <span className="byline__sep">·</span>
-      <span className="byline__agent">
-        {t("reader.byline_via", agent)}
-      </span>
+      {agent && (
+        <>
+          <span className="byline__sep">·</span>
+          <span className="byline__agent">
+            {t("reader.byline_via", agent)}
+          </span>
+        </>
+      )}
     </span>
   );
 }

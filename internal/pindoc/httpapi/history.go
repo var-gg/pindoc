@@ -13,17 +13,18 @@ import (
 )
 
 type revisionRow struct {
-	RevisionNumber int       `json:"revision_number"`
-	Title          string    `json:"title"`
-	BodyHash       string    `json:"body_hash"`
-	AuthorID       string    `json:"author_id"`
-	AuthorVersion  string    `json:"author_version,omitempty"`
-	CommitMsg      string    `json:"commit_msg,omitempty"`
-	Completeness   string    `json:"completeness"`
-	RevisionShape  string    `json:"revision_shape,omitempty"`
-	RevisionType   string    `json:"revision_type,omitempty"`
-	BulkOpID       string    `json:"bulk_op_id,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+	RevisionNumber int            `json:"revision_number"`
+	Title          string         `json:"title"`
+	BodyHash       string         `json:"body_hash"`
+	AuthorID       string         `json:"author_id"`
+	AuthorVersion  string         `json:"author_version,omitempty"`
+	CommitMsg      string         `json:"commit_msg,omitempty"`
+	Completeness   string         `json:"completeness"`
+	RevisionShape  string         `json:"revision_shape,omitempty"`
+	RevisionType   string         `json:"revision_type,omitempty"`
+	BulkOpID       string         `json:"bulk_op_id,omitempty"`
+	AuthorUser     *authorUserRef `json:"author_user,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
 }
 
 func (d Deps) handleArtifactRevisions(w http.ResponseWriter, r *http.Request) {
@@ -51,12 +52,15 @@ func (d Deps) handleArtifactRevisions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := d.DB.Query(r.Context(), `
-		SELECT revision_number, title, body_hash, author_id, author_version,
-		       commit_msg, completeness, tags, revision_shape, shape_payload,
-		       COALESCE(source_session_ref->>'bulk_op_id', ''), created_at
-		FROM artifact_revisions
-		WHERE artifact_id = $1
-		ORDER BY revision_number ASC
+		SELECT r.revision_number, r.title, r.body_hash, r.author_id, r.author_version,
+		       r.commit_msg, r.completeness, r.tags, r.revision_shape, r.shape_payload,
+		       COALESCE(r.source_session_ref->>'bulk_op_id', ''), r.created_at,
+		       u.id::text, u.display_name, u.github_handle
+		FROM artifact_revisions r
+		JOIN artifacts a ON a.id = r.artifact_id
+		LEFT JOIN users u ON u.id = COALESCE(r.author_user_id, a.author_user_id)
+		WHERE r.artifact_id = $1
+		ORDER BY r.revision_number ASC
 	`, artifactID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed")
@@ -70,14 +74,16 @@ func (d Deps) handleArtifactRevisions(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var r revisionRow
 		var authorVer, commit *string
+		var authorUserID, authorDisplay, authorGithub *string
 		var tags []string
 		var shapePayload []byte
 		if err := rows.Scan(&r.RevisionNumber, &r.Title, &r.BodyHash, &r.AuthorID,
 			&authorVer, &commit, &r.Completeness, &tags, &r.RevisionShape, &shapePayload,
-			&r.BulkOpID, &r.CreatedAt); err != nil {
+			&r.BulkOpID, &r.CreatedAt, &authorUserID, &authorDisplay, &authorGithub); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan failed")
 			return
 		}
+		r.AuthorUser = authorUserFromNullable(authorUserID, authorDisplay, authorGithub)
 		if authorVer != nil {
 			r.AuthorVersion = *authorVer
 		}
@@ -110,15 +116,16 @@ func (d Deps) handleArtifactRevisions(w http.ResponseWriter, r *http.Request) {
 }
 
 type diffRevOut struct {
-	RevisionNumber int       `json:"revision_number"`
-	Title          string    `json:"title"`
-	BodyHash       string    `json:"body_hash,omitempty"`
-	AuthorID       string    `json:"author_id"`
-	AuthorVersion  string    `json:"author_version,omitempty"`
-	CommitMsg      string    `json:"commit_msg,omitempty"`
-	RevisionShape  string    `json:"revision_shape,omitempty"`
-	RevisionType   string    `json:"revision_type,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+	RevisionNumber int            `json:"revision_number"`
+	Title          string         `json:"title"`
+	BodyHash       string         `json:"body_hash,omitempty"`
+	AuthorID       string         `json:"author_id"`
+	AuthorVersion  string         `json:"author_version,omitempty"`
+	CommitMsg      string         `json:"commit_msg,omitempty"`
+	RevisionShape  string         `json:"revision_shape,omitempty"`
+	RevisionType   string         `json:"revision_type,omitempty"`
+	AuthorUser     *authorUserRef `json:"author_user,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
 }
 
 func (d Deps) handleArtifactDiff(w http.ResponseWriter, r *http.Request) {
@@ -210,6 +217,7 @@ type loadedRevHTTP struct {
 func loadRevHTTP(r *http.Request, d Deps, artifactID string, rev int) (loadedRevHTTP, error) {
 	var out loadedRevHTTP
 	var authorVer, commitMsg *string
+	var authorUserID, authorDisplay, authorGithub *string
 	var tags []string
 	var shapePayload []byte
 	err := d.DB.QueryRow(r.Context(), `
@@ -228,13 +236,17 @@ func loadRevHTTP(r *http.Request, d Deps, artifactID string, rev int) (loadedRev
 		           ''
 		       ) AS body_markdown,
 		       r.body_hash, r.author_id, r.author_version, r.commit_msg,
-		       r.completeness, r.tags, r.revision_shape, r.shape_payload, r.created_at
+		       r.completeness, r.tags, r.revision_shape, r.shape_payload, r.created_at,
+		       u.id::text, u.display_name, u.github_handle
 		FROM artifact_revisions r
+		JOIN artifacts a ON a.id = r.artifact_id
+		LEFT JOIN users u ON u.id = COALESCE(r.author_user_id, a.author_user_id)
 		WHERE r.artifact_id = $1 AND r.revision_number = $2
 	`, artifactID, rev).Scan(
 		&out.meta.RevisionNumber, &out.meta.Title, &out.body, &out.meta.BodyHash,
 		&out.meta.AuthorID, &authorVer, &commitMsg, &out.snapshot.Completeness,
 		&tags, &out.meta.RevisionShape, &shapePayload, &out.meta.CreatedAt,
+		&authorUserID, &authorDisplay, &authorGithub,
 	)
 	if err != nil {
 		return out, err
@@ -245,6 +257,7 @@ func loadRevHTTP(r *http.Request, d Deps, artifactID string, rev int) (loadedRev
 	if commitMsg != nil {
 		out.meta.CommitMsg = *commitMsg
 	}
+	out.meta.AuthorUser = authorUserFromNullable(authorUserID, authorDisplay, authorGithub)
 	out.snapshot = diff.RevisionMetaSnapshot{
 		RevisionNumber: out.meta.RevisionNumber,
 		Tags:           tags,
@@ -253,6 +266,17 @@ func loadRevHTTP(r *http.Request, d Deps, artifactID string, rev int) (loadedRev
 		ShapePayload:   json.RawMessage(shapePayload),
 	}
 	return out, nil
+}
+
+func authorUserFromNullable(id, displayName, githubHandle *string) *authorUserRef {
+	if id == nil || displayName == nil {
+		return nil
+	}
+	out := &authorUserRef{ID: *id, DisplayName: *displayName}
+	if githubHandle != nil {
+		out.GithubHandle = *githubHandle
+	}
+	return out
 }
 
 func loadMetaSnapshotsHTTP(r *http.Request, d Deps, artifactID string, toRev int) ([]diff.RevisionMetaSnapshot, error) {

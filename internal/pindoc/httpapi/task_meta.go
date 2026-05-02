@@ -163,7 +163,12 @@ func (d Deps) handleTaskMetaPatch(w http.ResponseWriter, r *http.Request) {
 		writeTaskMetaError(w, http.StatusBadRequest, "BAD_JSON", "could not parse request body as JSON")
 		return
 	}
-	out, appErr := d.applyTaskMetaPatch(r.Context(), projectSlug, idOrSlug, in, "http_task_meta", "user", false)
+	principal := d.principalForRequest(r)
+	if principal == nil {
+		writeTaskMetaError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "login is required")
+		return
+	}
+	out, appErr := d.applyTaskMetaPatch(r.Context(), projectSlug, idOrSlug, in, "http_task_meta", "user", false, principal.UserID)
 	if appErr != nil {
 		writeJSON(w, appErr.status, appErr.body)
 		return
@@ -192,6 +197,13 @@ func (d Deps) handleTaskAssign(w http.ResponseWriter, r *http.Request) {
 		errBody := taskMetaError{ErrorCode: "BAD_JSON", Message: "could not parse request body as JSON"}
 		d.recordTaskAssignTelemetry(start, projectSlug, in, errBody, errBody.ErrorCode)
 		writeJSON(w, http.StatusBadRequest, errBody)
+		return
+	}
+	principal := d.principalForRequest(r)
+	if principal == nil {
+		errBody := taskMetaError{ErrorCode: "AUTH_REQUIRED", Message: "login is required"}
+		d.recordTaskAssignTelemetry(start, projectSlug, in, errBody, errBody.ErrorCode)
+		writeJSON(w, http.StatusUnauthorized, errBody)
 		return
 	}
 	assignee, ok := normalizeTaskAssignee(in.Assignee)
@@ -225,7 +237,7 @@ func (d Deps) handleTaskAssign(w http.ResponseWriter, r *http.Request) {
 		AuthorVersion: in.AuthorVersion,
 		Assignee:      &assignee,
 	}
-	out, appErr := d.applyTaskMetaPatch(r.Context(), projectSlug, idOrSlug, patchIn, "http_task_assign", "user", true)
+	out, appErr := d.applyTaskMetaPatch(r.Context(), projectSlug, idOrSlug, patchIn, "http_task_assign", "user", true, principal.UserID)
 	if appErr != nil {
 		d.recordTaskAssignTelemetry(start, projectSlug, in, appErr.body, appErr.body.ErrorCode)
 		writeJSON(w, appErr.status, appErr.body)
@@ -249,6 +261,7 @@ func (d Deps) applyTaskMetaPatch(
 	origin string,
 	authorKind string,
 	useCurrentHead bool,
+	authorUserID string,
 ) (taskMetaPatchResponse, *taskMetaApplyError) {
 	var zero taskMetaPatchResponse
 	if d.DB == nil {
@@ -411,10 +424,10 @@ func (d Deps) applyTaskMetaPatch(
 		INSERT INTO artifact_revisions (
 			artifact_id, revision_number, title, body_markdown, body_hash,
 			tags, completeness, author_kind, author_id, author_version,
-			commit_msg, source_session_ref, revision_shape, shape_payload
-		) VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, $10, NULL, 'meta_patch', $11::jsonb)
+			author_user_id, commit_msg, source_session_ref, revision_shape, shape_payload
+		) VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, NULLIF($10, '')::uuid, $11, NULL, 'meta_patch', $12::jsonb)
 	`, artifactID, newRev, currentTitle, prevBodyHash, currentTags, currentCompleteness,
-		authorKind, in.AuthorID, authorVersion, in.CommitMsg, string(shapePayload),
+		authorKind, in.AuthorID, authorVersion, strings.TrimSpace(authorUserID), in.CommitMsg, string(shapePayload),
 	); err != nil {
 		d.Logger.Error("task-meta revision insert", "err", err)
 		return zero, newTaskMetaApplyError(http.StatusInternalServerError, "DB_ERROR", "revision insert failed")
@@ -425,9 +438,10 @@ func (d Deps) applyTaskMetaPatch(
 		   SET task_meta      = jsonb_strip_nulls(COALESCE(task_meta, '{}'::jsonb) || $2::jsonb),
 		       author_id      = $3,
 		       author_version = $4,
+		       author_user_id = COALESCE(NULLIF($5, '')::uuid, author_user_id),
 		       updated_at     = now()
 		 WHERE id = $1
-	`, artifactID, string(patchJSON), in.AuthorID, authorVersion); err != nil {
+	`, artifactID, string(patchJSON), in.AuthorID, authorVersion, strings.TrimSpace(authorUserID)); err != nil {
 		d.Logger.Error("task-meta head update", "err", err)
 		return zero, newTaskMetaApplyError(http.StatusInternalServerError, "DB_ERROR", "head update failed")
 	}

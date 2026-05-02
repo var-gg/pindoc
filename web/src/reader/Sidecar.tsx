@@ -23,6 +23,7 @@ import {
 import type { Aggregate } from "./useReaderData";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
+import { authorAvatarKey, authorDisplayLabel } from "./authorDisplay";
 import { localizedAreaName } from "./areaLocale";
 import { TaskControls } from "./TaskControls";
 import { Toc } from "./Toc";
@@ -51,6 +52,7 @@ import {
   graphTypeClassSuffix,
   type StartFocusReason,
 } from "./graphSvg";
+import { isGeneratedAgentId } from "./readerInternalVisibility";
 
 type Props = {
   projectSlug: string;
@@ -138,7 +140,8 @@ export function Sidecar({
     );
   }
 
-  const av = agentAvatar(detail.author_id);
+  const av = agentAvatar(authorAvatarKey(detail));
+  const authorLabel = authorDisplayLabel(detail, t("reader.byline_unknown"));
   const publishedAt = detail.published_at
     ? new Date(detail.published_at).toLocaleString()
     : "—";
@@ -252,8 +255,7 @@ export function Sidecar({
         <MetaBlock
           avClassName={av.className}
           avInitials={av.initials}
-          authorID={detail.author_id}
-          authorVersion={detail.author_version}
+          authorLabel={authorLabel}
           areaLabel={areaLabel}
           status={detail.status}
           completeness={detail.completeness}
@@ -465,6 +467,7 @@ function TaskInspectorSummary({ detail, areaLabel }: { detail: Artifact; areaLab
   const percent = stats.total > 0 ? Math.round((stats.resolved / stats.total) * 100) : 0;
   const edges = (detail.relates_to?.length ?? 0) + (detail.related_by?.length ?? 0);
   const updatedAt = detail.updated_at ? new Date(detail.updated_at).toLocaleString() : "—";
+  const author = authorDisplayLabel(detail, t("reader.byline_unknown"));
   return (
     <div className="task-inspector-summary">
       <div className="task-inspector-summary__grid">
@@ -479,7 +482,7 @@ function TaskInspectorSummary({ detail, areaLabel }: { detail: Artifact; areaLab
         <span>{t("task_inspector.edges")}</span>
         <strong>{edges}</strong>
         <span>{t("task_inspector.last_revision")}</span>
-        <strong>{updatedAt} · {detail.author_id}</strong>
+        <strong>{updatedAt} · {author}</strong>
       </div>
       <div className="task-inspector-meter" aria-label={t("task_inspector.acceptance_ratio")}>
         <div className="task-inspector-meter__head">
@@ -586,7 +589,7 @@ function RecentChanges({ projectSlug, slug }: { projectSlug: string; slug: strin
         </Link>
       </div>
       {shown.map((r) => {
-        const av = agentAvatar(r.author_id);
+        const av = agentAvatar(authorAvatarKey(r));
         return (
           <div
             key={r.revision_number}
@@ -1053,8 +1056,7 @@ function PolicyRow({ enumKey, label, value }: { enumKey: VisualMetaEnumKey; labe
 function MetaBlock({
   avClassName,
   avInitials,
-  authorID,
-  authorVersion,
+  authorLabel,
   areaLabel,
   status,
   completeness,
@@ -1063,8 +1065,7 @@ function MetaBlock({
 }: {
   avClassName: string;
   avInitials: string;
-  authorID: string;
-  authorVersion?: string;
+  authorLabel: string;
   areaLabel: string;
   status: string;
   completeness: string;
@@ -1080,8 +1081,7 @@ function MetaBlock({
           <span className={avClassName}>
             {avInitials}
           </span>
-          {authorID}
-          {authorVersion ? `@${authorVersion}` : ""}
+          {authorLabel}
         </span>
       </div>
       <div className="provenance__row">
@@ -1159,14 +1159,18 @@ function PinsList({ pins }: { pins: PinRef[] }) {
 }
 
 function SourceSessionLine({ session }: { session: SourceSessionRef }) {
-  const agent = session.agent_id || session.reported_author_id;
+  const reported = session.reported_author_id && !isGeneratedAgentId(session.reported_author_id)
+    ? session.reported_author_id
+    : "";
+  const generatedHidden = session.agent_id && isGeneratedAgentId(session.agent_id);
+  const agent = reported || (generatedHidden ? "" : session.agent_id);
   return (
     <div style={{ fontSize: 11, color: "var(--fg-2)" }}>
       <span style={{ color: "var(--fg-3)" }}>Session: </span>
       {agent ? (
         <span style={{ fontFamily: "var(--font-mono)" }}>{agent}</span>
       ) : (
-        <span style={{ color: "var(--fg-3)" }}>ephemeral — not recorded</span>
+        <span style={{ color: "var(--fg-3)" }}>local session</span>
       )}
       {session.source_session ? (
         <Tooltip content={session.source_session}>
