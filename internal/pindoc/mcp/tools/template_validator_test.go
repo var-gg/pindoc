@@ -184,6 +184,31 @@ func TestTaskCodeCoordinateExemptionsAreExplicitMeta(t *testing.T) {
 	}
 }
 
+func TestBodyPatchUpdateSkipsStructurePreflightUntilMaterialized(t *testing.T) {
+	version := 1
+	in := artifactProposeInput{
+		Type:            "Task",
+		Title:           "patch update",
+		AreaSlug:        "mcp",
+		AuthorID:        "test-agent",
+		UpdateOf:        "task-propose-section-preflight",
+		ExpectedVersion: &version,
+		BodyPatch: &BodyPatchInput{
+			Mode:       "append",
+			AppendText: "## Outcome\n\nPatch-only update.",
+		},
+	}
+	_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
+	for _, unexpected := range []string{"TASK_NO_ACCEPTANCE", "TASK_CODE_COORDINATE_MISSING"} {
+		if containsString(failed, unexpected) {
+			t.Fatalf("body_patch preflight should not run full-body structure gate %s: %v", unexpected, failed)
+		}
+	}
+	if hasCodePrefix(failed, "MISSING_H2:") {
+		t.Fatalf("body_patch preflight should not emit missing H2 before materialization: %v", failed)
+	}
+}
+
 func TestDebugPreflightRequiresHypothesesAndVerification(t *testing.T) {
 	in := artifactProposeInput{
 		Type: "Debug", Title: "debug missing new slots", AreaSlug: "mcp", AuthorID: "test-agent",

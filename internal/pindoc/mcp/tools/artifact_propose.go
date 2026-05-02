@@ -2107,63 +2107,69 @@ func preflight(ctx context.Context, deps Deps, projectSlug string, in *artifactP
 	// its required_keywords from the matching `_template_<type>` body's
 	// validator meta comment. A nil hint set (no template, no comment,
 	// DB unreachable) falls back to the hard-coded defaults below.
-	hints := getValidatorHints(ctx, deps, projectSlug, in.Type)
-	for _, slot := range missingRequiredH2Slots(in.BodyMarkdown, requiredH2SlotsFromHints(in.Type, hints)) {
-		push(fmt.Sprintf(i18n.T(lang, "preflight.h2_missing"), in.Type, slot.Label), "MISSING_H2:"+slot.Label)
-	}
-	if lines, ok := tldrLineCapViolation(in.BodyMarkdown); ok {
-		push(fmt.Sprintf(i18n.T(lang, "preflight.tldr_too_long"), lines), "TLDR_LINE_CAP")
-	}
-	switch in.Type {
-	case "Task":
-		needed := []string{"acceptance"}
-		if hints != nil && len(hints.RequiredKeywords) > 0 {
-			needed = hints.RequiredKeywords
+	//
+	// body_patch updates intentionally omit body_markdown during cheap
+	// preflight. The full body is materialised later in the update lane, so
+	// section/content gates only run when this call supplies an actual body.
+	if strings.TrimSpace(in.BodyMarkdown) != "" {
+		hints := getValidatorHints(ctx, deps, projectSlug, in.Type)
+		for _, slot := range missingRequiredH2Slots(in.BodyMarkdown, requiredH2SlotsFromHints(in.Type, hints)) {
+			push(fmt.Sprintf(i18n.T(lang, "preflight.h2_missing"), in.Type, slot.Label), "MISSING_H2:"+slot.Label)
 		}
-		if !bodyContainsAnyKeyword(in.BodyMarkdown, needed) {
-			push(i18n.T(lang, "preflight.task_acceptance"), "TASK_NO_ACCEPTANCE")
+		if lines, ok := tldrLineCapViolation(in.BodyMarkdown); ok {
+			push(fmt.Sprintf(i18n.T(lang, "preflight.tldr_too_long"), lines), "TLDR_LINE_CAP")
 		}
-		if strings.TrimSpace(in.BodyMarkdown) != "" && !taskCodeCoordinateExempt(in) && !taskBodyHasCodeCoordinate(in.BodyMarkdown) {
-			push(i18n.T(lang, "preflight.task_code_coordinate_missing"), "TASK_CODE_COORDINATE_MISSING")
-		}
-	case "Decision":
-		if hints != nil && len(hints.RequiredKeywords) > 0 {
-			if !bodyContainsAllKeywords(in.BodyMarkdown, hints.RequiredKeywords) {
-				push(i18n.T(lang, "preflight.adr_sections"), "DEC_NO_SECTIONS")
+		switch in.Type {
+		case "Task":
+			needed := []string{"acceptance"}
+			if hints != nil && len(hints.RequiredKeywords) > 0 {
+				needed = hints.RequiredKeywords
 			}
-		} else {
-			lower := strings.ToLower(in.BodyMarkdown)
-			if !strings.Contains(lower, "decision") || !strings.Contains(lower, "context") {
-				push(i18n.T(lang, "preflight.adr_sections"), "DEC_NO_SECTIONS")
+			if !bodyContainsAnyKeyword(in.BodyMarkdown, needed) {
+				push(i18n.T(lang, "preflight.task_acceptance"), "TASK_NO_ACCEPTANCE")
 			}
-		}
-	case "Debug":
-		// Debug keeps its "at least one repro-ish keyword and at least
-		// one resolution-ish keyword" split because that captures the
-		// "symptom → resolution" arc better than a single all-or-nothing
-		// check. Template hints contribute extra synonyms on top of the
-		// hard-coded base set.
-		reproKeywords := []string{"reproduction", "repro", "재현", "증상", "symptom"}
-		resolutionKeywords := []string{"resolution", "root cause", "원인", "해결"}
-		if hints != nil {
-			for _, kw := range hints.RequiredKeywords {
-				lower := strings.ToLower(kw)
-				if strings.Contains(lower, "repro") || strings.Contains(lower, "symptom") ||
-					strings.Contains(lower, "증상") || strings.Contains(lower, "재현") {
-					reproKeywords = append(reproKeywords, kw)
-					continue
+			if !taskCodeCoordinateExempt(in) && !taskBodyHasCodeCoordinate(in.BodyMarkdown) {
+				push(i18n.T(lang, "preflight.task_code_coordinate_missing"), "TASK_CODE_COORDINATE_MISSING")
+			}
+		case "Decision":
+			if hints != nil && len(hints.RequiredKeywords) > 0 {
+				if !bodyContainsAllKeywords(in.BodyMarkdown, hints.RequiredKeywords) {
+					push(i18n.T(lang, "preflight.adr_sections"), "DEC_NO_SECTIONS")
 				}
-				if strings.Contains(lower, "resolution") || strings.Contains(lower, "cause") ||
-					strings.Contains(lower, "원인") || strings.Contains(lower, "해결") {
-					resolutionKeywords = append(resolutionKeywords, kw)
+			} else {
+				lower := strings.ToLower(in.BodyMarkdown)
+				if !strings.Contains(lower, "decision") || !strings.Contains(lower, "context") {
+					push(i18n.T(lang, "preflight.adr_sections"), "DEC_NO_SECTIONS")
 				}
 			}
-		}
-		if !bodyContainsAnyKeyword(in.BodyMarkdown, reproKeywords) {
-			push(i18n.T(lang, "preflight.debug_no_repro"), "DBG_NO_REPRO")
-		}
-		if !bodyContainsAnyKeyword(in.BodyMarkdown, resolutionKeywords) {
-			push(i18n.T(lang, "preflight.debug_no_resolution"), "DBG_NO_RESOLUTION")
+		case "Debug":
+			// Debug keeps its "at least one repro-ish keyword and at least
+			// one resolution-ish keyword" split because that captures the
+			// "symptom → resolution" arc better than a single all-or-nothing
+			// check. Template hints contribute extra synonyms on top of the
+			// hard-coded base set.
+			reproKeywords := []string{"reproduction", "repro", "재현", "증상", "symptom"}
+			resolutionKeywords := []string{"resolution", "root cause", "원인", "해결"}
+			if hints != nil {
+				for _, kw := range hints.RequiredKeywords {
+					lower := strings.ToLower(kw)
+					if strings.Contains(lower, "repro") || strings.Contains(lower, "symptom") ||
+						strings.Contains(lower, "증상") || strings.Contains(lower, "재현") {
+						reproKeywords = append(reproKeywords, kw)
+						continue
+					}
+					if strings.Contains(lower, "resolution") || strings.Contains(lower, "cause") ||
+						strings.Contains(lower, "원인") || strings.Contains(lower, "해결") {
+						resolutionKeywords = append(resolutionKeywords, kw)
+					}
+				}
+			}
+			if !bodyContainsAnyKeyword(in.BodyMarkdown, reproKeywords) {
+				push(i18n.T(lang, "preflight.debug_no_repro"), "DBG_NO_REPRO")
+			}
+			if !bodyContainsAnyKeyword(in.BodyMarkdown, resolutionKeywords) {
+				push(i18n.T(lang, "preflight.debug_no_resolution"), "DBG_NO_RESOLUTION")
+			}
 		}
 	}
 
