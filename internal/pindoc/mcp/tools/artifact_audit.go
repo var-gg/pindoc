@@ -114,7 +114,7 @@ and never mutates or reopens artifacts.
 `),
 		},
 		func(ctx context.Context, p *auth.Principal, in artifactAuditInput) (*sdk.CallToolResult, artifactAuditOutput, error) {
-			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			readScope, err := resolveMCPReadProjectScope(ctx, deps.DB, p, in.ProjectSlug)
 			if err != nil {
 				return nil, artifactAuditOutput{}, fmt.Errorf("artifact.audit: %w", err)
 			}
@@ -122,7 +122,7 @@ and never mutates or reopens artifacts.
 			if err != nil {
 				return nil, artifactAuditOutput{}, err
 			}
-			out, err := buildArtifactAudit(ctx, deps, scope, filter)
+			out, err := buildArtifactAudit(ctx, deps, readScope, filter)
 			if err != nil {
 				return nil, artifactAuditOutput{}, err
 			}
@@ -264,7 +264,8 @@ func normalizeAuditKindFilters(values []string) ([]string, error) {
 	return out, nil
 }
 
-func buildArtifactAudit(ctx context.Context, deps Deps, scope *auth.ProjectScope, filter artifactAuditFilter) (artifactAuditOutput, error) {
+func buildArtifactAudit(ctx context.Context, deps Deps, readScope *mcpReadProjectScope, filter artifactAuditFilter) (artifactAuditOutput, error) {
+	scope := readScope.ProjectScope
 	var typesArg, areasArg any
 	if len(filter.Types) > 0 {
 		typesArg = filter.Types
@@ -273,7 +274,10 @@ func buildArtifactAudit(ctx context.Context, deps Deps, scope *auth.ProjectScope
 		areasArg = filter.Areas
 	}
 
-	rows, err := deps.DB.Query(ctx, `
+	args := []any{scope.ProjectSlug, filter.Statuses, typesArg, areasArg}
+	visibilityWhere, visibilityArgs := mcpReadArtifactVisibilityWhere(readScope, "a", len(args)+1)
+	args = append(args, visibilityArgs...)
+	rows, err := deps.DB.Query(ctx, fmt.Sprintf(`
 		WITH base AS (
 			SELECT
 				a.id AS artifact_uuid,
@@ -301,6 +305,7 @@ func buildArtifactAudit(ctx context.Context, deps Deps, scope *auth.ProjectScope
 			  AND ($3::text[] IS NULL OR a.type = ANY($3))
 			  AND ($4::text[] IS NULL OR ar.slug = ANY($4))
 			  AND NOT starts_with(a.slug, '_template_')
+			  AND %s
 			ORDER BY a.updated_at DESC, a.slug
 		)
 		SELECT
@@ -328,7 +333,7 @@ func buildArtifactAudit(ctx context.Context, deps Deps, scope *auth.ProjectScope
 			LIMIT 1
 		) w ON true
 		ORDER BY b.updated_at DESC, b.slug
-	`, scope.ProjectSlug, filter.Statuses, typesArg, areasArg)
+	`, visibilityWhere), args...)
 	if err != nil {
 		return artifactAuditOutput{}, fmt.Errorf("artifact.audit query: %w", err)
 	}

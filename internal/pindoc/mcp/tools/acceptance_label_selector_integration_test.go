@@ -40,7 +40,7 @@ func TestArtifactProposeAcceptanceLabelSelectorIntegration(t *testing.T) {
 
 	taskSlug := fmt.Sprintf("label-task-%d", suffix)
 	taskID := insertContextReceiptTask(t, ctx, pool, projectID, areaID, taskSlug)
-	body := "## Purpose\n\nLabel selector integration.\n\n## Scope\n\nMCP acceptance transition.\n\n## TODO\n\n- [ ] DevTI 검증\n- [ ] QA 통과\n"
+	body := "## Purpose\n\nLabel selector integration.\n\n## Scope\n\nMCP acceptance transition.\n\n## 코드 좌표\n\n- `internal/pindoc/mcp/tools/artifact_propose.go`\n\n## TODO\n\n- [ ] DevTI 검증\n- [ ] QA 통과\n\n## TC / DoD\n\nLabel selector updates only the matching acceptance item.\n"
 	if _, err := pool.Exec(ctx, `UPDATE artifacts SET body_markdown = $2 WHERE id = $1::uuid`, taskID, body); err != nil {
 		t.Fatalf("seed task body: %v", err)
 	}

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 )
 
@@ -73,8 +74,18 @@ func TestContextForTaskTaskReceiptSnapshotsIntegration(t *testing.T) {
 
 	activeTaskID := insertContextReceiptTask(t, ctx, pool, projectID, activeAreaID, "active-task")
 	deps := Deps{DB: pool}
+	readScope := &mcpReadProjectScope{
+		ProjectScope: &auth.ProjectScope{
+			ProjectID:     projectID,
+			ProjectSlug:   projectSlug,
+			ProjectLocale: "en",
+			Role:          auth.RoleOwner,
+		},
+		TrustedAll: true,
+		Member:     true,
+	}
 
-	activeSnapshots := contextForTaskReceiptSnapshots(ctx, deps, projectID, "Task",
+	activeSnapshots := contextForTaskReceiptSnapshots(ctx, deps, readScope, "Task",
 		contextForTaskInput{Areas: []string{activeAreaSlug}},
 		contextForTaskOutput{},
 	)
@@ -100,7 +111,7 @@ func TestContextForTaskTaskReceiptSnapshotsIntegration(t *testing.T) {
 		t.Fatalf("artifact_search-style snapshots should still satisfy TASK_ACTIVE_CONTEXT_REQUIRED gate")
 	}
 
-	emptySnapshots := contextForTaskReceiptSnapshots(ctx, deps, projectID, "Task",
+	emptySnapshots := contextForTaskReceiptSnapshots(ctx, deps, readScope, "Task",
 		contextForTaskInput{Areas: []string{emptyAreaSlug}},
 		contextForTaskOutput{},
 	)
@@ -108,7 +119,7 @@ func TestContextForTaskTaskReceiptSnapshotsIntegration(t *testing.T) {
 		t.Fatalf("empty area snapshots = %v, want none", emptySnapshots)
 	}
 
-	nonTaskSnapshots := contextForTaskReceiptSnapshots(ctx, deps, projectID, "Decision",
+	nonTaskSnapshots := contextForTaskReceiptSnapshots(ctx, deps, readScope, "Decision",
 		contextForTaskInput{Areas: []string{activeAreaSlug}},
 		contextForTaskOutput{},
 	)
@@ -121,8 +132,12 @@ func insertContextReceiptProject(t *testing.T, ctx context.Context, pool *db.Poo
 	t.Helper()
 	var id string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO projects (slug, name, primary_language)
-		VALUES ($1, $2, 'en')
+		INSERT INTO projects (owner_id, organization_id, slug, name, primary_language)
+		VALUES (
+			'default',
+			(SELECT id FROM organizations WHERE slug = 'default' LIMIT 1),
+			$1, $2, 'en'
+		)
 		RETURNING id::text
 	`, slug, "test "+slug).Scan(&id); err != nil {
 		t.Fatalf("insert project: %v", err)

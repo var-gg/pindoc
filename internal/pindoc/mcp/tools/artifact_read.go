@@ -141,10 +141,11 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			Description: "Fetch an artifact by UUID, slug, or share URL, including /p/{project}/wiki/{slug} paths and their absolute URLs. Legacy /p/{project}/{locale}/wiki/{slug} paths are accepted. view=brief returns title/summary/pins/stale without the full body; view=continuation adds recent revisions and typed edges; view=full (default) returns everything. Responses include unresolved_acceptance_labels for [ ]/[~] checkbox selector context. For open Task artifacts, full/continuation reads may include task_attention only when the caller is the assignee or latest revision author.",
 		},
 		func(ctx context.Context, p *auth.Principal, in artifactReadInput) (*sdk.CallToolResult, artifactReadOutput, error) {
-			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			readScope, err := resolveMCPReadProjectScope(ctx, deps.DB, p, in.ProjectSlug)
 			if err != nil {
 				return nil, artifactReadOutput{}, fmt.Errorf("artifact.read: %w", err)
 			}
+			scope := readScope.ProjectScope
 			ref := normalizeArtifactReadRef(in.IDOrSlug, scope.ProjectSlug)
 			idOrSlug := ref.Value
 			if idOrSlug == "" {
@@ -166,7 +167,10 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			var publishedAt *time.Time
 			var metaRaw, taskMetaRaw []byte
 			var lastRevisionAuthor string
-			err = deps.DB.QueryRow(ctx, `
+			readArgs := []any{scope.ProjectSlug, idOrSlug}
+			visibilityWhere, visibilityArgs := mcpReadArtifactVisibilityWhere(readScope, "a", len(readArgs)+1)
+			readArgs = append(readArgs, visibilityArgs...)
+			err = deps.DB.QueryRow(ctx, fmt.Sprintf(`
 				SELECT
 					a.id::text,
 					proj.slug,
@@ -200,9 +204,18 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 				JOIN projects proj ON proj.id = a.project_id
 				JOIN areas    area ON area.id = a.area_id
 				WHERE proj.slug = $1
-				  AND (a.id::text = $2 OR a.slug = $2)
+				  AND (
+				       a.id::text = $2 OR a.slug = $2 OR
+				       a.id = (
+				          SELECT asa.artifact_id
+				            FROM artifact_slug_aliases asa
+				           WHERE asa.project_id = proj.id AND asa.old_slug = $2
+				           LIMIT 1
+				       )
+				  )
+				  AND %s
 				LIMIT 1
-			`, scope.ProjectSlug, idOrSlug).Scan(
+			`, visibilityWhere), readArgs...).Scan(
 				&out.ID, &out.ProjectSlug, &out.AreaSlug, &out.Slug,
 				&out.Type, &out.Title, &out.BodyMarkdown, &out.BodyLocale, &out.Tags,
 				&out.Completeness, &out.Status, &out.ReviewState,
@@ -285,7 +298,7 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 				}
 				out.RecentRevisions = revs
 
-				rel, relBy, err := loadEdges(ctx, deps, scope, out.ID)
+				rel, relBy, err := loadEdges(ctx, deps, readScope, out.ID)
 				if err != nil {
 					deps.Logger.Warn("edges lookup failed", "artifact_id", out.ID, "err", err)
 				}
@@ -537,18 +550,23 @@ func loadRecentRevisions(ctx context.Context, deps Deps, artifactID string, limi
 	return out, rows.Err()
 }
 
-func loadEdges(ctx context.Context, deps Deps, scope *auth.ProjectScope, artifactID string) ([]EdgeRef, []EdgeRef, error) {
+func loadEdges(ctx context.Context, deps Deps, readScope *mcpReadProjectScope, artifactID string) ([]EdgeRef, []EdgeRef, error) {
 	out := []EdgeRef{}
 	outBy := []EdgeRef{}
+	scope := readScope.ProjectScope
 
 	// Outgoing: this artifact → others.
-	rows, err := deps.DB.Query(ctx, `
+	args := []any{artifactID}
+	visibilityWhere, visibilityArgs := mcpReadArtifactVisibilityWhere(readScope, "a", len(args)+1)
+	args = append(args, visibilityArgs...)
+	rows, err := deps.DB.Query(ctx, fmt.Sprintf(`
 		SELECT e.target_id::text, a.slug, a.type, a.title, e.relation
 		FROM artifact_edges e
 		JOIN artifacts a ON a.id = e.target_id
 		WHERE e.source_id = $1
+		  AND %s
 		ORDER BY e.created_at
-	`, artifactID)
+	`, visibilityWhere), args...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -566,13 +584,17 @@ func loadEdges(ctx context.Context, deps Deps, scope *auth.ProjectScope, artifac
 	rows.Close()
 
 	// Incoming: others → this artifact.
-	rows2, err := deps.DB.Query(ctx, `
+	args = []any{artifactID}
+	visibilityWhere, visibilityArgs = mcpReadArtifactVisibilityWhere(readScope, "a", len(args)+1)
+	args = append(args, visibilityArgs...)
+	rows2, err := deps.DB.Query(ctx, fmt.Sprintf(`
 		SELECT e.source_id::text, a.slug, a.type, a.title, e.relation
 		FROM artifact_edges e
 		JOIN artifacts a ON a.id = e.source_id
 		WHERE e.target_id = $1
+		  AND %s
 		ORDER BY e.created_at
-	`, artifactID)
+	`, visibilityWhere), args...)
 	if err != nil {
 		return out, nil, err
 	}

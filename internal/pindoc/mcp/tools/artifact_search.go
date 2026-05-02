@@ -80,10 +80,11 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 			Description: "Semantic search over Pindoc artifacts. Returns the best matching chunk per artifact with distance (lower = closer). Use before writing a new artifact to avoid duplicates. Filters on type and area_slug.",
 		},
 		func(ctx context.Context, p *auth.Principal, in artifactSearchInput) (*sdk.CallToolResult, artifactSearchOutput, error) {
-			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			readScope, err := resolveMCPReadProjectScope(ctx, deps.DB, p, in.ProjectSlug)
 			if err != nil {
 				return nil, artifactSearchOutput{}, fmt.Errorf("artifact.search: %w", err)
 			}
+			scope := readScope.ProjectScope
 			if strings.TrimSpace(in.Query) == "" {
 				return nil, artifactSearchOutput{}, fmt.Errorf("query is required")
 			}
@@ -160,8 +161,12 @@ func RegisterArtifactSearch(server *sdk.Server, deps Deps) {
 			if len(in.Areas) > 0 {
 				areasArg = in.Areas
 			}
+			args := []any{qVec, scope.ProjectSlug, typesArg, areasArg, in.TopK, in.IncludeTemplates, in.IncludeSuperseded}
+			visibilityWhere, visibilityArgs := mcpReadArtifactVisibilityWhere(readScope, "a", len(args)+1)
+			args = append(args, visibilityArgs...)
 
-			rows, err := deps.DB.Query(ctx, sql, qVec, scope.ProjectSlug, typesArg, areasArg, in.TopK, in.IncludeTemplates, in.IncludeSuperseded)
+			sql = strings.Replace(sql, "AND ($6::bool OR NOT starts_with(a.slug, '_template_'))", "AND ($6::bool OR NOT starts_with(a.slug, '_template_'))\n\t\t\t\t\t  AND "+visibilityWhere, 1)
+			rows, err := deps.DB.Query(ctx, sql, args...)
 			if err != nil {
 				return nil, artifactSearchOutput{}, fmt.Errorf("search query: %w", err)
 			}

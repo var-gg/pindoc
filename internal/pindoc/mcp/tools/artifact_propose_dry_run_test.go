@@ -50,13 +50,14 @@ func TestArtifactProposeDryRunIntegration(t *testing.T) {
 	beforeArtifacts := countRows(t, ctx, pool, "artifacts", projectID)
 	beforeEdges := countRows(t, ctx, pool, "artifact_edges", projectID)
 	createSlug := fmt.Sprintf("dry-run-create-%d", suffix)
+	createBody := validDecisionBodyForPropose("x", "y")
 	out := call(ctx, map[string]any{
 		"project_slug":  projectSlug,
 		"area_slug":     areaSlug,
 		"type":          "Decision",
 		"title":         "Dry run create",
 		"slug":          createSlug,
-		"body_markdown": "## Context\nx\n## Decision\ny\n## Rationale\nz\n## Alternatives considered\na\n## Consequences\nb\n",
+		"body_markdown": createBody,
 		"author_id":     "codex-test",
 		"dry_run":       true,
 		"relates_to": []map[string]any{
@@ -74,13 +75,14 @@ func TestArtifactProposeDryRunIntegration(t *testing.T) {
 	}
 
 	persistedSlug := fmt.Sprintf("persisted-%d", suffix)
+	persistedBody := validDecisionBodyForPropose("x", "y")
 	persisted := call(ctx, map[string]any{
 		"project_slug":  projectSlug,
 		"area_slug":     areaSlug,
 		"type":          "Decision",
 		"title":         "Persisted decision",
 		"slug":          persistedSlug,
-		"body_markdown": "## Context\nx\n## Decision\ny\n## Rationale\nz\n## Alternatives considered\na\n## Consequences\nb\n",
+		"body_markdown": persistedBody,
 		"author_id":     "codex-test",
 	})
 	if persisted.Status != "accepted" || persisted.DryRun || !persisted.Created || persisted.RevisionNumber != 1 {
@@ -95,14 +97,14 @@ func TestArtifactProposeDryRunIntegration(t *testing.T) {
 		"update_of":        persistedSlug,
 		"expected_version": 1,
 		"commit_msg":       "dry run update",
-		"body_markdown":    "## Context\nx2\n## Decision\ny\n## Rationale\nz\n## Alternatives considered\na\n## Consequences\nb\n",
+		"body_markdown":    validDecisionBodyForPropose("x2", "y"),
 		"author_id":        "codex-test",
 		"dry_run":          true,
 	})
 	if updateOut.Status != "accepted" || !updateOut.DryRun || updateOut.Created || updateOut.RevisionNumber != 0 {
 		t.Fatalf("dry_run update output = status=%q dry=%v created=%v rev=%d", updateOut.Status, updateOut.DryRun, updateOut.Created, updateOut.RevisionNumber)
 	}
-	assertArtifactHead(t, ctx, pool, persisted.ArtifactID, 1, "## Context\nx\n## Decision\ny\n## Rationale\nz\n## Alternatives considered\na\n## Consequences\nb\n")
+	assertArtifactHead(t, ctx, pool, persisted.ArtifactID, 1, persistedBody)
 
 	supersedeOut := call(ctx, map[string]any{
 		"project_slug":  projectSlug,
@@ -111,7 +113,7 @@ func TestArtifactProposeDryRunIntegration(t *testing.T) {
 		"title":         "Replacement decision",
 		"slug":          fmt.Sprintf("replacement-%d", suffix),
 		"supersede_of":  persistedSlug,
-		"body_markdown": "## Context\nx\n## Decision\ny2\n## Rationale\nz\n## Alternatives considered\na\n## Consequences\nb\n",
+		"body_markdown": validDecisionBodyForPropose("x", "y2"),
 		"author_id":     "codex-test",
 		"dry_run":       true,
 	})
@@ -154,7 +156,7 @@ func TestArtifactProposeDryRunDoesNotBypassReceipt(t *testing.T) {
 		"type":          "Decision",
 		"title":         "Receipt gated dry run",
 		"slug":          fmt.Sprintf("receipt-gated-%d", suffix),
-		"body_markdown": "## Context\nx\n## Decision\ny\n## Rationale\nz\n## Alternatives considered\na\n## Consequences\nb\n",
+		"body_markdown": validDecisionBodyForPropose("x", "y"),
 		"author_id":     "codex-test",
 		"dry_run":       true,
 	})
@@ -210,6 +212,15 @@ func newArtifactProposeTestCaller(t *testing.T, ctx context.Context, pool *db.Po
 		}
 		return out
 	}
+}
+
+func validDecisionBodyForPropose(contextText, decisionText string) string {
+	return "## TL;DR\n\nFixture decision for artifact.propose integration.\n\n" +
+		"## Context\n\n" + contextText + "\n\n" +
+		"## Decision\n\n" + decisionText + "\n\n" +
+		"## Rationale\n\nFixture rationale.\n\n" +
+		"## Alternatives considered\n\nAlternative path recorded for validation.\n\n" +
+		"## Consequences\n\nFixture consequences.\n"
 }
 
 func insertDryRunArtifact(t *testing.T, ctx context.Context, pool *db.Pool, projectID, areaID, slug, typ, title, body string) string {

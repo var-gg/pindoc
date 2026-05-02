@@ -49,7 +49,7 @@ func TestArtifactProposeNormalizesPindocLinksIntegration(t *testing.T) {
 		"type":          "Decision",
 		"title":         "Cross link create",
 		"slug":          fmt.Sprintf("cross-link-create-%d", suffix),
-		"body_markdown": "## Context\nSee pindoc://target-doc.\n## Decision\nStore normalized body.\n## Rationale\nx\n## Alternatives considered\ny\n## Consequences\nz\n",
+		"body_markdown": validDecisionBodyForPropose("See pindoc://target-doc.", "Store normalized body."),
 		"author_id":     "codex-test",
 	})
 	if created.Status != "accepted" {
@@ -70,7 +70,7 @@ func TestArtifactProposeNormalizesPindocLinksIntegration(t *testing.T) {
 		"type":          "Decision",
 		"title":         "Cross link invalid",
 		"slug":          fmt.Sprintf("cross-link-invalid-%d", suffix),
-		"body_markdown": "## Context\nSee pindoc://missing-doc.\n## Decision\nReject invalid refs.\n## Rationale\nx\n## Alternatives considered\ny\n## Consequences\nz\n",
+		"body_markdown": validDecisionBodyForPropose("See pindoc://missing-doc.", "Reject invalid refs."),
 		"author_id":     "codex-test",
 	})
 	if invalid.Status != "not_ready" || invalid.ErrorCode != "PINDOC_LINK_TARGET_NOT_FOUND" {

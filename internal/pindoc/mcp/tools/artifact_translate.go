@@ -68,10 +68,11 @@ func RegisterArtifactTranslate(server *sdk.Server, deps Deps) {
 			Description: "Return source markdown and translation cache metadata for an artifact. The server does not translate; the calling agent translates source_markdown to target_locale and may cache via a translation_of artifact.",
 		},
 		func(ctx context.Context, p *auth.Principal, in artifactTranslateInput) (*sdk.CallToolResult, artifactTranslateOutput, error) {
-			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			readScope, err := resolveMCPReadProjectScope(ctx, deps.DB, p, in.ProjectSlug)
 			if err != nil {
 				return nil, artifactTranslateOutput{}, fmt.Errorf("artifact.translate: %w", err)
 			}
+			scope := readScope.ProjectScope
 			targetLocale := normalizeBodyLocale(in.TargetLocale)
 			if targetLocale == "" {
 				return nil, artifactTranslateOutput{}, errors.New("target_locale is required")
@@ -84,7 +85,7 @@ func RegisterArtifactTranslate(server *sdk.Server, deps Deps) {
 				return nil, artifactTranslateOutput{}, artifactReadNotFoundError(in.ArtifactSlug, scope, ref)
 			}
 
-			source, err := loadTranslateSource(ctx, deps, scope.ProjectSlug, ref.Value)
+			source, err := loadTranslateSource(ctx, deps, readScope, ref.Value)
 			if err != nil {
 				if errors.Is(err, pgx.ErrNoRows) {
 					return nil, artifactTranslateOutput{}, artifactReadNotFoundError(in.ArtifactSlug, scope, ref)
@@ -117,7 +118,7 @@ func RegisterArtifactTranslate(server *sdk.Server, deps Deps) {
 			)
 
 			if useCache {
-				cached, err := artifacts.FindCachedTranslation(ctx, deps.DB, source.ID, targetLocale)
+				cached, err := findVisibleCachedTranslation(ctx, deps, readScope, source.ID, targetLocale)
 				if err != nil && !artifacts.IsNoCachedTranslation(err) {
 					return nil, artifactTranslateOutput{}, fmt.Errorf("translation cache lookup: %w", err)
 				}
@@ -135,9 +136,12 @@ func RegisterArtifactTranslate(server *sdk.Server, deps Deps) {
 	)
 }
 
-func loadTranslateSource(ctx context.Context, deps Deps, projectSlug, idOrSlug string) (translateSourceArtifact, error) {
+func loadTranslateSource(ctx context.Context, deps Deps, readScope *mcpReadProjectScope, idOrSlug string) (translateSourceArtifact, error) {
 	var out translateSourceArtifact
-	err := deps.DB.QueryRow(ctx, `
+	args := []any{readScope.ProjectSlug, idOrSlug}
+	visibilityWhere, visibilityArgs := mcpReadArtifactVisibilityWhere(readScope, "a", len(args)+1)
+	args = append(args, visibilityArgs...)
+	err := deps.DB.QueryRow(ctx, fmt.Sprintf(`
 		SELECT
 			a.id::text,
 			a.slug,
@@ -153,8 +157,9 @@ func loadTranslateSource(ctx context.Context, deps Deps, projectSlug, idOrSlug s
 		WHERE proj.slug = $1
 		  AND a.status <> 'archived'
 		  AND (a.id::text = $2 OR a.slug = $2)
+		  AND %s
 		LIMIT 1
-	`, projectSlug, idOrSlug).Scan(
+	`, visibilityWhere), args...).Scan(
 		&out.ID,
 		&out.Slug,
 		&out.Title,
@@ -166,6 +171,53 @@ func loadTranslateSource(ctx context.Context, deps Deps, projectSlug, idOrSlug s
 	)
 	out.BodyLocale = normalizeBodyLocale(out.BodyLocale)
 	return out, err
+}
+
+func findVisibleCachedTranslation(ctx context.Context, deps Deps, readScope *mcpReadProjectScope, sourceArtifactID, targetLocale string) (*artifacts.CachedTranslation, error) {
+	args := []any{sourceArtifactID, targetLocale}
+	visibilityWhere, visibilityArgs := mcpReadArtifactVisibilityWhere(readScope, "t", len(args)+1)
+	args = append(args, visibilityArgs...)
+	rows, err := deps.DB.Query(ctx, fmt.Sprintf(`
+		WITH candidates AS (
+			SELECT t.id::text, t.slug, t.title, t.body_markdown, t.body_locale, t.updated_at
+			  FROM artifact_edges e
+			  JOIN artifacts t ON t.id = e.source_id
+			 WHERE e.relation = 'translation_of'
+			   AND e.target_id = $1::uuid
+			   AND lower(t.body_locale) = lower($2)
+			   AND t.status <> 'archived'
+			   AND %s
+			UNION
+			SELECT t.id::text, t.slug, t.title, t.body_markdown, t.body_locale, t.updated_at
+			  FROM artifact_edges e
+			  JOIN artifacts t ON t.id = e.target_id
+			 WHERE e.relation = 'translation_of'
+			   AND e.source_id = $1::uuid
+			   AND lower(t.body_locale) = lower($2)
+			   AND t.status <> 'archived'
+			   AND %s
+		)
+		SELECT id, slug, title, body_markdown, body_locale, updated_at
+		  FROM candidates
+		 ORDER BY updated_at DESC
+		 LIMIT 1
+	`, visibilityWhere, visibilityWhere), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out artifacts.CachedTranslation
+	if rows.Next() {
+		if err := rows.Scan(&out.ID, &out.Slug, &out.Title, &out.BodyMarkdown, &out.BodyLocale, &out.UpdatedAt); err != nil {
+			return nil, err
+		}
+		return &out, rows.Err()
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return nil, pgx.ErrNoRows
 }
 
 func normalizeBodyLocale(raw string) string {

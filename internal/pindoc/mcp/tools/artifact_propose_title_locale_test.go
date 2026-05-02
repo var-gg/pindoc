@@ -89,7 +89,7 @@ func TestArtifactProposeTitleLocaleMismatchIntegration(t *testing.T) {
 
 	call := newArtifactProposeTestCaller(t, ctx, pool, nil)
 	slug := fmt.Sprintf("title-locale-%d", suffix)
-	body := "## Context\nx\n## Decision\ny\n## Rationale\nz\n## Alternatives considered\na\n## Consequences\nb\n"
+	body := validDecisionBodyForPropose("x", "y")
 	created := call(ctx, map[string]any{
 		"project_slug":  projectSlug,
 		"area_slug":     areaSlug,
@@ -153,7 +153,7 @@ func TestArtifactProposeBodyLocaleSafeSubsetIntegration(t *testing.T) {
 	}()
 
 	call := newArtifactProposeTestCaller(t, ctx, pool, nil)
-	body := "## Context\nx\n## Decision\ny\n## Rationale\nz\n## Alternatives considered\na\n## Consequences\nb\n"
+	body := validDecisionBodyForPropose("x", "y")
 	invalidCreate := call(ctx, map[string]any{
 		"project_slug":  projectSlug,
 		"area_slug":     areaSlug,

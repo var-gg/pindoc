@@ -222,10 +222,11 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			Description: "Given a natural-language task description, return the 1–3 most relevant artifacts in this project. Call this at the start of any non-trivial task before grepping code or writing new artifacts. Tuning: smaller TopK than artifact.search because this optimises for first-hop precision, not recall. Agent callers with open assigned Tasks may also receive caller_in_flight lifecycle attention, and agent callers with matching recent local Git commits may receive pin_candidates for propose(pins=[...]) or artifact.add_pin.",
 		},
 		func(ctx context.Context, p *auth.Principal, in contextForTaskInput) (*sdk.CallToolResult, contextForTaskOutput, error) {
-			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			readScope, err := resolveMCPReadProjectScope(ctx, deps.DB, p, in.ProjectSlug)
 			if err != nil {
 				return nil, contextForTaskOutput{}, fmt.Errorf("context.for_task: %w", err)
 			}
+			scope := readScope.ProjectScope
 			if strings.TrimSpace(in.TaskDescription) == "" {
 				return nil, contextForTaskOutput{}, fmt.Errorf("task_description is required")
 			}
@@ -253,7 +254,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			recentChangeGroups := recentChangeGroupsForTask(ctx, deps, scope.ProjectSlug, in)
 			templateHints := templateHintsForTypes(ctx, deps, scope.ProjectSlug, []string{targetType})
 			if deps.Embedder == nil {
-				applicableRules := loadApplicableRulesForContext(ctx, deps, scope.ProjectSlug, scope.ProjectLocale, firstAreaFilter(in.Areas), targetType, ruleLimit)
+				applicableRules := loadApplicableRulesForContext(ctx, deps, readScope, firstAreaFilter(in.Areas), targetType, ruleLimit)
 				return nil, contextForTaskOutput{
 					TaskDescription:    in.TaskDescription,
 					Notice:             "embedder not configured on this server; context.for_task disabled",
@@ -310,7 +311,11 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			if len(in.Areas) > 0 {
 				areasArg = in.Areas
 			}
-			rows, err := deps.DB.Query(ctx, sql, qVec, scope.ProjectSlug, areasArg, in.TopK, in.IncludeTemplates, in.IncludeSuperseded)
+			args := []any{qVec, scope.ProjectSlug, areasArg, in.TopK, in.IncludeTemplates, in.IncludeSuperseded}
+			visibilityWhere, visibilityArgs := mcpReadArtifactVisibilityWhere(readScope, "a", len(args)+1)
+			args = append(args, visibilityArgs...)
+			sql = strings.Replace(sql, "AND COALESCE(a.artifact_meta->>'next_context_policy', '') <> 'excluded'", "AND COALESCE(a.artifact_meta->>'next_context_policy', '') <> 'excluded'\n\t\t\t\t\t  AND "+visibilityWhere, 1)
+			rows, err := deps.DB.Query(ctx, sql, args...)
 			if err != nil {
 				return nil, contextForTaskOutput{}, fmt.Errorf("query: %w", err)
 			}
@@ -389,18 +394,18 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			if info.Name == "stub" {
 				out.Notice = "stub embedder active — landings are hash-ranked, not semantic."
 			}
-			if areaCounts, err := areaArtifactCounts(ctx, deps, scope.ProjectSlug); err == nil {
+			if areaCounts, err := areaArtifactCounts(ctx, deps, readScope); err == nil {
 				out.SuggestedAreas = suggestAreasForTaskDescription(in.TaskDescription, out.Landings, areaCounts)
 			}
 			applyTopMatchSimilarityHint(&out)
-			out.ApplicableRules = loadApplicableRulesForContext(ctx, deps, scope.ProjectSlug, scope.ProjectLocale, applicableRuleTargetArea(in, out), targetType, ruleLimit)
+			out.ApplicableRules = loadApplicableRulesForContext(ctx, deps, readScope, applicableRuleTargetArea(in, out), targetType, ruleLimit)
 			out.PinCandidates = buildPinCandidatesAttention(ctx, deps, p, scope, out.Landings)
 			if deps.Receipts != nil {
 				// Phase E — bind the receipt to the landings' current head
 				// revisions. propose-time verifier flags drift instead of
 				// trusting a 30-min clock.
 				out.SearchReceipt = deps.Receipts.Issue(scope.ProjectSlug, in.TaskDescription,
-					contextForTaskReceiptSnapshots(ctx, deps, scope.ProjectID, targetType, in, out),
+					contextForTaskReceiptSnapshots(ctx, deps, readScope, targetType, in, out),
 				)
 			}
 			if err := recordAreaSuggestionEvent(ctx, deps, scope.ProjectSlug, out.SearchReceipt, in.TaskDescription, out.SuggestedAreas); err != nil && deps.Logger != nil {
@@ -421,13 +426,13 @@ func applyTopMatchSimilarityHint(out *contextForTaskOutput) {
 	}
 }
 
-func contextForTaskReceiptSnapshots(ctx context.Context, deps Deps, projectID, targetType string, in contextForTaskInput, out contextForTaskOutput) []receipts.ArtifactRef {
+func contextForTaskReceiptSnapshots(ctx context.Context, deps Deps, readScope *mcpReadProjectScope, targetType string, in contextForTaskInput, out contextForTaskOutput) []receipts.ArtifactRef {
 	ids := make([]string, 0, len(out.Landings))
 	for _, l := range out.Landings {
 		ids = append(ids, l.ArtifactID)
 	}
 	if strings.TrimSpace(targetType) == "Task" {
-		ids = append(ids, activeTaskArtifactIDsForContextReceipt(ctx, deps, projectID, contextForTaskReceiptAreaSlugs(in, out))...)
+		ids = append(ids, activeTaskArtifactIDsForContextReceipt(ctx, deps, readScope, contextForTaskReceiptAreaSlugs(in, out))...)
 	}
 	return headSnapshotsForArtifacts(ctx, deps, dedupeNonEmptyStrings(ids))
 }
@@ -444,11 +449,14 @@ func contextForTaskReceiptAreaSlugs(in contextForTaskInput, out contextForTaskOu
 	return dedupeNonEmptyStrings(candidates)
 }
 
-func activeTaskArtifactIDsForContextReceipt(ctx context.Context, deps Deps, projectID string, areaSlugs []string) []string {
+func activeTaskArtifactIDsForContextReceipt(ctx context.Context, deps Deps, readScope *mcpReadProjectScope, areaSlugs []string) []string {
 	if deps.DB == nil || len(areaSlugs) == 0 {
 		return nil
 	}
-	rows, err := deps.DB.Query(ctx, `
+	args := []any{readScope.ProjectID, areaSlugs, contextTaskReceiptPerAreaLimit}
+	visibilityWhere, visibilityArgs := mcpReadArtifactVisibilityWhere(readScope, "a", len(args)+1)
+	args = append(args, visibilityArgs...)
+	rows, err := deps.DB.Query(ctx, fmt.Sprintf(`
 		WITH ranked AS (
 			SELECT
 				a.id::text AS artifact_id,
@@ -461,12 +469,13 @@ func activeTaskArtifactIDsForContextReceipt(ctx context.Context, deps Deps, proj
 			  AND a.status <> 'archived'
 			  AND a.status <> 'superseded'
 			  AND COALESCE(NULLIF(a.task_meta->>'status', ''), 'open') IN ('open', 'claimed_done')
+			  AND %s
 		)
 		SELECT artifact_id
 		FROM ranked
 		WHERE rn <= $3
 		ORDER BY artifact_id
-	`, projectID, areaSlugs, contextTaskReceiptPerAreaLimit)
+	`, visibilityWhere), args...)
 	if err != nil {
 		if deps.Logger != nil {
 			deps.Logger.Warn("context.for_task active task snapshot query failed", "err", err)
@@ -534,8 +543,10 @@ func applicableRuleTargetArea(in contextForTaskInput, out contextForTaskOutput) 
 	return ""
 }
 
-func loadApplicableRulesForContext(ctx context.Context, deps Deps, projectSlug, projectLocale, targetAreaSlug, targetType string, limit int) []ApplicableRule {
+func loadApplicableRulesForContext(ctx context.Context, deps Deps, readScope *mcpReadProjectScope, targetAreaSlug, targetType string, limit int) []ApplicableRule {
 	out := []ApplicableRule{}
+	projectSlug := readScope.ProjectSlug
+	projectLocale := readScope.ProjectLocale
 	target, err := loadApplicableRuleTarget(ctx, deps, projectSlug, targetAreaSlug, targetType)
 	if err != nil {
 		if deps.Logger != nil {
@@ -543,7 +554,7 @@ func loadApplicableRulesForContext(ctx context.Context, deps Deps, projectSlug, 
 		}
 		return out
 	}
-	candidates, err := loadApplicableRuleCandidates(ctx, deps, projectSlug)
+	candidates, err := loadApplicableRuleCandidates(ctx, deps, readScope)
 	if err != nil {
 		if deps.Logger != nil {
 			deps.Logger.Warn("context.for_task applicable rules query failed", "err", err)
@@ -652,8 +663,11 @@ func loadApplicableRuleTarget(ctx context.Context, deps Deps, projectSlug, targe
 	return target, nil
 }
 
-func loadApplicableRuleCandidates(ctx context.Context, deps Deps, projectSlug string) ([]applicableRuleCandidate, error) {
-	rows, err := deps.DB.Query(ctx, `
+func loadApplicableRuleCandidates(ctx context.Context, deps Deps, readScope *mcpReadProjectScope) ([]applicableRuleCandidate, error) {
+	args := []any{readScope.ProjectSlug}
+	visibilityWhere, visibilityArgs := mcpReadArtifactVisibilityWhere(readScope, "a", len(args)+1)
+	args = append(args, visibilityArgs...)
+	rows, err := deps.DB.Query(ctx, fmt.Sprintf(`
 		SELECT
 			a.id::text,
 			a.slug,
@@ -674,7 +688,8 @@ func loadApplicableRuleCandidates(ctx context.Context, deps Deps, projectSlug st
 		  AND NOT starts_with(a.slug, '_template_')
 		  AND COALESCE(a.artifact_meta->>'next_context_policy', '') <> 'excluded'
 		  AND COALESCE(a.artifact_meta->>'rule_severity', '') <> ''
-	`, projectSlug)
+		  AND %s
+	`, visibilityWhere), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1021,15 +1036,18 @@ func suggestAreasForTaskDescription(desc string, landings []ContextLanding, area
 	return out
 }
 
-func areaArtifactCounts(ctx context.Context, deps Deps, projectSlug string) (map[string]int, error) {
-	rows, err := deps.DB.Query(ctx, `
+func areaArtifactCounts(ctx context.Context, deps Deps, readScope *mcpReadProjectScope) (map[string]int, error) {
+	args := []any{readScope.ProjectSlug}
+	visibilityWhere, visibilityArgs := mcpReadArtifactVisibilityWhere(readScope, "a", len(args)+1)
+	args = append(args, visibilityArgs...)
+	rows, err := deps.DB.Query(ctx, fmt.Sprintf(`
 		SELECT ar.slug, count(a.id)::int
 		FROM areas ar
 		JOIN projects p ON p.id = ar.project_id
-		LEFT JOIN artifacts a ON a.area_id = ar.id AND a.status <> 'archived' AND a.status <> 'superseded'
+		LEFT JOIN artifacts a ON a.area_id = ar.id AND a.status <> 'archived' AND a.status <> 'superseded' AND %s
 		WHERE p.slug = $1
 		GROUP BY ar.slug
-	`, projectSlug)
+	`, visibilityWhere), args...)
 	if err != nil {
 		return nil, err
 	}
