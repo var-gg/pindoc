@@ -14,6 +14,7 @@ function assertEqual<T>(actual: T, expected: T, message: string): void {
 function testDefaultAgentRowsHideRawInternalIds(): void {
   const agents: Aggregate[] = [
     { key: "codex", count: 4 },
+    { key: "agent:codex", count: 8 },
     { key: "ag_7f3a2b1c", count: 2 },
     { key: "pindoc-reconcile-sweeper", count: 1 },
     { key: "system", count: 3 },
@@ -24,12 +25,15 @@ function testDefaultAgentRowsHideRawInternalIds(): void {
   assert(!visibleLabels.includes("ag_7f3a2b1c"), "generated agent id must not be visible by default");
   assert(!visibleLabels.includes("pindoc-reconcile-sweeper"), "sweeper id must not be visible by default");
   assert(!visibleLabels.includes("system|"), "raw system id must not be visible by default");
+  assert(!visibleLabels.includes("agent:codex"), "agent-prefixed author id must not be visible");
   assert(visibleLabels.includes("codex"), "human-readable agent remains visible");
   assert(visibleLabels.includes("sidebar.agent_generated"), "generated agents are grouped");
   assert(visibleLabels.includes("sidebar.agent_system"), "system actors are separated");
 
+  const codex = rows.find((row) => row.key === "codex");
   const generated = rows.find((row) => row.kind === "generated");
   const system = rows.find((row) => row.kind === "system");
+  assertEqual(codex?.count, 12, "agent-prefixed author count merges into visible author");
   assertEqual(generated?.count, 2, "generated group count");
   assertEqual(system?.count, 4, "system group count");
 }
