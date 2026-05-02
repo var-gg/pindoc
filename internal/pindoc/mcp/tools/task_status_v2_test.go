@@ -94,15 +94,27 @@ func TestCountAcceptanceCheckboxes(t *testing.T) {
 func TestPreflightTaskStatusV2Transitions(t *testing.T) {
 	baseBodyChecked := `## Purpose
 mark complete
+## Scope
+status transition validation
+## 코드 좌표 (Code coordinates)
+internal/pindoc/mcp/tools/task_status_v2_test.go
 ## Acceptance criteria
 - [x] step one
-- [x] step two`
+- [x] step two
+## TC / DoD
+status transition gate is covered by preflight tests`
 
 	baseBodyUnchecked := `## Purpose
 mark complete
+## Scope
+status transition validation
+## 코드 좌표 (Code coordinates)
+internal/pindoc/mcp/tools/task_status_v2_test.go
 ## Acceptance criteria
 - [x] step one
-- [ ] step two`
+- [ ] step two
+## TC / DoD
+status transition gate is covered by preflight tests`
 
 	t.Run("verified status is rejected by enum", func(t *testing.T) {
 		in := artifactProposeInput{
@@ -173,8 +185,12 @@ func TestPreflightTaskMetaValidation(t *testing.T) {
 validate task meta
 ## Scope
 metadata validation only
+## 코드 좌표 (Code coordinates)
+internal/pindoc/mcp/tools/task_status_v2_test.go
 ## Acceptance criteria
-- [ ] validation runs before insert`
+- [ ] validation runs before insert
+## TC / DoD
+task_meta validation gate is covered by preflight tests`
 
 	t.Run("invalid assignee is rejected", func(t *testing.T) {
 		in := artifactProposeInput{

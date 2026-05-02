@@ -179,6 +179,8 @@ type artifactProposeInput struct {
 	//   assignee    — agent:<id> | user:<id> | @<handle> | "" to clear
 	//   due_at      — RFC3339 timestamp
 	//   parent_slug — another Task artifact's slug (for epic→task→subtask)
+	//   code_coordinate_exempt — true only for policy/vision Tasks with
+	//                    no meaningful code coordinate section
 	//
 	// On create, omitted assignee means unassigned; set assignee explicitly
 	// when claiming ownership. On meta_patch update, omitted assignee is
@@ -256,11 +258,12 @@ func normalizePinInputs(pins []ArtifactPinInput) {
 type TaskMetaInput struct {
 	// Status is the Task lifecycle enum. `claimed_done` is the settled
 	// completion state after acceptance criteria land.
-	Status     string `json:"status,omitempty" jsonschema:"open | claimed_done | blocked | cancelled"`
-	Priority   string `json:"priority,omitempty" jsonschema:"p0 release blocker; p1 must close before release; p2 next round; p3 backlog. Project-specific priority policy wins when present."`
-	Assignee   string `json:"assignee,omitempty"`
-	DueAt      string `json:"due_at,omitempty" jsonschema:"RFC3339 timestamp"`
-	ParentSlug string `json:"parent_slug,omitempty" jsonschema:"slug of parent Task artifact"`
+	Status               string `json:"status,omitempty" jsonschema:"open | claimed_done | blocked | cancelled"`
+	Priority             string `json:"priority,omitempty" jsonschema:"p0 release blocker; p1 must close before release; p2 next round; p3 backlog. Project-specific priority policy wins when present."`
+	Assignee             string `json:"assignee,omitempty"`
+	DueAt                string `json:"due_at,omitempty" jsonschema:"RFC3339 timestamp"`
+	ParentSlug           string `json:"parent_slug,omitempty" jsonschema:"slug of parent Task artifact"`
+	CodeCoordinateExempt bool   `json:"code_coordinate_exempt,omitempty" jsonschema:"true only for policy/vision Tasks that intentionally have no code coordinates"`
 
 	assigneeSet bool
 }
@@ -271,11 +274,12 @@ type TaskMetaInput struct {
 // while explicit "" means clear the assignee.
 func (tm *TaskMetaInput) UnmarshalJSON(data []byte) error {
 	type wireTaskMetaInput struct {
-		Status     string `json:"status,omitempty"`
-		Priority   string `json:"priority,omitempty"`
-		Assignee   string `json:"assignee,omitempty"`
-		DueAt      string `json:"due_at,omitempty"`
-		ParentSlug string `json:"parent_slug,omitempty"`
+		Status               string `json:"status,omitempty"`
+		Priority             string `json:"priority,omitempty"`
+		Assignee             string `json:"assignee,omitempty"`
+		DueAt                string `json:"due_at,omitempty"`
+		ParentSlug           string `json:"parent_slug,omitempty"`
+		CodeCoordinateExempt bool   `json:"code_coordinate_exempt,omitempty"`
 	}
 	var wire wireTaskMetaInput
 	if err := json.Unmarshal(data, &wire); err != nil {
@@ -286,12 +290,13 @@ func (tm *TaskMetaInput) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*tm = TaskMetaInput{
-		Status:      wire.Status,
-		Priority:    wire.Priority,
-		Assignee:    wire.Assignee,
-		DueAt:       wire.DueAt,
-		ParentSlug:  wire.ParentSlug,
-		assigneeSet: raw != nil && raw["assignee"] != nil,
+		Status:               wire.Status,
+		Priority:             wire.Priority,
+		Assignee:             wire.Assignee,
+		DueAt:                wire.DueAt,
+		ParentSlug:           wire.ParentSlug,
+		CodeCoordinateExempt: wire.CodeCoordinateExempt,
+		assigneeSet:          raw != nil && raw["assignee"] != nil,
 	}
 	return nil
 }
@@ -315,6 +320,9 @@ func (tm TaskMetaInput) MarshalJSON() ([]byte, error) {
 	if ps := strings.TrimSpace(tm.ParentSlug); ps != "" {
 		payload["parent_slug"] = ps
 	}
+	if tm.CodeCoordinateExempt {
+		payload["code_coordinate_exempt"] = true
+	}
 	return json.Marshal(payload)
 }
 
@@ -335,20 +343,28 @@ const warningAcceptanceUnchecked = "acceptance_unchecked"
 
 var closeSuggestiveCommitWordRe = regexp.MustCompile(`[a-z]+`)
 
+const maxTLDRNonEmptyLines = 2
+
+var (
+	codeCoordinatePathRe    = regexp.MustCompile("(?m)(?:^|[\\s`(\\[])(?:\\.{1,2}[\\\\/])?(?:[A-Za-z0-9_.-]+[\\\\/])+[A-Za-z0-9_.-]+(?:\\.[A-Za-z0-9_.-]+)?")
+	codeCoordinatePackageRe = regexp.MustCompile(`(?m)\b(?:package|module)\s+[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\b`)
+)
+
 // ArtifactMetaInput is the agent-facing shape for epistemic axes. Every
 // field is optional; resolveArtifactMeta fills defaults based on pins,
 // update path, and body heuristics.
 type ArtifactMetaInput struct {
-	SourceType        string   `json:"source_type,omitempty" jsonschema:"code | artifact | user_chat | external | mixed"`
-	ConsentState      string   `json:"consent_state,omitempty" jsonschema:"not_needed | requested | granted | denied"`
-	Confidence        string   `json:"confidence,omitempty" jsonschema:"low | medium | high"`
-	Audience          string   `json:"audience,omitempty" jsonschema:"owner_only | approvers | project_readers"`
-	NextContextPolicy string   `json:"next_context_policy,omitempty" jsonschema:"default | opt_in | excluded"`
-	VerificationState string   `json:"verification_state,omitempty" jsonschema:"verified | partially_verified | unverified"`
-	AppliesToAreas    []string `json:"applies_to_areas,omitempty" jsonschema:"area_slug list; wildcard scopes like ui/* supported"`
-	AppliesToTypes    []string `json:"applies_to_types,omitempty" jsonschema:"artifact type list; omitted or empty means all types"`
-	RuleSeverity      string   `json:"rule_severity,omitempty" jsonschema:"binding | guidance | reference; presence marks this artifact as an applicable rule"`
-	RuleExcerpt       string   `json:"rule_excerpt,omitempty" jsonschema:"short excerpt returned by context.for_task applicable_rules; default derives from the first H2 section"`
+	SourceType           string   `json:"source_type,omitempty" jsonschema:"code | artifact | user_chat | external | mixed"`
+	ConsentState         string   `json:"consent_state,omitempty" jsonschema:"not_needed | requested | granted | denied"`
+	Confidence           string   `json:"confidence,omitempty" jsonschema:"low | medium | high"`
+	Audience             string   `json:"audience,omitempty" jsonschema:"owner_only | approvers | project_readers"`
+	NextContextPolicy    string   `json:"next_context_policy,omitempty" jsonschema:"default | opt_in | excluded"`
+	VerificationState    string   `json:"verification_state,omitempty" jsonschema:"verified | partially_verified | unverified"`
+	AppliesToAreas       []string `json:"applies_to_areas,omitempty" jsonschema:"area_slug list; wildcard scopes like ui/* supported"`
+	AppliesToTypes       []string `json:"applies_to_types,omitempty" jsonschema:"artifact type list; omitted or empty means all types"`
+	RuleSeverity         string   `json:"rule_severity,omitempty" jsonschema:"binding | guidance | reference; presence marks this artifact as an applicable rule"`
+	RuleExcerpt          string   `json:"rule_excerpt,omitempty" jsonschema:"short excerpt returned by context.for_task applicable_rules; default derives from the first H2 section"`
+	CodeCoordinateExempt bool     `json:"code_coordinate_exempt,omitempty" jsonschema:"true only for policy/vision Tasks that intentionally have no code coordinates"`
 }
 
 var validSourceTypes = map[string]struct{}{
@@ -2095,6 +2111,9 @@ func preflight(ctx context.Context, deps Deps, projectSlug string, in *artifactP
 	for _, slot := range missingRequiredH2Slots(in.BodyMarkdown, requiredH2SlotsFromHints(in.Type, hints)) {
 		push(fmt.Sprintf(i18n.T(lang, "preflight.h2_missing"), in.Type, slot.Label), "MISSING_H2:"+slot.Label)
 	}
+	if lines, ok := tldrLineCapViolation(in.BodyMarkdown); ok {
+		push(fmt.Sprintf(i18n.T(lang, "preflight.tldr_too_long"), lines), "TLDR_LINE_CAP")
+	}
 	switch in.Type {
 	case "Task":
 		needed := []string{"acceptance"}
@@ -2103,6 +2122,9 @@ func preflight(ctx context.Context, deps Deps, projectSlug string, in *artifactP
 		}
 		if !bodyContainsAnyKeyword(in.BodyMarkdown, needed) {
 			push(i18n.T(lang, "preflight.task_acceptance"), "TASK_NO_ACCEPTANCE")
+		}
+		if strings.TrimSpace(in.BodyMarkdown) != "" && !taskCodeCoordinateExempt(in) && !taskBodyHasCodeCoordinate(in.BodyMarkdown) {
+			push(i18n.T(lang, "preflight.task_code_coordinate_missing"), "TASK_CODE_COORDINATE_MISSING")
 		}
 	case "Decision":
 		if hints != nil && len(hints.RequiredKeywords) > 0 {
@@ -2493,7 +2515,7 @@ func defaultNextTools(code string) []NextToolHint {
 		return toolHints("pindoc.artifact.search", "pindoc.area.list")
 	case "AREA_UNKNOWN", "AREA_NOT_FOUND", "AREA_EMPTY", "DECISION_AREA_DEPRECATED":
 		return toolHints("pindoc.area.list")
-	case "TASK_NO_ACCEPTANCE", "DEC_NO_SECTIONS", "DBG_NO_REPRO", "DBG_NO_RESOLUTION":
+	case "TASK_NO_ACCEPTANCE", "TASK_CODE_COORDINATE_MISSING", "TLDR_LINE_CAP", "DEC_NO_SECTIONS", "DBG_NO_REPRO", "DBG_NO_RESOLUTION":
 		return toolHints("pindoc.harness.install")
 	case "UPDATE_SUPERSEDE_EXCLUSIVE":
 		return toolHints("pindoc.artifact.read")
@@ -2661,7 +2683,7 @@ func needsTemplateSelfHealHint(failed []string) bool {
 			return true
 		}
 		switch code {
-		case "TASK_NO_ACCEPTANCE", "DEC_NO_SECTIONS", "DBG_NO_REPRO", "DBG_NO_RESOLUTION":
+		case "TASK_NO_ACCEPTANCE", "TASK_CODE_COORDINATE_MISSING", "TLDR_LINE_CAP", "DEC_NO_SECTIONS", "DBG_NO_REPRO", "DBG_NO_RESOLUTION":
 			return true
 		}
 	}
@@ -2770,7 +2792,7 @@ func patchFieldsFor(code string) []string {
 		return []string{"update_of"}
 	case "AREA_UNKNOWN", "AREA_NOT_FOUND", "AREA_EMPTY", "DECISION_AREA_DEPRECATED":
 		return []string{"area_slug"}
-	case "TASK_NO_ACCEPTANCE", "DEC_NO_SECTIONS", "DBG_NO_REPRO", "DBG_NO_RESOLUTION":
+	case "TASK_NO_ACCEPTANCE", "TASK_CODE_COORDINATE_MISSING", "TLDR_LINE_CAP", "DEC_NO_SECTIONS", "DBG_NO_REPRO", "DBG_NO_RESOLUTION":
 		return []string{"body_markdown"}
 	case "TITLE_EMPTY":
 		return []string{"title"}
@@ -2960,6 +2982,9 @@ func taskMetaToJSON(artifactType string, tm *TaskMetaInput) any {
 	if ps := strings.TrimSpace(tm.ParentSlug); ps != "" {
 		payload["parent_slug"] = ps
 	}
+	if tm.CodeCoordinateExempt {
+		payload["code_coordinate_exempt"] = true
+	}
 	buf, err := json.Marshal(payload)
 	if err != nil {
 		return nil
@@ -3042,17 +3067,18 @@ func shouldAutoClaimDone(artifactType string, taskMetaRaw []byte, body string) b
 // warnings slice describing heuristic decisions so agents can see why a
 // default was chosen (e.g. "source_type inferred from pins").
 type ResolvedArtifactMeta struct {
-	SourceType        string   `json:"source_type,omitempty"`
-	ConsentState      string   `json:"consent_state,omitempty"`
-	Confidence        string   `json:"confidence,omitempty"`
-	Audience          string   `json:"audience,omitempty"`
-	NextContextPolicy string   `json:"next_context_policy,omitempty"`
-	VerificationState string   `json:"verification_state,omitempty"`
-	AppliesToAreas    []string `json:"applies_to_areas,omitempty"`
-	AppliesToTypes    []string `json:"applies_to_types,omitempty"`
-	RuleSeverity      string   `json:"rule_severity,omitempty"`
-	RuleExcerpt       string   `json:"rule_excerpt,omitempty"`
-	Warnings          []string `json:"-"`
+	SourceType           string   `json:"source_type,omitempty"`
+	ConsentState         string   `json:"consent_state,omitempty"`
+	Confidence           string   `json:"confidence,omitempty"`
+	Audience             string   `json:"audience,omitempty"`
+	NextContextPolicy    string   `json:"next_context_policy,omitempty"`
+	VerificationState    string   `json:"verification_state,omitempty"`
+	AppliesToAreas       []string `json:"applies_to_areas,omitempty"`
+	AppliesToTypes       []string `json:"applies_to_types,omitempty"`
+	RuleSeverity         string   `json:"rule_severity,omitempty"`
+	RuleExcerpt          string   `json:"rule_excerpt,omitempty"`
+	CodeCoordinateExempt bool     `json:"code_coordinate_exempt,omitempty"`
+	Warnings             []string `json:"-"`
 }
 
 // userChatQuotePattern matches body substrates likely derived from a user
@@ -3094,6 +3120,7 @@ func resolveArtifactMeta(in *ArtifactMetaInput, pins []ArtifactPinInput, body st
 		out.AppliesToTypes = normalizeStringSlice(in.AppliesToTypes)
 		out.RuleSeverity = strings.TrimSpace(in.RuleSeverity)
 		out.RuleExcerpt = strings.TrimSpace(in.RuleExcerpt)
+		out.CodeCoordinateExempt = in.CodeCoordinateExempt
 	}
 
 	hasCodePin := false
@@ -3183,6 +3210,9 @@ func artifactMetaToJSON(r ResolvedArtifactMeta) string {
 	}
 	if r.RuleExcerpt != "" {
 		payload["rule_excerpt"] = r.RuleExcerpt
+	}
+	if r.CodeCoordinateExempt {
+		payload["code_coordinate_exempt"] = true
 	}
 	buf, err := json.Marshal(payload)
 	if err != nil {
@@ -4182,18 +4212,48 @@ func requiredH2SlotsFor(ctx context.Context, deps Deps, projectSlug, artifactTyp
 }
 
 func requiredH2SlotsFromHints(artifactType string, hints *validatorHints) []requiredH2Slot {
-	if hints != nil && len(hints.RequiredH2) > 0 {
-		out := make([]requiredH2Slot, 0, len(hints.RequiredH2))
-		for _, label := range hints.RequiredH2 {
-			label = strings.TrimSpace(label)
-			if label == "" {
-				continue
-			}
-			out = append(out, requiredH2SlotForLabel(artifactType, label))
-		}
+	out := append([]requiredH2Slot{}, defaultRequiredH2Slots(artifactType)...)
+	if hints == nil || len(hints.RequiredH2) == 0 {
 		return out
 	}
-	return defaultRequiredH2Slots(artifactType)
+	for _, label := range hints.RequiredH2 {
+		label = strings.TrimSpace(label)
+		if label == "" {
+			continue
+		}
+		out = mergeRequiredH2Slot(out, requiredH2SlotForLabel(artifactType, label))
+	}
+	return out
+}
+
+func mergeRequiredH2Slot(slots []requiredH2Slot, incoming requiredH2Slot) []requiredH2Slot {
+	if strings.TrimSpace(incoming.Label) == "" && len(incoming.Aliases) == 0 {
+		return slots
+	}
+	for i, slot := range slots {
+		if requiredH2SlotsOverlap(slot, incoming) {
+			slots[i].Aliases = uniqueStrings(append(slot.Aliases, incoming.Aliases...))
+			return slots
+		}
+	}
+	return append(slots, incoming)
+}
+
+func requiredH2SlotsOverlap(a, b requiredH2Slot) bool {
+	aAliases := append([]string{a.Label}, a.Aliases...)
+	bAliases := append([]string{b.Label}, b.Aliases...)
+	for _, left := range aAliases {
+		leftKey := normalizeH2Label(left)
+		if leftKey == "" {
+			continue
+		}
+		for _, right := range bAliases {
+			if leftKey == normalizeH2Label(right) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func missingRequiredH2Slots(body string, slots []requiredH2Slot) []requiredH2Slot {
@@ -4260,6 +4320,84 @@ func normalizeH2Label(s string) string {
 	return strings.ToLower(strings.TrimSpace(strings.TrimRight(s, "#")))
 }
 
+func tldrLineCapViolation(body string) (int, bool) {
+	section, ok := h2SectionContentForSlot(body, requiredH2Slot{Label: "TL;DR", Aliases: []string{"TL;DR", "TL", "요약"}})
+	if !ok {
+		return 0, false
+	}
+	lines := countNonEmptyMarkdownLines(section)
+	return lines, lines > maxTLDRNonEmptyLines
+}
+
+func taskBodyHasCodeCoordinate(body string) bool {
+	section, ok := h2SectionContentForSlot(body, requiredH2SlotForLabel("Task", "코드 좌표"))
+	if !ok {
+		return false
+	}
+	return sectionHasCodeCoordinate(section)
+}
+
+func taskCodeCoordinateExempt(in *artifactProposeInput) bool {
+	if in == nil {
+		return false
+	}
+	if in.TaskMeta != nil && in.TaskMeta.CodeCoordinateExempt {
+		return true
+	}
+	return in.ArtifactMeta != nil && in.ArtifactMeta.CodeCoordinateExempt
+}
+
+func h2SectionContentForSlot(body string, slot requiredH2Slot) (string, bool) {
+	var buf strings.Builder
+	inTarget := false
+	found := false
+	for _, line := range strings.Split(body, "\n") {
+		if after, ok := strings.CutPrefix(line, "## "); ok {
+			if found && inTarget {
+				return buf.String(), true
+			}
+			inTarget = h2HeadingMatchesSlot(after, slot)
+			found = inTarget
+			buf.Reset()
+			continue
+		}
+		if inTarget {
+			buf.WriteString(line)
+			buf.WriteString("\n")
+		}
+	}
+	if found {
+		return buf.String(), true
+	}
+	return "", false
+}
+
+func h2HeadingMatchesSlot(heading string, slot requiredH2Slot) bool {
+	for _, key := range h2HeadingKeys(heading) {
+		for _, alias := range slot.Aliases {
+			if key == normalizeH2Label(alias) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func countNonEmptyMarkdownLines(section string) int {
+	count := 0
+	for _, line := range strings.Split(section, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func sectionHasCodeCoordinate(section string) bool {
+	return codeCoordinatePathRe.MatchString(section) || codeCoordinatePackageRe.MatchString(section)
+}
+
 func requiredH2SlotForLabel(artifactType, label string) requiredH2Slot {
 	slot := requiredH2Slot{Label: label, Aliases: []string{label}}
 	for _, candidate := range defaultRequiredH2Slots(artifactType) {
@@ -4280,6 +4418,7 @@ func defaultRequiredH2Slots(t string) []requiredH2Slot {
 	switch t {
 	case "Decision":
 		return []requiredH2Slot{
+			{Label: "TL;DR", Aliases: []string{"TL;DR", "TL", "요약"}},
 			{Label: "Context", Aliases: []string{"Context", "맥락", "컨텍스트"}},
 			{Label: "Decision", Aliases: []string{"Decision", "결정"}},
 			{Label: "Rationale", Aliases: []string{"Rationale", "근거"}},
@@ -4294,14 +4433,18 @@ func defaultRequiredH2Slots(t string) []requiredH2Slot {
 		return []requiredH2Slot{
 			{Label: "Purpose", Aliases: []string{"Purpose", "목적"}},
 			{Label: "Scope", Aliases: []string{"Scope", "범위"}},
+			{Label: "코드 좌표", Aliases: []string{"코드 좌표", "Code coordinates", "Code coordinate", "Code coords", "리소스 경로", "Resources", "Resource paths", "Resource path"}},
 			{Label: "TODO", Aliases: []string{"TODO", "Acceptance criteria", "Acceptance", "완료 기준", "완료기준"}},
+			{Label: "TC / DoD", Aliases: []string{"TC / DoD", "TC", "DoD", "Test cases", "Definition of done", "테스트", "검증"}},
 		}
 	case "Debug":
 		return []requiredH2Slot{
 			{Label: "Symptom", Aliases: []string{"Symptom", "Symptoms", "증상"}},
 			{Label: "Reproduction", Aliases: []string{"Reproduction", "Repro", "재현"}},
+			{Label: "Hypotheses tried", Aliases: []string{"Hypotheses tried", "Hypotheses", "Hypothesis", "가설"}},
 			{Label: "Root cause", Aliases: []string{"Root cause", "Cause", "원인"}},
 			{Label: "Resolution", Aliases: []string{"Resolution", "해결"}},
+			{Label: "Verification", Aliases: []string{"Verification", "Verify", "검증"}},
 		}
 	default:
 		return nil

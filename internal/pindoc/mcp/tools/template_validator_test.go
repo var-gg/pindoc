@@ -89,9 +89,111 @@ func TestRequiredH2WarningsSlashMixed(t *testing.T) {
 }
 
 func TestRequiredH2WarningsParentheticalBilingual(t *testing.T) {
-	body := "## 증상 (Symptom)\n\n## 재현 (Reproduction)\n\n## 원인 (Root cause)\n\n## 해결 (Resolution)\n"
+	body := "## 증상 (Symptom)\n\n## 재현 (Reproduction)\n\n## 가설 (Hypotheses tried)\n\n## 원인 (Root cause)\n\n## 해결 (Resolution)\n\n## 검증 (Verification)\n"
 	if warns := requiredH2Warnings(body, "Debug"); len(warns) != 0 {
 		t.Fatalf("parenthetical bilingual headings should satisfy Debug slots, got %v", warns)
+	}
+}
+
+func TestRequiredH2SlotsMergeStaleTemplateHintsWithDefaults(t *testing.T) {
+	slots := requiredH2SlotsFromHints("Task", &validatorHints{
+		RequiredH2: []string{"목적", "범위", "TODO"},
+	})
+	for _, want := range []string{"Purpose", "Scope", "코드 좌표", "TODO", "TC / DoD"} {
+		if !requiredH2SlotLabelsContain(slots, want) {
+			t.Fatalf("merged Task slots missing %q: %+v", want, slots)
+		}
+	}
+}
+
+func TestDecisionPreflightRequiresTLDRAndCapsLines(t *testing.T) {
+	missingTLDR := artifactProposeInput{
+		Type: "Decision", Title: "decision without summary", AreaSlug: "mcp", AuthorID: "test-agent",
+		BodyMarkdown: "## Context\nContext.\n\n## Decision\nDecision.\n\n## Rationale\nBecause.\n\n## Alternatives considered\nA.\n\n## Consequences\nImpact.",
+	}
+	_, failed, _ := preflight(context.Background(), Deps{}, "", &missingTLDR, "en")
+	if !containsString(failed, "MISSING_H2:TL;DR") {
+		t.Fatalf("Decision without TL;DR should fail H2 validation: %v", failed)
+	}
+
+	tooLong := artifactProposeInput{
+		Type: "Decision", Title: "decision long summary", AreaSlug: "mcp", AuthorID: "test-agent",
+		BodyMarkdown: "## TL;DR\nLine one.\nLine two.\nLine three.\n\n## Context\nContext.\n\n## Decision\nDecision.\n\n## Rationale\nBecause.\n\n## Alternatives considered\nA.\n\n## Consequences\nImpact.",
+	}
+	_, failed, _ = preflight(context.Background(), Deps{}, "", &tooLong, "en")
+	if !containsString(failed, "TLDR_LINE_CAP") {
+		t.Fatalf("Decision TL;DR with 3 non-empty lines should fail: %v", failed)
+	}
+}
+
+func TestTaskPreflightRequiresCodeCoordinatesAndTCDOD(t *testing.T) {
+	valid := artifactProposeInput{
+		Type: "Task", Title: "task with coordinates", AreaSlug: "mcp", AuthorID: "test-agent",
+		BodyMarkdown: taskBodyWithCodeCoordinate("`internal/pindoc/mcp/tools/artifact_propose.go` and package internal/pindoc/mcp/tools."),
+	}
+	_, failed, _ := preflight(context.Background(), Deps{}, "", &valid, "en")
+	if hasCodePrefix(failed, "MISSING_H2:") || containsString(failed, "TASK_CODE_COORDINATE_MISSING") {
+		t.Fatalf("Task with canonical sections and code coordinate should pass structure gates: %v", failed)
+	}
+
+	emptyCoordinate := valid
+	emptyCoordinate.BodyMarkdown = taskBodyWithCodeCoordinate("   ")
+	_, failed, _ = preflight(context.Background(), Deps{}, "", &emptyCoordinate, "en")
+	if !containsString(failed, "TASK_CODE_COORDINATE_MISSING") {
+		t.Fatalf("Task with empty code coordinate section should fail: %v", failed)
+	}
+
+	missingTCDOD := valid
+	missingTCDOD.BodyMarkdown = strings.Replace(valid.BodyMarkdown, "\n## TC / DoD\n\nAutomatic tests and DoD.", "", 1)
+	_, failed, _ = preflight(context.Background(), Deps{}, "", &missingTCDOD, "en")
+	if !containsString(failed, "MISSING_H2:TC / DoD") {
+		t.Fatalf("Task without TC / DoD should fail H2 validation: %v", failed)
+	}
+}
+
+func TestTaskCodeCoordinateExemptionsAreExplicitMeta(t *testing.T) {
+	body := taskBodyWithCodeCoordinate("")
+	cases := []struct {
+		name string
+		in   artifactProposeInput
+	}{
+		{
+			name: "task meta",
+			in: artifactProposeInput{
+				Type: "Task", Title: "policy task", AreaSlug: "mcp", AuthorID: "test-agent",
+				BodyMarkdown: body,
+				TaskMeta:     &TaskMetaInput{CodeCoordinateExempt: true},
+			},
+		},
+		{
+			name: "artifact meta",
+			in: artifactProposeInput{
+				Type: "Task", Title: "vision task", AreaSlug: "mcp", AuthorID: "test-agent",
+				BodyMarkdown: body,
+				ArtifactMeta: &ArtifactMetaInput{CodeCoordinateExempt: true},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, failed, _ := preflight(context.Background(), Deps{}, "", &tc.in, "en")
+			if containsString(failed, "TASK_CODE_COORDINATE_MISSING") {
+				t.Fatalf("code coordinate exemption should suppress coordinate gate: %v", failed)
+			}
+		})
+	}
+}
+
+func TestDebugPreflightRequiresHypothesesAndVerification(t *testing.T) {
+	in := artifactProposeInput{
+		Type: "Debug", Title: "debug missing new slots", AreaSlug: "mcp", AuthorID: "test-agent",
+		BodyMarkdown: "## 증상 (Symptom)\nSymptom.\n\n## 재현 (Reproduction)\nRepro.\n\n## 원인 (Root cause)\nCause.\n\n## 해결 (Resolution)\nResolution.",
+	}
+	_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "en")
+	for _, want := range []string{"MISSING_H2:Hypotheses tried", "MISSING_H2:Verification"} {
+		if !containsString(failed, want) {
+			t.Fatalf("Debug missing new H2 slot %s; got %v", want, failed)
+		}
 	}
 }
 
@@ -229,6 +331,23 @@ func containsExactString(values []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func requiredH2SlotLabelsContain(slots []requiredH2Slot, label string) bool {
+	for _, slot := range slots {
+		if slot.Label == label {
+			return true
+		}
+	}
+	return false
+}
+
+func taskBodyWithCodeCoordinate(coordinate string) string {
+	return "## 목적 / Purpose\n\nPurpose.\n\n" +
+		"## 범위 / Scope\n\nScope.\n\n" +
+		"## 코드 좌표 (Code coordinates)\n\n" + coordinate + "\n\n" +
+		"## TODO — Acceptance criteria\n\n- [ ] acceptance criterion is explicit.\n\n" +
+		"## TC / DoD\n\nAutomatic tests and DoD."
 }
 
 // TestBodyContainsAnyKeywordCaseInsensitive guards the template-driven
