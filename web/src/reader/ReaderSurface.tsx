@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
-import { ChevronLeft, ChevronRight, Languages, ListFilter } from "lucide-react";
-import { api, type Artifact, type ArtifactReadState, type ArtifactRef } from "../api/client";
+import { Building2, ChevronDown, ChevronLeft, ChevronRight, Globe2, Languages, ListFilter, Loader2, Lock } from "lucide-react";
+import { api, type Artifact, type ArtifactReadState, type ArtifactRef, type VisibilityTier } from "../api/client";
 import { useI18n } from "../i18n";
 import { estimateReadingTime } from "../utils/readingTime";
 import { ArtifactByline } from "./ArtifactByline";
@@ -13,6 +13,14 @@ import { localizedAreaName } from "./areaLocale";
 import type { BadgeFilter } from "./badgeFilters";
 import { createReadTracker, readerReadingMetrics, type ReadTrackerFlushReason, type ReadTrackerSnapshot } from "./readTracker";
 import { EmptyState } from "./SurfacePrimitives";
+import {
+  VISIBILITY_TIERS,
+  canEditArtifactVisibility,
+  normalizeVisibilityTier,
+  visibilityChipClass,
+  visibilityDescriptionKey,
+  visibilityLabelKey,
+} from "./visibility";
 
 type Props = {
   detail: Artifact | null;
@@ -21,6 +29,7 @@ type Props = {
   projectSlug?: string;
   onApplyBadgeFilter?: (filter: BadgeFilter) => void;
   onApplyAreaFilter?: (areaSlug: string) => void;
+  onArtifactUpdated?: () => void;
 };
 
 export type DetailScope = {
@@ -40,6 +49,7 @@ export function ReaderSurface({
   projectSlug,
   onApplyBadgeFilter,
   onApplyAreaFilter,
+  onArtifactUpdated,
 }: Props) {
   const { t } = useI18n();
   const location = useLocation();
@@ -161,6 +171,11 @@ export function ReaderSurface({
             onApply={onApplyAreaFilter ? () => onApplyAreaFilter(detail.area_slug) : undefined}
             legendHref={legendHref}
           />
+          <VisibilityControl
+            artifact={detail}
+            projectSlug={projectSlug}
+            onArtifactUpdated={onArtifactUpdated}
+          />
           {projectSlug && localeOptions.length > 0 && (
             <span className="translate-toggle" aria-label={t("reader.body_language")}>
               <Languages className="lucide" aria-hidden="true" />
@@ -205,6 +220,148 @@ export function ReaderSurface({
       </article>
     </main>
   );
+}
+
+function VisibilityControl({
+  artifact,
+  projectSlug,
+  onArtifactUpdated,
+}: {
+  artifact: Artifact;
+  projectSlug?: string;
+  onArtifactUpdated?: () => void;
+}) {
+  const { t } = useI18n();
+  const [visibility, setVisibility] = useState<VisibilityTier>(() => normalizeVisibilityTier(artifact.visibility));
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const editable = Boolean(projectSlug) && canEditArtifactVisibility(artifact.can_edit_visibility);
+  const label = t(visibilityLabelKey(visibility));
+  const description = t(visibilityDescriptionKey(visibility));
+  const ariaLabel = `${t("artifact.visibility_label")}: ${label}`;
+
+  useEffect(() => {
+    setVisibility(normalizeVisibilityTier(artifact.visibility));
+    setOpen(false);
+    setSaving(false);
+    setError("");
+  }, [artifact.id, artifact.visibility]);
+
+  async function applyVisibility(next: VisibilityTier) {
+    if (!projectSlug || saving || next === visibility) {
+      setOpen(false);
+      return;
+    }
+    const previous = visibility;
+    setVisibility(next);
+    setOpen(false);
+    setSaving(true);
+    setError("");
+    try {
+      const resp = await api.artifactVisibilityPatch(projectSlug, artifact.slug, { visibility: next });
+      setVisibility(normalizeVisibilityTier(resp.visibility));
+      onArtifactUpdated?.();
+    } catch (err) {
+      setVisibility(previous);
+      const code = (err as { error_code?: string }).error_code;
+      setError(code ? `${t("artifact.visibility_update_failed")} (${code})` : t("artifact.visibility_update_failed"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const chip = (
+    <>
+      {visibilityIcon(visibility)}
+      <span>{label}</span>
+      {saving ? (
+        <Loader2 className="lucide visibility-chip__spinner" aria-hidden="true" />
+      ) : editable ? (
+        <ChevronDown className="lucide visibility-chip__chevron" aria-hidden="true" />
+      ) : null}
+    </>
+  );
+
+  if (!editable) {
+    return (
+      <Tooltip content={description}>
+        <span className={`${visibilityChipClass(visibility)} is-readonly`} aria-label={ariaLabel}>
+          {chip}
+        </span>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <div
+      className="visibility-control"
+      onBlur={(event) => {
+        const nextFocus = event.relatedTarget as Node | null;
+        if (!nextFocus || !event.currentTarget.contains(nextFocus)) {
+          setOpen(false);
+        }
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setOpen(false);
+        }
+      }}
+    >
+      <Tooltip content={description}>
+        <button
+          type="button"
+          className={`${visibilityChipClass(visibility)} is-editable`}
+          aria-label={ariaLabel}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          disabled={saving}
+        >
+          {chip}
+        </button>
+      </Tooltip>
+      {open && (
+        <div className="visibility-menu" role="listbox" aria-label={t("artifact.visibility_label")}>
+          {VISIBILITY_TIERS.map((tier) => (
+            <button
+              key={tier}
+              type="button"
+              className={`visibility-menu__item${tier === visibility ? " is-active" : ""}`}
+              role="option"
+              aria-selected={tier === visibility}
+              disabled={saving}
+              onClick={() => void applyVisibility(tier)}
+            >
+              {visibilityIcon(tier)}
+              <span className="visibility-menu__copy">
+                <span>{t(visibilityLabelKey(tier))}</span>
+                <small>{t(visibilityDescriptionKey(tier))}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      {error && (
+        <span className="visibility-toast" role="alert" aria-live="polite">
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function visibilityIcon(tier: VisibilityTier) {
+  const className = "lucide visibility-chip__icon";
+  switch (tier) {
+    case "public":
+      return <Globe2 className={className} aria-hidden="true" />;
+    case "private":
+      return <Lock className={className} aria-hidden="true" />;
+    case "org":
+    default:
+      return <Building2 className={className} aria-hidden="true" />;
+  }
 }
 
 function emptyReadSnapshot(): ReadTrackerSnapshot {

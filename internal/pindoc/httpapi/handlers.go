@@ -515,6 +515,7 @@ type artifactRow struct {
 	Title        string    `json:"title"`
 	AreaSlug     string    `json:"area_slug"`
 	BodyLocale   string    `json:"body_locale,omitempty"`
+	Visibility   string    `json:"visibility"`
 	Completeness string    `json:"completeness"`
 	Status       string    `json:"status"`
 	ReviewState  string    `json:"review_state"`
@@ -564,6 +565,7 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 		SELECT
 			a.id::text, a.slug, a.type, a.title, ar.slug,
 			COALESCE(NULLIF(a.body_locale, ''), NULLIF(p.primary_language, ''), 'en'),
+			a.visibility,
 			a.completeness, a.status, a.review_state,
 			a.author_id, a.published_at, a.updated_at, a.task_meta, a.artifact_meta,
 			wr.recent_warnings,
@@ -612,7 +614,7 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 		var userID, userDisplay, userGithub *string
 		if err := rows.Scan(
 			&a.ID, &a.Slug, &a.Type, &a.Title, &a.AreaSlug,
-			&a.BodyLocale,
+			&a.BodyLocale, &a.Visibility,
 			&a.Completeness, &a.Status, &a.ReviewState,
 			&a.AuthorID, &publishedAt, &a.UpdatedAt, &taskMeta, &artifactMeta,
 			&recentWarnings,
@@ -686,6 +688,9 @@ type artifactDetail struct {
 	// stay accessible via the revision history. Empty when the artifact
 	// has never raised a warning.
 	RecentWarnings []recentWarningRow `json:"recent_warnings,omitempty"`
+	// CanEditVisibility lets the Reader render the visibility chip as a
+	// dropdown only for callers that can mutate project-level exposure.
+	CanEditVisibility bool `json:"can_edit_visibility,omitempty"`
 }
 
 // recentWarningRow is the Reader-facing projection of one
@@ -752,6 +757,7 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		SELECT
 			a.id::text, a.slug, a.type, a.title, ar.slug,
 			COALESCE(NULLIF(a.body_locale, ''), NULLIF(p.primary_language, ''), 'en'),
+			a.visibility,
 			a.completeness, a.status, a.review_state,
 			a.author_id, a.published_at, a.updated_at,
 			a.body_markdown, a.tags, a.author_version, a.created_at,
@@ -774,7 +780,7 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		LIMIT 1
 	`, slug, ref).Scan(
 		&a.ID, &a.Slug, &a.Type, &a.Title, &a.AreaSlug,
-		&a.BodyLocale,
+		&a.BodyLocale, &a.Visibility,
 		&a.Completeness, &a.Status, &a.ReviewState,
 		&a.AuthorID, &publishedAt, &a.UpdatedAt,
 		&a.BodyMarkdown, &a.Tags, &authorVer, &a.CreatedAt,
@@ -812,6 +818,11 @@ func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 			ref.GithubHandle = *userGithub
 		}
 		a.AuthorUser = ref
+	}
+	if principal := d.principalForRequest(r); principal != nil {
+		if scope, err := pauth.ResolveProject(r.Context(), d.DB, principal, slug); err == nil && scope.Can("write.project") {
+			a.CanEditVisibility = true
+		}
 	}
 
 	// Load edges (best-effort — failure leaves the slices empty, artifact

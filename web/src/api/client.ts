@@ -86,6 +86,8 @@ export type Project = {
 
 export type ProjectSensitiveOps = "auto" | "confirm";
 
+export type VisibilityTier = "public" | "org" | "private";
+
 export type ProjectSettingsPatchInput = {
   sensitive_ops: ProjectSensitiveOps;
 };
@@ -385,6 +387,7 @@ export type ArtifactRef = {
   title: string;
   area_slug: string;
   body_locale?: string;
+  visibility: VisibilityTier;
   completeness: string;
   status: string;
   review_state: string;
@@ -423,6 +426,7 @@ export type Artifact = ArtifactRef & {
   pins?: PinRef[];
   source_session_ref?: SourceSessionRef;
   recent_warnings?: RecentWarning[];
+  can_edit_visibility?: boolean;
 };
 
 export type SearchHit = {
@@ -771,6 +775,22 @@ export type TaskMetaPatchError = {
   failed?: string[];
 };
 
+export type ArtifactVisibilityPatchInput = {
+  visibility: VisibilityTier;
+};
+
+export type ArtifactVisibilityPatchResp = {
+  status: "ok";
+  artifact_id: string;
+  slug: string;
+  visibility: VisibilityTier;
+};
+
+export type ArtifactVisibilityPatchError = {
+  error_code: string;
+  message: string;
+};
+
 // Project bootstrap (Decision project-bootstrap-canonical-flow-reader-ui-
 // first-class). primary_language is required and immutable post-create —
 // the form makes the user pick deliberately; defaulting to a guessed
@@ -1037,6 +1057,37 @@ export const api = {
       throw err;
     }
     return (await res.json()) as TaskMetaPatchResp;
+  },
+  artifactVisibilityPatch: async (
+    project: string,
+    idOrSlug: string,
+    input: ArtifactVisibilityPatchInput,
+  ): Promise<ArtifactVisibilityPatchResp> => {
+    const res = await fetch(
+      `${p(project)}/artifacts/${encodeURIComponent(idOrSlug)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      },
+    );
+    if (!res.ok) {
+      let parsed: ArtifactVisibilityPatchError | null = null;
+      try {
+        parsed = (await res.json()) as ArtifactVisibilityPatchError;
+      } catch {
+        // fall through to generic
+      }
+      const err = new Error(
+        parsed?.message ?? `${res.status} ${res.statusText}`,
+      ) as Error & Partial<ArtifactVisibilityPatchError>;
+      if (parsed) {
+        err.error_code = parsed.error_code;
+        err.message = parsed.message;
+      }
+      throw err;
+    }
+    return (await res.json()) as ArtifactVisibilityPatchResp;
   },
 
   // Project-scoped

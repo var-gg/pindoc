@@ -14,6 +14,7 @@ function artifact(id: string, areaSlug: string): ArtifactRef {
     type: "Decision",
     title: id,
     area_slug: areaSlug,
+    visibility: "org",
     completeness: "settled",
     status: "published",
     review_state: "auto_published",

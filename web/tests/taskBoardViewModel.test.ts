@@ -27,6 +27,7 @@ function task(slug: string, status: string | undefined, priority: string, update
     type: "Task",
     title: slug,
     area_slug: "ui",
+    visibility: "org",
     completeness: "partial",
     status: "published",
     review_state: "auto_published",

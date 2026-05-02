@@ -647,6 +647,7 @@ export function ReaderShell({ view, unavailableSurface }: Props) {
           onClearFilters={clearFilters}
           onApplyBadgeFilter={applyBadgeFilter}
           onApplyAreaFilter={applyAreaFilterFromBadge}
+          onArtifactUpdated={reload}
           onSelectArea={handleSelectArea}
           onInboxCountChange={setInboxCount}
           reviewQueueEnabled={reviewQueueEnabled}
@@ -792,6 +793,7 @@ function Body({
   onClearFilters,
   onApplyBadgeFilter,
   onApplyAreaFilter,
+  onArtifactUpdated,
   onSelectArea,
   onInboxCountChange,
   reviewQueueEnabled,
@@ -821,6 +823,7 @@ function Body({
   onClearFilters: () => void;
   onApplyBadgeFilter: (filter: BadgeFilter) => void;
   onApplyAreaFilter: (areaSlug: string) => void;
+  onArtifactUpdated: () => void;
   onSelectArea: (areaSlug: string) => void;
   onInboxCountChange: (count: number) => void;
   reviewQueueEnabled: boolean;
@@ -928,6 +931,7 @@ function Body({
         projectSlug={projectSlug}
         onApplyBadgeFilter={onApplyBadgeFilter}
         onApplyAreaFilter={onApplyAreaFilter}
+        onArtifactUpdated={onArtifactUpdated}
       />
     );
   }

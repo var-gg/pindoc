@@ -171,6 +171,7 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/p/{project}/areas", d.handleAreas)
 	mux.HandleFunc("GET /api/p/{project}/artifacts", d.handleArtifactList)
 	mux.HandleFunc("GET /api/p/{project}/artifacts/{idOrSlug}", d.handleArtifactGet)
+	mux.HandleFunc("PATCH /api/p/{project}/artifacts/{idOrSlug}", d.handleArtifactPatch)
 	mux.HandleFunc("GET /api/p/{project}/artifacts/{idOrSlug}/revisions", d.handleArtifactRevisions)
 	mux.HandleFunc("GET /api/p/{project}/artifacts/{idOrSlug}/diff", d.handleArtifactDiff)
 	mux.HandleFunc("GET /api/p/{project}/task-flow", d.handleTaskFlow)
