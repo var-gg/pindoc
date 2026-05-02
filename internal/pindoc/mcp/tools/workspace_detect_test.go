@@ -21,9 +21,7 @@ import (
 )
 
 func TestWorkspaceDetectPriorityChain(t *testing.T) {
-	frontmatter := &struct {
-		ProjectSlug string `json:"project_slug,omitempty"`
-	}{ProjectSlug: "pindoc"}
+	frontmatter := &pingPindocFrontmatter{ProjectSlug: "pindoc", SchemaVersion: "1"}
 	got := detectWorkspaceFromSources(workspaceDetectInput{
 		WorkspacePath: "/work/other",
 		GitRemoteURL:  "https://github.com/var-gg/other.git",
@@ -55,9 +53,7 @@ func TestWorkspaceDetectPriorityChain(t *testing.T) {
 }
 
 func TestWorkspaceDetectMembershipGuard(t *testing.T) {
-	frontmatter := &struct {
-		ProjectSlug string `json:"project_slug,omitempty"`
-	}{ProjectSlug: "secret"}
+	frontmatter := &pingPindocFrontmatter{ProjectSlug: "secret", SchemaVersion: "1"}
 	got := detectWorkspaceFromSources(workspaceDetectInput{
 		Frontmatter: frontmatter,
 	}, []string{"pindoc"}, nil)

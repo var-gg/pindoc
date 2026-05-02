@@ -15,11 +15,9 @@ import (
 )
 
 type workspaceDetectInput struct {
-	WorkspacePath string `json:"workspace_path,omitempty" jsonschema:"optional agent current working directory"`
-	GitRemoteURL  string `json:"git_remote_url,omitempty" jsonschema:"optional output of git remote get-url origin"`
-	Frontmatter   *struct {
-		ProjectSlug string `json:"project_slug,omitempty"`
-	} `json:"pindoc_md_frontmatter,omitempty" jsonschema:"optional PINDOC.md frontmatter fields"`
+	WorkspacePath string                 `json:"workspace_path,omitempty" jsonschema:"optional agent current working directory"`
+	GitRemoteURL  string                 `json:"git_remote_url,omitempty" jsonschema:"optional output of git remote get-url origin"`
+	Frontmatter   *pingPindocFrontmatter `json:"pindoc_md_frontmatter,omitempty" jsonschema:"optional PINDOC.md frontmatter fields; workspace.detect uses project_slug and accepts schema_version for compatibility with ping harness drift probes"`
 }
 
 type workspaceDetectOutput struct {
@@ -35,7 +33,7 @@ func RegisterWorkspaceDetect(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.workspace.detect",
-			Description: "Resolve the likely project_slug for the current workspace from PINDOC.md frontmatter, git remote URL, workspace directory name, and visible-project fallback.",
+			Description: "Resolve the likely project_slug for the current workspace from client-provided PINDOC.md frontmatter, git remote URL, workspace directory name, and visible-project fallback. This tool does not require the MCP server to read the client's local PINDOC.md file.",
 		},
 		func(ctx context.Context, p *auth.Principal, in workspaceDetectInput) (*sdk.CallToolResult, workspaceDetectOutput, error) {
 			out, err := handleWorkspaceDetect(ctx, deps, p, in)

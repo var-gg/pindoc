@@ -67,6 +67,9 @@ func TestDetectHarnessDrift(t *testing.T) {
 		if hint == nil || !hint.Detected {
 			t.Fatalf("missing PINDOC.md should be detected: %+v", hint)
 		}
+		if hint.Code != harnessDriftCodeMissingPindoc {
+			t.Fatalf("missing PINDOC.md code = %q, want %q", hint.Code, harnessDriftCodeMissingPindoc)
+		}
 		if hint.SuggestedCall != "pindoc.harness.install" {
 			t.Fatalf("suggested_call = %q", hint.SuggestedCall)
 		}
@@ -81,6 +84,9 @@ func TestDetectHarnessDrift(t *testing.T) {
 		hint := detectHarnessDrift(dir, "pindoc")
 		if hint == nil || hint.Detected {
 			t.Fatalf("matching PINDOC.md should not drift: %+v", hint)
+		}
+		if hint.SuggestedCall != harnessSuggestedNone {
+			t.Fatalf("matching PINDOC.md suggested_call = %q, want none", hint.SuggestedCall)
 		}
 	})
 
@@ -97,6 +103,9 @@ func TestDetectHarnessDrift(t *testing.T) {
 		if hint.Severity != "blocking" {
 			t.Fatalf("mismatch severity = %q, want blocking", hint.Severity)
 		}
+		if hint.Code != harnessDriftCodeProjectSlugMismatch {
+			t.Fatalf("mismatch code = %q, want %q", hint.Code, harnessDriftCodeProjectSlugMismatch)
+		}
 	})
 
 	t.Run("missing schema version", func(t *testing.T) {
@@ -107,6 +116,135 @@ func TestDetectHarnessDrift(t *testing.T) {
 			t.Fatalf("missing schema_version should be detected: %+v", hint)
 		}
 	})
+}
+
+func TestEvaluateHarnessDriftClientInputs(t *testing.T) {
+	t.Run("current PINDOC.md body wins over unobservable working_directory", func(t *testing.T) {
+		unobservableDir := filepath.Join(t.TempDir(), "not-mounted", "project")
+		hints, clean := evaluateHarnessDrift(harnessDriftProbe{
+			WorkingDirectory:    unobservableDir,
+			ExpectedProjectSlug: "pindoc",
+			CurrentPindocMD:     testPindocBody("project_slug: pindoc\nschema_version: 1\n"),
+			Frontmatter: &pingPindocFrontmatter{
+				ProjectSlug:   "other",
+				SchemaVersion: "1",
+			},
+		})
+		if len(hints) != 0 {
+			t.Fatalf("client body should avoid server filesystem drift hints: %+v", hints)
+		}
+		if clean.Detected || clean.Source != harnessDriftSourceClientBody {
+			t.Fatalf("clean hint = %+v; want client body non-drift", clean)
+		}
+		if clean.FoundProjectSlug != "pindoc" || clean.SchemaVersion != "1" {
+			t.Fatalf("clean frontmatter = slug %q schema %q", clean.FoundProjectSlug, clean.SchemaVersion)
+		}
+	})
+
+	t.Run("frontmatter wins over unobservable working_directory", func(t *testing.T) {
+		unobservableDir := filepath.Join(t.TempDir(), "not-mounted", "project")
+		hints, clean := evaluateHarnessDrift(harnessDriftProbe{
+			WorkingDirectory:    unobservableDir,
+			ExpectedProjectSlug: "pindoc",
+			Frontmatter: &pingPindocFrontmatter{
+				ProjectSlug:   "pindoc",
+				SchemaVersion: "1",
+			},
+		})
+		if len(hints) != 0 {
+			t.Fatalf("client frontmatter should avoid server filesystem drift hints: %+v", hints)
+		}
+		if clean.Detected || clean.Source != harnessDriftSourceClientFrontmatter {
+			t.Fatalf("clean hint = %+v; want client frontmatter non-drift", clean)
+		}
+	})
+
+	t.Run("frontmatter project slug mismatch is blocking", func(t *testing.T) {
+		hints, _ := evaluateHarnessDrift(harnessDriftProbe{
+			ExpectedProjectSlug: "pindoc",
+			Frontmatter: &pingPindocFrontmatter{
+				ProjectSlug:   "other",
+				SchemaVersion: "1",
+			},
+		})
+		if len(hints) != 1 {
+			t.Fatalf("hints len = %d, want 1: %+v", len(hints), hints)
+		}
+		if hints[0].Severity != "blocking" || hints[0].Code != harnessDriftCodeProjectSlugMismatch {
+			t.Fatalf("mismatch hint = %+v", hints[0])
+		}
+		if hints[0].SuggestedCall != harnessSuggestedHarnessInstallClient {
+			t.Fatalf("suggested_call = %q, want %q", hints[0].SuggestedCall, harnessSuggestedHarnessInstallClient)
+		}
+	})
+}
+
+func TestEvaluateHarnessDriftServerObservation(t *testing.T) {
+	t.Run("nonexistent working_directory is unobservable not missing PINDOC.md", func(t *testing.T) {
+		unobservableDir := filepath.Join(t.TempDir(), "not-mounted", "project")
+		hint := detectHarnessDrift(unobservableDir, "pindoc")
+		if hint == nil || !hint.Detected {
+			t.Fatalf("unobservable workspace should produce diagnostic hint: %+v", hint)
+		}
+		if hint.Code != harnessDriftCodeServerUnobservable {
+			t.Fatalf("unobservable code = %q, want %q", hint.Code, harnessDriftCodeServerUnobservable)
+		}
+		if strings.Contains(hint.Reason, "missing in the workspace root") {
+			t.Fatalf("unobservable reason must not claim PINDOC.md is missing: %q", hint.Reason)
+		}
+		if hint.SuggestedCall != harnessSuggestedWorkspaceDetect {
+			t.Fatalf("suggested_call = %q, want %q", hint.SuggestedCall, harnessSuggestedWorkspaceDetect)
+		}
+	})
+
+	t.Run("working_directory file is unreadable root diagnostic", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "not-a-dir")
+		if err := os.WriteFile(path, []byte("not a directory"), 0o600); err != nil {
+			t.Fatalf("write not-a-dir: %v", err)
+		}
+		hint := detectHarnessDrift(path, "pindoc")
+		if hint == nil || !hint.Detected {
+			t.Fatalf("file workspace should produce diagnostic hint: %+v", hint)
+		}
+		if hint.Code != harnessDriftCodeRootUnreadable {
+			t.Fatalf("root unreadable code = %q, want %q", hint.Code, harnessDriftCodeRootUnreadable)
+		}
+		if hint.SuggestedCall != harnessSuggestedWorkspaceDetect {
+			t.Fatalf("suggested_call = %q, want %q", hint.SuggestedCall, harnessSuggestedWorkspaceDetect)
+		}
+	})
+
+	t.Run("unreadable PINDOC.md is not unobservable", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, "PINDOC.md"), 0o700); err != nil {
+			t.Fatalf("mkdir PINDOC.md: %v", err)
+		}
+		hint := detectHarnessDrift(dir, "pindoc")
+		if hint == nil || !hint.Detected {
+			t.Fatalf("directory PINDOC.md should produce diagnostic hint: %+v", hint)
+		}
+		if hint.Code != harnessDriftCodeUnreadablePindoc {
+			t.Fatalf("unreadable PINDOC.md code = %q, want %q", hint.Code, harnessDriftCodeUnreadablePindoc)
+		}
+		if hint.SuggestedCall != harnessSuggestedHarnessInstall {
+			t.Fatalf("suggested_call = %q, want %q", hint.SuggestedCall, harnessSuggestedHarnessInstall)
+		}
+	})
+}
+
+func TestPindocMDPathPreservesWindowsStyleSeparators(t *testing.T) {
+	got := pindocMDPath(`A:\vargg-workspace\survival-manager`)
+	want := `A:\vargg-workspace\survival-manager\PINDOC.md`
+	if got != want {
+		t.Fatalf("pindocMDPath windows = %q, want %q", got, want)
+	}
+
+	got = pindocMDPath(`A:\vargg-workspace/survival-manager/`)
+	want = `A:\vargg-workspace\survival-manager\PINDOC.md`
+	if got != want {
+		t.Fatalf("pindocMDPath mixed = %q, want %q", got, want)
+	}
 }
 
 func TestDetectHarnessDriftsSortsSeverity(t *testing.T) {
@@ -126,8 +264,11 @@ func TestDetectHarnessDriftsSortsSeverity(t *testing.T) {
 
 func writeTestPindoc(t *testing.T, dir, frontmatter string) {
 	t.Helper()
-	body := "---\n" + frontmatter + "---\n\n# PINDOC.md\n"
-	if err := os.WriteFile(filepath.Join(dir, "PINDOC.md"), []byte(body), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "PINDOC.md"), []byte(testPindocBody(frontmatter)), 0o600); err != nil {
 		t.Fatalf("write PINDOC.md: %v", err)
 	}
+}
+
+func testPindocBody(frontmatter string) string {
+	return "---\n" + frontmatter + "---\n\n# PINDOC.md\n"
 }

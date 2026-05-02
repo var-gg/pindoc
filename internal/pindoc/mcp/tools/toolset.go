@@ -13,7 +13,7 @@ import (
 // tool name. RegisteredTools catches catalog membership drift; this salt
 // catches same-name surface drift that client-side schema caches otherwise
 // cannot see.
-const ToolsetSchemaVersion = "2026-05-01-mcp-dx-hot-path-v1"
+const ToolsetSchemaVersion = "2026-05-02-ping-harness-observe-v1"
 
 type ToolsetClientAction struct {
 	ID     string         `json:"id"`
