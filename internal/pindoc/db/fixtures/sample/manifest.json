@@ -1,0 +1,58 @@
+{
+  "project": {
+    "slug": "pindoc-tour",
+    "name": "Pindoc Tour",
+    "description": "Generic sample project seeded for first-run self-host onboarding.",
+    "primary_language": "en"
+  },
+  "artifacts": [
+    {
+      "slug": "start-here-agent-written-memory",
+      "type": "Analysis",
+      "area": "strategy",
+      "title": "Start Here — Agent-Written Memory",
+      "tags": ["sample", "tour", "getting-started"],
+      "file": "start-here-agent-written-memory.md"
+    },
+    {
+      "slug": "decision-capture-project-rules",
+      "type": "Decision",
+      "area": "policies",
+      "title": "Decision — Capture Project Rules In Artifacts",
+      "tags": ["sample", "tour", "decision"],
+      "file": "decision-capture-project-rules.md"
+    },
+    {
+      "slug": "task-launch-checklist-example",
+      "type": "Task",
+      "area": "launch",
+      "title": "Task — Launch Checklist Example",
+      "tags": ["sample", "tour", "task"],
+      "file": "task-launch-checklist-example.md"
+    },
+    {
+      "slug": "debug-import-timeout-example",
+      "type": "Debug",
+      "area": "mechanisms",
+      "title": "Debug — Import Timeout Example",
+      "tags": ["sample", "tour", "debug"],
+      "file": "debug-import-timeout-example.md"
+    },
+    {
+      "slug": "glossary-agent-memory",
+      "type": "Glossary",
+      "area": "glossary",
+      "title": "Glossary — Agent Memory",
+      "tags": ["sample", "tour", "glossary"],
+      "file": "glossary-agent-memory.md"
+    },
+    {
+      "slug": "flow-session-handoff-example",
+      "type": "Flow",
+      "area": "flows",
+      "title": "Flow — Session Handoff Example",
+      "tags": ["sample", "tour", "flow"],
+      "file": "flow-session-handoff-example.md"
+    }
+  ]
+}

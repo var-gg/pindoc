@@ -37,6 +37,7 @@ import (
 	pauth "github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
+	samplefixtures "github.com/var-gg/pindoc/internal/pindoc/db/fixtures/sample"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/httpapi"
 	pmcp "github.com/var-gg/pindoc/internal/pindoc/mcp"
@@ -203,6 +204,21 @@ func main() {
 	// install" state — the Reader's onboarding flow surfaces a form,
 	// no env edit required.
 	defaultUserID := bootstrapDefaultLoopbackUser(ctx, logger, pool, ssStore, cfg)
+
+	if cfg.WithSample {
+		result, err := samplefixtures.Seed(ctx, pool, defaultUserID)
+		if err != nil {
+			logger.Error("sample fixtures seed failed", "err", err)
+			os.Exit(1)
+		}
+		logger.Info("sample fixtures seed checked",
+			"project_slug", result.ProjectSlug,
+			"project_created", result.ProjectCreated,
+			"artifacts_inserted", result.ArtifactsInserted,
+			"artifacts_skipped", result.ArtifactsSkipped,
+			"fixtures_total", result.FixturesTotal,
+		)
+	}
 
 	if httpAddr != "" {
 		// Resolve the default project's canonical language once for the

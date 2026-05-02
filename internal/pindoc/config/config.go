@@ -95,6 +95,11 @@ type Config struct {
 	// via PINDOC_PROJECT.
 	ProjectSlug string
 
+	// WithSample seeds the public "pindoc-tour" sample project on boot.
+	// It is opt-in so existing installs do not gain demo content unless
+	// the operator asks for it with PINDOC_WITH_SAMPLE=true.
+	WithSample bool
+
 	// Embed controls which embedding provider is built at startup.
 	Embed embed.Config
 
@@ -200,6 +205,7 @@ func Load() (*Config, error) {
 		UserLanguage:               strings.ToLower(env("PINDOC_USER_LANGUAGE", "en")),
 		ReceiptExemptionLimit:      envInt("PINDOC_RECEIPT_EXEMPTION_LIMIT", 5),
 		ProjectSlug:                env("PINDOC_PROJECT", "pindoc"),
+		WithSample:                 envBool("PINDOC_WITH_SAMPLE", false),
 		RepoRoot:                   env("PINDOC_REPO_ROOT", ""),
 		UserName:                   strings.TrimSpace(env("PINDOC_USER_NAME", "")),
 		UserEmail:                  strings.TrimSpace(env("PINDOC_USER_EMAIL", "")),

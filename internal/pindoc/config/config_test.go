@@ -54,6 +54,18 @@ func TestLoadProvidersCSVNormalizes(t *testing.T) {
 	}
 }
 
+func TestLoadWithSampleFlag(t *testing.T) {
+	t.Setenv("PINDOC_WITH_SAMPLE", "true")
+	t.Setenv("PINDOC_BIND_ADDR", DefaultBindAddr)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.WithSample {
+		t.Fatal("PINDOC_WITH_SAMPLE=true should enable sample fixtures")
+	}
+}
+
 // TestConfigPublicWithoutAuthRefused locks the boot-time refusal:
 // non-loopback bind + empty providers + no explicit opt-in must fail
 // fast with ErrPublicWithoutAuth so a misconfigured operator never
