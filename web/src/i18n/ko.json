@@ -470,6 +470,10 @@
 
   "cmdk.placeholder": "문서 또는 commit SHA 검색...",
   "cmdk.artifacts": "문서",
+  "cmdk.dialog_label": "명령 팔레트",
+  "cmdk.results_label": "명령 팔레트 결과",
+  "cmdk.commits_section_label": "커밋",
+  "cmdk.artifacts_section_label": "문서",
   "cmdk.hint": "문서나 commit SHA를 검색하세요.",
   "cmdk.no_hits": "일치하는 문서가 없습니다.",
   "cmdk.commit_result": "커밋 %s",

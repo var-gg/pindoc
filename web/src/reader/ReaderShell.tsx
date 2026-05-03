@@ -300,8 +300,11 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        setShortcutsOpen(false);
-        setPaletteOpen(true);
+        setPaletteOpen((current) => {
+          const next = !current;
+          if (next) setShortcutsOpen(false);
+          return next;
+        });
       }
     }
     window.addEventListener("keydown", onKey);

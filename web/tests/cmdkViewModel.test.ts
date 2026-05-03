@@ -1,8 +1,13 @@
 import type { SearchHit } from "../src/api/client";
 import {
   CMDK_RELEVANCE_SETTINGS,
+  cmdkEmptyCopyKey,
+  cmdkNextIndex,
+  cmdkOptionId,
   cmdkRelevantHits,
   cmdkResultMeta,
+  cmdkSections,
+  cmdkTrapTabTarget,
 } from "../src/reader/cmdkViewModel";
 import ko from "../src/i18n/ko.json";
 import en from "../src/i18n/en.json";
@@ -110,6 +115,50 @@ function testCmdKRelevanceCutoffIsCentralized(): void {
 function testCmdKEmptyCopyExistsInBothLocales(): void {
   assertEqual(ko["cmdk.no_hits"], "일치하는 문서가 없습니다.", "KO CmdK empty copy");
   assertEqual(en["cmdk.no_hits"], "No matching artifacts.", "EN CmdK empty copy");
+  assertEqual(ko["cmdk.dialog_label"], "명령 팔레트", "KO CmdK dialog label");
+  assertEqual(en["cmdk.dialog_label"], "Command palette", "EN CmdK dialog label");
+  assertEqual(ko["cmdk.commits_section_label"], "커밋", "KO CmdK commit section label");
+  assertEqual(en["cmdk.commits_section_label"], "Commits", "EN CmdK commit section label");
+  assertEqual(ko["cmdk.artifacts_section_label"], "문서", "KO CmdK artifact section label");
+  assertEqual(en["cmdk.artifacts_section_label"], "Artifacts", "EN CmdK artifact section label");
+}
+
+function testCmdKEmptyCopyUsesTrimmedQuery(): void {
+  assertEqual(cmdkEmptyCopyKey("   "), "cmdk.hint", "whitespace-only query should show the initial hint");
+  assertEqual(cmdkEmptyCopyKey("nonsense"), "cmdk.no_hits", "non-empty query should show no hits");
+}
+
+function testCmdKKeyboardJumpNavigation(): void {
+  assertEqual(cmdkNextIndex(1, 8, "Home"), 0, "Home should move to first result");
+  assertEqual(cmdkNextIndex(1, 8, "End"), 7, "End should move to last result");
+  assertEqual(cmdkNextIndex(2, 8, "PageDown"), 7, "PageDown should jump five rows and clamp");
+  assertEqual(cmdkNextIndex(7, 8, "PageUp"), 2, "PageUp should jump five rows");
+  assertEqual(cmdkNextIndex(0, 8, "ArrowUp"), 0, "ArrowUp should clamp at first result");
+  assertEqual(cmdkNextIndex(7, 8, "ArrowDown"), 7, "ArrowDown should clamp at last result");
+  assertEqual(cmdkNextIndex(3, 0, "End"), 3, "navigation should be a no-op with no results");
+}
+
+function testCmdKFocusTrapTargets(): void {
+  assertEqual(cmdkTrapTabTarget("input", 0, false), "input", "Tab should stay on input with no results");
+  assertEqual(cmdkTrapTabTarget("input", 0, true), "input", "Shift+Tab should stay on input with no results");
+  assertEqual(cmdkTrapTabTarget("input", 3, true), 2, "Shift+Tab from input should wrap to the last result");
+  assertEqual(cmdkTrapTabTarget(2, 3, false), "input", "Tab from last result should wrap to input");
+  assertEqual(cmdkTrapTabTarget(1, 3, false), null, "middle result Tab should use native focus order");
+}
+
+function testCmdKSectionsSeparateCommitsAndArtifacts(): void {
+  const artifact = { kind: "artifact" as const, hit: hit({ artifact_id: "a2" }) };
+  const commit = { kind: "commit" as const, repo: { id: "repo-a", name: "repo-a", default_branch: "main" }, sha: "abcdef1" };
+  const sections = cmdkSections([commit, artifact]);
+
+  assertEqual(sections.length, 2, "commit and artifact rows should render in separate sections");
+  assertEqual(sections[0]?.labelKey, "cmdk.commits_section_label", "commit section label key");
+  assertEqual(sections[0]?.startIndex, 0, "commit section start index");
+  assertEqual(sections[1]?.labelKey, "cmdk.artifacts_section_label", "artifact section label key");
+  assertEqual(sections[1]?.startIndex, 1, "artifact section start index");
+  assertEqual(cmdkSections([artifact]).length, 1, "empty commit section should be hidden");
+  assertEqual(cmdkSections([artifact])[0]?.labelKey, "cmdk.artifacts_section_label", "artifact-only label key");
+  assertEqual(cmdkOptionId(3), "cmdk-option-3", "stable option id");
 }
 
 testCmdKMetaHidesRawDistance();
@@ -121,3 +170,7 @@ testCmdKFiltersIrrelevantNonsenseQueryHits();
 testCmdKKeepsRelevantTopResults();
 testCmdKRelevanceCutoffIsCentralized();
 testCmdKEmptyCopyExistsInBothLocales();
+testCmdKEmptyCopyUsesTrimmedQuery();
+testCmdKKeyboardJumpNavigation();
+testCmdKFocusTrapTargets();
+testCmdKSectionsSeparateCommitsAndArtifacts();

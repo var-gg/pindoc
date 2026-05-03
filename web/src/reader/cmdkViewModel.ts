@@ -3,6 +3,19 @@ import { localizedAreaName } from "./areaLocale";
 
 type TFn = (key: string, ...args: Array<string | number>) => string;
 
+export type CmdKNavigationKey = "ArrowDown" | "ArrowUp" | "Home" | "End" | "PageDown" | "PageUp";
+
+export type CmdKItemKind = "commit" | "artifact";
+
+export type CmdKSection<T extends { kind: CmdKItemKind }> = {
+  kind: "commits" | "artifacts";
+  labelKey: "cmdk.commits_section_label" | "cmdk.artifacts_section_label";
+  items: T[];
+  startIndex: number;
+};
+
+export type CmdKFocusTarget = "input" | number;
+
 export const CMDK_RELEVANCE_SETTINGS = {
   maxDistance: 0.7,
 } as const;
@@ -32,6 +45,67 @@ export function cmdkResultMeta(hit: SearchHit, t: TFn): string {
     parts.push(heading);
   }
   return parts.join(" · ");
+}
+
+export function cmdkNextIndex(current: number, count: number, key: CmdKNavigationKey): number {
+  if (count <= 0) return current;
+  const bounded = Math.min(Math.max(current, 0), count - 1);
+  switch (key) {
+    case "ArrowDown":
+      return Math.min(bounded + 1, count - 1);
+    case "ArrowUp":
+      return Math.max(bounded - 1, 0);
+    case "Home":
+      return 0;
+    case "End":
+      return count - 1;
+    case "PageDown":
+      return Math.min(bounded + 5, count - 1);
+    case "PageUp":
+      return Math.max(bounded - 5, 0);
+  }
+}
+
+export function cmdkEmptyCopyKey(query: string): "cmdk.hint" | "cmdk.no_hits" {
+  return query.trim() ? "cmdk.no_hits" : "cmdk.hint";
+}
+
+export function cmdkOptionId(index: number): string {
+  return `cmdk-option-${index}`;
+}
+
+export function cmdkSections<T extends { kind: CmdKItemKind }>(items: T[]): CmdKSection<T>[] {
+  const commits = items.filter((item) => item.kind === "commit");
+  const artifacts = items.filter((item) => item.kind === "artifact");
+  const sections: CmdKSection<T>[] = [];
+  if (commits.length > 0) {
+    sections.push({
+      kind: "commits",
+      labelKey: "cmdk.commits_section_label",
+      items: commits,
+      startIndex: 0,
+    });
+  }
+  if (artifacts.length > 0) {
+    sections.push({
+      kind: "artifacts",
+      labelKey: "cmdk.artifacts_section_label",
+      items: artifacts,
+      startIndex: commits.length,
+    });
+  }
+  return sections;
+}
+
+export function cmdkTrapTabTarget(
+  current: CmdKFocusTarget,
+  optionCount: number,
+  shiftKey: boolean,
+): CmdKFocusTarget | null {
+  if (optionCount <= 0) return "input";
+  if (shiftKey && current === "input") return optionCount - 1;
+  if (!shiftKey && current === optionCount - 1) return "input";
+  return null;
 }
 
 function cmdkLifecycleLabel(hit: SearchHit, t: TFn): string | null {

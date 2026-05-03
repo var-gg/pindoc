@@ -470,6 +470,10 @@
 
   "cmdk.placeholder": "Search artifacts or a commit SHA...",
   "cmdk.artifacts": "Artifacts",
+  "cmdk.dialog_label": "Command palette",
+  "cmdk.results_label": "Command palette results",
+  "cmdk.commits_section_label": "Commits",
+  "cmdk.artifacts_section_label": "Artifacts",
   "cmdk.hint": "Search artifacts or a commit SHA in this project.",
   "cmdk.no_hits": "No matching artifacts.",
   "cmdk.commit_result": "Commit %s",
