@@ -1,8 +1,14 @@
 import { useEffect, useState, useCallback } from "react";
-import { Link } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { api, type TelemetryResponse, type TelemetryWindow } from "../api/client";
 import { useI18n } from "../i18n";
 import { formatNumber } from "../utils/formatDateTime";
+import {
+  filterTelemetryRecentByTool,
+  telemetrySearchForSelectedTool,
+  telemetrySelectedToolFromSearch,
+  toggleTelemetryToolSelection,
+} from "./telemetryViewModel";
 import "../styles/telemetry.css";
 
 // Telemetry is the Phase J UI — aggregated view of the async
@@ -23,11 +29,14 @@ const WINDOWS: { value: TelemetryWindow; label: string }[] = [
 
 export function Telemetry() {
   const { t, lang } = useI18n();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [data, setData] = useState<TelemetryResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [window, setWindow] = useState<TelemetryWindow>("24h");
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const selectedTool = telemetrySelectedToolFromSearch(location.search);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,6 +63,14 @@ export function Telemetry() {
 
   const totals = data?.totals;
   const errorRate = totals && totals.calls > 0 ? (totals.errors / totals.calls) : 0;
+  const recentCalls = data ? filterTelemetryRecentByTool(data.recent, selectedTool) : [];
+
+  const setSelectedTool = useCallback((toolName: string) => {
+    navigate({
+      pathname: location.pathname,
+      search: telemetrySearchForSelectedTool(location.search, toolName),
+    });
+  }, [location.pathname, location.search, navigate]);
 
   return (
     <div className="ops">
@@ -126,58 +143,91 @@ export function Telemetry() {
               </thead>
               <tbody>
                 {data.tools.map((toolRow) => {
-                const totalTok = toolRow.total_input_tokens + toolRow.total_output_tokens;
-                return (
-                  <tr key={toolRow.tool_name}>
-                    <td className="tool">{toolRow.tool_name}</td>
-                    <td className="num">{toolRow.calls}</td>
-                    <td className={`num ${toolRow.errors > 0 ? "err" : ""}`}>{toolRow.errors || "·"}</td>
-                    <td className="num">{toolRow.avg_duration_ms}</td>
-                    <td className="num">{toolRow.p95_duration_ms}</td>
-                    <td className="num">{toolRow.avg_input_tokens}</td>
-                    <td className="num">{toolRow.avg_output_tokens}</td>
-                    <td className="num strong">{formatNumber(totalTok, lang)}</td>
-                    <td className="ts">{formatRelative(toolRow.last_call_at)}</td>
-                  </tr>
-                );
-              })}
+                  const totalTok = toolRow.total_input_tokens + toolRow.total_output_tokens;
+                  const isSelected = selectedTool === toolRow.tool_name;
+                  const toggleTool = () => setSelectedTool(toggleTelemetryToolSelection(selectedTool, toolRow.tool_name));
+
+                  return (
+                    <tr
+                      key={toolRow.tool_name}
+                      className={`ops-tool-row${isSelected ? " is-selected" : ""}`}
+                      tabIndex={0}
+                      aria-selected={isSelected}
+                      onClick={toggleTool}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        toggleTool();
+                      }}
+                    >
+                      <td className="tool">{toolRow.tool_name}</td>
+                      <td className="num">{toolRow.calls}</td>
+                      <td className={`num ${toolRow.errors > 0 ? "err" : ""}`}>{toolRow.errors || "·"}</td>
+                      <td className="num">{toolRow.avg_duration_ms}</td>
+                      <td className="num">{toolRow.p95_duration_ms}</td>
+                      <td className="num">{toolRow.avg_input_tokens}</td>
+                      <td className="num">{toolRow.avg_output_tokens}</td>
+                      <td className="num strong">{formatNumber(totalTok, lang)}</td>
+                      <td className="ts">{formatRelative(toolRow.last_call_at)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </section>
       )}
 
-      {data && data.recent.length > 0 && (
+      {data && (data.recent.length > 0 || selectedTool) && (
         <section className="ops__recent">
-          <h2>{t("ops.recent_title", data.recent.length)}</h2>
-          <div className="ops__table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>{t("ops.th.time")}</th>
-                  <th>{t("ops.th.tool")}</th>
-                  <th className="num">{t("ops.th.ms")}</th>
-                  <th className="num">{t("ops.th.in")}</th>
-                  <th className="num">{t("ops.th.out")}</th>
-                  <th>{t("ops.th.error")}</th>
-                  <th>{t("ops.th.agent")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.recent.map((c, i) => (
-                  <tr key={`${c.started_at}-${i}`} className={c.error_code ? "is-err" : ""}>
-                    <td className="ts">{formatRelative(c.started_at)}</td>
-                    <td className="tool">{c.tool_name}</td>
-                    <td className="num">{c.duration_ms}</td>
-                    <td className="num" title={`${c.input_bytes}B`}>{c.input_tokens_est}t</td>
-                    <td className="num" title={`${c.output_bytes}B`}>{c.output_tokens_est}t</td>
-                    <td className="err">{c.error_code || "·"}</td>
-                    <td className="mono">{c.agent_id ? c.agent_id.slice(0, 10) : "·"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="ops__section-head">
+            <h2>{t("ops.recent_title", recentCalls.length)}</h2>
+            {selectedTool && (
+              <button
+                type="button"
+                className="ops__filter-chip"
+                aria-label={t("ops.clear_tool_filter", selectedTool)}
+                onClick={() => setSelectedTool("")}
+              >
+                <span>{t("ops.selected_tool", selectedTool)}</span>
+                <span>{t("ops.clear_tool")}</span>
+              </button>
+            )}
           </div>
+          {recentCalls.length > 0 ? (
+            <div className="ops__table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{t("ops.th.time")}</th>
+                    <th>{t("ops.th.tool")}</th>
+                    <th className="num">{t("ops.th.ms")}</th>
+                    <th className="num">{t("ops.th.in")}</th>
+                    <th className="num">{t("ops.th.out")}</th>
+                    <th>{t("ops.th.error")}</th>
+                    <th>{t("ops.th.agent")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentCalls.map((c, i) => (
+                    <tr key={`${c.started_at}-${i}`} className={c.error_code ? "is-err" : ""}>
+                      <td className="ts">{formatRelative(c.started_at)}</td>
+                      <td className="tool">{c.tool_name}</td>
+                      <td className="num">{c.duration_ms}</td>
+                      <td className="num" title={`${c.input_bytes}B`}>{c.input_tokens_est}t</td>
+                      <td className="num" title={`${c.output_bytes}B`}>{c.output_tokens_est}t</td>
+                      <td className="err">{c.error_code || "·"}</td>
+                      <td className="mono">{c.agent_id ? c.agent_id.slice(0, 10) : "·"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="ops__empty ops__empty--compact">
+              {t("ops.recent_empty_filtered", selectedTool)}
+            </div>
+          )}
         </section>
       )}
 
