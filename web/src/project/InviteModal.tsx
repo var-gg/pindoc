@@ -9,6 +9,7 @@ import {
   type UserRef,
 } from "../api/client";
 import { useI18n } from "../i18n";
+import { dismissTooltipsForModal } from "../reader/Tooltip";
 import { MembersPanel } from "./MembersPanel";
 import {
   canIssuePermanentInvite,
@@ -50,6 +51,7 @@ export function InviteModal({ project, open, onClose, users }: Props) {
 
   useEffect(() => {
     if (!open) return;
+    dismissTooltipsForModal();
     setError(null);
     setCopied(false);
     function onKey(e: KeyboardEvent) {

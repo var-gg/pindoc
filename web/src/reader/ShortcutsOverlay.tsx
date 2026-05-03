@@ -1,4 +1,4 @@
-import type { ComponentType, ReactNode } from "react";
+import { useEffect, useRef, type ComponentType, type ReactNode } from "react";
 import { Link } from "react-router";
 import {
   ArrowLeftRight,
@@ -20,6 +20,7 @@ import type { Artifact } from "../api/client";
 import { useI18n } from "../i18n";
 import { projectSurfacePath } from "../readerRoutes";
 import type { BadgeFilter } from "./badgeFilters";
+import { dismissTooltipsForModal } from "./Tooltip";
 import { typeChipClass } from "./typeChip";
 
 type ReaderView = "reader" | "inbox" | "graph" | "tasks" | "today";
@@ -71,6 +72,48 @@ export function ShortcutsOverlay({
   onClose,
 }: Props) {
   const { t } = useI18n();
+  const panelRef = useRef<HTMLElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!open) return;
+    dismissTooltipsForModal();
+    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const unlockScroll = lockBodyScrollForModal();
+    const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus({ preventScroll: true }), 40);
+
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const focusable = shortcutsFocusableElements(panelRef.current);
+      if (focusable.length === 0) return;
+      const activeIndex = focusable.findIndex((node) => node === document.activeElement);
+      const nextIndex = shortcutsTrapTabIndex(activeIndex, focusable.length, e.shiftKey);
+      if (nextIndex === null) return;
+      e.preventDefault();
+      focusable[nextIndex]?.focus();
+    }
+
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener("keydown", onKey);
+      unlockScroll();
+      restoreShortcutsFocus(restoreFocusRef.current);
+      restoreFocusRef.current = null;
+    };
+  }, [open]);
+
   if (!open) return null;
 
   const surfaceTitle = surfaceLabel(view, t);
@@ -93,7 +136,13 @@ export function ShortcutsOverlay({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <section className="shortcuts-panel" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
+      <section
+        ref={panelRef}
+        className="shortcuts-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="shortcuts-title"
+      >
         <header className="shortcuts-panel__head">
           <div className="shortcuts-panel__title">
             <CircleHelp className="lucide" />
@@ -102,7 +151,13 @@ export function ShortcutsOverlay({
               <p>{t("shortcuts.surface", surfaceTitle)}</p>
             </div>
           </div>
-          <button type="button" className="shortcuts-panel__close" onClick={onClose} aria-label={t("shortcuts.close")}>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            className="shortcuts-panel__close"
+            onClick={onClose}
+            aria-label={t("shortcuts.close")}
+          >
             <X className="lucide" />
           </button>
         </header>
@@ -144,6 +199,7 @@ export function ShortcutsOverlay({
           <Link to={legendHref} onClick={onClose}>
             {t("shortcuts.legend_link")}
           </Link>
+          <span>{t("shortcuts.help_hint")}</span>
           <span>
             <span className="kbd">esc</span> {t("cmdk.close")}
           </span>
@@ -151,6 +207,70 @@ export function ShortcutsOverlay({
       </section>
     </div>
   );
+}
+
+export function shortcutsTrapTabIndex(
+  activeIndex: number,
+  focusableCount: number,
+  shiftKey: boolean,
+): number | null {
+  if (focusableCount <= 0) return null;
+  if (activeIndex < 0) return 0;
+  if (shiftKey && activeIndex === 0) return focusableCount - 1;
+  if (!shiftKey && activeIndex === focusableCount - 1) return 0;
+  return null;
+}
+
+function shortcutsFocusableElements(root: HTMLElement | null): HTMLElement[] {
+  if (!root) return [];
+  return Array.from(root.querySelectorAll<HTMLElement>(
+    "a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])",
+  )).filter((node) => !node.hasAttribute("disabled") && node.getAttribute("aria-hidden") !== "true");
+}
+
+function lockBodyScrollForModal(): () => void {
+  const scrollY = window.scrollY;
+  const { style } = document.body;
+  const original = {
+    overflow: style.overflow,
+    position: style.position,
+    top: style.top,
+    left: style.left,
+    right: style.right,
+    width: style.width,
+    paddingRight: style.paddingRight,
+  };
+  const scrollbarWidth = Math.max(0, window.innerWidth - document.documentElement.clientWidth);
+  style.overflow = "hidden";
+  style.position = "fixed";
+  style.top = `-${scrollY}px`;
+  style.left = "0";
+  style.right = "0";
+  style.width = "100%";
+  if (scrollbarWidth > 0) style.paddingRight = `${scrollbarWidth}px`;
+
+  return () => {
+    style.overflow = original.overflow;
+    style.position = original.position;
+    style.top = original.top;
+    style.left = original.left;
+    style.right = original.right;
+    style.width = original.width;
+    style.paddingRight = original.paddingRight;
+    window.scrollTo(0, scrollY);
+  };
+}
+
+function restoreShortcutsFocus(target: HTMLElement | null) {
+  const focusTarget = target?.isConnected
+    ? target
+    : document.querySelector<HTMLElement>("main, [role='main'], .reader-shell") ?? document.body;
+  const hadTabIndex = focusTarget.hasAttribute("tabindex");
+  if (!hadTabIndex) focusTarget.setAttribute("tabindex", "-1");
+  focusTarget.focus({ preventScroll: true });
+  if (!hadTabIndex) {
+    focusTarget.addEventListener("blur", () => focusTarget.removeAttribute("tabindex"), { once: true });
+  }
 }
 
 function ShortcutItem({ row }: { row: ShortcutRow }) {

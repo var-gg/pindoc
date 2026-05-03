@@ -7,7 +7,7 @@ import { compareAreas, isFixedTaxonomyArea, localizedAreaName } from "./areaLoca
 import type { Aggregate } from "./useReaderData";
 import { visualArea, visualDescription, visualLabel, visualType } from "./visualLanguage";
 import { visualIconComponent } from "./visualLanguageIcons";
-import { Tooltip } from "./Tooltip";
+import { dismissTooltipsForModal, Tooltip } from "./Tooltip";
 import { sidebarAgentRows } from "./readerInternalVisibility";
 import { buildAreaUnreadOwnCounts, subtreeUnreadCount } from "./sidebarUnread";
 import { ProjectSwitcher } from "./ProjectSwitcher";
@@ -141,7 +141,10 @@ export function Sidebar({
           project={project}
           orgSlug={orgSlug}
           open={projectSwitcherOpen}
-          onOpenChange={setProjectSwitcherOpen}
+          onOpenChange={(next) => {
+            if (next) dismissTooltipsForModal();
+            setProjectSwitcherOpen(next);
+          }}
           showHiddenProjects={showInternalAgents}
           projectCreateAllowed={projectCreateAllowed}
           placement="sidebar"

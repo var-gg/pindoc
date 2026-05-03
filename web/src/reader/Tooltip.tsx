@@ -1,5 +1,5 @@
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
-import type { ReactElement, ReactNode } from "react";
+import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 
 type TooltipProps = {
   content?: ReactNode;
@@ -7,6 +7,13 @@ type TooltipProps = {
   side?: "top" | "right" | "bottom" | "left";
   align?: "start" | "center" | "end";
 };
+
+const TOOLTIP_DISMISS_EVENT = "pindoc:tooltip-dismiss";
+
+export function dismissTooltipsForModal() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(TOOLTIP_DISMISS_EVENT));
+}
 
 export function PindocTooltipProvider({ children }: { children: ReactNode }) {
   return (
@@ -17,9 +24,19 @@ export function PindocTooltipProvider({ children }: { children: ReactNode }) {
 }
 
 export function Tooltip({ content, children, side = "top", align = "center" }: TooltipProps) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    function onDismiss() {
+      setOpen(false);
+    }
+    window.addEventListener(TOOLTIP_DISMISS_EVENT, onDismiss);
+    return () => window.removeEventListener(TOOLTIP_DISMISS_EVENT, onDismiss);
+  }, []);
+
   if (!content) return children;
   return (
-    <TooltipPrimitive.Root>
+    <TooltipPrimitive.Root open={open} onOpenChange={setOpen}>
       <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
       <TooltipPrimitive.Portal>
         <TooltipPrimitive.Content

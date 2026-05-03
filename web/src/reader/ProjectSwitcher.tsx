@@ -3,6 +3,7 @@ import { ChevronDown } from "lucide-react";
 import { api, type Project, type ProjectListItem } from "../api/client";
 import { useI18n } from "../i18n";
 import { projectSurfacePath } from "../readerRoutes";
+import { dismissTooltipsForModal } from "./Tooltip";
 import {
   groupProjectSwitcherProjects,
   projectSwitcherActionItems,
@@ -55,6 +56,10 @@ export function ProjectSwitcher({
     [actionItems],
   );
   const showGroupHeadings = groups.length > 1;
+
+  useEffect(() => {
+    if (open) dismissTooltipsForModal();
+  }, [open]);
 
   useEffect(() => {
     if (!open || loadedHiddenProjects === showHiddenProjects) return;

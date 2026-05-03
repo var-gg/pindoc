@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router";
-import { Activity, AlignCenter, AlignJustify, CalendarDays, CircleHelp, ExternalLink, FileText, Inbox, Languages, LogOut, Maximize2, Menu, Moon, Search, Settings2, Share2, Sun, UserCircle } from "lucide-react";
+import { Activity, AlignCenter, AlignJustify, CalendarDays, CircleHelp, ExternalLink, FileText, Inbox, Keyboard, Languages, LogOut, Maximize2, Menu, Moon, Search, Settings2, Share2, Sun, UserCircle } from "lucide-react";
 import type { ComponentType } from "react";
 import { api, type CurrentUserResp } from "../api/client";
 import { useI18n, type Lang } from "../i18n";
@@ -11,7 +11,7 @@ import type { ReaderWidth } from "./readerWidth";
 import { typeChipClass } from "./typeChip";
 import { topLevelVisualAreaSlugs, visualDescription, visualLabel, visualLanguage } from "./visualLanguage";
 import { visualIconComponent } from "./visualLanguageIcons";
-import { Tooltip } from "./Tooltip";
+import { dismissTooltipsForModal, Tooltip } from "./Tooltip";
 import { canShowTelemetryNav, telemetryDebugEnabled } from "./opsAccess";
 import { paletteOpenAfterProjectSwitcherToggle, projectSwitcherOpenAfterPaletteChange } from "./overlayStack";
 import { isReaderDevSurfaceEnabled, projectRoutePrefix } from "../readerRoutes";
@@ -33,6 +33,7 @@ type Props = {
   readerWidth: ReaderWidth;
   onChangeReaderWidth: (next: ReaderWidth) => void;
   onOpenInvite?: () => void;
+  onOpenShortcuts: () => void;
   showProjectSwitcher: boolean;
   projectCreateAllowed: boolean;
 };
@@ -63,6 +64,7 @@ export function TopNav({
   readerWidth,
   onChangeReaderWidth,
   onOpenInvite,
+  onOpenShortcuts,
   showProjectSwitcher,
   projectCreateAllowed,
 }: Props) {
@@ -85,11 +87,13 @@ export function TopNav({
   }, [paletteOpen]);
 
   function openPalette() {
+    dismissTooltipsForModal();
     setProjectSwitcherOpen(false);
     onOpenPalette();
   }
 
   function setProjectSwitcher(next: boolean) {
+    if (next) dismissTooltipsForModal();
     setProjectSwitcherOpen(next);
     if (!paletteOpenAfterProjectSwitcherToggle(next, paletteOpen)) {
       onClosePalette();
@@ -175,7 +179,7 @@ export function TopNav({
         </Tooltip>
       )}
 
-      <HelpPopover surface={surface} />
+      <HelpPopover surface={surface} onOpenShortcuts={onOpenShortcuts} />
 
       <div className="nav__width" role="group" aria-label={t("nav.width_toggle")}>
         {WIDTH_OPTIONS.map(({ mode, icon: Icon, labelKey }) => {
@@ -409,7 +413,7 @@ function profileInitials(seed: string): string {
   return trimmed.slice(0, 2).toUpperCase();
 }
 
-function HelpPopover({ surface }: { surface: SurfaceId }) {
+function HelpPopover({ surface, onOpenShortcuts }: { surface: SurfaceId; onOpenShortcuts: () => void }) {
   const { t, lang } = useI18n();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -505,6 +509,16 @@ function HelpPopover({ surface }: { surface: SurfaceId }) {
           </section>
 
           <div className="nav-help__links" aria-label={t("help.docs_title")}>
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onOpenShortcuts();
+              }}
+            >
+              <Keyboard className="lucide" aria-hidden="true" />
+              <span>{t("help.shortcuts_link")}</span>
+            </button>
             <a href="https://github.com/var-gg/pindoc/blob/main/docs/19-area-taxonomy.md" target="_blank" rel="noreferrer">
               <span>{t("help.docs_area_taxonomy")}</span>
               <ExternalLink className="lucide" aria-hidden="true" />

@@ -17,6 +17,7 @@ import {
   type CmdKNavigationKey,
 } from "./cmdkViewModel";
 import { projectRoutePrefix, projectSurfacePath } from "../readerRoutes";
+import { dismissTooltipsForModal } from "./Tooltip";
 
 type Props = {
   projectSlug: string;
@@ -65,6 +66,7 @@ export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
   // Focus the input when the palette opens and restore focus after close.
   useEffect(() => {
     if (open) {
+      dismissTooltipsForModal();
       restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       const id = window.setTimeout(() => inputRef.current?.focus(), 40);
       return () => window.clearTimeout(id);

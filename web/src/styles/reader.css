@@ -247,7 +247,8 @@
   padding-top: 12px;
   border-top: 1px solid var(--border);
 }
-.nav-help__links a {
+.nav-help__links a,
+.nav-help__links button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -257,11 +258,15 @@
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--r-1);
+  font: inherit;
   font-size: 12px;
   text-decoration: none;
+  cursor: pointer;
 }
 .nav-help__links a:hover,
-.nav-help__links a:focus-visible {
+.nav-help__links a:focus-visible,
+.nav-help__links button:hover,
+.nav-help__links button:focus-visible {
   color: var(--fg-0);
   background: var(--bg-3);
   border-color: var(--border-strong);
@@ -2223,6 +2228,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 10px 18px;
   border-top: 1px solid var(--border);
@@ -2296,6 +2302,7 @@
   color: var(--fg-3);
   font-family: var(--font-mono);
   font-size: 11px;
+  line-height: 1.45;
 }
 .project-settings__header h1 {
   margin: 0;

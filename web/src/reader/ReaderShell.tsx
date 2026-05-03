@@ -22,7 +22,7 @@ import { Sidecar } from "./Sidecar";
 import { ShortcutsOverlay } from "./ShortcutsOverlay";
 import { EmptyState, SurfaceHeader, surfaceDisplayName } from "./SurfacePrimitives";
 import { TaskFlowLens } from "./TaskFlowLens";
-import { Tooltip } from "./Tooltip";
+import { dismissTooltipsForModal, Tooltip } from "./Tooltip";
 import { Today } from "./Today";
 import { TopNav } from "./TopNav";
 import { ArtifactTypeChip, VisualAreaChip } from "./VisualChips";
@@ -302,7 +302,10 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
         e.preventDefault();
         setPaletteOpen((current) => {
           const next = !current;
-          if (next) setShortcutsOpen(false);
+          if (next) {
+            dismissTooltipsForModal();
+            setShortcutsOpen(false);
+          }
           return next;
         });
       }
@@ -322,7 +325,10 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
       const questionKey = e.key === "?" || (e.key === "/" && e.shiftKey);
       if (questionKey) {
         e.preventDefault();
-        setShortcutsOpen((v) => !v);
+        setShortcutsOpen((v) => {
+          if (!v) dismissTooltipsForModal();
+          return !v;
+        });
         return;
       }
       if (e.key === "Escape" && shortcutsOpen) {
@@ -678,7 +684,10 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
         surface={view}
         theme={theme}
         onToggleTheme={toggleTheme}
-        onOpenPalette={() => setPaletteOpen(true)}
+        onOpenPalette={() => {
+          dismissTooltipsForModal();
+          setPaletteOpen(true);
+        }}
         onClosePalette={() => setPaletteOpen(false)}
         onToggleMenu={() => setMenuOpen((v) => !v)}
         menuOpen={menuOpen}
@@ -686,7 +695,15 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
         inboxCount={reviewQueueEnabled ? inboxCount : 0}
         readerWidth={readerWidth}
         onChangeReaderWidth={changeReaderWidth}
-        onOpenInvite={() => setInviteOpen(true)}
+        onOpenInvite={() => {
+          dismissTooltipsForModal();
+          setInviteOpen(true);
+        }}
+        onOpenShortcuts={() => {
+          dismissTooltipsForModal();
+          setPaletteOpen(false);
+          setShortcutsOpen(true);
+        }}
         showProjectSwitcher={!mobileChrome && multiProjectSwitching}
         projectCreateAllowed={projectCreateAllowed}
       />
