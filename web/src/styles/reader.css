@@ -2594,6 +2594,14 @@
   opacity: 0.55;
   cursor: default;
 }
+.inbox-spin {
+  animation: inbox-spin 0.8s linear infinite;
+}
+@keyframes inbox-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .inbox-error {
   margin: 0 0 14px;
   padding: 10px 12px;
@@ -2601,6 +2609,16 @@
   border-radius: var(--r-1);
   background: color-mix(in oklch, var(--danger, #d33) 10%, transparent);
   color: var(--danger, #d33);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.inbox-success {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklch, var(--ok, #2f8f5b) 30%, var(--border));
+  border-radius: var(--r-1);
+  background: color-mix(in oklch, var(--ok, #2f8f5b) 10%, transparent);
+  color: var(--ok, #2f8f5b);
   font-size: 12.5px;
   line-height: 1.45;
 }
@@ -2613,6 +2631,10 @@
   border: 1px solid var(--border);
   border-radius: var(--r-2);
   background: var(--bg-0);
+}
+.inbox-card:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--accent) 72%, transparent);
+  outline-offset: 2px;
 }
 .inbox-card__meta {
   display: flex;
@@ -2695,6 +2717,91 @@
 .inbox-action:disabled {
   opacity: 0.6;
   cursor: default;
+}
+.inbox-review-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: color-mix(in oklch, var(--bg-0) 72%, transparent);
+  backdrop-filter: blur(4px);
+}
+.inbox-review-dialog {
+  width: min(480px, 100%);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-2);
+  background: var(--bg-0);
+  box-shadow: var(--shadow-lg, 0 24px 80px rgb(0 0 0 / 0.24));
+}
+.inbox-review-dialog form {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+.inbox-review-dialog__head,
+.inbox-review-dialog__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.inbox-review-dialog__head h2 {
+  margin: 0;
+  color: var(--fg-0);
+  font-size: 16px;
+  line-height: 1.25;
+}
+.inbox-review-dialog__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-1);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  cursor: pointer;
+}
+.inbox-review-dialog__close:hover,
+.inbox-review-dialog__close:focus-visible {
+  outline: none;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.inbox-review-dialog__desc {
+  margin: 0;
+  color: var(--fg-1);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.inbox-review-dialog__label {
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.inbox-review-dialog textarea {
+  width: 100%;
+  min-height: 92px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--r-1);
+  background: var(--bg-1);
+  color: var(--fg-0);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 9px 10px;
+}
+.inbox-review-dialog textarea:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--accent) 70%, transparent);
+  outline-offset: 1px;
+}
+.inbox-review-dialog__actions {
+  justify-content: flex-end;
 }
 
 /* Graph surface */

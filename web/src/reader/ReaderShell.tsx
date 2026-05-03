@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { Bot, CircleHelp, PanelRightOpen, UserRound, X } from "lucide-react";
 import type { Aggregate } from "./useReaderData";
 import { api, type Artifact, type ArtifactRef, type Area } from "../api/client";
@@ -88,6 +88,7 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
   const { project = "", slug } = useParams<{ project: string; slug?: string }>();
   const { t } = useI18n();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [showTemplates, setShowTemplates] = useState(false);
   const state = useReaderData(project, slug, showTemplates);
@@ -611,6 +612,14 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
   }
   const reload = state.reload;
   const reviewQueueEnabled = projectData.sensitive_ops === "confirm";
+  if (view === "inbox" && !reviewQueueEnabled) {
+    return (
+      <Navigate
+        to={`${projectSurfacePath(project, "today", undefined, orgSlug)}${location.search || ""}`}
+        replace
+      />
+    );
+  }
   const sidecarDetail =
     unavailableSurface
       ? null
@@ -728,6 +737,7 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
             onSelectArea={handleSelectArea}
             onInboxCountChange={setInboxCount}
             reviewQueueEnabled={reviewQueueEnabled}
+            projectRole={projectData.current_role}
             graphFocusSlug={graphFocusSlug}
             onGraphFocusChange={handleGraphFocusChange}
             unavailableSurface={unavailableSurface}
@@ -873,6 +883,7 @@ function Body({
   onSelectArea,
   onInboxCountChange,
   reviewQueueEnabled,
+  projectRole,
   graphFocusSlug,
   onGraphFocusChange,
   unavailableSurface,
@@ -904,6 +915,7 @@ function Body({
   onSelectArea: (areaSlug: string) => void;
   onInboxCountChange: (count: number) => void;
   reviewQueueEnabled: boolean;
+  projectRole?: "owner" | "editor" | "viewer";
   graphFocusSlug: string | null;
   onGraphFocusChange: (slug: string) => void;
   unavailableSurface?: string;
@@ -985,6 +997,7 @@ function Body({
         projectSlug={projectSlug}
         orgSlug={orgSlug}
         enabled={reviewQueueEnabled}
+        projectRole={projectRole}
         onCountChange={onInboxCountChange}
       />
     );

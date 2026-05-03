@@ -683,6 +683,31 @@ export type InboxReviewResp = {
   row_status: "published" | "archived";
 };
 
+export type InboxReviewOptions = {
+  reviewerId?: string | null;
+  commitMsg?: string | null;
+};
+
+export type InboxReviewBody = {
+  decision: "approve" | "reject";
+  reviewer_id?: string;
+  commit_msg: string;
+};
+
+export function buildInboxReviewBody(
+  decision: "approve" | "reject",
+  options: InboxReviewOptions = {},
+): InboxReviewBody {
+  const reviewer = options.reviewerId?.trim();
+  const commitMsg = options.commitMsg?.trim() || `Reader Inbox ${decision}`;
+  const body: InboxReviewBody = {
+    decision,
+    commit_msg: commitMsg,
+  };
+  if (reviewer) body.reviewer_id = reviewer;
+  return body;
+}
+
 export type ReadEventInput = {
   artifact_id: string;
   artifact_slug?: string;
@@ -1278,17 +1303,14 @@ export const api = {
     project: string,
     idOrSlug: string,
     decision: "approve" | "reject",
+    options?: InboxReviewOptions,
   ): Promise<InboxReviewResp> => {
     const res = await fetch(
       `${p(project)}/inbox/${encodeURIComponent(idOrSlug)}/review`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          decision,
-          reviewer_id: "reader",
-          commit_msg: `Reader Inbox ${decision}`,
-        }),
+        body: JSON.stringify(buildInboxReviewBody(decision, options)),
       },
     );
     if (!res.ok) {

@@ -287,6 +287,30 @@ function buildShortcutGroups(
       title: t("shortcuts.group_inbox"),
       rows: [
         {
+          keys: ["↑", "↓", "j", "k"],
+          label: t("shortcuts.inbox_select.label"),
+          hint: t("shortcuts.inbox_select.hint"),
+          icon: ArrowUpDown,
+        },
+        {
+          keys: ["a"],
+          label: t("shortcuts.inbox_approve.label"),
+          hint: t("shortcuts.inbox_approve.hint"),
+          icon: ShieldCheck,
+        },
+        {
+          keys: ["r"],
+          label: t("shortcuts.inbox_reject.label"),
+          hint: t("shortcuts.inbox_reject.hint"),
+          icon: X,
+        },
+        {
+          keys: ["↵", "o"],
+          label: t("shortcuts.inbox_open.label"),
+          hint: t("shortcuts.inbox_open.hint"),
+          icon: CornerDownLeft,
+        },
+        {
           keys: ["⌘K"],
           label: t("shortcuts.inbox_search.label"),
           hint: t("shortcuts.inbox_search.hint"),
