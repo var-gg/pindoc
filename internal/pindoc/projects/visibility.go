@@ -77,6 +77,23 @@ func IsMultiProject(visibleCount int) bool {
 	return visibleCount > 1
 }
 
+// MultiProjectCaps is the Reader-facing split of the legacy
+// `multi_project` flag. Switching answers "should project-switcher chrome
+// exist"; creation answers "may the Reader expose the web project-create
+// entrypoint". Creation is intentionally permissive today because role /
+// plan policy is not yet modeled at this layer.
+type MultiProjectCaps struct {
+	MultiProjectSwitching bool
+	ProjectCreateAllowed  bool
+}
+
+func CapabilitiesForVisibleCount(visibleCount int) MultiProjectCaps {
+	return MultiProjectCaps{
+		MultiProjectSwitching: IsMultiProject(visibleCount),
+		ProjectCreateAllowed:  true,
+	}
+}
+
 // normalizeScope accepts either a string (legacy userID call site, kept
 // for the trusted_local migration path) or a ViewerScope (new shape).
 // The any-typed parameter avoids a breaking change to existing callers

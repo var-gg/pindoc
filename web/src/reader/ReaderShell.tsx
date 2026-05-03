@@ -137,6 +137,36 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
     searchParams.toString(),
     typeof window === "undefined" ? null : window.localStorage.getItem("pindoc.ops.debug"),
   );
+  const [multiProjectSwitching, setMultiProjectSwitching] = useState(false);
+  const [projectCreateAllowed, setProjectCreateAllowed] = useState(false);
+  const [mobileChrome, setMobileChrome] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.config()
+      .then((cfg) => {
+        if (cancelled) return;
+        setMultiProjectSwitching(cfg.multi_project_switching ?? cfg.multi_project);
+        setProjectCreateAllowed(cfg.project_create_allowed ?? false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMultiProjectSwitching(false);
+        setProjectCreateAllowed(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const query = window.matchMedia("(max-width: 1023px)");
+    const update = () => setMobileChrome(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
 
   // Surface transition policy (Decision `decision-reader-ia-hierarchy`):
   // Area carries across surfaces (exploration continuity — "UI area in
@@ -645,9 +675,12 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
         readerWidth={readerWidth}
         onChangeReaderWidth={changeReaderWidth}
         onOpenInvite={() => setInviteOpen(true)}
+        showProjectSwitcher={!mobileChrome && multiProjectSwitching}
+        projectCreateAllowed={projectCreateAllowed}
       />
       <div className="main">
         <Sidebar
+          project={projectData}
           projectSlug={project}
           orgSlug={orgSlug}
           artifacts={areaCounterArtifacts}
@@ -663,6 +696,8 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
           showTemplates={showTemplates}
           onToggleTemplates={() => setShowTemplates((v) => !v)}
           showInternalAgents={opsDebug}
+          showProjectSwitcher={mobileChrome && multiProjectSwitching}
+          projectCreateAllowed={projectCreateAllowed && (mobileChrome || !multiProjectSwitching)}
         />
         {children ?? (
           <Body

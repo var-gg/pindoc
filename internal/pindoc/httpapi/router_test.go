@@ -67,6 +67,18 @@ func TestConfigReportsProvidersAndBind(t *testing.T) {
 	if _, ok := body["auth_mode"]; ok {
 		t.Fatalf("auth_mode should be retired from /api/config")
 	}
+	if got, want := body["multi_project_switching"], false; got != want {
+		t.Fatalf("multi_project_switching = %v, want %v", got, want)
+	}
+	if got, want := body["project_create_allowed"], true; got != want {
+		t.Fatalf("project_create_allowed = %v, want %v", got, want)
+	}
+	if got, want := body["multi_project"], body["multi_project_switching"]; got != want {
+		t.Fatalf("multi_project legacy alias = %v, want %v", got, want)
+	}
+	if got, want := body["multi_project_deprecated"], "use multi_project_switching"; got != want {
+		t.Fatalf("multi_project_deprecated = %v, want %q", got, want)
+	}
 }
 
 func TestOAuthUnavailableRoutesDoNotFallThroughToSPA(t *testing.T) {

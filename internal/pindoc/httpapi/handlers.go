@@ -83,12 +83,16 @@ func (d Deps) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if providers == nil {
 		providers = []string{}
 	}
+	projectCaps := d.deriveMultiProjectCaps(r)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"default_project_slug":   d.DefaultProjectSlug,
-		"default_project_locale": d.DefaultProjectLocale,
-		"multi_project":          d.deriveMultiProject(r),
-		"public_base_url":        publicBase,
-		"version":                d.Version,
+		"default_project_slug":     d.DefaultProjectSlug,
+		"default_project_locale":   d.DefaultProjectLocale,
+		"multi_project":            projectCaps.MultiProjectSwitching,
+		"multi_project_deprecated": "use multi_project_switching",
+		"multi_project_switching":  projectCaps.MultiProjectSwitching,
+		"project_create_allowed":   projectCaps.ProjectCreateAllowed,
+		"public_base_url":          publicBase,
+		"version":                  d.Version,
 		// providers + bind_addr replace the deprecated auth_mode enum
 		// (Decision `decision-auth-model-loopback-and-providers`).
 		// Reader keys "is the operator the calling principal" off the
@@ -144,19 +148,23 @@ func (d Deps) identityRequired() bool {
 // pool fall back to false — Reader chrome stays single-project rather
 // than spuriously showing a switcher when the lookup hiccups.
 func (d Deps) deriveMultiProject(r *http.Request) bool {
+	return d.deriveMultiProjectCaps(r).MultiProjectSwitching
+}
+
+func (d Deps) deriveMultiProjectCaps(r *http.Request) projects.MultiProjectCaps {
 	if d.DB == nil {
-		return false
+		return projects.CapabilitiesForVisibleCount(0)
 	}
 	n, err := projects.CountVisible(r.Context(), d.DB, d.viewerScopeForRequest(r))
 	if err != nil {
 		if d.Logger != nil {
-			d.Logger.Warn("multi_project derivation failed; defaulting to false",
+			d.Logger.Warn("multi-project capability derivation failed; defaulting switching to false",
 				"err", err,
 			)
 		}
-		return false
+		return projects.CapabilitiesForVisibleCount(0)
 	}
-	return projects.IsMultiProject(n)
+	return projects.CapabilitiesForVisibleCount(n)
 }
 
 func (d Deps) viewerScopeForRequest(r *http.Request) projects.ViewerScope {
@@ -387,10 +395,13 @@ func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, p)
 	}
+	projectCaps := d.deriveMultiProjectCaps(r)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"projects":             out,
-		"default_project_slug": d.DefaultProjectSlug,
-		"multi_project":        d.deriveMultiProject(r),
+		"projects":                out,
+		"default_project_slug":    d.DefaultProjectSlug,
+		"multi_project":           projectCaps.MultiProjectSwitching,
+		"multi_project_switching": projectCaps.MultiProjectSwitching,
+		"project_create_allowed":  projectCaps.ProjectCreateAllowed,
 	})
 }
 

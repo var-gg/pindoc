@@ -32,6 +32,31 @@ func TestIsMultiProject(t *testing.T) {
 	}
 }
 
+func TestCapabilitiesForVisibleCount(t *testing.T) {
+	cases := []struct {
+		name              string
+		count             int
+		wantSwitching     bool
+		wantCreateAllowed bool
+	}{
+		{"empty table", 0, false, true},
+		{"single project", 1, false, true},
+		{"two visible projects", 2, true, true},
+		{"many visible projects", 5, true, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := CapabilitiesForVisibleCount(c.count)
+			if got.MultiProjectSwitching != c.wantSwitching {
+				t.Errorf("MultiProjectSwitching = %v, want %v", got.MultiProjectSwitching, c.wantSwitching)
+			}
+			if got.ProjectCreateAllowed != c.wantCreateAllowed {
+				t.Errorf("ProjectCreateAllowed = %v, want %v", got.ProjectCreateAllowed, c.wantCreateAllowed)
+			}
+		})
+	}
+}
+
 // TestBuildVisibilitySelect locks the three branches of the
 // visibility-aware listing query so a future change here can't silently
 // regress: anonymous/default scopes see only public, members see public

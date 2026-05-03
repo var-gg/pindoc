@@ -10,6 +10,10 @@
   min-height: 100vh;
   background: var(--bg-0);
   color: var(--fg-1);
+  --z-nav: 60;
+  --z-mobile-surfaces: 55;
+  --z-sidebar-drawer: 50;
+  --z-project-menu: 80;
 }
 
 /* Top nav — sticky so it stays visible during window scroll (the whole
@@ -19,7 +23,7 @@
 .nav {
   position: sticky;
   top: 0;
-  z-index: 40;
+  z-index: var(--z-nav);
   height: var(--nav-h);
   display: flex;
   align-items: center;
@@ -29,10 +33,37 @@
   border-bottom: 1px solid var(--border);
 }
 .nav__brand { display: flex; align-items: center; gap: 8px; color: var(--fg-0); font-weight: 600; font-size: 14px; letter-spacing: -0.02em; flex-shrink: 0; text-decoration: none; }
+.nav__project-wrap { position: relative; flex-shrink: 0; }
 .nav__project { display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-2); font-family: var(--font-mono); font-size: 12px; color: var(--fg-1); cursor: pointer; flex-shrink: 0; }
 .nav__project:hover { background: var(--bg-3); }
 .nav__project .lucide { width: 12px; height: 12px; color: var(--fg-3); }
+.nav__project-slug { min-width: 0; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav__project-org { color: var(--fg-3); font-size: 11px; }
+.nav__project-identity { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 190px; padding: 4px 8px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-2); font-family: var(--font-mono); font-size: 12px; color: var(--fg-1); flex-shrink: 0; }
+.project-menu { position: absolute; top: calc(100% + 4px); left: 0; min-width: 260px; max-width: min(420px, calc(100vw - 24px)); max-height: min(70vh, 420px); overflow-y: auto; background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--r-2); box-shadow: var(--shadow-float); z-index: var(--z-project-menu); padding: 4px; }
+.project-menu__state { padding: 8px 10px; font-size: 12px; color: var(--fg-3); }
+.project-menu__group + .project-menu__group { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border); }
+.project-menu__group-heading { padding: 6px 10px 4px; font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+.project-menu__option { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r-1); text-decoration: none; color: var(--fg-0); outline: none; }
+.project-menu__option:hover,
+.project-menu__option:focus,
+.project-menu__option.is-active { background: var(--bg-2); }
+.project-menu__option.is-selected { background: color-mix(in oklch, var(--accent) 10%, transparent); }
+.project-menu__option.is-selected.is-active { background: color-mix(in oklch, var(--accent) 16%, var(--bg-2)); }
+.project-menu__color { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.project-menu__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-menu__slug { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); white-space: nowrap; }
+.project-menu__option--create { display: block; margin-top: 4px; border-top: 1px solid var(--border); font-size: 11px; color: var(--fg-3); line-height: 1.45; }
+.project-menu__create-title { display: block; color: var(--fg-2); margin-bottom: 2px; }
+.project-menu__create-body { display: block; }
+.nav__project-wrap--sidebar { margin: 0 10px 8px; }
+.nav__project-wrap--sidebar .nav__project { width: 100%; justify-content: space-between; }
+.nav__project-wrap--sidebar .project-menu { position: static; width: 100%; min-width: 0; max-width: none; margin-top: 4px; max-height: min(54vh, 360px); }
+.sidebar-project-create { display: block; margin: 0 10px 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--bg-1); color: var(--fg-2); text-decoration: none; font-size: 11px; line-height: 1.45; }
+.sidebar-project-create:hover,
+.sidebar-project-create:focus { background: var(--bg-2); color: var(--fg-1); outline: none; }
+.sidebar-project-create__title { display: block; color: var(--fg-1); margin-bottom: 2px; }
+.sidebar-project-create__body { display: block; color: var(--fg-3); }
 .nav__spacer { flex: 1; min-width: 0; }
 .nav__search { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-2); width: 320px; min-width: 0; cursor: pointer; font: inherit; color: inherit; }
 .nav__search .lucide { width: 13px; height: 13px; color: var(--fg-3); flex-shrink: 0; }
@@ -56,7 +87,7 @@
   display: none;
   position: sticky;
   top: var(--nav-h);
-  z-index: 39;
+  z-index: var(--z-mobile-surfaces);
   padding: 8px 10px;
   background: var(--bg-1);
   border-bottom: 1px solid var(--border);
@@ -3655,7 +3686,7 @@
 /* Responsive */
 @media (max-width: 1023px) {
   .main { grid-template-columns: minmax(0, 1fr); }
-  .sidebar { display: none; position: fixed; top: var(--nav-h); left: 0; bottom: 0; width: 260px; background: var(--bg-0); border-right: 1px solid var(--border); z-index: 50; padding-top: 8px; }
+  .sidebar { display: none; position: fixed; top: var(--nav-h); left: 0; bottom: 0; width: 260px; background: var(--bg-0); border-right: 1px solid var(--border); z-index: var(--z-sidebar-drawer); padding-top: 8px; }
   .sidebar.open { display: block; box-shadow: var(--shadow-float); }
   .sidecar {
     position: static;
@@ -3669,7 +3700,8 @@
   }
   .sidecar--empty { display: none; }
   .nav__menu { display: inline-flex; align-items: center; justify-content: center; }
-  .nav__project { display: none; }
+  .nav__project-wrap--topnav { display: none; }
+  .nav__project-identity { max-width: 140px; }
   .nav__brand span.word { display: none; }
   .nav__tabs .nav__tab span.label { display: none; }
   .nav__tabs .nav__tab { padding: 0 8px; }
@@ -3683,6 +3715,7 @@
 @media (max-width: 767px) {
   .nav { gap: 8px; padding: 0 12px; }
   .nav__tabs { display: none; }
+  .nav__project-identity { max-width: 112px; }
   .sidebar {
     top: calc(var(--nav-h) + 53px);
     height: calc(100vh - var(--nav-h) - 53px);

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router";
-import { Activity, AlignCenter, AlignJustify, CalendarDays, ChevronDown, CircleHelp, ExternalLink, FileText, Inbox, Languages, LogOut, Maximize2, Menu, Moon, Search, Settings2, Share2, Sun, UserCircle } from "lucide-react";
+import { Activity, AlignCenter, AlignJustify, CalendarDays, CircleHelp, ExternalLink, FileText, Inbox, Languages, LogOut, Maximize2, Menu, Moon, Search, Settings2, Share2, Sun, UserCircle } from "lucide-react";
 import type { ComponentType } from "react";
-import { api, type CurrentUserResp, type ProjectListItem } from "../api/client";
+import { api, type CurrentUserResp } from "../api/client";
 import { useI18n, type Lang } from "../i18n";
 import type { Project } from "../api/client";
 import { InviteButton } from "../project/InviteButton";
@@ -14,8 +14,9 @@ import { visualIconComponent } from "./visualLanguageIcons";
 import { Tooltip } from "./Tooltip";
 import { canShowTelemetryNav, telemetryDebugEnabled } from "./opsAccess";
 import { paletteOpenAfterProjectSwitcherToggle, projectSwitcherOpenAfterPaletteChange } from "./overlayStack";
-import { isReaderDevSurfaceEnabled, projectRoutePrefix, projectSurfacePath } from "../readerRoutes";
+import { isReaderDevSurfaceEnabled, projectRoutePrefix } from "../readerRoutes";
 import { maskEmail } from "./profilePrivacy";
+import { ProjectSwitcher } from "./ProjectSwitcher";
 
 type Props = {
   project: Project;
@@ -32,6 +33,8 @@ type Props = {
   readerWidth: ReaderWidth;
   onChangeReaderWidth: (next: ReaderWidth) => void;
   onOpenInvite?: () => void;
+  showProjectSwitcher: boolean;
+  projectCreateAllowed: boolean;
 };
 type SurfaceId = "today" | "reader" | "inbox" | "graph" | "tasks";
 
@@ -60,6 +63,8 @@ export function TopNav({
   readerWidth,
   onChangeReaderWidth,
   onOpenInvite,
+  showProjectSwitcher,
+  projectCreateAllowed,
 }: Props) {
   const { t, lang, setLang } = useI18n();
   const location = useLocation();
@@ -111,13 +116,22 @@ export function TopNav({
         <span className="word">pindoc</span>
       </NavLink>
 
-      <ProjectSwitcher
-        project={project}
-        orgSlug={orgSlug}
-        open={projectSwitcherOpen}
-        onOpenChange={setProjectSwitcher}
-        showHiddenProjects={opsDebug}
-      />
+      {showProjectSwitcher ? (
+        <ProjectSwitcher
+          project={project}
+          orgSlug={orgSlug}
+          open={projectSwitcherOpen}
+          onOpenChange={setProjectSwitcher}
+          showHiddenProjects={opsDebug}
+          projectCreateAllowed={projectCreateAllowed}
+          placement="topnav"
+        />
+      ) : (
+        <div className="nav__project-identity" aria-label={t("nav.current_project_label")}>
+          <span className="nav__project-slug">{project.slug}</span>
+          <span className="nav__project-org">{orgSlug}</span>
+        </div>
+      )}
 
       <div className="nav__tabs">
         <NavLink to={`${baseRoute}/today`} className="nav__tab">
@@ -233,7 +247,6 @@ export function TopNav({
     </>
   );
 }
-
 function UserProfileMenu({
   project,
   orgSlug,
@@ -386,7 +399,6 @@ function UserProfileMenu({
     </div>
   );
 }
-
 function profileInitials(seed: string): string {
   const trimmed = seed.trim();
   if (!trimmed) return "?";
@@ -501,171 +513,6 @@ function HelpPopover({ surface }: { surface: SurfaceId }) {
               <span>{t("help.docs_glossary")}</span>
               <ExternalLink className="lucide" aria-hidden="true" />
             </a>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ProjectSwitcher toggles a dropdown listing every project in this instance.
-// Switching navigates to /p/<slug>/wiki of the chosen project. Creation of
-// new projects is intentionally not available here: per architecture principle
-// 1 (agent-only write surface), the user asks the agent which calls
-// pindoc.project.create. The "+ new project" row surfaces that hint.
-function ProjectSwitcher({
-  project,
-  orgSlug,
-  open,
-  onOpenChange,
-  showHiddenProjects,
-}: {
-  project: Project;
-  orgSlug: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  showHiddenProjects: boolean;
-}) {
-  const { t } = useI18n();
-  const [projects, setProjects] = useState<ProjectListItem[] | null>(null);
-  const [loadedHiddenProjects, setLoadedHiddenProjects] = useState<boolean | null>(null);
-  const ref = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open || loadedHiddenProjects === showHiddenProjects) return;
-    let cancelled = false;
-    setProjects(null);
-    (async () => {
-      try {
-        const resp = await api.projectList({ includeHidden: showHiddenProjects });
-        if (!cancelled) {
-          setProjects(resp.projects);
-          setLoadedHiddenProjects(showHiddenProjects);
-        }
-      } catch {
-        if (!cancelled) {
-          setProjects([]);
-          setLoadedHiddenProjects(showHiddenProjects);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [open, loadedHiddenProjects, showHiddenProjects]);
-
-  useEffect(() => {
-    if (!open) return;
-    function onClickAway(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        onOpenChange(false);
-      }
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onOpenChange(false);
-    }
-    window.addEventListener("mousedown", onClickAway);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onClickAway);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open, onOpenChange]);
-
-  return (
-    <div className="nav__project-wrap" ref={ref} style={{ position: "relative" }}>
-      <button
-        type="button"
-        className="nav__project"
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        onClick={() => onOpenChange(!open)}
-      >
-        <span>{project.slug}</span>
-        <span className="nav__project-org">{orgSlug}</span>
-        <ChevronDown className="lucide" />
-      </button>
-      {open && (
-        <div
-          role="listbox"
-          className="project-menu"
-          style={{
-            position: "absolute",
-            top: "calc(100% + 4px)",
-            left: 0,
-            minWidth: 240,
-            maxHeight: "min(70vh, 420px)",
-            overflowY: "auto",
-            background: "var(--bg-1)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--r-2)",
-            boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
-            zIndex: 40,
-            padding: 4,
-          }}
-        >
-          {projects === null && (
-            <div style={{ padding: "8px 10px", fontSize: 12, color: "var(--fg-3)" }}>
-              {t("wiki.loading")}
-            </div>
-          )}
-          {projects?.map((p) => (
-            <a
-              key={p.id}
-              href={projectSurfacePath(p.slug, "wiki", undefined, p.organization_slug ?? orgSlug)}
-              role="option"
-              aria-selected={p.slug === project.slug}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "8px 10px",
-                borderRadius: "var(--r-1)",
-                textDecoration: "none",
-                color: "var(--fg-0)",
-                background:
-                  p.slug === project.slug
-                    ? "color-mix(in oklch, var(--accent) 10%, transparent)"
-                    : "transparent",
-              }}
-            >
-              <span
-                aria-hidden
-                style={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: 2,
-                  background: p.color || "var(--accent)",
-                  flexShrink: 0,
-                }}
-              />
-              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {p.name}
-              </span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-3)" }}>
-                {p.slug}
-              </span>
-            </a>
-          ))}
-          {projects && projects.length === 0 && (
-            <div style={{ padding: "8px 10px", fontSize: 12, color: "var(--fg-3)" }}>
-              {t("nav.no_other_projects")}
-            </div>
-          )}
-          <div
-            style={{
-              borderTop: "1px solid var(--border)",
-              marginTop: 4,
-              padding: "8px 10px",
-              fontSize: 11,
-              color: "var(--fg-3)",
-              lineHeight: 1.45,
-            }}
-          >
-            <div style={{ color: "var(--fg-2)", marginBottom: 2 }}>
-              {t("nav.new_project_hint_title")}
-            </div>
-            {t("nav.new_project_hint_body")}
           </div>
         </div>
       )}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, ChevronDown, ChevronRight, FolderOpen, LayoutTemplate } from "lucide-react";
-import { api, type Area, type ArtifactReadState, type ArtifactRef } from "../api/client";
+import { api, type Area, type ArtifactReadState, type ArtifactRef, type Project } from "../api/client";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
 import { compareAreas, isFixedTaxonomyArea, localizedAreaName } from "./areaLocale";
@@ -10,8 +10,10 @@ import { visualIconComponent } from "./visualLanguageIcons";
 import { Tooltip } from "./Tooltip";
 import { sidebarAgentRows } from "./readerInternalVisibility";
 import { buildAreaUnreadOwnCounts, subtreeUnreadCount } from "./sidebarUnread";
+import { ProjectSwitcher } from "./ProjectSwitcher";
 
 type Props = {
+  project: Project;
   projectSlug: string;
   orgSlug: string;
   artifacts: ArtifactRef[];
@@ -31,6 +33,8 @@ type Props = {
   showTemplates: boolean;
   onToggleTemplates: () => void;
   showInternalAgents?: boolean;
+  showProjectSwitcher: boolean;
+  projectCreateAllowed: boolean;
 };
 
 // AreaNode is the tree-enriched Area: same fields + resolved children.
@@ -79,6 +83,7 @@ function containsSelected(node: AreaNode, selectedArea: string | null): boolean 
 }
 
 export function Sidebar({
+  project,
   projectSlug,
   orgSlug,
   artifacts,
@@ -94,9 +99,12 @@ export function Sidebar({
   showTemplates,
   onToggleTemplates,
   showInternalAgents = false,
+  showProjectSwitcher,
+  projectCreateAllowed,
 }: Props) {
   const { t, lang } = useI18n();
   const [readStates, setReadStates] = useState<ArtifactReadState[] | null>(null);
+  const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -128,6 +136,22 @@ export function Sidebar({
         <span className="sidebar-scope__label">{t("sidebar.scope_label")}</span>
         <span className="sidebar-scope__path">/{orgSlug}/p/{projectSlug}</span>
       </div>
+      {showProjectSwitcher ? (
+        <ProjectSwitcher
+          project={project}
+          orgSlug={orgSlug}
+          open={projectSwitcherOpen}
+          onOpenChange={setProjectSwitcherOpen}
+          showHiddenProjects={showInternalAgents}
+          projectCreateAllowed={projectCreateAllowed}
+          placement="sidebar"
+        />
+      ) : projectCreateAllowed ? (
+        <a className="sidebar-project-create" href="/projects/new?welcome=1">
+          <span className="sidebar-project-create__title">{t("nav.new_project_hint_title")}</span>
+          <span className="sidebar-project-create__body">{t("nav.new_project_hint_body")}</span>
+        </a>
+      ) : null}
       <div className="side-section">{t("wiki.section_areas")}</div>
       <button
         type="button"

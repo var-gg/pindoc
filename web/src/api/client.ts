@@ -12,7 +12,13 @@ export type ServerConfig = {
   // Compatibility alias for the default project's primary_language.
   // Canonical Reader URLs no longer carry locale.
   default_project_locale?: string;
+  // multi_project is a one-cycle compatibility alias. New UI code should
+  // consume the split capabilities below so switching and creation can be
+  // gated independently.
   multi_project: boolean;
+  multi_project_deprecated?: string;
+  multi_project_switching: boolean;
+  project_create_allowed: boolean;
   version: string;
   // providers + bind_addr replace the deprecated auth_mode enum
   // (Decision `decision-auth-model-loopback-and-providers`). Empty
@@ -120,6 +126,8 @@ export type ProjectListResp = {
   projects: ProjectListItem[];
   default_project_slug: string;
   multi_project: boolean;
+  multi_project_switching?: boolean;
+  project_create_allowed?: boolean;
 };
 
 export type ProjectListOptions = {
