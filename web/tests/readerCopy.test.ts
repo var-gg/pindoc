@@ -1,5 +1,5 @@
-import ko = require("../src/i18n/ko.json");
-import en = require("../src/i18n/en.json");
+import ko from "../src/i18n/ko.json";
+import en from "../src/i18n/en.json";
 import {
   fieldForProjectCreateError,
   isProjectCreateSubmitDisabled,

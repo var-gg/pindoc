@@ -4,8 +4,8 @@ import {
   cmdkRelevantHits,
   cmdkResultMeta,
 } from "../src/reader/cmdkViewModel";
-import ko = require("../src/i18n/ko.json");
-import en = require("../src/i18n/en.json");
+import ko from "../src/i18n/ko.json";
+import en from "../src/i18n/en.json";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
