@@ -10,11 +10,18 @@
 // fresh install can land directly here from the onboarding wizard (T4)
 // without depending on the Reader's project-scoped chrome being usable
 // yet.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Check, Copy, Loader2 } from "lucide-react";
 import { api, type CreateProjectResp } from "../api/client";
 import { useI18n } from "../i18n";
+import {
+  fieldForProjectCreateError,
+  isProjectCreateSubmitDisabled,
+  PROJECT_SLUG_HTML_PATTERN,
+  projectCreateErrorMessage,
+  validateProjectSlugInput,
+} from "./projectSlugPolicy";
 import "../styles/reader.css";
 
 type Lang = "en" | "ko" | "ja";
@@ -45,15 +52,49 @@ export function CreateProjectPage() {
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [created, setCreated] = useState<CreateProjectResp | null>(null);
   const [copied, setCopied] = useState(false);
+  const slugRef = useRef<HTMLInputElement | null>(null);
+  const nameRef = useRef<HTMLInputElement | null>(null);
+  const languageRef = useRef<HTMLInputElement | null>(null);
 
   // Reset the "copied" flash when the user navigates back to the form.
   useEffect(() => {
     if (!created) setCopied(false);
   }, [created]);
 
+  useEffect(() => {
+    const field = fieldForProjectCreateError(errorCode);
+    if (!field) return;
+    const target =
+      field === "slug"
+        ? slugRef.current
+        : field === "name"
+          ? nameRef.current
+          : languageRef.current;
+    target?.focus();
+  }, [errorCode]);
+
+  const serverErrorField = fieldForProjectCreateError(errorCode);
+  const serverErrorMessage = errorCode ? projectCreateErrorMessage(t, errorCode) : null;
+  const slugClientErrorCode = validateProjectSlugInput(slug);
+  const slugError =
+    slugClientErrorCode
+      ? projectCreateErrorMessage(t, slugClientErrorCode)
+      : serverErrorField === "slug"
+        ? serverErrorMessage
+        : null;
+  const nameError = serverErrorField === "name" ? serverErrorMessage : null;
+  const languageError = serverErrorField === "language" ? serverErrorMessage : null;
+  const formError = errorCode && !serverErrorField ? serverErrorMessage : null;
+  const submitDisabled = isProjectCreateSubmitDisabled({
+    slug,
+    name,
+    primaryLanguage,
+    submitting,
+  });
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (submitting) return;
+    if (submitDisabled) return;
     setErrorCode(null);
     setSubmitting(true);
     try {
@@ -96,8 +137,6 @@ export function CreateProjectPage() {
     );
   }
 
-  const errorKey = errorCode ? `new_project.error.${errorCode}` : null;
-
   return (
     <div className="cp-page">
       {isWelcome && (
@@ -112,54 +151,94 @@ export function CreateProjectPage() {
         <p className="cp-subtitle">{t("new_project.subtitle")}</p>
       </header>
 
-      <form className="cp-form" onSubmit={handleSubmit} noValidate>
+      <form className="cp-form" onSubmit={handleSubmit}>
         <label className="cp-field">
           <span className="cp-field__label">{t("new_project.field.slug")}</span>
           <input
+            ref={slugRef}
             type="text"
             className="cp-field__input"
             value={slug}
-            onChange={(e) => setSlug(e.target.value)}
+            onChange={(e) => {
+              setSlug(e.target.value);
+              setErrorCode(null);
+            }}
             placeholder={t("new_project.field.slug.placeholder")}
+            pattern={PROJECT_SLUG_HTML_PATTERN}
+            minLength={2}
+            maxLength={40}
+            aria-invalid={slugError ? true : undefined}
+            aria-describedby={slugError ? "new-project-slug-error" : "new-project-slug-hint"}
             autoFocus
             required
           />
-          <span className="cp-field__hint">{t("new_project.field.slug.hint")}</span>
+          <span id="new-project-slug-hint" className="cp-field__hint">
+            {t("new_project.field.slug.hint")}
+          </span>
+          {slugError && (
+            <span id="new-project-slug-error" className="cp-field__error">
+              {slugError}
+            </span>
+          )}
         </label>
 
         <label className="cp-field">
           <span className="cp-field__label">{t("new_project.field.name")}</span>
           <input
+            ref={nameRef}
             type="text"
             className="cp-field__input"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              setName(e.target.value);
+              setErrorCode(null);
+            }}
             placeholder={t("new_project.field.name.placeholder")}
+            aria-invalid={nameError ? true : undefined}
+            aria-describedby={nameError ? "new-project-name-error" : undefined}
             required
           />
+          {nameError && (
+            <span id="new-project-name-error" className="cp-field__error">
+              {nameError}
+            </span>
+          )}
         </label>
 
-        <fieldset className="cp-field">
+        <fieldset
+          className="cp-field"
+          aria-invalid={languageError ? true : undefined}
+          aria-describedby={languageError ? "new-project-language-error new-project-language-hint" : "new-project-language-hint"}
+        >
           <legend className="cp-field__label">
             {t("new_project.field.language")}
           </legend>
-          <div className="cp-radio-group">
+          <div className="cp-radio-group" aria-invalid={languageError ? true : undefined}>
             {(["en", "ko", "ja"] as const).map((l) => (
               <label key={l} className="cp-radio">
                 <input
+                  ref={l === "en" ? languageRef : undefined}
                   type="radio"
                   name="primary_language"
                   value={l}
                   checked={primaryLanguage === l}
-                  onChange={() => setPrimaryLanguage(l)}
+                  onChange={() => {
+                    setPrimaryLanguage(l);
+                    setErrorCode(null);
+                  }}
                 />
                 <span>{l.toUpperCase()}</span>
               </label>
             ))}
           </div>
-          <span className="cp-field__hint">
+          <span id="new-project-language-hint" className="cp-field__hint">
             {t("new_project.field.language.hint")}
           </span>
+          {languageError && (
+            <span id="new-project-language-error" className="cp-field__error">
+              {languageError}
+            </span>
+          )}
         </fieldset>
 
         <label className="cp-field">
@@ -174,20 +253,23 @@ export function CreateProjectPage() {
             type="text"
             className="cp-field__input"
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => {
+              setDescription(e.target.value);
+              setErrorCode(null);
+            }}
             placeholder={t("new_project.field.description.placeholder")}
             maxLength={200}
           />
         </label>
 
-        {errorKey && (
+        {formError && (
           <div role="alert" className="cp-error">
-            <strong>[{errorCode}]</strong> {t(errorKey)}
+            {formError}
           </div>
         )}
 
         <div className="cp-actions">
-          <button type="submit" className="cp-submit" disabled={submitting}>
+          <button type="submit" className="cp-submit" disabled={submitDisabled}>
             {submitting && (
               <Loader2 className="lucide cp-spinner" aria-hidden />
             )}

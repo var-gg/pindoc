@@ -1,5 +1,11 @@
 import ko = require("../src/i18n/ko.json");
 import en = require("../src/i18n/en.json");
+import {
+  fieldForProjectCreateError,
+  isProjectCreateSubmitDisabled,
+  projectCreateErrorMessage,
+  validateProjectSlugInput,
+} from "../src/reader/projectSlugPolicy";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -132,7 +138,88 @@ function testCmdKCopyDoesNotAdvertiseMissingCommands(): void {
   }
 }
 
+function tFrom(copy: Record<string, string>) {
+  return (key: string, ...args: Array<string | number>): string => {
+    let value = copy[key] ?? key;
+    for (const arg of args) {
+      value = value.replace(/%[sd]/, String(arg));
+    }
+    return value;
+  };
+}
+
+function testCreateProjectErrorsHideRawCodes(): void {
+  const codes = [
+    "SLUG_INVALID",
+    "SLUG_RESERVED",
+    "SLUG_TAKEN",
+    "NAME_REQUIRED",
+    "LANG_REQUIRED",
+    "LANG_INVALID",
+    "GIT_REMOTE_URL_INVALID",
+    "BAD_JSON",
+    "INTERNAL_ERROR",
+    "UNKNOWN",
+  ];
+
+  for (const copy of [ko, en]) {
+    const t = tFrom(copy as Record<string, string>);
+    for (const code of codes) {
+      const message = projectCreateErrorMessage(t, code);
+      assert(!message.includes(`[${code}]`), `create-project message should not include bracketed code ${code}`);
+      assert(!message.includes(code), `create-project message should not include raw code ${code}`);
+    }
+  }
+}
+
+function testCreateProjectErrorFieldMapping(): void {
+  assertEqual(fieldForProjectCreateError("SLUG_INVALID"), "slug", "SLUG_INVALID should map to slug");
+  assertEqual(fieldForProjectCreateError("SLUG_RESERVED"), "slug", "SLUG_RESERVED should map to slug");
+  assertEqual(fieldForProjectCreateError("SLUG_TAKEN"), "slug", "SLUG_TAKEN should map to slug");
+  assertEqual(fieldForProjectCreateError("NAME_REQUIRED"), "name", "NAME_REQUIRED should map to name");
+  assertEqual(fieldForProjectCreateError("LANG_REQUIRED"), "language", "LANG_REQUIRED should map to language");
+  assertEqual(fieldForProjectCreateError("LANG_INVALID"), "language", "LANG_INVALID should map to language");
+  assertEqual(fieldForProjectCreateError("INTERNAL_ERROR"), null, "INTERNAL_ERROR should stay form-level");
+}
+
+function testCreateProjectSlugClientValidation(): void {
+  for (const raw of ["테스트", "1abc", "Test", "a", "a".repeat(41), "foo_bar"]) {
+    assertEqual(validateProjectSlugInput(raw), "SLUG_INVALID", `${raw} should fail shape validation`);
+  }
+  for (const raw of ["admin", "api", "wiki", "new"]) {
+    assertEqual(validateProjectSlugInput(raw), "SLUG_RESERVED", `${raw} should fail reserved validation`);
+  }
+  assertEqual(validateProjectSlugInput("var-gg-test"), null, "valid project slug should pass client validation");
+}
+
+function testCreateProjectSubmitDisabledState(): void {
+  assert(
+    isProjectCreateSubmitDisabled({ slug: "", name: "Var GG", primaryLanguage: "ko", submitting: false }),
+    "empty slug should disable submit",
+  );
+  assert(
+    isProjectCreateSubmitDisabled({ slug: "var-gg", name: "", primaryLanguage: "ko", submitting: false }),
+    "empty name should disable submit",
+  );
+  assert(
+    isProjectCreateSubmitDisabled({ slug: "admin", name: "Admin", primaryLanguage: "ko", submitting: false }),
+    "reserved slug should disable submit",
+  );
+  assert(
+    isProjectCreateSubmitDisabled({ slug: "var-gg", name: "Var GG", primaryLanguage: "ko", submitting: true }),
+    "submitting state should disable submit",
+  );
+  assert(
+    !isProjectCreateSubmitDisabled({ slug: "var-gg", name: "Var GG", primaryLanguage: "ko", submitting: false }),
+    "valid form should enable submit",
+  );
+}
+
 testKoreanReaderMetaCopySnapshot();
 testKoreanReaderChromeCopyHidesRawEnglishLabels();
 testEnglishNavLabelsUseTitleCase();
 testCmdKCopyDoesNotAdvertiseMissingCommands();
+testCreateProjectErrorsHideRawCodes();
+testCreateProjectErrorFieldMapping();
+testCreateProjectSlugClientValidation();
+testCreateProjectSubmitDisabledState();
