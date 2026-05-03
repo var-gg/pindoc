@@ -11,8 +11,7 @@
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/var-gg/pindoc",
-      "version": "0.1.0",
+      "identifier": "ghcr.io/var-gg/pindoc:0.1.0",
       "transport": {
         "type": "streamable-http",
         "url": "http://127.0.0.1:5830/mcp"

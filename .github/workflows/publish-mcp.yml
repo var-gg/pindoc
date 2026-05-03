@@ -52,7 +52,9 @@ jobs:
       - name: Sync release version into server.json
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
-          jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > server.tmp
+          jq --arg v "$VERSION" --arg img "ghcr.io/var-gg/pindoc" \
+             '.version = $v | .packages[0].identifier = ($img + ":" + $v)' \
+             server.json > server.tmp
           mv server.tmp server.json
 
       - name: Authenticate to MCP Registry
