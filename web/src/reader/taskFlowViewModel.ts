@@ -20,6 +20,19 @@ export type TaskFlowSummary = {
   projects: number;
 };
 
+export type TaskCardKeyAction = "open" | "select" | null;
+
+export function taskCardKeyAction(
+  key: string,
+  shiftKey: boolean,
+  nestedInteractiveTarget: boolean,
+): TaskCardKeyAction {
+  if (nestedInteractiveTarget) return null;
+  if (key.toLowerCase() === "o" || (key === "Enter" && shiftKey)) return "open";
+  if (key === "Enter" || key === " ") return "select";
+  return null;
+}
+
 export function taskFlowSummary(rows: TaskFlowRow[]): TaskFlowSummary {
   const projects = new Set<string>();
   let ready = 0;

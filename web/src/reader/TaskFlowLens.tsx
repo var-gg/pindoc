@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { Bot, CalendarClock, GitBranch, Layers3, ListTree, PanelRightOpen, UserRound, X } from "lucide-react";
 import {
   api,
@@ -19,6 +19,7 @@ import { formatDate } from "../utils/formatDateTime";
 import {
   TASK_FLOW_STAGES,
   groupTaskFlowByProject,
+  taskCardKeyAction,
   taskFlowRowsForCurrentFilter,
   taskFlowSummary,
 } from "./taskFlowViewModel";
@@ -60,6 +61,8 @@ type TaskFlowLane = {
   rows: TaskFlowRow[];
   tone: TaskFlowRow["stage"];
 };
+
+const TASK_FLOW_CARD_NESTED_CONTROL_SELECTOR = "a, button, input, textarea, select, [contenteditable='true']";
 
 export function TaskFlowLens({
   projectSlug,
@@ -494,6 +497,7 @@ function TaskFlowRowCard({
   onSelectTask: (slug: string) => void;
 }) {
   const { t, lang } = useI18n();
+  const navigate = useNavigate();
   const isLocal = row.project_slug === projectSlug;
   const selected = isLocal && (currentSlug === row.slug || selectedTaskSlug === row.slug);
   const priorityClass = row.priority ? `prio prio--${row.priority}` : "";
@@ -514,15 +518,25 @@ function TaskFlowRowCard({
       onClick={(e) => {
         if (!isLocal) return;
         const target = e.target as HTMLElement | null;
-        if (target?.closest("a, button, input, select")) return;
+        if (target?.closest(TASK_FLOW_CARD_NESTED_CONTROL_SELECTOR)) return;
         onSelectTask(row.slug);
       }}
       onKeyDown={(e) => {
-        if (!isLocal || (e.key !== "Enter" && e.key !== " ")) return;
         const target = e.target as HTMLElement | null;
-        if (target?.closest("a, button, input, select")) return;
-        e.preventDefault();
-        onSelectTask(row.slug);
+        const action = taskCardKeyAction(
+          e.key,
+          e.shiftKey,
+          Boolean(target?.closest(TASK_FLOW_CARD_NESTED_CONTROL_SELECTOR)),
+        );
+        if (action === "open") {
+          e.preventDefault();
+          navigate(href);
+          return;
+        }
+        if (action === "select" && isLocal) {
+          e.preventDefault();
+          onSelectTask(row.slug);
+        }
       }}
     >
       <div className="task-flow-card__body">

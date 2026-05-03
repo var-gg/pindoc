@@ -48,6 +48,7 @@ import {
   visibleTaskGroups,
   type TaskBoardSummary,
 } from "./taskBoardViewModel";
+import { taskCardKeyAction } from "./taskFlowViewModel";
 import {
   appendBadgeFilters,
   artifactMatchesBadgeFilters,
@@ -62,6 +63,8 @@ import {
 import "../styles/reader.css";
 
 export type ReaderView = "reader" | "inbox" | "graph" | "tasks" | "today";
+
+const TASK_CARD_NESTED_CONTROL_SELECTOR = "a, button, input, textarea, select, [contenteditable='true']";
 
 // surfaceAllows decides which artifacts a Surface's natural set contains
 // (Decision `decision-reader-ia-hierarchy`). Wiki = everything except Task;
@@ -1766,14 +1769,25 @@ function TaskCard({
       data-task-card-slug={a.slug}
       aria-selected={selected}
       className={`task-card${selected ? " is-active" : ""}`}
-      onClick={() => onSelect(a.slug)}
+      onClick={(e) => {
+        const target = e.target as HTMLElement | null;
+        if (target?.closest(TASK_CARD_NESTED_CONTROL_SELECTOR)) return;
+        onSelect(a.slug);
+      }}
       onDoubleClick={() => navigate(detailHref)}
       onKeyDown={(e) => {
-        if (e.key === "Enter") {
+        const target = e.target as HTMLElement | null;
+        const action = taskCardKeyAction(
+          e.key,
+          e.shiftKey,
+          Boolean(target?.closest(TASK_CARD_NESTED_CONTROL_SELECTOR)),
+        );
+        if (action === "open") {
           e.preventDefault();
           navigate(detailHref);
+          return;
         }
-        if (e.key === " ") {
+        if (action === "select") {
           e.preventDefault();
           onSelect(a.slug);
         }

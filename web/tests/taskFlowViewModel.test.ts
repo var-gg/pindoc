@@ -2,6 +2,7 @@ import type { TaskFlowRow } from "../src/api/client";
 import {
   groupTaskFlowByProject,
   groupTaskFlowByStage,
+  taskCardKeyAction,
   taskFlowRowsForCurrentFilter,
   taskFlowSummary,
 } from "../src/reader/taskFlowViewModel";
@@ -81,6 +82,26 @@ function testCurrentScopeFilterUsesCurrentProjectVisibleSetOnly(): void {
   );
 }
 
+function testTaskFlowCardKeyboardOpenParity(): void {
+  assertEqual(taskCardKeyAction("Enter", true, false), "open", "Shift+Enter opens detail");
+  assertEqual(taskCardKeyAction("o", false, false), "open", "o opens detail");
+  assertEqual(taskCardKeyAction("O", false, false), "open", "O opens detail");
+}
+
+function testTaskFlowCardKeyboardSelectParity(): void {
+  assertEqual(taskCardKeyAction("Enter", false, false), "select", "Enter selects preview");
+  assertEqual(taskCardKeyAction(" ", false, false), "select", "Space selects preview");
+}
+
+function testTaskFlowCardKeyboardIgnoresNestedControls(): void {
+  assertEqual(taskCardKeyAction("Enter", true, true), null, "nested link Shift+Enter is not intercepted");
+  assertEqual(taskCardKeyAction("o", false, true), null, "nested control O is not intercepted");
+  assertEqual(taskCardKeyAction(" ", false, true), null, "nested control Space is not intercepted");
+}
+
 testStageGroupingPreservesServerSequence();
 testProjectGroupingAndSummary();
 testCurrentScopeFilterUsesCurrentProjectVisibleSetOnly();
+testTaskFlowCardKeyboardOpenParity();
+testTaskFlowCardKeyboardSelectParity();
+testTaskFlowCardKeyboardIgnoresNestedControls();
