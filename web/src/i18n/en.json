@@ -158,6 +158,8 @@
   "surface.name.commit": "commit",
   "surface.name.settings": "settings",
   "surface.name.surface": "surface",
+  "surface.name.history": "History",
+  "surface.name.diff": "Diff",
   "surface.not_found": "\"%s\" is not available in this instance. Continue from Today.",
   "surface.return_today": "Back to Today",
   "surface.unavailable_sidecar": "This surface is not available in this instance.",
@@ -527,7 +529,7 @@
   "shortcuts.symbol_filter.label": "Filter chip",
   "shortcuts.symbol_filter.hint": "Badge filter applied to the current list/board.",
 
-  "history.title": "history",
+  "history.title": "History",
   "history.count": "%s revisions",
   "history.no_commit_msg": "(no commit message)",
   "history.diff_prev": "diff vs previous",

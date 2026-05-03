@@ -78,9 +78,10 @@ type Props = {
   view: ReaderView;
   unavailableSurface?: string;
   orgSlug?: string;
+  children?: ReactNode;
 };
 
-export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER_ORG_SLUG }: Props) {
+export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER_ORG_SLUG, children }: Props) {
   const { project = "", slug } = useParams<{ project: string; slug?: string }>();
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -660,38 +661,40 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
           onToggleTemplates={() => setShowTemplates((v) => !v)}
           showInternalAgents={opsDebug}
         />
-        <Body
-          view={view}
-          projectSlug={project}
-          orgSlug={orgSlug}
-          detail={detail}
-          list={filteredArtifacts}
-          allList={surfaceList}
-          currentSlug={slug}
-          selectedArea={selectedArea}
-          selectedType={selectedType}
-          badgeFilters={badgeFilters}
-          selectedInspectorSlug={view === "today" ? todayInspectorSlug : wikiInspectorSlug}
-          onSelectInspectorArtifact={view === "today" ? setTodayInspectorSlug : setWikiInspectorSlug}
-          areaNameBySlug={areaNameBySlug}
-          areaPathBySlug={areaPathBySlug}
-          keyboardDisabled={paletteOpen || shortcutsOpen}
-          selectedTaskSlug={taskInspectorSlug}
-          onSelectTask={setTaskInspectorSlug}
-          onClearAreaFilter={clearAreaFilter}
-          onClearTypeFilter={clearTypeFilter}
-          onClearBadgeFilter={clearBadgeFilter}
-          onClearFilters={clearFilters}
-          onApplyBadgeFilter={applyBadgeFilter}
-          onApplyAreaFilter={applyAreaFilterFromBadge}
-          onArtifactUpdated={reload}
-          onSelectArea={handleSelectArea}
-          onInboxCountChange={setInboxCount}
-          reviewQueueEnabled={reviewQueueEnabled}
-          graphFocusSlug={graphFocusSlug}
-          onGraphFocusChange={handleGraphFocusChange}
-          unavailableSurface={unavailableSurface}
-        />
+        {children ?? (
+          <Body
+            view={view}
+            projectSlug={project}
+            orgSlug={orgSlug}
+            detail={detail}
+            list={filteredArtifacts}
+            allList={surfaceList}
+            currentSlug={slug}
+            selectedArea={selectedArea}
+            selectedType={selectedType}
+            badgeFilters={badgeFilters}
+            selectedInspectorSlug={view === "today" ? todayInspectorSlug : wikiInspectorSlug}
+            onSelectInspectorArtifact={view === "today" ? setTodayInspectorSlug : setWikiInspectorSlug}
+            areaNameBySlug={areaNameBySlug}
+            areaPathBySlug={areaPathBySlug}
+            keyboardDisabled={paletteOpen || shortcutsOpen}
+            selectedTaskSlug={taskInspectorSlug}
+            onSelectTask={setTaskInspectorSlug}
+            onClearAreaFilter={clearAreaFilter}
+            onClearTypeFilter={clearTypeFilter}
+            onClearBadgeFilter={clearBadgeFilter}
+            onClearFilters={clearFilters}
+            onApplyBadgeFilter={applyBadgeFilter}
+            onApplyAreaFilter={applyAreaFilterFromBadge}
+            onArtifactUpdated={reload}
+            onSelectArea={handleSelectArea}
+            onInboxCountChange={setInboxCount}
+            reviewQueueEnabled={reviewQueueEnabled}
+            graphFocusSlug={graphFocusSlug}
+            onGraphFocusChange={handleGraphFocusChange}
+            unavailableSurface={unavailableSurface}
+          />
+        )}
         <Sidecar
           projectSlug={project}
           orgSlug={orgSlug}

@@ -158,6 +158,8 @@
   "surface.name.commit": "커밋",
   "surface.name.settings": "설정",
   "surface.name.surface": "화면",
+  "surface.name.history": "수정 이력",
+  "surface.name.diff": "차이",
   "surface.not_found": "\"%s\" 화면은 현재 사용할 수 없습니다. Today에서 계속 탐색하세요.",
   "surface.return_today": "Today로 돌아가기",
   "surface.unavailable_sidecar": "이 화면은 현재 사용할 수 없습니다.",
@@ -527,7 +529,7 @@
   "shortcuts.symbol_filter.label": "Filter chip",
   "shortcuts.symbol_filter.hint": "현재 list/board에 적용된 badge filter.",
 
-  "history.title": "history",
+  "history.title": "수정 이력",
   "history.count": "리비전 %s개",
   "history.no_commit_msg": "(커밋 메시지 없음)",
   "history.diff_prev": "이전과 비교",

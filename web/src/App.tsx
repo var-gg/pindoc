@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation, useParams } from "react-router";
 import { api } from "./api/client";
 import { ProvidersPanel } from "./admin/ProvidersPanel";
@@ -36,8 +36,14 @@ export function App() {
       <Route path="/:org/p/:project/today" element={<ReaderRoute view="today" />} />
       <Route path="/:org/p/:project/wiki" element={<ReaderRoute view="reader" />} />
       <Route path="/:org/p/:project/wiki/:slug" element={<ReaderRoute view="reader" />} />
-      <Route path="/:org/p/:project/wiki/:slug/history" element={<History />} />
-      <Route path="/:org/p/:project/wiki/:slug/diff" element={<Diff />} />
+      <Route
+        path="/:org/p/:project/wiki/:slug/history"
+        element={<ReaderRoute view="reader"><History /></ReaderRoute>}
+      />
+      <Route
+        path="/:org/p/:project/wiki/:slug/diff"
+        element={<ReaderRoute view="reader"><Diff /></ReaderRoute>}
+      />
       <Route path="/:org/p/:project/task" element={<ProjectSurfaceRedirect segment="task" />} />
       <Route path="/:org/p/:project/task/:slug" element={<ProjectSurfaceRedirect segment="task" />} />
       <Route path="/:org/p/:project/tasks" element={<ReaderRoute view="tasks" />} />
@@ -52,8 +58,14 @@ export function App() {
       <Route path="/p/:project/today" element={<ReaderRoute view="today" />} />
       <Route path="/p/:project/wiki" element={<ReaderRoute view="reader" />} />
       <Route path="/p/:project/wiki/:slug" element={<ReaderRoute view="reader" />} />
-      <Route path="/p/:project/wiki/:slug/history" element={<History />} />
-      <Route path="/p/:project/wiki/:slug/diff" element={<Diff />} />
+      <Route
+        path="/p/:project/wiki/:slug/history"
+        element={<ReaderRoute view="reader"><History /></ReaderRoute>}
+      />
+      <Route
+        path="/p/:project/wiki/:slug/diff"
+        element={<ReaderRoute view="reader"><Diff /></ReaderRoute>}
+      />
       <Route path="/p/:project/task" element={<ProjectSurfaceRedirect segment="task" />} />
       <Route path="/p/:project/task/:slug" element={<ProjectSurfaceRedirect segment="task" />} />
       <Route path="/p/:project/tasks" element={<ReaderRoute view="tasks" />} />
@@ -163,7 +175,7 @@ function ProjectSurfaceNotFound({ surfaceOverride }: { surfaceOverride?: string 
   return <ReaderRoute view="reader" unavailableSurface={surfaceOverride ?? surface} />;
 }
 
-function ReaderRoute(props: { view: ReaderView; unavailableSurface?: string }) {
+function ReaderRoute(props: { view: ReaderView; unavailableSurface?: string; children?: ReactNode }) {
   const { org } = useParams<{ org?: string }>();
   return <ReaderShell {...props} orgSlug={org ?? DEFAULT_READER_ORG_SLUG} />;
 }
