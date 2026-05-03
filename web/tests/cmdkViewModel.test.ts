@@ -1,6 +1,7 @@
 import type { SearchHit } from "../src/api/client";
 import {
   CMDK_RELEVANCE_SETTINGS,
+  cmdkCommitRows,
   cmdkEmptyCopyKey,
   cmdkNextIndex,
   cmdkOptionId,
@@ -161,6 +162,32 @@ function testCmdKSectionsSeparateCommitsAndArtifacts(): void {
   assertEqual(cmdkOptionId(3), "cmdk-option-3", "stable option id");
 }
 
+function testCmdKCommitRowsUseEveryMatchingRepo(): void {
+  const rows = cmdkCommitRows([
+    {
+      repo: { id: "frontend", name: "frontend", default_branch: "main" },
+      available: true,
+      commit: "abcdef1234567890",
+      summary: "front fix",
+    },
+    {
+      repo: { id: "backend", name: "backend", default_branch: "main" },
+      available: true,
+      commit: "abcdef9999999999",
+      summary: "back fix",
+    },
+    {
+      repo: { id: "docs", name: "docs", default_branch: "main" },
+      available: false,
+    },
+  ], "abcdef1");
+
+  assertEqual(rows.length, 2, "only matching repos should produce commit rows");
+  assertEqual(rows.map((row) => row.repo.id).join(","), "frontend,backend", "matching repos should keep individual rows");
+  assertEqual(rows.map((row) => row.sha).join(","), "abcdef1234567890,abcdef9999999999", "commit rows should use resolved SHAs");
+  assertEqual(cmdkCommitRows([{ repo: { id: "docs" }, available: false }], "abcdef1").length, 0, "no repo match should hide the commit candidate");
+}
+
 testCmdKMetaHidesRawDistance();
 testCmdKMetaDoesNotDependOnDistanceForDisplay();
 testCmdKMetaShowsSectionContextWhenAvailable();
@@ -174,3 +201,4 @@ testCmdKEmptyCopyUsesTrimmedQuery();
 testCmdKKeyboardJumpNavigation();
 testCmdKFocusTrapTargets();
 testCmdKSectionsSeparateCommitsAndArtifacts();
+testCmdKCommitRowsUseEveryMatchingRepo();

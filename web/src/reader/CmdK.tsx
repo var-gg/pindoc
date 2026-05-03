@@ -5,6 +5,7 @@ import { api, type GitRepoSummary, type SearchHit } from "../api/client";
 import { useI18n } from "../i18n";
 import { gitCommitPath, isCommitQuery, shortSha } from "../git/routes";
 import {
+  cmdkCommitRows,
   cmdkEmptyCopyKey,
   cmdkNextIndex,
   cmdkOptionId,
@@ -116,22 +117,21 @@ export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
     }
     let cancelled = false;
     setCommitItems([]);
-    Promise.all(repos.map(async (repo): Promise<CmdKCommitItem | null> => {
+    Promise.all(repos.map(async (repo) => {
       try {
         const resp = await api.gitCommit(projectSlug, repo.id, q);
-        if (!resp.git_preview.available) return null;
         return {
-          kind: "commit",
           repo,
-          sha: resp.commit || q,
+          available: resp.git_preview.available,
+          commit: resp.commit,
           summary: resp.commit_info?.summary,
         };
       } catch {
-        return null;
+        return { repo, available: false };
       }
     })).then((rows) => {
       if (cancelled) return;
-      setCommitItems(rows.filter((item): item is CmdKCommitItem => Boolean(item)));
+      setCommitItems(cmdkCommitRows(rows, q));
       setSelected(0);
     });
     return () => {

@@ -16,6 +16,13 @@ export type CmdKSection<T extends { kind: CmdKItemKind }> = {
 
 export type CmdKFocusTarget = "input" | number;
 
+export type CmdKCommitLookup<TRepo> = {
+  repo: TRepo;
+  available: boolean;
+  commit?: string;
+  summary?: string;
+};
+
 export const CMDK_RELEVANCE_SETTINGS = {
   maxDistance: 0.7,
 } as const;
@@ -106,6 +113,20 @@ export function cmdkTrapTabTarget(
   if (shiftKey && current === "input") return optionCount - 1;
   if (!shiftKey && current === optionCount - 1) return "input";
   return null;
+}
+
+export function cmdkCommitRows<TRepo>(
+  lookups: Array<CmdKCommitLookup<TRepo>>,
+  query: string,
+): Array<{ kind: "commit"; repo: TRepo; sha: string; summary?: string }> {
+  return lookups
+    .filter((lookup) => lookup.available)
+    .map((lookup) => ({
+      kind: "commit",
+      repo: lookup.repo,
+      sha: lookup.commit || query,
+      summary: lookup.summary,
+    }));
 }
 
 function cmdkLifecycleLabel(hit: SearchHit, t: TFn): string | null {
