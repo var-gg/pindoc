@@ -44,6 +44,55 @@ type Status =
   | { kind: "ready"; members: MemberRow[]; invites: ActiveInviteRow[]; viewerRole: string; viewerId?: string }
   | { kind: "error"; message: string };
 
+type MemberRemoveOptions = {
+  confirmLeave?: boolean;
+};
+
+export type MemberActionState = {
+  isSelf: boolean;
+  canRemove: boolean;
+  isLastOwnerSelfLeave: boolean;
+  requiresConfirm: boolean;
+};
+
+export function getMemberActionState({
+  member,
+  members,
+  viewerRole,
+  viewerId,
+}: {
+  member: MemberRow;
+  members: MemberRow[];
+  viewerRole: string;
+  viewerId?: string;
+}): MemberActionState {
+  const isSelf = member.is_self === true || (viewerId !== undefined && member.user_id === viewerId);
+  const ownerCount = members.filter((m) => m.role === "owner").length;
+  const isLastOwnerSelfLeave = isSelf && member.role === "owner" && ownerCount <= 1;
+  return {
+    isSelf,
+    canRemove: viewerRole === "owner" || isSelf,
+    isLastOwnerSelfLeave,
+    requiresConfirm: isSelf && !isLastOwnerSelfLeave,
+  };
+}
+
+export function formatMembersPanelError(
+  t: (key: string, ...args: Array<string | number>) => string,
+  err: Error & { error_code?: string },
+): string {
+  switch (err.error_code) {
+    case "LAST_OWNER":
+      return t("members_panel.error_last_owner");
+    case "PROJECT_OWNER_REQUIRED":
+      return t("members_panel.error_project_owner_required");
+    case "MEMBER_NOT_FOUND":
+      return t("members_panel.error_member_not_found");
+    default:
+      return err.error_code ? `${err.error_code}: ${err.message}` : err.message;
+  }
+}
+
 export function MembersPanel({ project, refreshNonce = 0, users }: Props) {
   const { t, lang } = useI18n();
   const [status, setStatus] = useState<Status>({ kind: "idle" });
@@ -95,20 +144,20 @@ export function MembersPanel({ project, refreshNonce = 0, users }: Props) {
     };
   }, [project.slug, refreshNonce, reloadCounter]);
 
-  async function handleRemove(userId: string) {
+  async function handleRemove(userId: string, options: MemberRemoveOptions = {}) {
     if (pendingAction) return;
     setActionError(null);
+    if (options.confirmLeave) {
+      const confirmed = window.confirm(t("members_panel.leave_confirm"));
+      if (!confirmed) return;
+    }
     setPendingAction(`member:${userId}`);
     try {
       await api.removeMember(project.slug, userId);
       reload();
     } catch (e) {
       const err = e as Error & { error_code?: string };
-      setActionError(
-        err.error_code
-          ? `${err.error_code}: ${err.message}`
-          : err.message,
-      );
+      setActionError(formatMembersPanelError(t, err));
     } finally {
       setPendingAction(null);
     }
@@ -200,7 +249,7 @@ export function MembersPanel({ project, refreshNonce = 0, users }: Props) {
   );
 }
 
-function MembersSection({
+export function MembersSection({
   members,
   viewerRole,
   viewerId,
@@ -215,7 +264,7 @@ function MembersSection({
   viewerId?: string;
   usersByID: Map<string, UserRef>;
   pendingAction: string | null;
-  onRemove: (userId: string) => void;
+  onRemove: (userId: string, options?: MemberRemoveOptions) => void;
   t: (key: string, ...args: Array<string | number>) => string;
   lang: string;
 }) {
@@ -230,16 +279,20 @@ function MembersSection({
       ) : (
         <ul className="members-panel__list">
           {members.map((m) => {
-            const isSelf = m.is_self === true || (viewerId !== undefined && m.user_id === viewerId);
-            const canRemove = viewerRole === "owner" || isSelf;
-            const action = canRemove ? (
+            const actionState = getMemberActionState({ member: m, members, viewerRole, viewerId });
+            const action = actionState.canRemove ? (
               <button
                 type="button"
                 className="members-panel__row-action"
-                onClick={() => onRemove(m.user_id)}
-                disabled={pendingAction === `member:${m.user_id}`}
+                onClick={() => onRemove(m.user_id, { confirmLeave: actionState.requiresConfirm })}
+                disabled={pendingAction === `member:${m.user_id}` || actionState.isLastOwnerSelfLeave}
+                title={
+                  actionState.isLastOwnerSelfLeave
+                    ? t("members_panel.last_owner_blocked")
+                    : undefined
+                }
                 aria-label={
-                  isSelf
+                  actionState.isSelf
                     ? t("members_panel.leave_aria", m.display_name || m.user_id)
                     : t("members_panel.remove_aria", m.display_name || m.user_id)
                 }
@@ -249,7 +302,7 @@ function MembersSection({
                 ) : (
                   <Trash2 className="lucide" aria-hidden />
                 )}
-                <span>{isSelf ? t("members_panel.leave") : t("members_panel.remove")}</span>
+                <span>{actionState.isSelf ? t("members_panel.leave") : t("members_panel.remove")}</span>
               </button>
             ) : null;
             return (
@@ -257,7 +310,7 @@ function MembersSection({
                 <div className="members-panel__row-main">
                   <span className="members-panel__row-name">
                     {m.display_name || m.user_id.slice(0, 8)}
-                    {isSelf && <em>{` · ${t("members_panel.self")}`}</em>}
+                    {actionState.isSelf && <em>{` · ${t("members_panel.self")}`}</em>}
                   </span>
                   {m.github_handle && (
                     <span className="members-panel__row-handle">@{m.github_handle}</span>
