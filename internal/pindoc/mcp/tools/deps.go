@@ -78,6 +78,13 @@ type Deps struct {
 	// in front).
 	BindAddr string
 
+	// ForceOAuthLocal and AllowPublicUnauthenticated mirror the auth
+	// posture env axes. RuntimeStatus exposes them so operators can
+	// verify the active daemon without reading env or logs.
+	ForceOAuthLocal            bool
+	AllowPublicUnauthenticated bool
+	DCRMode                    string
+
 	// Embedder generates vectors for chunking on write and for query-side
 	// search / context.for_task. Phase 3+.
 	Embedder embed.Provider

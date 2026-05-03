@@ -65,6 +65,10 @@ type runtimeStatusOutput struct {
 	// external IdP wired.
 	AuthProviders []string `json:"providers"`
 
+	ForceOAuthLocal            bool   `json:"force_oauth_local"`
+	AllowPublicUnauthenticated bool   `json:"allow_public_unauthenticated"`
+	DCRMode                    string `json:"dcr_mode"`
+
 	// BindAddr mirrors PINDOC_BIND_ADDR. Loopback host = single-user
 	// trust boundary; external host = OAuth path is mandatory unless
 	// AllowPublicUnauthenticated is set.
@@ -146,32 +150,48 @@ func buildRuntimeStatusOutput(ctx context.Context, p *auth.Principal, deps Deps,
 	if providers == nil {
 		providers = []string{}
 	}
+	dcrMode := deps.DCRMode
+	if deps.Settings != nil {
+		dcrMode = deps.Settings.Get().DCRMode
+	}
 	toolsetVersion := ToolsetVersion()
 	requiresResync, sinceLastSeen := toolsetDrift(in.ClientToolsetHash, toolsetVersion)
 	out := runtimeStatusOutput{
-		Version:        deps.Version,
-		ServerCommit:   commit,
-		BuildModified:  modified,
-		ToolsetVersion: toolsetVersion,
-		ToolCount:      len(RegisteredTools),
-		RequiresResync: requiresResync,
-		SinceLastSeen:  sinceLastSeen,
-		Source:         source,
-		AuthProviders:  providers,
-		BindAddr:       bindAddr,
-		Ports:          configuredPorts(),
-		ContainerID:    DetectContainerID(),
-		ImageTag:       strings.TrimSpace(os.Getenv("PINDOC_IMAGE_TAG")),
-		Hostname:       hostname,
-		Transport:      deps.Transport,
-		GoVersion:      runtime.Version(),
-		DBHealthy:      dbHealthy,
-		Notice:         "Diagnostic snapshot is read-only. toolset_version mismatch between this response and the client schema cache means the tool catalog or schema changed; use client_actions to call runtime.status, refresh ToolSearch, and restart the MCP session when needed.",
+		Version:                    deps.Version,
+		ServerCommit:               commit,
+		BuildModified:              modified,
+		ToolsetVersion:             toolsetVersion,
+		ToolCount:                  len(RegisteredTools),
+		RequiresResync:             requiresResync,
+		SinceLastSeen:              sinceLastSeen,
+		Source:                     source,
+		AuthProviders:              providers,
+		ForceOAuthLocal:            deps.ForceOAuthLocal,
+		AllowPublicUnauthenticated: deps.AllowPublicUnauthenticated,
+		DCRMode:                    normalizeRuntimeDCRMode(dcrMode),
+		BindAddr:                   bindAddr,
+		Ports:                      configuredPorts(),
+		ContainerID:                DetectContainerID(),
+		ImageTag:                   strings.TrimSpace(os.Getenv("PINDOC_IMAGE_TAG")),
+		Hostname:                   hostname,
+		Transport:                  deps.Transport,
+		GoVersion:                  runtime.Version(),
+		DBHealthy:                  dbHealthy,
+		Notice:                     "Diagnostic snapshot is read-only. toolset_version mismatch between this response and the client schema cache means the tool catalog or schema changed; use client_actions to call runtime.status, refresh ToolSearch, and restart the MCP session when needed.",
 	}
 	if requiresResync != nil && *requiresResync {
 		out.ClientActions = toolsetDriftClientActions(in.ClientToolsetHash)
 	}
 	return out
+}
+
+func normalizeRuntimeDCRMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "open":
+		return "open"
+	default:
+		return "closed"
+	}
 }
 
 // readBuildVCS reads the vcs.* settings the Go toolchain (1.18+) embeds

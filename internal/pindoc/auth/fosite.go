@@ -47,6 +47,7 @@ type OAuthConfig struct {
 	ClientSecret       string
 	RedirectURIs       []string
 	BootstrapUserID    string
+	DefaultProjectSlug string
 	GitHubClientID     string
 	GitHubClientSecret string
 	GitHubAuthURL      string
@@ -56,17 +57,19 @@ type OAuthConfig struct {
 }
 
 type OAuthService struct {
-	provider        fosite.OAuth2Provider
-	store           *FositeStore
-	strategy        *foauth2.DefaultJWTStrategy
-	secretHasher    fosite.Hasher
-	signingKey      *rsa.PrivateKey
-	keyID           string
-	issuer          string
-	publicBaseURL   string
-	clientID        string
-	bootstrapUserID string
-	cookieSecret    []byte
+	provider           fosite.OAuth2Provider
+	store              *FositeStore
+	strategy           *foauth2.DefaultJWTStrategy
+	secretHasher       fosite.Hasher
+	signingKey         *rsa.PrivateKey
+	keyID              string
+	issuer             string
+	publicBaseURL      string
+	clientID           string
+	bootstrapUserID    string
+	defaultProjectSlug string
+	cookieSecret       []byte
+	dcrLimiter         *dcrRateLimiter
 
 	// github is swapped in-place when the admin UI rotates credentials.
 	// Read paths take a snapshot via currentGitHub() so a swap mid-
@@ -172,19 +175,21 @@ func NewOAuthService(ctx context.Context, pool *db.Pool, cfg OAuthConfig) (*OAut
 	}
 
 	return &OAuthService{
-		provider:        provider,
-		store:           store,
-		strategy:        jwtStrategy,
-		secretHasher:    fositeConfig.ClientSecretsHasher,
-		signingKey:      key,
-		keyID:           keyID,
-		issuer:          issuer,
-		publicBaseURL:   publicBaseURL,
-		clientID:        clientID,
-		bootstrapUserID: strings.TrimSpace(cfg.BootstrapUserID),
-		cookieSecret:    cookieSecret,
-		github:          githubOAuth,
-		redirectBaseURL: redirectBaseURL,
+		provider:           provider,
+		store:              store,
+		strategy:           jwtStrategy,
+		secretHasher:       fositeConfig.ClientSecretsHasher,
+		signingKey:         key,
+		keyID:              keyID,
+		issuer:             issuer,
+		publicBaseURL:      publicBaseURL,
+		clientID:           clientID,
+		bootstrapUserID:    strings.TrimSpace(cfg.BootstrapUserID),
+		defaultProjectSlug: strings.TrimSpace(cfg.DefaultProjectSlug),
+		cookieSecret:       cookieSecret,
+		dcrLimiter:         newDCRRateLimiter(),
+		github:             githubOAuth,
+		redirectBaseURL:    redirectBaseURL,
 	}, nil
 }
 

@@ -42,6 +42,11 @@ type Values struct {
 	// the lone non-test row at boot.
 	DefaultLoopbackUserID string
 
+	// DCRMode controls RFC 7591 Dynamic Client Registration. Default
+	// "closed" keeps anonymous /oauth/register disabled until an owner
+	// explicitly opens it from the admin surface.
+	DCRMode string
+
 	UpdatedAt time.Time
 }
 
@@ -72,15 +77,17 @@ func (s *Store) Reload(ctx context.Context) error {
 	err := s.db.QueryRow(ctx, `
 		SELECT public_base_url,
 		       COALESCE(default_loopback_user_id::text, '')::text AS default_loopback_user_id,
+		       COALESCE(dcr_mode, 'closed') AS dcr_mode,
 		       updated_at
 		  FROM server_settings WHERE id = 1
-	`).Scan(&v.PublicBaseURL, &defaultLoopback, &v.UpdatedAt)
+	`).Scan(&v.PublicBaseURL, &defaultLoopback, &v.DCRMode, &v.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("settings load: %w", err)
 	}
 	if defaultLoopback != nil {
 		v.DefaultLoopbackUserID = strings.TrimSpace(*defaultLoopback)
 	}
+	v.DCRMode = normalizeDCRMode(v.DCRMode)
 	s.current.Store(&v)
 	return nil
 }
@@ -127,6 +134,16 @@ func (s *Store) SeedFromEnv(ctx context.Context, key, envValue string) (bool, er
 		`, envValue); err != nil {
 			return false, fmt.Errorf("seed default_loopback_user_id: %w", err)
 		}
+	case "dcr_mode":
+		envValue = normalizeDCRMode(envValue)
+		if v.DCRMode != "" && v.DCRMode != "closed" {
+			return false, nil
+		}
+		if _, err := s.db.Exec(ctx, `
+			UPDATE server_settings SET dcr_mode = $1, updated_at = now() WHERE id = 1
+		`, envValue); err != nil {
+			return false, fmt.Errorf("seed dcr_mode: %w", err)
+		}
 	default:
 		return false, fmt.Errorf("unknown setting key: %s", key)
 	}
@@ -164,6 +181,13 @@ func (s *Store) Set(ctx context.Context, key, value string) error {
 				return err
 			}
 		}
+	case "dcr_mode":
+		value = normalizeDCRMode(value)
+		if _, err := s.db.Exec(ctx, `
+			UPDATE server_settings SET dcr_mode = $1, updated_at = now() WHERE id = 1
+		`, value); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("unknown setting key: %s", key)
 	}
@@ -179,7 +203,16 @@ func (s *Store) SetDefaultLoopbackUserID(ctx context.Context, userID string) err
 
 // AllKeys lists the editable keys. pindoc-admin list uses this.
 func AllKeys() []string {
-	return []string{"public_base_url", "default_loopback_user_id"}
+	return []string{"public_base_url", "default_loopback_user_id", "dcr_mode"}
+}
+
+func normalizeDCRMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "open":
+		return "open"
+	default:
+		return "closed"
+	}
 }
 
 // FindBackfillCandidate looks for a single non-test users row to bind

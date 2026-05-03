@@ -51,32 +51,34 @@ func NewFositeStore(pool *db.Pool) *FositeStore {
 }
 
 type OAuthClient struct {
-	ID              string
-	DisplayName     string
-	SecretHash      []byte
-	RedirectURIs    []string
-	GrantTypes      []string
-	ResponseTypes   []string
-	Scopes          []string
-	Public          bool
-	CreatedByUserID string
-	CreatedVia      string
-	SeedSuppressed  bool
+	ID                string
+	DisplayName       string
+	SecretHash        []byte
+	RedirectURIs      []string
+	GrantTypes        []string
+	ResponseTypes     []string
+	Scopes            []string
+	Public            bool
+	CreatedByUserID   string
+	CreatedVia        string
+	CreatedRemoteAddr string
+	SeedSuppressed    bool
 }
 
 type OAuthClientRecord struct {
-	ID              string
-	DisplayName     string
-	RedirectURIs    []string
-	GrantTypes      []string
-	ResponseTypes   []string
-	Scopes          []string
-	Public          bool
-	HasSecret       bool
-	CreatedByUserID string
-	CreatedVia      string
-	SeedSuppressed  bool
-	CreatedAt       time.Time
+	ID                string
+	DisplayName       string
+	RedirectURIs      []string
+	GrantTypes        []string
+	ResponseTypes     []string
+	Scopes            []string
+	Public            bool
+	HasSecret         bool
+	CreatedByUserID   string
+	CreatedVia        string
+	CreatedRemoteAddr string
+	SeedSuppressed    bool
+	CreatedAt         time.Time
 }
 
 func (s *FositeStore) UpsertClient(ctx context.Context, c OAuthClient) error {
@@ -114,8 +116,8 @@ func (s *FositeStore) UpsertClient(ctx context.Context, c OAuthClient) error {
 		INSERT INTO oauth_clients (
 			client_id, display_name, secret_hash, redirect_uris, grant_types,
 			response_types, scopes, public, created_by_user_id, created_via,
-			seed_suppressed, deleted_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, $10, $11, NULL)
+			created_remote_addr, seed_suppressed, deleted_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, $10, $11, $12, NULL)
 		ON CONFLICT (client_id) DO UPDATE SET
 			display_name = EXCLUDED.display_name,
 			secret_hash = EXCLUDED.secret_hash,
@@ -126,9 +128,10 @@ func (s *FositeStore) UpsertClient(ctx context.Context, c OAuthClient) error {
 			public = EXCLUDED.public,
 			created_by_user_id = COALESCE(EXCLUDED.created_by_user_id, oauth_clients.created_by_user_id),
 			created_via = EXCLUDED.created_via,
+			created_remote_addr = COALESCE(NULLIF(EXCLUDED.created_remote_addr, ''), oauth_clients.created_remote_addr),
 			seed_suppressed = EXCLUDED.seed_suppressed,
 			deleted_at = NULL
-	`, c.ID, c.DisplayName, c.SecretHash, c.RedirectURIs, c.GrantTypes, c.ResponseTypes, c.Scopes, c.Public, c.CreatedByUserID, c.CreatedVia, c.SeedSuppressed)
+	`, c.ID, c.DisplayName, c.SecretHash, c.RedirectURIs, c.GrantTypes, c.ResponseTypes, c.Scopes, c.Public, c.CreatedByUserID, c.CreatedVia, strings.TrimSpace(c.CreatedRemoteAddr), c.SeedSuppressed)
 	if err != nil {
 		return fmt.Errorf("upsert oauth client %q: %w", c.ID, err)
 	}
@@ -162,7 +165,8 @@ func (s *FositeStore) ListClients(ctx context.Context) ([]OAuthClientRecord, err
 	rows, err := s.pool.Query(ctx, `
 		SELECT client_id, display_name, redirect_uris, grant_types, response_types,
 		       scopes, public, secret_hash IS NOT NULL AND octet_length(secret_hash) > 0,
-		       COALESCE(created_by_user_id::text, ''), created_via, seed_suppressed, created_at
+		       COALESCE(created_by_user_id::text, ''), created_via,
+		       COALESCE(created_remote_addr, ''), seed_suppressed, created_at
 		  FROM oauth_clients
 		 WHERE deleted_at IS NULL
 		 ORDER BY created_at ASC, client_id ASC
@@ -185,6 +189,7 @@ func (s *FositeStore) ListClients(ctx context.Context) ([]OAuthClientRecord, err
 			&rec.HasSecret,
 			&rec.CreatedByUserID,
 			&rec.CreatedVia,
+			&rec.CreatedRemoteAddr,
 			&rec.SeedSuppressed,
 			&rec.CreatedAt,
 		); err != nil {
@@ -210,7 +215,8 @@ func (s *FositeStore) ClientRecord(ctx context.Context, id string) (OAuthClientR
 	err := s.pool.QueryRow(ctx, `
 		SELECT client_id, display_name, redirect_uris, grant_types, response_types,
 		       scopes, public, secret_hash IS NOT NULL AND octet_length(secret_hash) > 0,
-		       COALESCE(created_by_user_id::text, ''), created_via, seed_suppressed, created_at
+		       COALESCE(created_by_user_id::text, ''), created_via,
+		       COALESCE(created_remote_addr, ''), seed_suppressed, created_at
 		  FROM oauth_clients
 		 WHERE client_id = $1 AND deleted_at IS NULL
 		 LIMIT 1
@@ -225,6 +231,7 @@ func (s *FositeStore) ClientRecord(ctx context.Context, id string) (OAuthClientR
 		&rec.HasSecret,
 		&rec.CreatedByUserID,
 		&rec.CreatedVia,
+		&rec.CreatedRemoteAddr,
 		&rec.SeedSuppressed,
 		&rec.CreatedAt,
 	)
@@ -235,6 +242,51 @@ func (s *FositeStore) ClientRecord(ctx context.Context, id string) (OAuthClientR
 		return OAuthClientRecord{}, fmt.Errorf("get oauth client record %q: %w", id, err)
 	}
 	return rec, nil
+}
+
+func (s *FositeStore) CountDCRClients(ctx context.Context) (int, error) {
+	if s == nil || s.pool == nil {
+		return 0, errors.New("auth: nil fosite store")
+	}
+	var count int
+	if err := s.pool.QueryRow(ctx, `
+		SELECT count(*)::int
+		  FROM oauth_clients
+		 WHERE deleted_at IS NULL AND created_via = $1
+	`, OAuthClientCreatedViaDCR).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count dcr clients: %w", err)
+	}
+	return count, nil
+}
+
+func (s *FositeStore) DCRMode(ctx context.Context) (string, error) {
+	if s == nil || s.pool == nil {
+		return "closed", errors.New("auth: nil fosite store")
+	}
+	var mode string
+	if err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(dcr_mode, 'closed') FROM server_settings WHERE id = 1
+	`).Scan(&mode); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "closed", nil
+		}
+		return "closed", fmt.Errorf("read dcr mode: %w", err)
+	}
+	return normalizeDCRMode(mode), nil
+}
+
+func (s *FositeStore) SetDCRMode(ctx context.Context, mode string) (string, error) {
+	if s == nil || s.pool == nil {
+		return "closed", errors.New("auth: nil fosite store")
+	}
+	mode = normalizeDCRMode(mode)
+	_, err := s.pool.Exec(ctx, `
+		UPDATE server_settings SET dcr_mode = $1, updated_at = now() WHERE id = 1
+	`, mode)
+	if err != nil {
+		return "closed", fmt.Errorf("set dcr mode: %w", err)
+	}
+	return mode, nil
 }
 
 func (s *FositeStore) DeleteClient(ctx context.Context, id string, suppressEnvSeed bool) error {

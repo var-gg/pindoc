@@ -72,15 +72,43 @@ func TestValidateServerConfig_GitHubCredentialsAreOptional(t *testing.T) {
 	}
 }
 
+func TestValidateOAuthBootPosture_ForceOAuthRequiresProvider(t *testing.T) {
+	err := validateOAuthBootPosture(&config.Config{ForceOAuthLocal: true}, false)
+	if !errors.Is(err, errForceOAuthLocalRequiresProvider) {
+		t.Fatalf("validateOAuthBootPosture err = %v, want errForceOAuthLocalRequiresProvider", err)
+	}
+	if err := validateOAuthBootPosture(&config.Config{ForceOAuthLocal: true}, true); err != nil {
+		t.Fatalf("active provider should satisfy force-oauth prerequisite: %v", err)
+	}
+	if err := validateOAuthBootPosture(&config.Config{}, false); err != nil {
+		t.Fatalf("force off should not require provider: %v", err)
+	}
+}
+
 func TestShouldBypassMCPBearerForceOAuthLocal(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:5830/mcp", nil)
 	req.RemoteAddr = "127.0.0.1:51234"
 
-	if !shouldBypassMCPBearer(&config.Config{}, req) {
+	if !shouldBypassMCPBearer(&config.Config{}, req, false) {
 		t.Fatal("default loopback request should bypass bearer middleware")
 	}
-	if shouldBypassMCPBearer(&config.Config{ForceOAuthLocal: true}, req) {
+	if shouldBypassMCPBearer(&config.Config{ForceOAuthLocal: true}, req, false) {
 		t.Fatal("ForceOAuthLocal should route loopback request through bearer middleware")
+	}
+}
+
+func TestShouldBypassMCPBearerTrustedProxy(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:5830/mcp", nil)
+	req.RemoteAddr = "172.18.0.1:51234"
+
+	if !shouldBypassMCPBearer(&config.Config{}, req, true) {
+		t.Fatal("trusted same-host proxy should bypass bearer middleware")
+	}
+	if shouldBypassMCPBearer(&config.Config{ForceOAuthLocal: true}, req, true) {
+		t.Fatal("ForceOAuthLocal should keep trusted-proxy request on bearer middleware")
+	}
+	if shouldBypassMCPBearer(&config.Config{}, req, false) {
+		t.Fatal("non-loopback request without trusted proxy should require bearer")
 	}
 }
 
@@ -104,7 +132,7 @@ func TestWrapMCPBearerForLoopbackForceOAuthLocal(t *testing.T) {
 	})(streamHandler)
 
 	t.Run("force on requires bearer for loopback", func(t *testing.T) {
-		handler := wrapMCPBearerForLoopback(streamHandler, bearer, &config.Config{ForceOAuthLocal: true})
+		handler := wrapMCPBearerForLoopback(streamHandler, bearer, &config.Config{ForceOAuthLocal: true}, false)
 		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:5830/mcp", nil)
 		req.RemoteAddr = "127.0.0.1:51234"
 		rec := httptest.NewRecorder()
@@ -121,7 +149,7 @@ func TestWrapMCPBearerForLoopbackForceOAuthLocal(t *testing.T) {
 	})
 
 	t.Run("force on accepts valid bearer for loopback", func(t *testing.T) {
-		handler := wrapMCPBearerForLoopback(streamHandler, bearer, &config.Config{ForceOAuthLocal: true})
+		handler := wrapMCPBearerForLoopback(streamHandler, bearer, &config.Config{ForceOAuthLocal: true}, false)
 		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:5830/mcp", nil)
 		req.RemoteAddr = "127.0.0.1:51234"
 		req.Header.Set("Authorization", "Bearer valid")
@@ -138,9 +166,25 @@ func TestWrapMCPBearerForLoopbackForceOAuthLocal(t *testing.T) {
 	})
 
 	t.Run("default preserves loopback bypass", func(t *testing.T) {
-		handler := wrapMCPBearerForLoopback(streamHandler, bearer, &config.Config{})
+		handler := wrapMCPBearerForLoopback(streamHandler, bearer, &config.Config{}, false)
 		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:5830/mcp", nil)
 		req.RemoteAddr = "127.0.0.1:51234"
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d; body=%q", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		if got := rec.Body.String(); got != "tool-ok" {
+			t.Fatalf("body = %q, want tool-ok", got)
+		}
+	})
+
+	t.Run("trusted proxy bypasses non-loopback bridge address", func(t *testing.T) {
+		handler := wrapMCPBearerForLoopback(streamHandler, bearer, &config.Config{}, true)
+		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:5830/mcp", nil)
+		req.RemoteAddr = "172.18.0.1:51234"
 		rec := httptest.NewRecorder()
 
 		handler.ServeHTTP(rec, req)

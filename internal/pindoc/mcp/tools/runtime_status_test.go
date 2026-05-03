@@ -100,6 +100,31 @@ func TestRuntimeStatusToolsetDriftActions(t *testing.T) {
 	}
 }
 
+func TestRuntimeStatusReportsAuthPosture(t *testing.T) {
+	out := buildRuntimeStatusOutput(context.Background(), nil, Deps{
+		ForceOAuthLocal:            true,
+		AllowPublicUnauthenticated: true,
+		DCRMode:                    "open",
+	}, runtimeStatusInput{})
+	if !out.ForceOAuthLocal {
+		t.Fatalf("force_oauth_local = false, want true")
+	}
+	if !out.AllowPublicUnauthenticated {
+		t.Fatalf("allow_public_unauthenticated = false, want true")
+	}
+	if out.DCRMode != "open" {
+		t.Fatalf("dcr_mode = %q, want open", out.DCRMode)
+	}
+
+	defaults := buildRuntimeStatusOutput(context.Background(), nil, Deps{}, runtimeStatusInput{})
+	if defaults.ForceOAuthLocal || defaults.AllowPublicUnauthenticated {
+		t.Fatalf("default auth posture = force=%v public=%v, want false/false", defaults.ForceOAuthLocal, defaults.AllowPublicUnauthenticated)
+	}
+	if defaults.DCRMode != "closed" {
+		t.Fatalf("default dcr_mode = %q, want closed", defaults.DCRMode)
+	}
+}
+
 // isDockerShortID factors the 12-hex predicate out of detectContainerID
 // for portable testing — the test cannot mock os.Hostname on Windows
 // reliably, so we exercise the predicate directly.

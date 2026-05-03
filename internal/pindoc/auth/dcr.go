@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
@@ -14,12 +16,13 @@ import (
 )
 
 type OAuthClientCreateInput struct {
-	ClientID        string
-	DisplayName     string
-	RedirectURIs    []string
-	Public          bool
-	CreatedByUserID string
-	CreatedVia      string
+	ClientID          string
+	DisplayName       string
+	RedirectURIs      []string
+	Public            bool
+	CreatedByUserID   string
+	CreatedVia        string
+	CreatedRemoteAddr string
 }
 
 type OAuthClientCreateResult struct {
@@ -62,16 +65,17 @@ func (s *OAuthService) CreateClient(ctx context.Context, in OAuthClientCreateInp
 		}
 	}
 	if err := s.store.UpsertClient(ctx, OAuthClient{
-		ID:              clientID,
-		DisplayName:     displayName,
-		SecretHash:      secretHash,
-		RedirectURIs:    redirectURIs,
-		GrantTypes:      []string{string(fosite.GrantTypeAuthorizationCode), string(fosite.GrantTypeRefreshToken)},
-		ResponseTypes:   []string{"code"},
-		Scopes:          SupportedOAuthScopes(),
-		Public:          in.Public,
-		CreatedByUserID: strings.TrimSpace(in.CreatedByUserID),
-		CreatedVia:      in.CreatedVia,
+		ID:                clientID,
+		DisplayName:       displayName,
+		SecretHash:        secretHash,
+		RedirectURIs:      redirectURIs,
+		GrantTypes:        []string{string(fosite.GrantTypeAuthorizationCode), string(fosite.GrantTypeRefreshToken)},
+		ResponseTypes:     []string{"code"},
+		Scopes:            SupportedOAuthScopes(),
+		Public:            in.Public,
+		CreatedByUserID:   strings.TrimSpace(in.CreatedByUserID),
+		CreatedVia:        in.CreatedVia,
+		CreatedRemoteAddr: strings.TrimSpace(in.CreatedRemoteAddr),
 	}); err != nil {
 		return OAuthClientCreateResult{}, err
 	}
@@ -94,7 +98,84 @@ type dcrError struct {
 	ErrorDescription string `json:"error_description,omitempty"`
 }
 
+const (
+	DCRModeClosed = "closed"
+	DCRModeOpen   = "open"
+
+	dcrRateLimitPerIP  = 5
+	dcrRateLimitWindow = time.Hour
+	dcrMaxClients      = 100
+)
+
+type dcrRateLimiter struct {
+	mu   sync.Mutex
+	hits map[string][]time.Time
+}
+
+func newDCRRateLimiter() *dcrRateLimiter {
+	return &dcrRateLimiter{hits: map[string][]time.Time{}}
+}
+
+func (l *dcrRateLimiter) Allow(key string, now time.Time, limit int, window time.Duration) bool {
+	if l == nil || limit <= 0 || window <= 0 {
+		return true
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		key = "unknown"
+	}
+	cutoff := now.Add(-window)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	recent := l.hits[key][:0]
+	for _, hit := range l.hits[key] {
+		if hit.After(cutoff) {
+			recent = append(recent, hit)
+		}
+	}
+	if len(recent) >= limit {
+		l.hits[key] = recent
+		return false
+	}
+	recent = append(recent, now)
+	l.hits[key] = recent
+	return true
+}
+
+type dcrRegistrationResponse struct {
+	oauthex.ClientRegistrationMetadata
+	ClientID              string `json:"client_id"`
+	ClientSecret          string `json:"client_secret,omitempty"`
+	ClientIDIssuedAt      int64  `json:"client_id_issued_at,omitempty"`
+	ClientSecretExpiresAt int64  `json:"client_secret_expires_at"`
+}
+
 func (s *OAuthService) handleDynamicClientRegistration(w http.ResponseWriter, r *http.Request) {
+	mode, err := s.DCRMode(r.Context())
+	if err != nil {
+		writeOAuthJSON(w, http.StatusInternalServerError, dcrError{ErrorCode: "server_error", ErrorDescription: "could not read DCR mode"})
+		return
+	}
+	if mode != DCRModeOpen {
+		w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token", error_description="dynamic client registration is closed"`)
+		writeOAuthJSON(w, http.StatusUnauthorized, dcrError{ErrorCode: "invalid_token", ErrorDescription: "dynamic client registration is closed; enable it from the OAuth clients admin panel"})
+		return
+	}
+	remoteAddr := requestRemoteAddr(r)
+	if !s.allowDCRRegistration(remoteAddr, time.Now()) {
+		writeOAuthJSON(w, http.StatusTooManyRequests, dcrError{ErrorCode: "slow_down", ErrorDescription: "dynamic client registration rate limit exceeded"})
+		return
+	}
+	total, err := s.store.CountDCRClients(r.Context())
+	if err != nil {
+		writeOAuthJSON(w, http.StatusInternalServerError, dcrError{ErrorCode: "server_error", ErrorDescription: "could not count DCR clients"})
+		return
+	}
+	if total >= dcrMaxClients {
+		writeOAuthJSON(w, http.StatusServiceUnavailable, dcrError{ErrorCode: "server_error", ErrorDescription: "dynamic client registration client limit reached"})
+		return
+	}
+
 	var meta oauthex.ClientRegistrationMetadata
 	if err := json.NewDecoder(r.Body).Decode(&meta); err != nil {
 		writeOAuthJSON(w, http.StatusBadRequest, dcrError{ErrorCode: "invalid_client_metadata", ErrorDescription: "could not parse request body as JSON"})
@@ -155,20 +236,22 @@ func (s *OAuthService) handleDynamicClientRegistration(w http.ResponseWriter, r 
 		displayName = clientID
 	}
 	if err := s.store.UpsertClient(r.Context(), OAuthClient{
-		ID:            clientID,
-		DisplayName:   displayName,
-		SecretHash:    secretHash,
-		RedirectURIs:  redirectURIs,
-		GrantTypes:    grantTypes,
-		ResponseTypes: responseTypes,
-		Scopes:        scopes,
-		Public:        public,
-		CreatedVia:    OAuthClientCreatedViaDCR,
+		ID:                clientID,
+		DisplayName:       displayName,
+		SecretHash:        secretHash,
+		RedirectURIs:      redirectURIs,
+		GrantTypes:        grantTypes,
+		ResponseTypes:     responseTypes,
+		Scopes:            scopes,
+		Public:            public,
+		CreatedVia:        OAuthClientCreatedViaDCR,
+		CreatedRemoteAddr: remoteAddr,
 	}); err != nil {
 		writeOAuthJSON(w, http.StatusInternalServerError, dcrError{ErrorCode: "server_error", ErrorDescription: "could not store client"})
 		return
 	}
-	writeOAuthJSON(w, http.StatusCreated, oauthex.ClientRegistrationResponse{
+	now := time.Now().UTC()
+	writeOAuthJSON(w, http.StatusCreated, dcrRegistrationResponse{
 		ClientRegistrationMetadata: oauthex.ClientRegistrationMetadata{
 			RedirectURIs:            redirectURIs,
 			TokenEndpointAuthMethod: method,
@@ -189,9 +272,61 @@ func (s *OAuthService) handleDynamicClientRegistration(w http.ResponseWriter, r 
 		},
 		ClientID:              clientID,
 		ClientSecret:          secret,
-		ClientIDIssuedAt:      time.Now().UTC(),
-		ClientSecretExpiresAt: time.Time{},
+		ClientIDIssuedAt:      now.Unix(),
+		ClientSecretExpiresAt: dcrSecretExpiresAtUnix(time.Time{}),
 	})
+}
+
+func (s *OAuthService) allowDCRRegistration(remoteAddr string, now time.Time) bool {
+	if s == nil {
+		return false
+	}
+	if s.dcrLimiter == nil {
+		s.dcrLimiter = newDCRRateLimiter()
+	}
+	return s.dcrLimiter.Allow(remoteAddr, now, dcrRateLimitPerIP, dcrRateLimitWindow)
+}
+
+func (s *OAuthService) DCRMode(ctx context.Context) (string, error) {
+	if s == nil || s.store == nil {
+		return DCRModeClosed, errors.New("auth: nil OAuthService")
+	}
+	return s.store.DCRMode(ctx)
+}
+
+func (s *OAuthService) SetDCRMode(ctx context.Context, mode string) (string, error) {
+	if s == nil || s.store == nil {
+		return DCRModeClosed, errors.New("auth: nil OAuthService")
+	}
+	return s.store.SetDCRMode(ctx, mode)
+}
+
+func normalizeDCRMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case DCRModeOpen:
+		return DCRModeOpen
+	default:
+		return DCRModeClosed
+	}
+}
+
+func requestRemoteAddr(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	remote := strings.TrimSpace(r.RemoteAddr)
+	host, port, err := net.SplitHostPort(remote)
+	if err == nil && strings.TrimSpace(host) != "" && strings.TrimSpace(port) != "" {
+		return net.JoinHostPort(strings.TrimSpace(host), strings.TrimSpace(port))
+	}
+	return remote
+}
+
+func dcrSecretExpiresAtUnix(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.UTC().Unix()
 }
 
 func dcrScopes(raw string) ([]string, error) {

@@ -56,7 +56,10 @@ PINDOC_OAUTH_REDIRECT_URIS=http://127.0.0.1:3846/callback,http://localhost:3846/
 `PINDOC_OAUTH_CLIENT_ID`, `PINDOC_OAUTH_CLIENT_SECRET`, and
 `PINDOC_OAUTH_REDIRECT_URIS` seed one initial client at boot. After startup,
 register more MCP clients through the OAuth Clients section at
-`/admin/providers` or through Dynamic Client Registration:
+`/admin/providers`. Dynamic Client Registration is closed by default; an
+instance owner must open it from the OAuth Clients panel before anonymous
+clients can call `/oauth/register`. When open, registrations are rate-limited,
+capped, and recorded with request audit metadata:
 
 ```bash
 curl -sS https://pindoc.example.com/oauth/register \
@@ -94,7 +97,15 @@ server {
 }
 ```
 
-## 5. Connect MCP Clients
+## 5. First-Run Owner Signup
+
+On a new instance, browse to `/signup`, complete the local identity setup if it
+appears, then use GitHub login once to bind the first external owner. When the
+default project has no owner yet, Pindoc permits one invite-less GitHub login
+and immediately adds that user as owner; after that, GitHub signup returns to
+the invite-only model.
+
+## 6. Connect MCP Clients
 
 Each MCP client connects to the account-level endpoint:
 
@@ -129,10 +140,16 @@ The old bootstrap fallback issue is tracked by
 ## Local OAuth QA
 
 Loopback `/mcp` calls normally bypass bearer auth. To exercise the OAuth bearer
-path on the same machine, set:
+path on the same machine, configure GitHub first and then set:
 
 ```env
+PINDOC_AUTH_PROVIDERS=github
+PINDOC_GITHUB_CLIENT_ID=Iv1.example
+PINDOC_GITHUB_CLIENT_SECRET=github-secret
 PINDOC_FORCE_OAUTH_LOCAL=true
 ```
 
-The daemon logs a warning because this flag is only for development and OSS QA.
+The daemon refuses to start if `PINDOC_FORCE_OAUTH_LOCAL=true` is set without an
+active OAuth provider, because that combination would otherwise be a silent
+no-op. It also logs a warning because this flag is only for development and OSS
+QA.

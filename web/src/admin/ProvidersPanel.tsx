@@ -303,6 +303,7 @@ function OAuthClientsPanel() {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [dcrUpdating, setDcrUpdating] = useState(false);
   const [newSecret, setNewSecret] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [form, setForm] = useState<ClientFormState>({
@@ -346,7 +347,7 @@ function OAuthClientsPanel() {
         redirect_uris: redirectUris,
         public: form.public,
       });
-      setData((d) => ({ clients: [...(d?.clients ?? []), resp.client] }));
+      setData((d) => ({ dcr_mode: d?.dcr_mode ?? "closed", clients: [...(d?.clients ?? []), resp.client] }));
       setNewSecret(resp.client_secret ?? null);
       setToast({ kind: "ok", message: "OAuth client registered." });
       setForm((f) => ({ ...f, displayName: "" }));
@@ -374,6 +375,7 @@ function OAuthClientsPanel() {
     try {
       await api.deleteOAuthClient(client.client_id, { suppressEnvSeed: suppress });
       setData((d) => ({
+        dcr_mode: d?.dcr_mode ?? "closed",
         clients: (d?.clients ?? []).filter((item) => item.client_id !== client.client_id),
       }));
       setToast({ kind: "ok", message: "OAuth client deleted." });
@@ -387,6 +389,30 @@ function OAuthClientsPanel() {
       setDeleting(null);
     }
   }
+
+  async function handleDCRMode(nextOpen: boolean) {
+    if (dcrUpdating) return;
+    setDcrUpdating(true);
+    setToast(null);
+    try {
+      const resp = await api.setOAuthDCRMode(nextOpen ? "open" : "closed");
+      setData((d) => ({ dcr_mode: resp.dcr_mode, clients: d?.clients ?? [] }));
+      setToast({
+        kind: "ok",
+        message: resp.dcr_mode === "open" ? "Dynamic registration opened." : "Dynamic registration closed.",
+      });
+    } catch (e) {
+      const tagged = e as Error & { error_code?: string };
+      setToast({
+        kind: "err",
+        message: tagged.error_code ? `${tagged.error_code}: ${tagged.message}` : tagged.message,
+      });
+    } finally {
+      setDcrUpdating(false);
+    }
+  }
+
+  const dcrOpen = data?.dcr_mode === "open";
 
   return (
     <section className="ops__panel">
@@ -416,6 +442,24 @@ function OAuthClientsPanel() {
 
       {!err && (
         <>
+          <div className="ops__row">
+            <div>
+              <strong>Dynamic Client Registration</strong>
+              <p>
+                <code>/oauth/register</code> is {dcrOpen ? "open" : "closed"} · anonymous clients are rate-limited and audited.
+              </p>
+            </div>
+            <label className="ops__field--inline">
+              <input
+                type="checkbox"
+                checked={dcrOpen}
+                disabled={loading || dcrUpdating}
+                onChange={(e) => void handleDCRMode(e.currentTarget.checked)}
+              />
+              <span>{dcrUpdating ? "Saving..." : dcrOpen ? "Open" : "Closed"}</span>
+            </label>
+          </div>
+
           <div className="ops__list">
             {(data?.clients ?? []).map((client) => (
               <div key={client.client_id} className="ops__row">
@@ -423,6 +467,7 @@ function OAuthClientsPanel() {
                   <strong>{client.display_name || client.client_id}</strong>
                   <p>
                     <code>{client.client_id}</code> · {client.public ? "public" : "confidential"} · {client.created_via}
+                    {client.created_remote_addr ? <> · {client.created_remote_addr}</> : null}
                   </p>
                 </div>
                 <button

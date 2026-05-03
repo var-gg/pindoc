@@ -179,6 +179,17 @@ func TestDynamicClientRegistrationIntegration(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("closed DCR status = %d, want 401, body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := svc.SetDCRMode(ctx, DCRModeOpen); err != nil {
+		t.Fatalf("SetDCRMode(open): %v", err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/oauth/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "203.0.113.10:49000"
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("DCR status = %d, body=%s", rec.Code, rec.Body.String())
 	}
@@ -190,12 +201,18 @@ func TestDynamicClientRegistrationIntegration(t *testing.T) {
 	if got := requireString(t, out, "client_name"); got != "Codex" {
 		t.Fatalf("client_name = %q, want Codex", got)
 	}
+	if expires, ok := out["client_secret_expires_at"].(float64); !ok || expires != 0 {
+		t.Fatalf("client_secret_expires_at = %#v, want number 0", out["client_secret_expires_at"])
+	}
 	recClient, err := svc.Store().ClientRecord(ctx, clientID)
 	if err != nil {
 		t.Fatalf("ClientRecord(%q): %v", clientID, err)
 	}
 	if recClient.CreatedVia != OAuthClientCreatedViaDCR || !recClient.Public {
 		t.Fatalf("client record = %+v", recClient)
+	}
+	if recClient.CreatedRemoteAddr != "203.0.113.10:49000" {
+		t.Fatalf("CreatedRemoteAddr = %q, want request RemoteAddr", recClient.CreatedRemoteAddr)
 	}
 }
 
@@ -218,6 +235,9 @@ func TestConsentFlowIntegration(t *testing.T) {
 
 	mux := http.NewServeMux()
 	svc.RegisterRoutes(mux)
+	if _, err := svc.SetDCRMode(ctx, DCRModeOpen); err != nil {
+		t.Fatalf("SetDCRMode(open): %v", err)
+	}
 	clientID := registerPublicDCRClient(t, mux)
 	cookies := browserSessionCookies(t, svc, userID)
 	verifier := "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJK"

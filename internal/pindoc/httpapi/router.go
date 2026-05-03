@@ -177,6 +177,7 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("DELETE /api/instance/providers/{idOrName}", d.handleInstanceProvidersDelete)
 	mux.HandleFunc("GET /api/instance/oauth-clients", d.handleOAuthClientsList)
 	mux.HandleFunc("POST /api/instance/oauth-clients", d.handleOAuthClientsCreate)
+	mux.HandleFunc("PATCH /api/instance/oauth-clients/dcr-mode", d.handleOAuthClientsDCRModePatch)
 	mux.HandleFunc("DELETE /api/instance/oauth-clients/{clientID}", d.handleOAuthClientsDelete)
 
 	// Project-scoped reads. The {project} path segment resolves a row in

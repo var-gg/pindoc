@@ -967,12 +967,19 @@ export type OAuthClient = {
   public: boolean;
   has_client_secret: boolean;
   created_via: "env_seed" | "admin_ui" | "dcr" | string;
+  created_remote_addr?: string;
   seed_suppressed: boolean;
   created_at: string;
 };
 
 export type OAuthClientsResp = {
+  dcr_mode: "closed" | "open" | string;
   clients: OAuthClient[];
+};
+
+export type OAuthDCRModeResp = {
+  status: string;
+  dcr_mode: "closed" | "open" | string;
 };
 
 export type OAuthClientCreateInput = {
@@ -1588,6 +1595,25 @@ export const api = {
   },
 
   oauthClients: () => j<OAuthClientsResp>("/api/instance/oauth-clients"),
+  setOAuthDCRMode: async (mode: "closed" | "open"): Promise<OAuthDCRModeResp> => {
+    const res = await fetch("/api/instance/oauth-clients/dcr-mode", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode }),
+    });
+    if (!res.ok) {
+      let parsed: OAuthClientError | null = null;
+      try {
+        parsed = (await res.json()) as OAuthClientError;
+      } catch {
+        // ignore
+      }
+      const err = new Error(parsed?.message ?? `HTTP ${res.status}`) as Error & Partial<OAuthClientError>;
+      if (parsed?.error_code) err.error_code = parsed.error_code;
+      throw err;
+    }
+    return (await res.json()) as OAuthDCRModeResp;
+  },
   createOAuthClient: async (
     input: OAuthClientCreateInput,
   ): Promise<OAuthClientCreateResp> => {

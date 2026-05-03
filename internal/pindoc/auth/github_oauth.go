@@ -22,6 +22,7 @@ import (
 	oauth2github "golang.org/x/oauth2/github"
 
 	"github.com/var-gg/pindoc/internal/pindoc/invites"
+	"github.com/var-gg/pindoc/internal/pindoc/projects"
 	"github.com/var-gg/pindoc/internal/pindoc/users"
 )
 
@@ -112,8 +113,15 @@ func (s *OAuthService) handleGitHubLogin(w http.ResponseWriter, r *http.Request)
 	}
 	invite := strings.TrimSpace(r.URL.Query().Get("invite"))
 	if invite == "" {
-		http.Error(w, "invite token is required", http.StatusBadRequest)
-		return
+		allowed, err := s.allowFirstOwnerSelfSignup(r.Context())
+		if err != nil {
+			http.Error(w, "first owner signup check failed", http.StatusInternalServerError)
+			return
+		}
+		if !allowed {
+			http.Error(w, "invite token is required", http.StatusBadRequest)
+			return
+		}
 	}
 	nonce, err := randomHex(16)
 	if err != nil {
@@ -161,9 +169,17 @@ func (s *OAuthService) handleGitHubCallback(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "expired oauth state", http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(state.InviteToken) == "" {
-		http.Error(w, "invite token is required", http.StatusForbidden)
-		return
+	selfSignup := strings.TrimSpace(state.InviteToken) == ""
+	if selfSignup {
+		allowed, err := s.allowFirstOwnerSelfSignup(r.Context())
+		if err != nil {
+			http.Error(w, "first owner signup check failed", http.StatusInternalServerError)
+			return
+		}
+		if !allowed {
+			http.Error(w, "invite token is required", http.StatusForbidden)
+			return
+		}
 	}
 	code := strings.TrimSpace(r.URL.Query().Get("code"))
 	if code == "" {
@@ -197,24 +213,72 @@ func (s *OAuthService) handleGitHubCallback(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "user upsert failed", http.StatusInternalServerError)
 		return
 	}
-	joined, err := invites.Consume(r.Context(), s.store.pool, state.InviteToken, user.ID, time.Now().UTC())
-	if err != nil {
-		status := http.StatusGone
-		if !errors.Is(err, invites.ErrTokenInactive) && !errors.Is(err, invites.ErrTokenNotFound) {
-			status = http.StatusInternalServerError
+	var joined *invites.Record
+	if selfSignup {
+		if err := s.ensureFirstOwnerMembership(r.Context(), user.ID); err != nil {
+			http.Error(w, "first owner membership failed", http.StatusInternalServerError)
+			return
 		}
-		http.Error(w, "invite consume failed", status)
-		return
+	} else {
+		var err error
+		joined, err = invites.Consume(r.Context(), s.store.pool, state.InviteToken, user.ID, time.Now().UTC())
+		if err != nil {
+			status := http.StatusGone
+			if !errors.Is(err, invites.ErrTokenInactive) && !errors.Is(err, invites.ErrTokenNotFound) {
+				status = http.StatusInternalServerError
+			}
+			http.Error(w, "invite consume failed", status)
+			return
+		}
 	}
 	if err := s.setBrowserSession(w, user.ID); err != nil {
 		http.Error(w, "session signing failed", http.StatusInternalServerError)
 		return
 	}
 	returnTo := gh.safeReturnTo(state.ReturnTo)
-	if (returnTo == "/" || returnTo == "/signup" || strings.HasPrefix(returnTo, "/signup?")) && joined.ProjectSlug != "" {
+	if joined != nil && (returnTo == "/" || returnTo == "/signup" || strings.HasPrefix(returnTo, "/signup?")) && joined.ProjectSlug != "" {
 		returnTo = "/p/" + url.PathEscape(joined.ProjectSlug) + "/today"
 	}
 	http.Redirect(w, r, returnTo, http.StatusFound)
+}
+
+func (s *OAuthService) allowFirstOwnerSelfSignup(ctx context.Context) (bool, error) {
+	if s == nil || s.store == nil || s.store.pool == nil {
+		return false, errors.New("auth: nil OAuthService")
+	}
+	projectSlug := strings.TrimSpace(s.defaultProjectSlug)
+	if projectSlug != "" {
+		var projectExists, ownerExists bool
+		err := s.store.pool.QueryRow(ctx, `
+			SELECT EXISTS (SELECT 1 FROM projects WHERE slug = $1),
+			       EXISTS (
+			           SELECT 1
+			             FROM projects p
+			             JOIN project_members pm ON pm.project_id = p.id
+			            WHERE p.slug = $1 AND pm.role = 'owner'
+			       )
+		`, projectSlug).Scan(&projectExists, &ownerExists)
+		if err != nil {
+			return false, fmt.Errorf("first owner project gate: %w", err)
+		}
+		if projectExists {
+			return !ownerExists, nil
+		}
+	}
+	var anyUsers bool
+	if err := s.store.pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM users WHERE deleted_at IS NULL)
+	`).Scan(&anyUsers); err != nil {
+		return false, fmt.Errorf("first owner user gate: %w", err)
+	}
+	return !anyUsers, nil
+}
+
+func (s *OAuthService) ensureFirstOwnerMembership(ctx context.Context, userID string) error {
+	if s == nil || s.store == nil || s.store.pool == nil {
+		return errors.New("auth: nil OAuthService")
+	}
+	return projects.EnsureDefaultProjectOwnerMembership(ctx, s.store.pool, s.defaultProjectSlug, userID)
 }
 
 func (s *OAuthService) handleLogout(w http.ResponseWriter, r *http.Request) {

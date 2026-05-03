@@ -203,6 +203,98 @@ func TestGitHubOAuthCallbackIntegration(t *testing.T) {
 	}
 }
 
+func TestGitHubFirstOwnerSelfSignupIntegration(t *testing.T) {
+	ctx, pool := openOAuthIntegrationDB(t)
+	suffix := uniqueOAuthSuffix()
+	providerUID := fmt.Sprintf("%d", time.Now().UnixNano())
+	email := fmt.Sprintf("first-owner-%s@example.invalid", suffix)
+	projectSlug, projectID := insertGitHubProjectWithoutOwner(t, ctx, pool, suffix)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE slug = $1`, projectSlug)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE lower(email) = $1 OR provider_uid = $2`, strings.ToLower(email), providerUID)
+	})
+
+	fakeGitHub := fakeGitHubServer(t, fakeGitHubIdentity{
+		ID:       providerUID,
+		Login:    "owner-" + suffix,
+		Name:     "First Owner",
+		Email:    email,
+		Verified: true,
+	})
+	defer fakeGitHub.Close()
+
+	var mux *http.ServeMux
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if mux == nil {
+			http.Error(w, "test mux not ready", http.StatusServiceUnavailable)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	}))
+	defer ts.Close()
+
+	svc, err := NewOAuthService(ctx, pool, OAuthConfig{
+		Issuer:             ts.URL,
+		PublicBaseURL:      ts.URL,
+		RedirectBaseURL:    ts.URL,
+		SigningKeyPath:     t.TempDir() + "/oauth.pem",
+		ClientID:           "first-owner-client-" + suffix,
+		RedirectURIs:       []string{ts.URL + "/client/callback"},
+		DefaultProjectSlug: projectSlug,
+		GitHubClientID:     "fake-gh-client",
+		GitHubClientSecret: "fake-gh-secret",
+		GitHubAuthURL:      fakeGitHub.URL + "/login",
+		GitHubTokenURL:     fakeGitHub.URL + "/token",
+		GitHubAPIBaseURL:   fakeGitHub.URL,
+	})
+	if err != nil {
+		t.Fatalf("NewOAuthService: %v", err)
+	}
+	mux = http.NewServeMux()
+	svc.RegisterRoutes(mux)
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookie jar: %v", err)
+	}
+	httpClient := &http.Client{
+		Jar: jar,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	loc := redirectLocation(t, httpClient, ts.URL+"/auth/github/login?return_to=/")
+	loc = redirectLocation(t, httpClient, loc.String())
+	loc = redirectLocation(t, httpClient, loc.String())
+	if loc.Path != "/" {
+		t.Fatalf("first-owner callback redirect = %s, want /", loc.String())
+	}
+
+	var userID, role string
+	if err := pool.QueryRow(ctx, `
+		SELECT u.id::text, pm.role
+		  FROM users u
+		  JOIN project_members pm ON pm.user_id = u.id
+		 WHERE lower(u.email) = $1 AND pm.project_id = $2::uuid
+	`, strings.ToLower(email), projectID).Scan(&userID, &role); err != nil {
+		t.Fatalf("select first owner membership: %v", err)
+	}
+	if userID == "" || role != "owner" {
+		t.Fatalf("first owner membership = user %q role %q, want owner", userID, role)
+	}
+
+	resp, err := httpClient.Get(ts.URL + "/auth/github/login")
+	if err != nil {
+		t.Fatalf("second no-invite login request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("second no-invite status = %d, want 400, body=%s", resp.StatusCode, string(body))
+	}
+}
+
 func TestSelectPrimaryVerifiedGitHubEmail(t *testing.T) {
 	got := selectPrimaryVerifiedGitHubEmail([]githubEmailResponse{
 		{Email: "secondary@example.invalid", Primary: false, Verified: true},
@@ -299,6 +391,20 @@ func insertGitHubInviteProject(t *testing.T, ctx context.Context, pool *db.Pool,
 		VALUES ($1::uuid, $2::uuid, 'owner')
 	`, projectID, ownerID); err != nil {
 		t.Fatalf("insert invite owner membership: %v", err)
+	}
+	return slug, projectID
+}
+
+func insertGitHubProjectWithoutOwner(t *testing.T, ctx context.Context, pool *db.Pool, suffix string) (string, string) {
+	t.Helper()
+	slug := "github-first-owner-" + suffix
+	var projectID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO projects (slug, name, organization_id, primary_language)
+		VALUES ($1, $2, (SELECT id FROM organizations WHERE slug = 'default' LIMIT 1), 'en')
+		RETURNING id::text
+	`, slug, "GitHub First Owner "+suffix).Scan(&projectID); err != nil {
+		t.Fatalf("insert first-owner project: %v", err)
 	}
 	return slug, projectID
 }

@@ -56,8 +56,10 @@ PINDOC_OAUTH_REDIRECT_URIS=http://127.0.0.1:3846/callback,http://localhost:3846/
 
 `PINDOC_OAUTH_CLIENT_ID`, `PINDOC_OAUTH_CLIENT_SECRET`,
 `PINDOC_OAUTH_REDIRECT_URIS`는 부팅 시 초기 client 1개를 seed한다. 이후에는
-`/admin/providers`의 OAuth Clients 섹션이나 Dynamic Client Registration으로
-client를 추가한다.
+`/admin/providers`의 OAuth Clients 섹션에서 client를 추가한다. Dynamic Client
+Registration은 기본값이 closed이며, instance owner가 OAuth Clients 패널에서
+명시적으로 open으로 바꾼 뒤에만 익명 client가 `/oauth/register`를 호출할 수
+있다. open 상태에서도 등록은 rate limit, 총량 cap, 요청 audit 기록을 거친다.
 
 ```bash
 curl -sS https://pindoc.example.com/oauth/register \
@@ -95,7 +97,14 @@ server {
 }
 ```
 
-## 5. MCP client 연결
+## 5. 첫 owner 등록
+
+새 인스턴스에서는 `/signup`으로 들어가 local identity setup이 보이면 먼저
+완료한 뒤 GitHub login을 한 번 실행한다. default project에 owner가 아직 없으면
+Pindoc은 invite 없는 GitHub login을 1회 허용하고 그 사용자를 owner로 즉시
+가입시킨다. 이후에는 같은 경로가 자동으로 닫히고 invite-only 모델로 돌아간다.
+
+## 6. MCP client 연결
 
 각 MCP client는 account-level endpoint 하나에 연결한다.
 
@@ -131,10 +140,15 @@ bootstrap fallback 문제는
 ## 로컬 OAuth QA
 
 loopback `/mcp` 호출은 기본적으로 bearer auth를 우회한다. 같은 머신에서 OAuth
-bearer path를 검증하려면 다음을 설정한다.
+bearer path를 검증하려면 GitHub provider를 먼저 구성하고 다음을 설정한다.
 
 ```env
+PINDOC_AUTH_PROVIDERS=github
+PINDOC_GITHUB_CLIENT_ID=Iv1.example
+PINDOC_GITHUB_CLIENT_SECRET=github-secret
 PINDOC_FORCE_OAUTH_LOCAL=true
 ```
 
-이 flag는 개발과 OSS QA 전용이므로 daemon은 부팅 시 warning을 남긴다.
+`PINDOC_FORCE_OAUTH_LOCAL=true`인데 active OAuth provider가 없으면 daemon은
+silent no-op 대신 부팅을 거부한다. 이 flag는 개발과 OSS QA 전용이므로 정상
+구성에서도 부팅 시 warning을 남긴다.

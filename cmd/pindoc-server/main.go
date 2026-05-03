@@ -54,6 +54,8 @@ var (
 	commit  = "unknown"
 )
 
+var errForceOAuthLocalRequiresProvider = errors.New("config: PINDOC_FORCE_OAUTH_LOCAL requires an active OAuth provider; set PINDOC_AUTH_PROVIDERS=github and GitHub credentials before enabling PINDOC_FORCE_OAUTH_LOCAL")
+
 func main() {
 	startTime := time.Now()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
@@ -264,6 +266,12 @@ func main() {
 		}
 		dbGithub, dbHasGithub := findGithubProvider(dbProviderRows)
 		githubActive := cfg.HasAuthProvider(config.AuthProviderGitHub) || dbHasGithub
+		if err := validateOAuthBootPosture(cfg, githubActive); err != nil {
+			logger.Error("server config rejected", "err", err,
+				"hint", "set PINDOC_AUTH_PROVIDERS=github and GitHub credentials before enabling PINDOC_FORCE_OAUTH_LOCAL",
+			)
+			os.Exit(1)
+		}
 
 		var oauthSvc *pauth.OAuthService
 		if githubActive {
@@ -295,6 +303,7 @@ func main() {
 				// Boot-time loopback owner only. OAuthService refuses to use
 				// this fallback for non-loopback authorize requests.
 				BootstrapUserID:    oauthUserID,
+				DefaultProjectSlug: cfg.ProjectSlug,
 				GitHubClientID:     ghClientID,
 				GitHubClientSecret: ghClientSecret,
 			})
@@ -365,7 +374,7 @@ func main() {
 			Settings:  ssStore,
 			Telemetry: tele,
 			Transport: "streamable_http",
-		}, apiHandler, oauthSvc, cfg)
+		}, apiHandler, oauthSvc, cfg, trustedProxy)
 		return
 	}
 
@@ -416,7 +425,7 @@ func main() {
 // dependencies; apiHandler carries the Reader API mux (httpapi.New) —
 // Go 1.22's ServeMux picks /mcp over the catch-all `/` so the routing
 // is unambiguous.
-func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOpts pmcp.Options, apiHandler http.Handler, oauthSvc *pauth.OAuthService, cfg *config.Config) {
+func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOpts pmcp.Options, apiHandler http.Handler, oauthSvc *pauth.OAuthService, cfg *config.Config, trustedProxy bool) {
 	mcp, err := pmcp.NewServer(baseOpts)
 	if err != nil {
 		logger.Error("mcp server init failed", "err", err)
@@ -438,7 +447,7 @@ func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOp
 		// bearer middleware so stdio-loopback parity holds for the
 		// HTTP transport too. Non-loopback callers still must
 		// present a Pindoc AS JWT.
-		mcpHandler = wrapMCPBearerForLoopback(streamHandler, bearer, cfg)
+		mcpHandler = wrapMCPBearerForLoopback(streamHandler, bearer, cfg, trustedProxy)
 	} else if cfg != nil && cfg.HasAuthProvider(config.AuthProviderGitHub) {
 		logger.Error("oauth provider configured but oauth service is nil")
 		os.Exit(1)
@@ -506,6 +515,13 @@ func validateServerConfig(cfg *config.Config) error {
 	// (Decision decision-auth-model-loopback-and-providers § 3,
 	// task-providers-admin-ui). Boot still fails loud later if env
 	// CSV says github but neither env nor DB carries credentials.
+	return nil
+}
+
+func validateOAuthBootPosture(cfg *config.Config, oauthActive bool) error {
+	if cfg != nil && cfg.ForceOAuthLocal && !oauthActive {
+		return errForceOAuthLocalRequiresProvider
+	}
 	return nil
 }
 
@@ -635,16 +651,16 @@ func daemonPublicBaseURL(publicBaseURL, addr string) string {
 	return "http://" + host
 }
 
-func shouldBypassMCPBearer(cfg *config.Config, r *http.Request) bool {
+func shouldBypassMCPBearer(cfg *config.Config, r *http.Request, trustedProxy bool) bool {
 	if cfg != nil && cfg.ForceOAuthLocal {
 		return false
 	}
-	return pauth.IsLoopbackRequest(r)
+	return pauth.IsLoopbackRequest(r) || trustedProxy
 }
 
-func wrapMCPBearerForLoopback(streamHandler, bearer http.Handler, cfg *config.Config) http.Handler {
+func wrapMCPBearerForLoopback(streamHandler, bearer http.Handler, cfg *config.Config, trustedProxy bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if shouldBypassMCPBearer(cfg, r) {
+		if shouldBypassMCPBearer(cfg, r, trustedProxy) {
 			streamHandler.ServeHTTP(w, r)
 			return
 		}

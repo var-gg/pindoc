@@ -113,21 +113,26 @@ func NewServer(opts Options) (*Server, error) {
 	// use it for the env-anchored user upsert, then layer the chain on
 	// top once we know UserID.
 	deps := tools.Deps{
-		DB:                    opts.DB,
-		Logger:                opts.Logger,
-		Version:               opts.Version,
-		UserLanguage:          opts.Config.UserLanguage,
-		ReceiptExemptionLimit: opts.Config.ReceiptExemptionLimit,
-		Embedder:              opts.Embedder,
-		Receipts:              receipts.New(0), // DefaultTTL applies
-		Settings:              opts.Settings,
-		RepoRoot:              opts.Config.RepoRoot,
-		AssetRoot:             opts.Config.AssetRoot,
-		Telemetry:             opts.Telemetry,
-		DefaultProjectSlug:    opts.Config.ProjectSlug,
-		Transport:             transport,
-		AuthProviders:         opts.Config.AuthProviders,
-		BindAddr:              opts.Config.BindAddr,
+		DB:                         opts.DB,
+		Logger:                     opts.Logger,
+		Version:                    opts.Version,
+		UserLanguage:               opts.Config.UserLanguage,
+		ReceiptExemptionLimit:      opts.Config.ReceiptExemptionLimit,
+		Embedder:                   opts.Embedder,
+		Receipts:                   receipts.New(0), // DefaultTTL applies
+		Settings:                   opts.Settings,
+		RepoRoot:                   opts.Config.RepoRoot,
+		AssetRoot:                  opts.Config.AssetRoot,
+		Telemetry:                  opts.Telemetry,
+		DefaultProjectSlug:         opts.Config.ProjectSlug,
+		Transport:                  transport,
+		AuthProviders:              opts.Config.AuthProviders,
+		BindAddr:                   opts.Config.BindAddr,
+		ForceOAuthLocal:            opts.Config.ForceOAuthLocal,
+		AllowPublicUnauthenticated: opts.Config.AllowPublicUnauthenticated,
+	}
+	if opts.Settings != nil {
+		deps.DCRMode = opts.Settings.Get().DCRMode
 	}
 	userID := strings.TrimSpace(opts.UserID)
 	if userID == "" {

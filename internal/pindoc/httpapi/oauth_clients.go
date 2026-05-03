@@ -15,21 +15,32 @@ type oauthClientError struct {
 }
 
 type oauthClientRow struct {
-	ClientID        string   `json:"client_id"`
-	DisplayName     string   `json:"display_name"`
-	RedirectURIs    []string `json:"redirect_uris"`
-	GrantTypes      []string `json:"grant_types"`
-	ResponseTypes   []string `json:"response_types"`
-	Scopes          []string `json:"scopes"`
-	Public          bool     `json:"public"`
-	HasClientSecret bool     `json:"has_client_secret"`
-	CreatedVia      string   `json:"created_via"`
-	SeedSuppressed  bool     `json:"seed_suppressed"`
-	CreatedAt       string   `json:"created_at"`
+	ClientID          string   `json:"client_id"`
+	DisplayName       string   `json:"display_name"`
+	RedirectURIs      []string `json:"redirect_uris"`
+	GrantTypes        []string `json:"grant_types"`
+	ResponseTypes     []string `json:"response_types"`
+	Scopes            []string `json:"scopes"`
+	Public            bool     `json:"public"`
+	HasClientSecret   bool     `json:"has_client_secret"`
+	CreatedVia        string   `json:"created_via"`
+	CreatedRemoteAddr string   `json:"created_remote_addr,omitempty"`
+	SeedSuppressed    bool     `json:"seed_suppressed"`
+	CreatedAt         string   `json:"created_at"`
 }
 
 type oauthClientsListResponse struct {
+	DCRMode string           `json:"dcr_mode"`
 	Clients []oauthClientRow `json:"clients"`
+}
+
+type oauthDCRModePatchRequest struct {
+	Mode string `json:"mode"`
+}
+
+type oauthDCRModePatchResponse struct {
+	Status  string `json:"status"`
+	DCRMode string `json:"dcr_mode"`
 }
 
 type oauthClientCreateRequest struct {
@@ -67,11 +78,38 @@ func (d Deps) handleOAuthClientsList(w http.ResponseWriter, r *http.Request) {
 		d.writeOAuthClientErr(w, err, "OAUTH_CLIENTS_LIST_FAILED")
 		return
 	}
-	out := oauthClientsListResponse{Clients: make([]oauthClientRow, 0, len(records))}
+	mode, err := d.OAuth.DCRMode(r.Context())
+	if err != nil {
+		d.writeOAuthClientErr(w, err, "OAUTH_DCR_MODE_FAILED")
+		return
+	}
+	out := oauthClientsListResponse{DCRMode: mode, Clients: make([]oauthClientRow, 0, len(records))}
 	for _, rec := range records {
 		out.Clients = append(out.Clients, oauthClientRowFromRecord(rec))
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (d Deps) handleOAuthClientsDCRModePatch(w http.ResponseWriter, r *http.Request) {
+	if d.OAuth == nil {
+		writeOAuthClientError(w, http.StatusServiceUnavailable, "OAUTH_UNAVAILABLE", "OAuth service not configured")
+		return
+	}
+	if d.instanceOwner(r) == nil {
+		writeOAuthClientError(w, http.StatusForbidden, "INSTANCE_OWNER_REQUIRED", "instance owner only")
+		return
+	}
+	var in oauthDCRModePatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeOAuthClientError(w, http.StatusBadRequest, "BAD_JSON", "could not parse request body as JSON")
+		return
+	}
+	mode, err := d.OAuth.SetDCRMode(r.Context(), in.Mode)
+	if err != nil {
+		d.writeOAuthClientErr(w, err, "OAUTH_DCR_MODE_UPDATE_FAILED")
+		return
+	}
+	writeJSON(w, http.StatusOK, oauthDCRModePatchResponse{Status: "ok", DCRMode: mode})
 }
 
 func (d Deps) handleOAuthClientsCreate(w http.ResponseWriter, r *http.Request) {
@@ -152,16 +190,17 @@ func (d Deps) writeOAuthClientErr(w http.ResponseWriter, err error, fallbackCode
 
 func oauthClientRowFromRecord(rec pauth.OAuthClientRecord) oauthClientRow {
 	return oauthClientRow{
-		ClientID:        rec.ID,
-		DisplayName:     rec.DisplayName,
-		RedirectURIs:    rec.RedirectURIs,
-		GrantTypes:      rec.GrantTypes,
-		ResponseTypes:   rec.ResponseTypes,
-		Scopes:          rec.Scopes,
-		Public:          rec.Public,
-		HasClientSecret: rec.HasSecret,
-		CreatedVia:      rec.CreatedVia,
-		SeedSuppressed:  rec.SeedSuppressed,
-		CreatedAt:       rec.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		ClientID:          rec.ID,
+		DisplayName:       rec.DisplayName,
+		RedirectURIs:      rec.RedirectURIs,
+		GrantTypes:        rec.GrantTypes,
+		ResponseTypes:     rec.ResponseTypes,
+		Scopes:            rec.Scopes,
+		Public:            rec.Public,
+		HasClientSecret:   rec.HasSecret,
+		CreatedVia:        rec.CreatedVia,
+		CreatedRemoteAddr: rec.CreatedRemoteAddr,
+		SeedSuppressed:    rec.SeedSuppressed,
+		CreatedAt:         rec.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 }
