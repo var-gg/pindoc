@@ -469,7 +469,7 @@
   "cmdk.placeholder": "아티팩트 검색 또는 명령어...",
   "cmdk.artifacts": "문서",
   "cmdk.hint": "이 프로젝트의 문서를 검색하세요.",
-  "cmdk.no_hits": "일치하는 항목 없음.",
+  "cmdk.no_hits": "일치하는 문서가 없습니다.",
   "cmdk.commit_result": "커밋 %s",
   "cmdk.updated": "수정 %s",
   "cmdk.navigate": "이동",

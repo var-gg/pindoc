@@ -3,6 +3,22 @@ import { localizedAreaName } from "./areaLocale";
 
 type TFn = (key: string, ...args: Array<string | number>) => string;
 
+export const CMDK_RELEVANCE_SETTINGS = {
+  maxDistance: 0.7,
+} as const;
+
+type CmdKRelevanceSettings = {
+  maxDistance?: number;
+};
+
+export function cmdkRelevantHits(
+  hits: SearchHit[],
+  settings: CmdKRelevanceSettings = CMDK_RELEVANCE_SETTINGS,
+): SearchHit[] {
+  const maxDistance = settings.maxDistance ?? CMDK_RELEVANCE_SETTINGS.maxDistance;
+  return hits.filter((hit) => Number.isFinite(hit.distance) && hit.distance <= maxDistance);
+}
+
 export function cmdkResultMeta(hit: SearchHit, t: TFn): string {
   // The raw embedding distance stays in the API response for ranking and
   // debugging, but the Reader command palette does not expose it.

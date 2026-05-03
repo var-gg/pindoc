@@ -1,5 +1,11 @@
 import type { SearchHit } from "../src/api/client";
-import { cmdkResultMeta } from "../src/reader/cmdkViewModel";
+import {
+  CMDK_RELEVANCE_SETTINGS,
+  cmdkRelevantHits,
+  cmdkResultMeta,
+} from "../src/reader/cmdkViewModel";
+import ko = require("../src/i18n/ko.json");
+import en = require("../src/i18n/en.json");
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -77,8 +83,41 @@ function testCmdKMetaShowsArtifactStatusSignalsWhenAvailable(): void {
   assertEqual(meta, "Decision · UI · Published/Partial · Updated 2026-05-02", "CmdK result meta with artifact signals");
 }
 
+function testCmdKFiltersIrrelevantNonsenseQueryHits(): void {
+  const filtered = cmdkRelevantHits([
+    hit({ artifact_id: "nonsense-1", slug: "nonsense-1", distance: 0.7291 }),
+    hit({ artifact_id: "nonsense-2", slug: "nonsense-2", distance: 0.81 }),
+  ]);
+
+  assertEqual(filtered.length, 0, "irrelevant CmdK hits should be hidden");
+}
+
+function testCmdKKeepsRelevantTopResults(): void {
+  const filtered = cmdkRelevantHits([
+    hit({ artifact_id: "visibility-1", slug: "visibility-1", distance: 0.58 }),
+    hit({ artifact_id: "visibility-2", slug: "visibility-2", distance: 0.64 }),
+    hit({ artifact_id: "too-far", slug: "too-far", distance: 0.71 }),
+  ]);
+
+  assertEqual(filtered.map((item) => item.slug).join(","), "visibility-1,visibility-2", "relevant CmdK hits should remain in ranked order");
+}
+
+function testCmdKRelevanceCutoffIsCentralized(): void {
+  assertEqual(CMDK_RELEVANCE_SETTINGS.maxDistance, 0.7, "CmdK relevance cutoff setting");
+  assertEqual(cmdkRelevantHits([hit({ distance: 0.7 })]).length, 1, "cutoff should be inclusive");
+}
+
+function testCmdKEmptyCopyExistsInBothLocales(): void {
+  assertEqual(ko["cmdk.no_hits"], "일치하는 문서가 없습니다.", "KO CmdK empty copy");
+  assertEqual(en["cmdk.no_hits"], "No matching artifacts.", "EN CmdK empty copy");
+}
+
 testCmdKMetaHidesRawDistance();
 testCmdKMetaDoesNotDependOnDistanceForDisplay();
 testCmdKMetaShowsSectionContextWhenAvailable();
 testCmdKMetaShowsLifecycleSignalsWhenAvailable();
 testCmdKMetaShowsArtifactStatusSignalsWhenAvailable();
+testCmdKFiltersIrrelevantNonsenseQueryHits();
+testCmdKKeepsRelevantTopResults();
+testCmdKRelevanceCutoffIsCentralized();
+testCmdKEmptyCopyExistsInBothLocales();

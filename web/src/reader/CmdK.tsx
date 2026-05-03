@@ -4,7 +4,7 @@ import { FileText, GitCommit, Search } from "lucide-react";
 import { api, type GitRepoSummary, type SearchHit } from "../api/client";
 import { useI18n } from "../i18n";
 import { gitCommitPath, isCommitQuery, shortSha } from "../git/routes";
-import { cmdkResultMeta } from "./cmdkViewModel";
+import { cmdkRelevantHits, cmdkResultMeta } from "./cmdkViewModel";
 import { projectRoutePrefix, projectSurfacePath } from "../readerRoutes";
 
 type Props = {
@@ -52,7 +52,7 @@ export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
     const id = window.setTimeout(async () => {
       try {
         const res = await api.search(projectSlug, q);
-        setHits(res.hits);
+        setHits(cmdkRelevantHits(res.hits));
         setNotice(res.notice);
         setSelected(0);
       } catch (err) {

@@ -469,7 +469,7 @@
   "cmdk.placeholder": "Search artifacts, run commands...",
   "cmdk.artifacts": "Artifacts",
   "cmdk.hint": "Type to search artifacts in this project.",
-  "cmdk.no_hits": "No matches.",
+  "cmdk.no_hits": "No matching artifacts.",
   "cmdk.commit_result": "Commit %s",
   "cmdk.updated": "Updated %s",
   "cmdk.navigate": "navigate",
