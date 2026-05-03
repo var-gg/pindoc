@@ -451,6 +451,8 @@ stdio MCP transport
 `users` 행 1개에 IdP identity N개가 link되는 SSO 모델 — 어떤 IdP로
 로그인하든 같은 `users.id`로 수렴한다.
 
+`bootstrapUserID` fallback은 loopback origin에서만 발동한다. Providers 미설정 시 OAuth endpoint들은 SPA로 빠지지 않고 503 + JSON `auth_not_configured`로 응답한다.
+
 ### 시나리오 매핑
 
 | 시나리오 | bind | providers | 운영자 경험 |

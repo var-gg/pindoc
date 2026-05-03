@@ -126,6 +126,8 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	}
 	if d.OAuth != nil {
 		d.OAuth.RegisterRoutes(mux)
+	} else {
+		pauth.RegisterUnavailableOAuthRoutes(mux)
 	}
 
 	// Unscoped reads — apply to the whole instance.

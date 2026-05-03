@@ -285,13 +285,15 @@ func main() {
 				ghClientSecret = dbGithub.ClientSecret
 			}
 			oauthSvc, err = pauth.NewOAuthService(ctx, pool, pauth.OAuthConfig{
-				Issuer:             publicBaseURL,
-				PublicBaseURL:      publicBaseURL,
-				RedirectBaseURL:    redirectBaseURL,
-				SigningKeyPath:     cfg.OAuthSigningKeyPath,
-				ClientID:           cfg.OAuthClientID,
-				ClientSecret:       cfg.OAuthClientSecret,
-				RedirectURIs:       cfg.OAuthRedirectURIs,
+				Issuer:          publicBaseURL,
+				PublicBaseURL:   publicBaseURL,
+				RedirectBaseURL: redirectBaseURL,
+				SigningKeyPath:  cfg.OAuthSigningKeyPath,
+				ClientID:        cfg.OAuthClientID,
+				ClientSecret:    cfg.OAuthClientSecret,
+				RedirectURIs:    cfg.OAuthRedirectURIs,
+				// Boot-time loopback owner only. OAuthService refuses to use
+				// this fallback for non-loopback authorize requests.
 				BootstrapUserID:    oauthUserID,
 				GitHubClientID:     ghClientID,
 				GitHubClientSecret: ghClientSecret,

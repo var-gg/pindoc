@@ -306,6 +306,36 @@ func (s *OAuthService) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /auth/logout", s.handleLogout)
 }
 
+// RegisterUnavailableOAuthRoutes keeps OAuth-reserved paths from
+// falling through to the Reader SPA when no identity provider is wired.
+// MCP clients expect JSON OAuth metadata/errors, not an index.html shell.
+func RegisterUnavailableOAuthRoutes(mux *http.ServeMux) {
+	if mux == nil {
+		return
+	}
+	for _, path := range []string{
+		"/.well-known/oauth-protected-resource",
+		"/.well-known/oauth-authorization-server",
+		"/.well-known/jwks.json",
+		"/oauth/authorize",
+		"/oauth/token",
+		"/oauth/revoke",
+		"/auth/github/login",
+		"/auth/github/callback",
+		"/auth/logout",
+	} {
+		mux.HandleFunc(path, handleOAuthUnavailable)
+	}
+}
+
+func handleOAuthUnavailable(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	writeOAuthJSON(w, http.StatusServiceUnavailable, map[string]string{
+		"error": "auth_not_configured",
+		"hint":  "set PINDOC_AUTH_PROVIDERS",
+	})
+}
+
 func (s *OAuthService) handleProtectedResourceMetadata(w http.ResponseWriter, _ *http.Request) {
 	writeOAuthJSON(w, http.StatusOK, oauthex.ProtectedResourceMetadata{
 		Resource:                          s.publicBaseURL + "/mcp",
@@ -359,7 +389,7 @@ func (s *OAuthService) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		ar.GrantAudience(audience)
 	}
 	subject := strings.TrimSpace(s.browserSessionUserID(r))
-	if subject == "" {
+	if subject == "" && IsLoopbackRequest(r) {
 		subject = strings.TrimSpace(s.bootstrapUserID)
 	}
 	if subject == "" {
@@ -470,6 +500,10 @@ func (s *OAuthService) prepareSession(session *foauth2.JWTSession, subject strin
 	}
 }
 
+// EnsureBootstrapUser resolves or creates the boot-time owner identity used
+// for local loopback convenience. Its returned ID must never authorize
+// non-loopback OAuth requests; handleAuthorize gates bootstrap fallback with
+// IsLoopbackRequest before using OAuthConfig.BootstrapUserID.
 func EnsureBootstrapUser(ctx context.Context, pool *db.Pool, userName, userEmail string) (string, error) {
 	if pool == nil {
 		return "", errors.New("auth: nil DB pool")

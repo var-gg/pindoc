@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -64,6 +66,50 @@ func TestConfigReportsProvidersAndBind(t *testing.T) {
 	}
 	if _, ok := body["auth_mode"]; ok {
 		t.Fatalf("auth_mode should be retired from /api/config")
+	}
+}
+
+func TestOAuthUnavailableRoutesDoNotFallThroughToSPA(t *testing.T) {
+	dist := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dist, "index.html"), []byte("<!doctype html><title>Pindoc</title>"), 0o644); err != nil {
+		t.Fatalf("write index.html: %v", err)
+	}
+	handler := New(&config.Config{}, Deps{SPADistDir: dist})
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/.well-known/oauth-protected-resource"},
+		{http.MethodGet, "/.well-known/oauth-authorization-server"},
+		{http.MethodGet, "/.well-known/jwks.json"},
+		{http.MethodGet, "/oauth/authorize"},
+		{http.MethodGet, "/oauth/token"},
+		{http.MethodPost, "/oauth/token"},
+		{http.MethodPost, "/oauth/revoke"},
+		{http.MethodGet, "/auth/github/login"},
+		{http.MethodGet, "/auth/github/callback"},
+		{http.MethodPost, "/auth/logout"},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d; want 503; body=%s", rec.Code, rec.Body.String())
+			}
+			if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") || strings.Contains(ct, "text/html") {
+				t.Fatalf("Content-Type = %q, want application/json and not text/html", ct)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode JSON: %v; body=%s", err, rec.Body.String())
+			}
+			if body["error"] != "auth_not_configured" || body["hint"] != "set PINDOC_AUTH_PROVIDERS" {
+				t.Fatalf("body = %#v", body)
+			}
+		})
 	}
 }
 

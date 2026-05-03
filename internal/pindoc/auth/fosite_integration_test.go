@@ -114,7 +114,63 @@ func TestFositePKCEFlowIntegration(t *testing.T) {
 	}
 }
 
+func TestAuthorizeBootstrapFallbackRequiresLoopback(t *testing.T) {
+	ctx, pool := openOAuthIntegrationDB(t)
+	suffix := uniqueOAuthSuffix()
+	userID := insertOAuthTestUser(t, ctx, pool, suffix)
+
+	clientID := "bootstrap-client-" + suffix
+	redirectURI := "http://127.0.0.1:3846/callback"
+	svc, err := NewOAuthService(ctx, pool, OAuthConfig{
+		Issuer:          "http://pindoc.example.test",
+		PublicBaseURL:   "http://pindoc.example.test",
+		SigningKeyPath:  t.TempDir() + "/oauth.pem",
+		ClientID:        clientID,
+		RedirectURIs:    []string{redirectURI},
+		BootstrapUserID: userID,
+	})
+	if err != nil {
+		t.Fatalf("NewOAuthService: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	svc.RegisterRoutes(mux)
+	verifier := "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJK"
+	authURL := buildAuthorizeURL(t, "http://pindoc.example.test", clientID, redirectURI, verifier)
+
+	loopbackLoc := authorizeLocationFromHandler(t, mux, authURL, "127.0.0.1:51234")
+	if code := loopbackLoc.Query().Get("code"); code == "" {
+		t.Fatalf("loopback authorize missing code: %s", loopbackLoc.String())
+	}
+	if errCode := loopbackLoc.Query().Get("error"); errCode != "" {
+		t.Fatalf("loopback authorize error = %q; location=%s", errCode, loopbackLoc.String())
+	}
+
+	nonLoopbackLoc := authorizeLocationFromHandler(t, mux, authURL, "203.0.113.10:51234")
+	if code := nonLoopbackLoc.Query().Get("code"); code != "" {
+		t.Fatalf("non-loopback authorize minted code %q; location=%s", code, nonLoopbackLoc.String())
+	}
+	if errCode := nonLoopbackLoc.Query().Get("error"); errCode != "access_denied" {
+		t.Fatalf("non-loopback error = %q, want access_denied; location=%s", errCode, nonLoopbackLoc.String())
+	}
+}
+
 func authorizeCode(t *testing.T, serverURL, clientID, redirectURI, verifier string) string {
+	t.Helper()
+	authURL := buildAuthorizeURL(t, serverURL, clientID, redirectURI, verifier)
+
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	resp, err := client.Get(authURL)
+	if err != nil {
+		t.Fatalf("GET authorize: %v", err)
+	}
+	defer resp.Body.Close()
+	return requireAuthorizeCode(t, resp)
+}
+
+func buildAuthorizeURL(t *testing.T, serverURL, clientID, redirectURI, verifier string) string {
 	t.Helper()
 	challenge := pkceChallenge(verifier)
 	authURL, err := url.Parse(serverURL + "/oauth/authorize")
@@ -130,23 +186,23 @@ func authorizeCode(t *testing.T, serverURL, clientID, redirectURI, verifier stri
 	q.Set("code_challenge", challenge)
 	q.Set("code_challenge_method", "S256")
 	authURL.RawQuery = q.Encode()
+	return authURL.String()
+}
 
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	}}
-	resp, err := client.Get(authURL.String())
-	if err != nil {
-		t.Fatalf("GET authorize: %v", err)
-	}
+func authorizeLocationFromHandler(t *testing.T, handler http.Handler, target, remoteAddr string) *url.URL {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = remoteAddr
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	resp := rec.Result()
 	defer resp.Body.Close()
-	if resp.StatusCode < 300 || resp.StatusCode > 399 {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("authorize status = %d, want redirect, body=%s", resp.StatusCode, string(body))
-	}
-	location, err := resp.Location()
-	if err != nil {
-		t.Fatalf("authorize Location: %v", err)
-	}
+	return requireAuthorizeLocation(t, resp)
+}
+
+func requireAuthorizeCode(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	location := requireAuthorizeLocation(t, resp)
 	code := location.Query().Get("code")
 	if code == "" {
 		t.Fatalf("authorize redirect has no code: %s", location.String())
@@ -155,6 +211,19 @@ func authorizeCode(t *testing.T, serverURL, clientID, redirectURI, verifier stri
 		t.Fatalf("state = %q, want state-0123456789", state)
 	}
 	return code
+}
+
+func requireAuthorizeLocation(t *testing.T, resp *http.Response) *url.URL {
+	t.Helper()
+	if resp.StatusCode < 300 || resp.StatusCode > 399 {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("authorize status = %d, want redirect, body=%s", resp.StatusCode, string(body))
+	}
+	location, err := resp.Location()
+	if err != nil {
+		t.Fatalf("authorize Location: %v", err)
+	}
+	return location
 }
 
 func tokenRequest(t *testing.T, serverURL string, form url.Values, wantStatus int) map[string]any {
