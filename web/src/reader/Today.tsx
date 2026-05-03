@@ -10,6 +10,7 @@ import { Tooltip } from "./Tooltip";
 import { buildChangeGroupCardView, buildTodayBrief } from "./todayViewModel";
 import { TypeCountChip, VisualAreaChip } from "./VisualChips";
 import { readStateLabel } from "./readStateLabel";
+import { formatDateTime } from "../utils/formatDateTime";
 
 type Props = {
   projectSlug: string;
@@ -38,7 +39,7 @@ export function Today({
   selectedArtifactSlug,
   onSelectArtifact,
 }: Props) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [data, setData] = useState<TodayResp | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<KindFilter>("all");
@@ -182,7 +183,7 @@ export function Today({
     : t("today.empty_filtered_all");
   const brief = useMemo(() => data ? buildTodayBrief(data, t) : null, [data, t]);
   const baselineLabel = data?.baseline.last_seen_at
-    ? new Date(data.baseline.last_seen_at).toLocaleString()
+    ? formatDateTime(data.baseline.last_seen_at, lang)
     : data?.baseline.defaulted_to_days
       ? `last ${data.baseline.defaulted_to_days}d`
       : "current";
@@ -345,7 +346,7 @@ function commitTargetFromGroup(
   return null;
 }
 
-function ChangeGroupCard({
+export function ChangeGroupCard({
   group,
   projectSlug,
   orgSlug,
@@ -368,7 +369,7 @@ function ChangeGroupCard({
   defaultRepo?: GitRepoSummary;
   compact?: boolean;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const navigate = useNavigate();
   const firstArea = group.areas[0];
   const firstArtifact = group.first_artifact;
@@ -436,13 +437,13 @@ function ChangeGroupCard({
         </ul>
       )}
       <div className="change-card__meta">
-        <span>{new Date(group.time_end).toLocaleString()}</span>
+        <span>{formatDateTime(group.time_end, lang)}</span>
         <span>{card.verificationLabel}</span>
         {firstArtifact && (
           <span
             className={`change-card__read-state change-card__read-state--${readState?.read_state ?? "unseen"}`}
             title={readState?.last_seen_at
-              ? `${readLabel} · ${new Date(readState.last_seen_at).toLocaleString()}`
+              ? `${readLabel} · ${formatDateTime(readState.last_seen_at, lang)}`
               : readLabel}
           >
             {readLabel}

@@ -9,12 +9,13 @@ import {
   type TaskFlowResp,
   type TaskFlowRow,
 } from "../api/client";
-import { useI18n } from "../i18n";
+import { useI18n, type Lang } from "../i18n";
 import { projectSurfacePath } from "../readerRoutes";
 import { EmptyState, SurfaceHeader } from "./SurfacePrimitives";
 import { Tooltip } from "./Tooltip";
 import { localizedAreaName } from "./areaLocale";
 import { taskAssigneeLabel } from "./assigneeDisplay";
+import { formatDate } from "../utils/formatDateTime";
 import {
   TASK_FLOW_STAGES,
   groupTaskFlowByProject,
@@ -492,7 +493,7 @@ function TaskFlowRowCard({
   areaNameBySlug: ReadonlyMap<string, string>;
   onSelectTask: (slug: string) => void;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const isLocal = row.project_slug === projectSlug;
   const selected = isLocal && (currentSlug === row.slug || selectedTaskSlug === row.slug);
   const priorityClass = row.priority ? `prio prio--${row.priority}` : "";
@@ -531,7 +532,7 @@ function TaskFlowRowCard({
             <span className="task-flow-card__deadline">
               <CalendarClock className="lucide" aria-hidden="true" />
               <span>{t("tasks.flow_deadline_marker")}</span>
-              <time dateTime={row.due_at}>{formatTaskFlowDate(row.due_at)}</time>
+              <time dateTime={row.due_at}>{formatTaskFlowDate(row.due_at, lang)}</time>
             </span>
           )}
         </div>
@@ -573,7 +574,7 @@ function TaskFlowRowCard({
         </div>
         <div className="task-flow-card__foot">
           <span>{t("tasks.flow_updated_marker")}</span>
-          <time dateTime={row.updated_at}>{formatTaskFlowDate(row.updated_at)}</time>
+          <time dateTime={row.updated_at}>{formatTaskFlowDate(row.updated_at, lang)}</time>
         </div>
         {blocked && (
           <div className="task-flow-card__blockers">
@@ -618,8 +619,8 @@ function dominantStage(rows: TaskFlowRow[]): TaskFlowRow["stage"] {
   return "other";
 }
 
-function formatTaskFlowDate(value: string): string {
-  return new Date(value).toLocaleDateString();
+function formatTaskFlowDate(value: string, lang: Lang): string {
+  return formatDate(value, lang);
 }
 
 function buildAssigneeOptions(

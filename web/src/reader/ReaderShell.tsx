@@ -37,6 +37,7 @@ import {
 } from "./readerErrorState";
 import { localizedAreaName } from "./areaLocale";
 import { taskAssigneeActorKey, taskAssigneeLabel } from "./assigneeDisplay";
+import { formatDate } from "../utils/formatDateTime";
 import {
   countPendingTasks,
   groupTasksByStatus,
@@ -866,7 +867,7 @@ function Body({
   onGraphFocusChange: (slug: string) => void;
   unavailableSurface?: string;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const navigate = useNavigate();
   const [taskSurfaceMode, setTaskSurfaceMode] = useState<"flow" | "board">("flow");
   const baseRoute = projectSurfacePath(
@@ -1115,7 +1116,7 @@ function Body({
                       />
                     </span>
                     <ArtifactByline artifact={a} variant="list" />
-                    <time dateTime={a.updated_at}>{new Date(a.updated_at).toLocaleDateString()}</time>
+                    <time dateTime={a.updated_at}>{formatDate(a.updated_at, lang)}</time>
                   </div>
                 </article>
               );
@@ -1744,7 +1745,7 @@ function TaskCard({
   onSelect: (slug: string) => void;
   areaNameBySlug: ReadonlyMap<string, string>;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const navigate = useNavigate();
   const priority = a.task_meta?.priority;
   const prioClass = priority ? PRIORITY_CLASS[priority] : undefined;
@@ -1822,9 +1823,9 @@ function TaskCard({
         </div>
         <div className="task-card__dates">
           {a.task_meta?.due_at && (
-            <span>~{new Date(a.task_meta.due_at).toLocaleDateString()}</span>
+            <span>~{formatDate(a.task_meta.due_at, lang)}</span>
           )}
-          <span>{new Date(a.updated_at).toLocaleDateString()}</span>
+          <span>{formatDate(a.updated_at, lang)}</span>
         </div>
       </div>
     </article>

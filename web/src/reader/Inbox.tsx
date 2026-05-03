@@ -8,6 +8,7 @@ import { ArtifactByline } from "./ArtifactByline";
 import { EmptyState, SurfaceHeader } from "./SurfacePrimitives";
 import { Tooltip } from "./Tooltip";
 import { ArtifactTypeChip, VisualAreaChip } from "./VisualChips";
+import { formatDateTime } from "../utils/formatDateTime";
 
 type Props = {
   projectSlug: string;
@@ -19,7 +20,7 @@ type Props = {
 type ReviewAction = "approve" | "reject";
 
 export function Inbox({ projectSlug, orgSlug, enabled = true, onCountChange }: Props) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [items, setItems] = useState<ArtifactRef[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -123,7 +124,7 @@ export function Inbox({ projectSlug, orgSlug, enabled = true, onCountChange }: P
                 </h2>
                 <div className="inbox-card__byline">
                   <ArtifactByline artifact={item} variant="list" />
-                  <span>{new Date(item.updated_at).toLocaleString()}</span>
+                  <span>{formatDateTime(item.updated_at, lang)}</span>
                 </div>
                 <div className="inbox-card__actions">
                   <button

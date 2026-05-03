@@ -7,12 +7,13 @@ import {
   type RevisionType,
   type RevisionsResp,
 } from "../api/client";
-import { useI18n } from "../i18n";
+import { useI18n, type Lang } from "../i18n";
 import { DEFAULT_READER_ORG_SLUG, projectSurfacePath } from "../readerRoutes";
 import { agentAvatar } from "./avatars";
 import { authorAvatarKey, authorDisplayLabel, authorIdentityKey } from "./authorDisplay";
 import { RevisionTypeBadge } from "./RevisionTypeBadge";
 import { SurfaceHeader } from "./SurfacePrimitives";
+import { formatDateTime, formatTime } from "../utils/formatDateTime";
 
 type Load =
   | { kind: "loading" }
@@ -156,7 +157,7 @@ function TimelineNode({
   expanded: boolean;
   onToggle: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   if (entry.kind === "single") {
     return (
       <RevisionListItem
@@ -200,7 +201,7 @@ function TimelineNode({
             <span className={av.className} style={{ width: 14, height: 14, fontSize: 8 }}>{av.initials}</span>
             <span>{author}</span>
             <span>·</span>
-            <span>{formatTimeRange(oldest.created_at, newest.created_at)}</span>
+            <span>{formatTimeRange(oldest.created_at, newest.created_at, lang)}</span>
           </div>
         </div>
         <button type="button" className="chip" onClick={onToggle} style={{ cursor: "pointer" }}>
@@ -242,7 +243,7 @@ function RevisionListItem({
   previous?: RevisionRow;
   nested?: boolean;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const av = agentAvatar(authorAvatarKey(revision));
   const author = authorDisplayLabel(revision, t("reader.byline_unknown"));
   const diffHref = previous
@@ -275,7 +276,7 @@ function RevisionListItem({
           <span>{author}</span>
           {revision.bulk_op_id && <span className="chip chip--area">bulk:{revision.bulk_op_id.slice(0, 8)}</span>}
           <span>·</span>
-          <span>{new Date(revision.created_at).toLocaleString()}</span>
+          <span>{formatDateTime(revision.created_at, lang)}</span>
         </div>
       </div>
       <div style={{ display: "flex", gap: 8 }}>
@@ -376,10 +377,10 @@ function revisionTypeFilterClass(revisionType: RevisionType): string {
   }
 }
 
-function formatTimeRange(start: string, end: string): string {
+function formatTimeRange(start: string, end: string, lang: Lang): string {
   const a = new Date(start);
   const b = new Date(end);
   const minutes = Math.max(0, Math.round((b.getTime() - a.getTime()) / 60000));
-  if (minutes <= 0) return b.toLocaleString();
-  return `${a.toLocaleTimeString()}-${b.toLocaleTimeString()} · ${minutes}m`;
+  if (minutes <= 0) return formatDateTime(b, lang);
+  return `${formatTime(a, lang)}-${formatTime(b, lang)} · ${minutes}m`;
 }

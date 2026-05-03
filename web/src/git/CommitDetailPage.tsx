@@ -11,6 +11,7 @@ import { useI18n } from "../i18n";
 import { EmptyState, SurfaceHeader } from "../reader/SurfacePrimitives";
 import { gitCommitPath, shortSha } from "./routes";
 import { GitDiff, GitFileList, GitPreviewUnavailable, PinKindBadge } from "./GitPreview";
+import { formatDateTime } from "../utils/formatDateTime";
 
 type LoadState =
   | { status: "loading" }
@@ -24,7 +25,7 @@ export function CommitDetailPage() {
     repoId: string;
     sha: string;
   }>();
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const navigate = useNavigate();
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [selectedPath, setSelectedPath] = useState("");
@@ -151,7 +152,7 @@ export function CommitDetailPage() {
           <h1>{state.info.summary || t("git.commit_no_summary")}</h1>
           <div className="commit-head__meta">
             <span>{state.info.author}</span>
-            <time dateTime={state.info.author_time}>{new Date(state.info.author_time).toLocaleString()}</time>
+            <time dateTime={state.info.author_time}>{formatDateTime(state.info.author_time, lang)}</time>
             <span className="commit-head__stats">+{stats.additions} -{stats.deletions}</span>
           </div>
         </div>

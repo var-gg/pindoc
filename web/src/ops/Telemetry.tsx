@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router";
 import { api, type TelemetryResponse, type TelemetryWindow } from "../api/client";
 import { useI18n } from "../i18n";
+import { formatNumber } from "../utils/formatDateTime";
 import "../styles/telemetry.css";
 
 // Telemetry is the Phase J UI — aggregated view of the async
@@ -21,7 +22,7 @@ const WINDOWS: { value: TelemetryWindow; label: string }[] = [
 ];
 
 export function Telemetry() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [data, setData] = useState<TelemetryResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -90,12 +91,12 @@ export function Telemetry() {
 
       {totals && (
         <section className="ops__totals">
-          <Metric label={t("ops.metric.calls")} value={totals.calls.toLocaleString()} />
-          <Metric label={t("ops.metric.errors")} value={totals.errors.toLocaleString()} sub={`${(errorRate * 100).toFixed(1)}%`} emphasize={totals.errors > 0} />
-          <Metric label={t("ops.metric.in_tokens")} value={totals.total_input_tokens.toLocaleString()} />
-          <Metric label={t("ops.metric.out_tokens")} value={totals.total_output_tokens.toLocaleString()} />
-          <Metric label={t("ops.metric.total_tokens")} value={(totals.total_input_tokens + totals.total_output_tokens).toLocaleString()} emphasize />
-          <Metric label={t("ops.metric.agents")} value={totals.unique_agents.toLocaleString()} />
+          <Metric label={t("ops.metric.calls")} value={formatNumber(totals.calls, lang)} />
+          <Metric label={t("ops.metric.errors")} value={formatNumber(totals.errors, lang)} sub={`${(errorRate * 100).toFixed(1)}%`} emphasize={totals.errors > 0} />
+          <Metric label={t("ops.metric.in_tokens")} value={formatNumber(totals.total_input_tokens, lang)} />
+          <Metric label={t("ops.metric.out_tokens")} value={formatNumber(totals.total_output_tokens, lang)} />
+          <Metric label={t("ops.metric.total_tokens")} value={formatNumber(totals.total_input_tokens + totals.total_output_tokens, lang)} emphasize />
+          <Metric label={t("ops.metric.agents")} value={formatNumber(totals.unique_agents, lang)} />
         </section>
       )}
 
@@ -135,7 +136,7 @@ export function Telemetry() {
                     <td className="num">{toolRow.p95_duration_ms}</td>
                     <td className="num">{toolRow.avg_input_tokens}</td>
                     <td className="num">{toolRow.avg_output_tokens}</td>
-                    <td className="num strong">{totalTok.toLocaleString()}</td>
+                    <td className="num strong">{formatNumber(totalTok, lang)}</td>
                     <td className="ts">{formatRelative(toolRow.last_call_at)}</td>
                   </tr>
                 );

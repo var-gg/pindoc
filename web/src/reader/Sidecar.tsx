@@ -51,6 +51,7 @@ import {
 } from "./graphSvg";
 import { isGeneratedAgentId } from "./readerInternalVisibility";
 import { projectSurfacePath } from "../readerRoutes";
+import { formatDate, formatDateTime } from "../utils/formatDateTime";
 
 type Props = {
   projectSlug: string;
@@ -84,7 +85,7 @@ export function Sidecar({
   emptyMessage,
   focusReason,
 }: Props) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [collapsed, toggleSection] = useSidecarCollapseState();
   // TOC feeds off body_markdown; Markdown.tsx independently derives the
   // same slugs via the same uniqueSlug ledger so `<h2 id>` matches
@@ -117,7 +118,7 @@ export function Sidecar({
   const av = agentAvatar(authorAvatarKey(detail));
   const authorLabel = authorDisplayLabel(detail, t("reader.byline_unknown"));
   const publishedAt = detail.published_at
-    ? new Date(detail.published_at).toLocaleString()
+    ? formatDateTime(detail.published_at, lang)
     : "—";
   const areaLabel = localizedAreaName(t, detail.area_slug, detail.area_slug);
   const artifactHref = projectSurfacePath(projectSlug, "wiki", detail.slug, orgSlug);
@@ -267,14 +268,14 @@ function useSidecarCollapseState(): [CollapsedState, (key: CollapsibleKey) => vo
 }
 
 function FocusReasonChip({ reason }: { reason: StartFocusReason }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   let label: string;
   switch (reason.kind) {
     case "last_focused":
       label = t("graph.focus_reason_last_focused");
       break;
     case "recent_meaningful":
-      label = `${t("graph.focus_reason_recent_meaningful")} · ${new Date(reason.updated_at).toLocaleDateString()}`;
+      label = `${t("graph.focus_reason_recent_meaningful")} · ${formatDate(reason.updated_at, lang)}`;
       break;
     case "most_connected":
       label = t("graph.focus_reason_most_connected", reason.degree);
@@ -426,11 +427,11 @@ function QuickActions({ detail, artifactHref }: { detail: Artifact; artifactHref
 }
 
 function TaskInspectorSummary({ detail, areaLabel }: { detail: Artifact; areaLabel: string }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const stats = acceptanceStats(detail.body_markdown);
   const percent = stats.total > 0 ? Math.round((stats.resolved / stats.total) * 100) : 0;
   const edges = (detail.relates_to?.length ?? 0) + (detail.related_by?.length ?? 0);
-  const updatedAt = detail.updated_at ? new Date(detail.updated_at).toLocaleString() : "—";
+  const updatedAt = detail.updated_at ? formatDateTime(detail.updated_at, lang) : "—";
   const author = authorDisplayLabel(detail, t("reader.byline_unknown"));
   const status = detail.task_meta?.status ?? "missing_status";
   const priority = taskPriority(detail.task_meta?.priority);
@@ -469,7 +470,7 @@ function TaskInspectorSummary({ detail, areaLabel }: { detail: Artifact; areaLab
         <span>{t("task_inspector.area")}</span>
         <strong>{areaLabel}</strong>
         <span>{t("task_inspector.due_at")}</span>
-        <strong>{detail.task_meta?.due_at ? new Date(detail.task_meta.due_at).toLocaleString() : "—"}</strong>
+        <strong>{detail.task_meta?.due_at ? formatDateTime(detail.task_meta.due_at, lang) : "—"}</strong>
         <span>{t("task_inspector.tags")}</span>
         <strong>{detail.tags.length > 0 ? detail.tags.join(", ") : "—"}</strong>
         <span>{t("task_inspector.edges")}</span>
@@ -586,7 +587,7 @@ function SidecarCollapsibleSection({
 }
 
 function RecentChanges({ projectSlug, orgSlug, slug }: { projectSlug: string; orgSlug: string; slug: string }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [revs, setRevs] = useState<RevisionRow[] | null>(null);
 
   useEffect(() => {
@@ -639,10 +640,10 @@ function RecentChanges({ projectSlug, orgSlug, slug }: { projectSlug: string; or
             </span>
             <time
               dateTime={r.created_at}
-              title={new Date(r.created_at).toLocaleString()}
+              title={formatDateTime(r.created_at, lang)}
               style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "var(--fg-4)", flexShrink: 0 }}
             >
-              {new Date(r.created_at).toLocaleDateString()}
+              {formatDate(r.created_at, lang)}
             </time>
           </div>
         );
