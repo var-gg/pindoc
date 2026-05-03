@@ -1,4 +1,5 @@
 import ko = require("../src/i18n/ko.json");
+import en = require("../src/i18n/en.json");
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -82,5 +83,21 @@ function testKoreanReaderChromeCopyHidesRawEnglishLabels(): void {
   assertEqual(ko["reader.byline_unknown"], "작성자 정보 없음", "unknown byline should be explicit and neutral");
 }
 
+function testEnglishNavLabelsUseTitleCase(): void {
+  const expectedLabels: Array<[keyof typeof en, string]> = [
+    ["nav.today", "Today"],
+    ["nav.wiki_reader", "Wiki"],
+    ["nav.tasks", "Tasks"],
+    ["nav.graph", "Graph"],
+    ["nav.inbox", "Inbox"],
+    ["nav.settings", "Settings"],
+  ];
+
+  for (const [key, expected] of expectedLabels) {
+    assertEqual(en[key], expected, `EN nav label ${key} should use Title Case`);
+  }
+}
+
 testKoreanReaderMetaCopySnapshot();
 testKoreanReaderChromeCopyHidesRawEnglishLabels();
+testEnglishNavLabelsUseTitleCase();
