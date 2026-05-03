@@ -437,13 +437,7 @@ func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOp
 		// bearer middleware so stdio-loopback parity holds for the
 		// HTTP transport too. Non-loopback callers still must
 		// present a Pindoc AS JWT.
-		mcpHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if shouldBypassMCPBearer(cfg, r) {
-				streamHandler.ServeHTTP(w, r)
-				return
-			}
-			bearer.ServeHTTP(w, r)
-		})
+		mcpHandler = wrapMCPBearerForLoopback(streamHandler, bearer, cfg)
 	} else if cfg != nil && cfg.HasAuthProvider(config.AuthProviderGitHub) {
 		logger.Error("oauth provider configured but oauth service is nil")
 		os.Exit(1)
@@ -645,6 +639,16 @@ func shouldBypassMCPBearer(cfg *config.Config, r *http.Request) bool {
 		return false
 	}
 	return pauth.IsLoopbackRequest(r)
+}
+
+func wrapMCPBearerForLoopback(streamHandler, bearer http.Handler, cfg *config.Config) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if shouldBypassMCPBearer(cfg, r) {
+			streamHandler.ServeHTTP(w, r)
+			return
+		}
+		bearer.ServeHTTP(w, r)
+	})
 }
 
 func firstNonEmpty(values ...string) string {

@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
+	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
+	pauth "github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 )
 
@@ -77,4 +82,74 @@ func TestShouldBypassMCPBearerForceOAuthLocal(t *testing.T) {
 	if shouldBypassMCPBearer(&config.Config{ForceOAuthLocal: true}, req) {
 		t.Fatal("ForceOAuthLocal should route loopback request through bearer middleware")
 	}
+}
+
+func TestWrapMCPBearerForLoopbackForceOAuthLocal(t *testing.T) {
+	streamHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("tool-ok"))
+	})
+	verifier := func(_ context.Context, token string, _ *http.Request) (*mcpauth.TokenInfo, error) {
+		if token != "valid" {
+			return nil, mcpauth.ErrInvalidToken
+		}
+		return &mcpauth.TokenInfo{
+			Scopes:     []string{pauth.ScopePindoc},
+			Expiration: time.Now().Add(time.Hour),
+		}, nil
+	}
+	bearer := mcpauth.RequireBearerToken(verifier, &mcpauth.RequireBearerTokenOptions{
+		ResourceMetadataURL: "http://127.0.0.1:5830/.well-known/oauth-protected-resource",
+		Scopes:              []string{pauth.ScopePindoc},
+	})(streamHandler)
+
+	t.Run("force on requires bearer for loopback", func(t *testing.T) {
+		handler := wrapMCPBearerForLoopback(streamHandler, bearer, &config.Config{ForceOAuthLocal: true})
+		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:5830/mcp", nil)
+		req.RemoteAddr = "127.0.0.1:51234"
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+		}
+		header := rec.Header().Get("WWW-Authenticate")
+		if !strings.Contains(header, "Bearer ") || !strings.Contains(header, "resource_metadata=") || !strings.Contains(header, pauth.ScopePindoc) {
+			t.Fatalf("WWW-Authenticate = %q, want bearer challenge with PRM and scope", header)
+		}
+	})
+
+	t.Run("force on accepts valid bearer for loopback", func(t *testing.T) {
+		handler := wrapMCPBearerForLoopback(streamHandler, bearer, &config.Config{ForceOAuthLocal: true})
+		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:5830/mcp", nil)
+		req.RemoteAddr = "127.0.0.1:51234"
+		req.Header.Set("Authorization", "Bearer valid")
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d; body=%q", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		if got := rec.Body.String(); got != "tool-ok" {
+			t.Fatalf("body = %q, want tool-ok", got)
+		}
+	})
+
+	t.Run("default preserves loopback bypass", func(t *testing.T) {
+		handler := wrapMCPBearerForLoopback(streamHandler, bearer, &config.Config{})
+		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:5830/mcp", nil)
+		req.RemoteAddr = "127.0.0.1:51234"
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d; body=%q", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		if got := rec.Body.String(); got != "tool-ok" {
+			t.Fatalf("body = %q, want tool-ok", got)
+		}
+	})
 }
