@@ -41,6 +41,10 @@ export function projectSurfacePath(
   return `${encodedOrg}/p/${encodedProject}/${surface}${encodedSlug}`;
 }
 
+export function projectBaseRedirectPath(project: string, orgSlug = DEFAULT_READER_ORG_SLUG): string {
+  return projectSurfacePath(project, "today", undefined, orgSlug);
+}
+
 export function projectRoutePrefix(project: string, orgSlug?: string): string {
   const encodedProject = encodeURIComponent(project);
   const encodedOrg = orgSlug ? `/${encodeURIComponent(orgSlug)}` : "";

@@ -14,7 +14,7 @@ import { ProjectSettingsPage } from "./reader/ProjectSettingsPage";
 import { ReaderShell, type ReaderView } from "./reader/ReaderShell";
 import { SignupCompletePage } from "./signup/SignupCompletePage";
 import { SignupPage } from "./signup/SignupPage";
-import { DEFAULT_READER_ORG_SLUG, isReaderDevSurfaceEnabled, normalizeReaderSurfaceSegment, projectSurfacePath } from "./readerRoutes";
+import { DEFAULT_READER_ORG_SLUG, isReaderDevSurfaceEnabled, normalizeReaderSurfaceSegment, projectBaseRedirectPath, projectSurfacePath } from "./readerRoutes";
 import { findSurface, previews, uiKits } from "./surfaces";
 
 export function App() {
@@ -32,6 +32,7 @@ export function App() {
 
       {/* Canonical project-scoped surfaces. Locale is project metadata, not
           route identity, after task-canonical-locale-migration. */}
+      <Route path="/:org/p/:project" element={<ProjectBaseRedirect />} />
       <Route path="/:org/p/:project/today" element={<ReaderRoute view="today" />} />
       <Route path="/:org/p/:project/wiki" element={<ReaderRoute view="reader" />} />
       <Route path="/:org/p/:project/wiki/:slug" element={<ReaderRoute view="reader" />} />
@@ -47,6 +48,7 @@ export function App() {
       <Route path="/:org/p/:project/git/:repoId/commit/:sha" element={<CommitDetailPage />} />
       <Route path="/:org/p/:project/:surface" element={<ProjectSurfaceNotFound />} />
       <Route path="/:org/p/:project/:surface/*" element={<ProjectSurfaceNotFound />} />
+      <Route path="/p/:project" element={<ProjectBaseRedirect />} />
       <Route path="/p/:project/today" element={<ReaderRoute view="today" />} />
       <Route path="/p/:project/wiki" element={<ReaderRoute view="reader" />} />
       <Route path="/p/:project/wiki/:slug" element={<ReaderRoute view="reader" />} />
@@ -130,6 +132,17 @@ function GraphSurfaceGate() {
     return <ReaderRoute view="graph" />;
   }
   return <ReaderRoute view="reader" unavailableSurface="graph" />;
+}
+
+function ProjectBaseRedirect() {
+  const { org, project = "" } = useParams<{ org?: string; project: string }>();
+  const location = useLocation();
+  return (
+    <Navigate
+      to={`${projectBaseRedirectPath(project, org ?? DEFAULT_READER_ORG_SLUG)}${location.search || ""}`}
+      replace
+    />
+  );
 }
 
 function ProjectSurfaceRedirect({ segment }: { segment: string }) {

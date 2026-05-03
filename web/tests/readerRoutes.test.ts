@@ -3,6 +3,7 @@ import {
   isReaderDevSurfaceEnabled,
   matchReaderRoutePath,
   normalizeReaderSurfaceSegment,
+  projectBaseRedirectPath,
   projectSurfacePath,
 } from "../src/readerRoutes";
 
@@ -54,6 +55,22 @@ function testProjectSurfacePathAddsOrgContextWhenPresent(): void {
   );
 }
 
+function testProjectBaseRedirectPathPreservesCanonicalOrg(): void {
+  assertEqual(
+    projectBaseRedirectPath("pindoc", "default"),
+    "/default/p/pindoc/today",
+    "canonical project base should redirect to the same org-scoped today surface",
+  );
+}
+
+function testProjectBaseRedirectPathAddsDefaultOrgForLegacyBase(): void {
+  assertEqual(
+    projectBaseRedirectPath("pindoc"),
+    "/default/p/pindoc/today",
+    "legacy project base should redirect to default org-scoped today surface",
+  );
+}
+
 function testReaderRouteMatchAcceptsOrgScopedAndLegacyPaths(): void {
   const orgScoped = matchReaderRoutePath("/curioustore/p/pindoc/wiki/artifact-a");
   assertEqual(orgScoped?.orgSlug, "curioustore", "org-scoped route org slug");
@@ -92,5 +109,7 @@ testTaskAliasNormalizesToTasks();
 testUnknownSurfaceFallsThrough();
 testProjectSurfacePathPreservesCanonicalTasks();
 testProjectSurfacePathAddsOrgContextWhenPresent();
+testProjectBaseRedirectPathPreservesCanonicalOrg();
+testProjectBaseRedirectPathAddsDefaultOrgForLegacyBase();
 testReaderRouteMatchAcceptsOrgScopedAndLegacyPaths();
 testDevSurfaceGateRequiresDevQueryInProduction();
