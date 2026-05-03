@@ -313,12 +313,14 @@ function LegacyRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "inbox" |
   if (err) {
     return (
       <div className="reader-state reader-state--error">
-        <strong>{t("wiki.error_title")}</strong>
+        <strong>{t("wiki.error_generic_title")}</strong>
         <p>{err}</p>
-        <p>
-          {t("wiki.error_hint_prefix")} <code>{t("wiki.error_hint_cmd")}</code>{" "}
-          {t("wiki.error_hint_suffix")}
-        </p>
+        {import.meta.env.DEV && (
+          <p>
+            {t("wiki.error_dev_hint_prefix")} <code>{t("wiki.error_dev_hint_cmd")}</code>{" "}
+            {t("wiki.error_dev_hint_suffix")}
+          </p>
+        )}
       </div>
     );
   }
@@ -355,12 +357,14 @@ function DesignLegendRedirect() {
   if (err) {
     return (
       <div className="reader-state reader-state--error">
-        <strong>{t("wiki.error_title")}</strong>
+        <strong>{t("wiki.error_generic_title")}</strong>
         <p>{err}</p>
-        <p>
-          {t("wiki.error_hint_prefix")} <code>{t("wiki.error_hint_cmd")}</code>{" "}
-          {t("wiki.error_hint_suffix")}
-        </p>
+        {import.meta.env.DEV && (
+          <p>
+            {t("wiki.error_dev_hint_prefix")} <code>{t("wiki.error_dev_hint_cmd")}</code>{" "}
+            {t("wiki.error_dev_hint_suffix")}
+          </p>
+        )}
       </div>
     );
   }
@@ -405,7 +409,7 @@ function LegacyLocaleRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "in
   if (err) {
     return (
       <div className="reader-state reader-state--error">
-        <strong>{t("wiki.error_title")}</strong>
+        <strong>{t("wiki.error_generic_title")}</strong>
         <p>{err}</p>
       </div>
     );

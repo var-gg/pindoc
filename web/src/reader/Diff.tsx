@@ -41,7 +41,7 @@ export function Diff() {
   if (state.kind === "error") {
     return (
       <div className="reader-state reader-state--error">
-        <strong>{t("wiki.error_title")}</strong>
+        <strong>{t("wiki.error_generic_title")}</strong>
         <p>{state.message}</p>
       </div>
     );

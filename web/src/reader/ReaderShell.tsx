@@ -30,6 +30,11 @@ import { initTheme, setTheme, type Theme } from "./theme";
 import { useReaderData } from "./useReaderData";
 import { initReaderWidth, setReaderWidth as applyReaderWidth, type ReaderWidth } from "./readerWidth";
 import { telemetryDebugEnabled } from "./opsAccess";
+import {
+  classifyReaderError,
+  readerErrorTitleKey,
+  shouldShowReaderErrorDevHint,
+} from "./readerErrorState";
 import { localizedAreaName } from "./areaLocale";
 import { taskAssigneeActorKey, taskAssigneeLabel } from "./assigneeDisplay";
 import {
@@ -530,14 +535,31 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
     return <div className="reader-state">{t("wiki.loading")}</div>;
   }
   if (state.kind === "error") {
+    const errorKind = classifyReaderError(state.message);
     return (
       <div className="reader-state reader-state--error">
-        <strong>{t("wiki.error_title")}</strong>
+        <strong>{t(readerErrorTitleKey(errorKind))}</strong>
         <p>{state.message}</p>
-        <p>
-          {t("wiki.error_hint_prefix")} <code>{t("wiki.error_hint_cmd")}</code>{" "}
-          {t("wiki.error_hint_suffix")}
-        </p>
+        {errorKind === "not_found" && (
+          <p>
+            <Link to={projectSurfacePath(project, "wiki", undefined, orgSlug)}>
+              {t("wiki.error_back_to_project")}
+            </Link>
+          </p>
+        )}
+        {errorKind === "generic" && (
+          <p>
+            <button type="button" className="chip" onClick={() => window.location.reload()}>
+              {t("wiki.error_refresh")}
+            </button>
+          </p>
+        )}
+        {shouldShowReaderErrorDevHint(errorKind, import.meta.env.DEV) && (
+          <p>
+            {t("wiki.error_dev_hint_prefix")} <code>{t("wiki.error_dev_hint_cmd")}</code>{" "}
+            {t("wiki.error_dev_hint_suffix")}
+          </p>
+        )}
       </div>
     );
   }
@@ -547,7 +569,7 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
   if (orgSlug !== projectOrgSlug) {
     return (
       <div className="reader-state reader-state--error">
-        <strong>{t("wiki.error_title")}</strong>
+        <strong>{t("wiki.error_generic_title")}</strong>
         <p>{t("surface.not_found", `/${orgSlug}/p/${project}`)}</p>
       </div>
     );

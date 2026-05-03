@@ -191,7 +191,7 @@ export function Today({
     return (
       <main className="content today-content">
         <div className="reader-state reader-state--error">
-          <strong>{t("wiki.error_title")}</strong>
+          <strong>{t("wiki.error_generic_title")}</strong>
           <p>{error}</p>
         </div>
       </main>
