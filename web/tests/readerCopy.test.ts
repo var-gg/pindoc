@@ -110,6 +110,29 @@ function testEnglishNavLabelsUseTitleCase(): void {
   }
 }
 
+function testCmdKCopyDoesNotAdvertiseMissingCommands(): void {
+  assertEqual(ko["nav.search_hint"], "문서 또는 commit SHA 검색...", "KO nav search hint should match implemented Cmd-K scope");
+  assertEqual(en["nav.search_hint"], "Search artifacts or a commit SHA...", "EN nav search hint should match implemented Cmd-K scope");
+  assertEqual(ko["cmdk.placeholder"], "문서 또는 commit SHA 검색...", "KO Cmd-K placeholder should not advertise commands");
+  assertEqual(en["cmdk.placeholder"], "Search artifacts or a commit SHA...", "EN Cmd-K placeholder should not advertise commands");
+  assertEqual(ko["cmdk.hint"], "문서나 commit SHA를 검색하세요.", "KO Cmd-K hint should align with placeholder scope");
+  assertEqual(en["cmdk.hint"], "Search artifacts or a commit SHA in this project.", "EN Cmd-K hint should align with placeholder scope");
+
+  const snapshot = [
+    ko["nav.search_hint"],
+    en["nav.search_hint"],
+    ko["cmdk.placeholder"],
+    en["cmdk.placeholder"],
+    ko["cmdk.hint"],
+    en["cmdk.hint"],
+  ].join("\n").toLowerCase();
+
+  for (const blocked of ["명령어", "command"]) {
+    assert(!snapshot.includes(blocked), `Cmd-K copy should not advertise missing commands: ${blocked}`);
+  }
+}
+
 testKoreanReaderMetaCopySnapshot();
 testKoreanReaderChromeCopyHidesRawEnglishLabels();
 testEnglishNavLabelsUseTitleCase();
+testCmdKCopyDoesNotAdvertiseMissingCommands();
