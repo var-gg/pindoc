@@ -72,6 +72,7 @@ export function ShortcutsOverlay({
   onClose,
 }: Props) {
   const { t } = useI18n();
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
@@ -86,6 +87,7 @@ export function ShortcutsOverlay({
     dismissTooltipsForModal();
     restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const unlockScroll = lockBodyScrollForModal();
+    const restoreBackground = hideShortcutsBackground(overlayRef.current);
     const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus({ preventScroll: true }), 40);
 
     function onKey(e: KeyboardEvent) {
@@ -109,6 +111,7 @@ export function ShortcutsOverlay({
       window.clearTimeout(focusTimer);
       window.removeEventListener("keydown", onKey);
       unlockScroll();
+      restoreBackground();
       restoreShortcutsFocus(restoreFocusRef.current);
       restoreFocusRef.current = null;
     };
@@ -131,6 +134,7 @@ export function ShortcutsOverlay({
 
   return (
     <div
+      ref={overlayRef}
       className="shortcuts-overlay"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -258,6 +262,40 @@ function lockBodyScrollForModal(): () => void {
     style.width = original.width;
     style.paddingRight = original.paddingRight;
     window.scrollTo(0, scrollY);
+  };
+}
+
+function hideShortcutsBackground(root: HTMLElement | null): () => void {
+  const parent = root?.parentElement;
+  if (!parent) return () => undefined;
+  const changes: Array<{
+    element: HTMLElement;
+    ariaHidden: string | null;
+    inert: boolean | null;
+  }> = [];
+
+  for (const child of Array.from(parent.children)) {
+    if (child === root || !(child instanceof HTMLElement)) continue;
+    const inertSupported = "inert" in child;
+    changes.push({
+      element: child,
+      ariaHidden: child.getAttribute("aria-hidden"),
+      inert: inertSupported ? (child as HTMLElement & { inert: boolean }).inert : null,
+    });
+    child.setAttribute("aria-hidden", "true");
+    if (inertSupported) {
+      (child as HTMLElement & { inert: boolean }).inert = true;
+    }
+  }
+
+  return () => {
+    for (const change of changes) {
+      if (change.ariaHidden === null) change.element.removeAttribute("aria-hidden");
+      else change.element.setAttribute("aria-hidden", change.ariaHidden);
+      if (change.inert !== null) {
+        (change.element as HTMLElement & { inert: boolean }).inert = change.inert;
+      }
+    }
   };
 }
 
