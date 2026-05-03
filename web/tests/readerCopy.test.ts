@@ -75,6 +75,9 @@ function testKoreanReaderChromeCopyHidesRawEnglishLabels(): void {
     ko["signup.meta.role"],
     ko["tasks.mobile_scroll_hint"],
     ko["ops.title"],
+    ko["artifact.visibility.public"],
+    ko["artifact.visibility.org"],
+    ko["artifact.visibility.private"],
   ].join("\n");
 
   for (const blocked of ["Area", "Type", "Agent", "Briefing", "Surface", "Inspector", "artifact", "change", "trusted local", "immutable", "surface 도움말", "Role", "export"]) {
@@ -87,6 +90,9 @@ function testKoreanReaderChromeCopyHidesRawEnglishLabels(): void {
   assertEqual(ko["surface.name.diff"], "차이", "diff surface label should be localized");
   assertEqual(ko["history.title"], "수정 이력", "history title should not fall back to raw English");
   assertEqual(ko["reader.byline_unknown"], "작성자 정보 없음", "unknown byline should be explicit and neutral");
+  assertEqual(ko["artifact.visibility.public"], "공개", "KO public visibility label should be localized");
+  assertEqual(ko["artifact.visibility.org"], "조직", "KO org visibility label should be localized");
+  assertEqual(ko["artifact.visibility.private"], "비공개", "KO private visibility label should be localized");
 }
 
 function testEnglishNavLabelsUseTitleCase(): void {

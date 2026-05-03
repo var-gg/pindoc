@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { Artifact, ArtifactReadState, ChangeGroup } from "../src/api/client";
 import { I18nProvider } from "../src/i18n";
+import { ReaderSurface } from "../src/reader/ReaderSurface";
 import { Sidecar } from "../src/reader/Sidecar";
 import { PindocTooltipProvider } from "../src/reader/Tooltip";
 import { ChangeGroupCard } from "../src/reader/Today";
@@ -84,6 +85,23 @@ function renderSidecar(renderDetail: Artifact, projectLang = "en"): string {
   );
 }
 
+function renderReaderSurface(renderDetail: Artifact, projectLang = "en"): string {
+  return renderToStaticMarkup(
+    <I18nProvider projectLang={projectLang}>
+      <PindocTooltipProvider>
+        <MemoryRouter>
+          <ReaderSurface
+            detail={renderDetail}
+            emptyMessage="empty"
+            projectSlug="pindoc"
+            orgSlug="default"
+          />
+        </MemoryRouter>
+      </PindocTooltipProvider>
+    </I18nProvider>,
+  );
+}
+
 function renderEnglishTodayAndSidecar(): string {
   return renderToStaticMarkup(
     <I18nProvider projectLang="en">
@@ -150,6 +168,14 @@ function testSidecarIdentityFallsBackForMissingTitleAndUnknownType(): void {
   assert(html.includes("runbook-slug"), "Missing title should fall back to the slug");
 }
 
+function testKoreanReaderVisibilityLabelIsLocalized(): void {
+  const html = renderReaderSurface({ ...detail, visibility: "org" }, "ko");
+  assert(html.includes("공개 범위: 조직"), "KO visibility chip aria label should use Korean label");
+  assert(html.includes(">조직</span>"), "KO visibility chip text should use Korean label");
+  assert(!html.includes(">ORG</span>"), "KO visibility chip must not render raw uppercase org label");
+}
+
 testEnglishRenderingDoesNotUseKoreanMeridiem();
 testSidecarIdentityUsesLocalizedTypeAndHumanTitle();
 testSidecarIdentityFallsBackForMissingTitleAndUnknownType();
+testKoreanReaderVisibilityLabelIsLocalized();
