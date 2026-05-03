@@ -819,13 +819,42 @@
   border-bottom: 1px solid var(--border);
 }
 .sidecar-identity__slug {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.sidecar-identity__title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--fg-0);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+.sidecar-identity__title--fallback {
   font-family: var(--font-mono);
   font-size: 11.5px;
+  font-weight: 500;
+}
+.sidecar-identity__slug-key {
+  flex: 0 0 auto;
+  color: var(--fg-3);
+  text-transform: uppercase;
+}
+.sidecar-identity__slug-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .sidecar-identity__status {
   grid-column: 1 / -1;

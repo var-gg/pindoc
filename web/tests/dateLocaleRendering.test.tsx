@@ -68,6 +68,22 @@ const detail: Artifact = {
   pins: [],
 };
 
+function renderSidecar(renderDetail: Artifact, projectLang = "en"): string {
+  return renderToStaticMarkup(
+    <I18nProvider projectLang={projectLang}>
+      <PindocTooltipProvider>
+        <MemoryRouter>
+          <Sidecar
+            projectSlug="pindoc"
+            orgSlug="default"
+            detail={renderDetail}
+          />
+        </MemoryRouter>
+      </PindocTooltipProvider>
+    </I18nProvider>,
+  );
+}
+
 function renderEnglishTodayAndSidecar(): string {
   return renderToStaticMarkup(
     <I18nProvider projectLang="en">
@@ -100,4 +116,40 @@ function testEnglishRenderingDoesNotUseKoreanMeridiem(): void {
   assert(!html.includes("오후"), "EN Today + Sidecar render should not include Korean PM marker");
 }
 
+function testSidecarIdentityUsesLocalizedTypeAndHumanTitle(): void {
+  const decision: Artifact = {
+    ...detail,
+    id: "artifact-decision",
+    slug: "raw-decision-slug",
+    type: "Decision",
+    title: "Readable artifact title",
+    task_meta: undefined,
+  };
+  const ko = renderSidecar(decision, "ko");
+  assert(ko.includes(">결정</span>"), "KO Sidecar type chip should use localized Decision label");
+  assert(ko.includes("sidecar-identity__title"), "Sidecar identity should render a title slot");
+  assert(ko.includes("Readable artifact title"), "Sidecar identity should prefer the human title");
+  assert(ko.includes("sidecar-identity__slug"), "Sidecar identity should keep slug as secondary metadata");
+
+  const en = renderSidecar(decision, "en");
+  assert(en.includes(">Decision</span>"), "EN Sidecar type chip should keep the English Decision label");
+}
+
+function testSidecarIdentityFallsBackForMissingTitleAndUnknownType(): void {
+  const unknown: Artifact = {
+    ...detail,
+    id: "artifact-runbook",
+    slug: "runbook-slug",
+    type: "Runbook",
+    title: "",
+    task_meta: undefined,
+  };
+  const html = renderSidecar(unknown, "ko");
+  assert(html.includes(">Runbook</span>"), "Unknown Sidecar type should fall back to the raw type");
+  assert(html.includes("sidecar-identity__title sidecar-identity__title--fallback"), "Missing title should use the slug fallback style");
+  assert(html.includes("runbook-slug"), "Missing title should fall back to the slug");
+}
+
 testEnglishRenderingDoesNotUseKoreanMeridiem();
+testSidecarIdentityUsesLocalizedTypeAndHumanTitle();
+testSidecarIdentityFallsBackForMissingTitleAndUnknownType();

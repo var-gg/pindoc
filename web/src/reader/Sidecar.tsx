@@ -36,6 +36,7 @@ import {
   visualPin,
   visualQuickAction,
   visualRelation,
+  visualType,
   type VisualMetaEnumKey,
 } from "./visualLanguage";
 import { visualIconComponent } from "./visualLanguageIcons";
@@ -293,18 +294,31 @@ function FocusReasonChip({ reason }: { reason: StartFocusReason }) {
 }
 
 function IdentityStrip({ detail }: { detail: Artifact }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const typeVisual = visualType(detail.type);
+  const typeLabel = typeVisual ? visualLabel(typeVisual, lang) : detail.type;
+  const title = detail.title.trim();
+  const hasTitle = title.length > 0;
+  const displayTitle = hasTitle ? title : detail.slug;
   const lifecycle = detail.type === "Task" && detail.task_meta?.status
     ? taskStatusLabel(detail.task_meta.status, t)
     : `${artifactStatusLabel(detail.status, t)} · ${artifactCompletenessLabel(detail.completeness, t)}`;
   return (
     <div className="sidecar-identity">
-      <span className={typeChipClass(detail.type)}>{detail.type}</span>
-      <Tooltip content={detail.slug}>
-        <span className="sidecar-identity__slug">
-          {detail.slug}
+      <span className={typeChipClass(detail.type)}>{typeLabel}</span>
+      <Tooltip content={displayTitle}>
+        <span className={`sidecar-identity__title${hasTitle ? "" : " sidecar-identity__title--fallback"}`}>
+          {displayTitle}
         </span>
       </Tooltip>
+      {hasTitle && (
+        <Tooltip content={detail.slug}>
+          <span className="sidecar-identity__slug">
+            <span className="sidecar-identity__slug-key">{t("sidecar.prov_id")}</span>
+            <span className="sidecar-identity__slug-value">{detail.slug}</span>
+          </span>
+        </Tooltip>
+      )}
       <span className="sidecar-identity__status">{lifecycle}</span>
     </div>
   );
