@@ -49,6 +49,10 @@ type projectCreateError struct {
 	Message   string `json:"message"`
 }
 
+func projectCreateDefaultURL(slug string) string {
+	return "/p/" + slug + "/today"
+}
+
 // handleProjectCreate is the Reader/CLI bridge for projects.CreateProject.
 // Behind the wire it does the exact same work pindoc.project.create
 // does — Decision project-bootstrap-canonical-flow-reader-ui-first-class
@@ -112,7 +116,7 @@ func (d Deps) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 		Slug:             out.Slug,
 		Name:             out.Name,
 		PrimaryLanguage:  out.PrimaryLanguage,
-		URL:              "/p/" + out.Slug + "/wiki",
+		URL:              projectCreateDefaultURL(out.Slug),
 		DefaultArea:      out.DefaultArea,
 		AreasCreated:     out.AreasCreated,
 		TemplatesCreated: out.TemplatesCreated,

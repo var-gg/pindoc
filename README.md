@@ -92,10 +92,11 @@ Open the Reader:
 http://localhost:5830/
 ```
 
-On a fresh instance, create the first project at:
+On a fresh instance, `/` redirects to the first-project wizard. To open that
+wizard directly:
 
 ```text
-http://localhost:5830/projects/new
+http://localhost:5830/projects/new?welcome=1
 ```
 
 ## Connect an MCP Client

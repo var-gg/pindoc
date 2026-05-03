@@ -87,10 +87,10 @@ Reader:
 http://localhost:5830/
 ```
 
-빈 인스턴스에서는 첫 프로젝트를 만듭니다.
+빈 인스턴스에서는 `/`가 첫 프로젝트 wizard로 redirect됩니다. 직접 열려면:
 
 ```text
-http://localhost:5830/projects/new
+http://localhost:5830/projects/new?welcome=1
 ```
 
 ## MCP 클라이언트 연결

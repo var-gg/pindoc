@@ -135,3 +135,9 @@ func TestIncludeReaderHiddenProjects(t *testing.T) {
 		})
 	}
 }
+
+func TestProjectCreateDefaultURLUsesToday(t *testing.T) {
+	if got := projectCreateDefaultURL("shop-fe"); got != "/p/shop-fe/today" {
+		t.Fatalf("projectCreateDefaultURL() = %q, want /p/shop-fe/today", got)
+	}
+}

@@ -74,68 +74,47 @@
 
 ---
 
-## Flow 0: Onboarding (`pindoc init` 7단계)
+## Flow 0: Web onboarding
 
-첫 설치 완주 **5분 이내** 목표.
+첫 설치 완주 **5분 이내** 목표. 현재 구현은 CLI가 아니라 Reader web form을
+정식 진입점으로 사용한다.
 
 ```
-$ cd my-project
-$ pindoc init
+[1/5] Daemon 기동
+  git clone https://github.com/var-gg/pindoc.git
+  cd pindoc
+  docker compose up -d --build
 
-[1/7] Server 감지
-  로컬 localhost:5830 감지 → 자동 연결
-  또는 "Pindoc 서버 URL" 입력
-  또는 "local daemon을 기동할까요?" 자동 안내
+[2/5] Reader 진입
+  http://localhost:5830/
+  fresh instance: /projects/new?welcome=1 로 자동 redirect
+  직접 진입: http://localhost:5830/projects/new?welcome=1
 
-[2/7] 인증
-  로컬 (loopback bind, providers empty): 자동 신뢰 — header 없음
-  외부 노출 + GitHub IdP (PINDOC_AUTH_PROVIDERS=github): 브라우저 OAuth 오픈
+[3/5] 첫 Project 생성
+  Slug              shop-fe
+  Name              Shop Frontend
+  Primary language  EN / KO / JA 중 선택
+  Description       선택 입력
 
-[3/7] Project 선택/생성
-  기존:
-    ◉ [새로 만들기]
-    ○ shop-fe
-    ○ shop-be
-  
-  (새로 만들기)
-  Project 이름?   shop-fe
-  Slug?          shop-fe
-  연결 repo?     github.com/myorg/shop-fe (자동 감지, 확인)
+[4/5] Success page
+  "이 프로젝트 열기"는 /p/{slug}/today 로 이동
+  .mcp.json snippet을 복사해 agent workspace에 붙여 넣음
 
-[4/7] Domain Pack 선택 (신규 Project만)
-  ☑ Web SaaS/SI (stable, 권장)
-  ☐ Game (skeleton)
-  ☐ ML/AI (skeleton)
-  ☐ Mobile (skeleton)
-
-[5/7] Project scope 확인
-  ✓ PINDOC.md frontmatter에 project_slug 기록
-  ✓ MCP tool call은 project_slug per-call 전달
-
-[6/7] MCP 클라이언트 자동 설정
-  ✓ Claude Code → ~/.config/claude-code/mcp.json
-  ✓ Cursor      → ~/.cursor/mcp.json
-  ○ Cline       (미설치)
-  ○ Codex       (미설치)
-
-[7/7] Harness 설치
-  ✓ PINDOC.md 생성 (Domain Pack 반영)
-  ✓ CLAUDE.md + AGENTS.md + .cursorrules 참조 추가
-
-✓ Setup complete in 4m 12s.
-
-다음 단계:
-  1. Claude Code 여세요
-  2. 평소처럼 대화 시작
-  3. 체크포인트 제안 뜨면 Pindoc 작동 중
+[5/5] Harness 설치
+  agent가 pindoc.workspace.detect 후 pindoc.harness.install 호출
+  PINDOC.md frontmatter에 project_slug 기록
+  MCP tool call은 project_slug per-call 전달
 ```
+
+`pindoc init` CLI는 현재 제품에 없다. 나중에 CLI wizard를 만들 경우 별도
+phase 문서와 구현 Task로 다루고, Day-1 onboarding 문서는 web form을 기준으로
+유지한다.
 
 ### 실패 대응
 
-자동화 실패 시 **정확한 copy-paste 명령** 제시:
+자동화가 막히면 **정확한 copy-paste 설정**을 제시:
 ```
-[6/7] Cursor 자동 설정 실패 (권한 에러)
-  다음을 ~/.cursor/mcp.json 에 추가:
+MCP client 설정이 비어 있으면 다음을 추가:
 
   {
     "mcpServers": {
