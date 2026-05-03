@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.var-gg/pindoc",
+  "description": "Code-pinned team memory for AI coding agents — typed artifacts (Decision/Analysis/Debug/Task), MCP-native workflow, self-host via Docker Compose. See README for setup.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/var-gg/pindoc",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/var-gg/pindoc#quick-start",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/var-gg/pindoc",
+      "version": "0.1.0",
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://127.0.0.1:5830/mcp"
+      },
+      "environmentVariables": [
+        {
+          "name": "PINDOC_DATABASE_URL",
+          "description": "Postgres connection string. Use the bundled docker compose stack for the recommended pgvector setup.",
+          "isRequired": true,
+          "isSecret": false
+        },
+        {
+          "name": "PINDOC_BIND_ADDR",
+          "description": "Daemon bind address. Loopback (127.0.0.1:5830) by default; set a non-loopback value only behind an IdP or trusted proxy.",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}
