@@ -29,6 +29,8 @@ RUN CGO_ENABLED=1 go build \
 
 FROM debian:bookworm-slim AS runtime
 
+LABEL io.modelcontextprotocol.server.name="io.github.var-gg/pindoc"
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl git libgomp1 \
     && rm -rf /var/lib/apt/lists/*
