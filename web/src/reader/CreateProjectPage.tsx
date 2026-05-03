@@ -2,9 +2,9 @@
 // project-bootstrap-canonical-flow-reader-ui-first-class, Task
 // t3-reader-new-project-page-and-mcp-snippet). Hits POST /api/projects
 // (same backend function the MCP tool and pindoc-admin CLI use), then
-// shows a copy-paste-ready .mcp.json snippet so the user finishes
-// bootstrap by pasting into their workspace's `.mcp.json` and opening
-// Claude Code there.
+// shows MCP connection copy targets so the user can finish bootstrap
+// by pasting either the URL, the `.mcp.json` block, or the agent-ready
+// prompt into their workspace.
 //
 // The page is intentionally standalone — no Reader sidebar/topnav — so a
 // fresh install can land directly here from the onboarding wizard (T4)
@@ -25,14 +25,7 @@ import {
 import "../styles/reader.css";
 
 type Lang = "en" | "ko" | "ja";
-
-// daemonBaseFallback is the default streamable-HTTP MCP daemon URL the
-// snippet suggests when /api/config doesn't surface one. Matches the
-// recommendation in README's "데몬 모드" section. Users on a custom port
-// edit the host:port portion of the snippet manually for now — V1.5
-// adds a server_settings.mcp_daemon_base_url override so the UI fills
-// it in automatically.
-const DAEMON_BASE_FALLBACK = "http://127.0.0.1:5830";
+type CopyTarget = "url" | "mcp_json" | "agent_prompt";
 
 export function CreateProjectPage() {
   const { t, lang } = useI18n();
@@ -51,14 +44,14 @@ export function CreateProjectPage() {
   const [submitting, setSubmitting] = useState(false);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [created, setCreated] = useState<CreateProjectResp | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<CopyTarget | null>(null);
   const slugRef = useRef<HTMLInputElement | null>(null);
   const nameRef = useRef<HTMLInputElement | null>(null);
   const languageRef = useRef<HTMLInputElement | null>(null);
 
   // Reset the "copied" flash when the user navigates back to the form.
   useEffect(() => {
-    if (!created) setCopied(false);
+    if (!created) setCopied(null);
   }, [created]);
 
   useEffect(() => {
@@ -126,10 +119,10 @@ export function CreateProjectPage() {
       <CreateProjectSuccess
         result={created}
         copied={copied}
-        onCopy={async () => {
-          await navigator.clipboard.writeText(buildSnippet());
-          setCopied(true);
-          setTimeout(() => setCopied(false), 2000);
+        onCopy={async (value, target) => {
+          await navigator.clipboard.writeText(value);
+          setCopied(target);
+          setTimeout(() => setCopied((c) => (c === target ? null : c)), 2000);
         }}
         onCreateAnother={reset}
         t={t}
@@ -283,7 +276,7 @@ export function CreateProjectPage() {
   );
 }
 
-function CreateProjectSuccess({
+export function CreateProjectSuccess({
   result,
   copied,
   onCopy,
@@ -291,15 +284,15 @@ function CreateProjectSuccess({
   t,
 }: {
   result: CreateProjectResp;
-  copied: boolean;
-  onCopy: () => void;
+  copied: CopyTarget | null;
+  onCopy: (value: string, target: CopyTarget) => void | Promise<void>;
   onCreateAnother: () => void;
   t: (k: string, ...args: Array<string | number>) => string;
 }) {
-  const snippet = buildSnippet();
   return (
     <div className="cp-page cp-page--success">
       <header className="cp-header">
+        <p className="cp-welcome__step">{t("new_project.success.step")}</p>
         <h1 className="cp-success-title">
           <Check className="lucide" aria-hidden /> {t("new_project.success.title", result.slug)}
         </h1>
@@ -313,21 +306,41 @@ function CreateProjectSuccess({
       </header>
 
       <section className="cp-snippet">
-        <p className="cp-snippet__intro">{t("new_project.snippet.intro")}</p>
-        <div className="cp-snippet__box">
-          <pre className="cp-snippet__pre">{snippet}</pre>
-          <button
-            type="button"
-            className="cp-snippet__copy"
-            onClick={onCopy}
-            aria-label={t("new_project.snippet.copy")}
-          >
-            {copied ? <Check className="lucide" /> : <Copy className="lucide" />}
-            {copied
-              ? t("new_project.snippet.copied")
-              : t("new_project.snippet.copy")}
-          </button>
-        </div>
+        <header className="cp-snippet__intro">
+          <h2>{t("new_project.snippet.title")}</h2>
+          <p>{t("new_project.snippet.intro")}</p>
+        </header>
+        <CopyBlock
+          title={t("new_project.snippet.copy.url.title")}
+          subtitle={t("new_project.snippet.copy.url.subtitle")}
+          value={result.mcp_connect.url}
+          monospace
+          copied={copied === "url"}
+          onCopy={() => onCopy(result.mcp_connect.url, "url")}
+          copyLabel={t("new_project.snippet.copy")}
+          copiedLabel={t("new_project.snippet.copied")}
+        />
+        <CopyBlock
+          title={t("new_project.snippet.copy.mcp_json.title")}
+          subtitle={t("new_project.snippet.copy.mcp_json.subtitle")}
+          value={result.mcp_connect.mcp_json}
+          monospace
+          multiline
+          copied={copied === "mcp_json"}
+          onCopy={() => onCopy(result.mcp_connect.mcp_json, "mcp_json")}
+          copyLabel={t("new_project.snippet.copy")}
+          copiedLabel={t("new_project.snippet.copied")}
+        />
+        <CopyBlock
+          title={t("new_project.snippet.copy.agent_prompt.title")}
+          subtitle={t("new_project.snippet.copy.agent_prompt.subtitle")}
+          value={result.mcp_connect.agent_prompt}
+          multiline
+          copied={copied === "agent_prompt"}
+          onCopy={() => onCopy(result.mcp_connect.agent_prompt, "agent_prompt")}
+          copyLabel={t("new_project.snippet.copy")}
+          copiedLabel={t("new_project.snippet.copied")}
+        />
         <p className="cp-snippet__harness">{t("new_project.harness_hint")}</p>
       </section>
 
@@ -347,17 +360,56 @@ function CreateProjectSuccess({
   );
 }
 
-// buildSnippet keeps the JSON formatting consistent with the README
-// example so a user comparing docs and the form sees the same shape.
-function buildSnippet(): string {
-  return [
-    "{",
-    `  "mcpServers": {`,
-    `    "pindoc": {`,
-    `      "type": "http",`,
-    `      "url": "${DAEMON_BASE_FALLBACK}/mcp"`,
-    `    }`,
-    `  }`,
-    `}`,
-  ].join("\n");
+function CopyBlock({
+  title,
+  subtitle,
+  value,
+  monospace,
+  multiline,
+  copied,
+  onCopy,
+  copyLabel,
+  copiedLabel,
+}: {
+  title: string;
+  subtitle: string;
+  value: string;
+  monospace?: boolean;
+  multiline?: boolean;
+  copied: boolean;
+  onCopy: () => void;
+  copyLabel: string;
+  copiedLabel: string;
+}) {
+  return (
+    <div className="cp-snippet__box" style={{ marginBottom: "var(--space-4, 16px)" }}>
+      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+        <div>
+          <strong>{title}</strong>
+          <p className="cp-subtitle" style={{ margin: "4px 0 0" }}>{subtitle}</p>
+        </div>
+        <button
+          type="button"
+          className="cp-snippet__copy"
+          onClick={onCopy}
+          aria-label={`${copyLabel} ${title}`}
+        >
+          {copied ? <Check className="lucide" /> : <Copy className="lucide" />}
+          {copied ? copiedLabel : copyLabel}
+        </button>
+      </header>
+      {multiline ? (
+        <pre
+          className="cp-snippet__pre"
+          style={{ marginTop: 8, fontFamily: monospace ? "var(--font-mono, monospace)" : "inherit" }}
+        >
+          {value}
+        </pre>
+      ) : (
+        <code className="cp-snippet__pre" style={{ marginTop: 8, display: "block", padding: "8px 12px" }}>
+          {value}
+        </code>
+      )}
+    </div>
+  );
 }

@@ -92,8 +92,9 @@ Open the Reader:
 http://localhost:5830/
 ```
 
-On a fresh instance, `/` redirects to the first-project wizard. To open that
-wizard directly:
+On a fresh instance, `/` first asks for the owner identity (display name and
+email), then routes to the first-project wizard. To open the project wizard
+directly after identity setup:
 
 ```text
 http://localhost:5830/projects/new?welcome=1

@@ -51,13 +51,15 @@ func TestOnboardingIdentityHandler_Loopback(t *testing.T) {
 	})
 
 	suffix := fmt.Sprintf("%x", time.Now().UnixNano())
+	projectSlug := "onb-" + suffix
 	email := "onboarding-" + suffix + "@example.invalid"
 	body := fmt.Sprintf(`{"display_name":"Onboard %s","email":"%s","github_handle":"@onb-%s"}`, suffix, email, suffix)
 
 	handler := New(&config.Config{}, Deps{
 		DB:                 pool,
 		Settings:           store,
-		DefaultProjectSlug: "pindoc",
+		DefaultProjectSlug: projectSlug,
+		UserLanguage:       "ko",
 	})
 
 	rec := doOnboardingRequest(handler, http.MethodPost, body, "127.0.0.1:54321")
@@ -71,8 +73,11 @@ func TestOnboardingIdentityHandler_Loopback(t *testing.T) {
 	if resp.Status != "ok" || resp.UserID == "" {
 		t.Fatalf("resp = %+v", resp)
 	}
-	if resp.Project.Slug != "pindoc" || resp.Project.Role != "owner" {
+	if resp.Project.Slug != projectSlug || resp.Project.Role != "owner" {
 		t.Fatalf("project ref = %+v", resp.Project)
+	}
+	if !strings.Contains(resp.MCPConnect.AgentPrompt, `project_slug="`+projectSlug+`"`) {
+		t.Fatalf("agent_prompt missing project slug: %q", resp.MCPConnect.AgentPrompt)
 	}
 	if !strings.Contains(resp.MCPConnect.MCPJSON, "/mcp") || resp.MCPConnect.URL == "" {
 		t.Fatalf("mcp_connect = %+v", resp.MCPConnect)
@@ -84,6 +89,18 @@ func TestOnboardingIdentityHandler_Loopback(t *testing.T) {
 	// Settings should reflect the new binding without a daemon restart.
 	if uid := store.Get().DefaultLoopbackUserID; uid != resp.UserID {
 		t.Fatalf("settings DefaultLoopbackUserID = %q, want %q", uid, resp.UserID)
+	}
+	var projectLang, memberRole string
+	if err := pool.QueryRow(ctx, `
+		SELECT p.primary_language, pm.role
+		  FROM projects p
+		  JOIN project_members pm ON pm.project_id = p.id
+		 WHERE p.slug = $1 AND pm.user_id = $2::uuid
+	`, projectSlug, resp.UserID).Scan(&projectLang, &memberRole); err != nil {
+		t.Fatalf("default project owner lookup: %v", err)
+	}
+	if projectLang != "ko" || memberRole != "owner" {
+		t.Fatalf("default project lang/role = %q/%q, want ko/owner", projectLang, memberRole)
 	}
 
 	// Cleanup the new user.

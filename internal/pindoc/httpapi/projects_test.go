@@ -1,10 +1,12 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/var-gg/pindoc/internal/pindoc/projects"
@@ -139,5 +141,39 @@ func TestIncludeReaderHiddenProjects(t *testing.T) {
 func TestProjectCreateDefaultURLUsesToday(t *testing.T) {
 	if got := projectCreateDefaultURL("shop-fe"); got != "/p/shop-fe/today" {
 		t.Fatalf("projectCreateDefaultURL() = %q, want /p/shop-fe/today", got)
+	}
+}
+
+func TestProjectCreateResponseIncludesMCPConnect(t *testing.T) {
+	resp := projectCreateResponse{
+		ProjectID:        "project-id",
+		Slug:             "shop-fe",
+		Name:             "Shop Frontend",
+		PrimaryLanguage:  "en",
+		URL:              projectCreateDefaultURL("shop-fe"),
+		DefaultArea:      "misc",
+		AreasCreated:     24,
+		TemplatesCreated: 4,
+		MCPConnect: onboardingMCPConnect{
+			URL:         "http://127.0.0.1:5832/mcp",
+			MCPJSON:     onboardingMCPJSON("http://127.0.0.1:5832/mcp"),
+			AgentPrompt: onboardingAgentPrompt("http://127.0.0.1:5832/mcp", "shop-fe"),
+		},
+	}
+	body, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+	s := string(body)
+	for _, want := range []string{
+		`"mcp_connect"`,
+		`"url":"http://127.0.0.1:5832/mcp"`,
+		`"mcp_json"`,
+		`"agent_prompt"`,
+		`project_slug=\"shop-fe\"`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("project create response JSON missing %s: %s", want, s)
+		}
 	}
 }

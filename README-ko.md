@@ -86,7 +86,9 @@ Reader:
 http://localhost:5830/
 ```
 
-빈 인스턴스에서는 `/`가 첫 프로젝트 wizard로 redirect됩니다. 직접 열려면:
+빈 인스턴스에서는 `/`가 먼저 소유자 정보(표시 이름과 이메일)를 받은 뒤 첫
+프로젝트 wizard로 이동합니다. 소유자 정보 설정 후 프로젝트 wizard를 직접
+열려면:
 
 ```text
 http://localhost:5830/projects/new?welcome=1

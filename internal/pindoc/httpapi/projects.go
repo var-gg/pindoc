@@ -29,14 +29,15 @@ type projectCreateRequest struct {
 // reconnect/activation block — those are MCP-specific framing the agent
 // needs but the REST audience does not.
 type projectCreateResponse struct {
-	ProjectID        string `json:"project_id"`
-	Slug             string `json:"slug"`
-	Name             string `json:"name"`
-	PrimaryLanguage  string `json:"primary_language"`
-	URL              string `json:"url"`
-	DefaultArea      string `json:"default_area"`
-	AreasCreated     int    `json:"areas_created"`
-	TemplatesCreated int    `json:"templates_created"`
+	ProjectID        string               `json:"project_id"`
+	Slug             string               `json:"slug"`
+	Name             string               `json:"name"`
+	PrimaryLanguage  string               `json:"primary_language"`
+	URL              string               `json:"url"`
+	DefaultArea      string               `json:"default_area"`
+	AreasCreated     int                  `json:"areas_created"`
+	TemplatesCreated int                  `json:"templates_created"`
+	MCPConnect       onboardingMCPConnect `json:"mcp_connect"`
 }
 
 // projectCreateError mirrors the task_meta error envelope so UI can use
@@ -111,6 +112,7 @@ func (d Deps) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 	d.Logger.Info("project created via REST",
 		"slug", out.Slug, "name", out.Name, "lang", out.PrimaryLanguage)
 
+	mcpURL := onboardingMCPURL(d, r)
 	writeJSON(w, http.StatusCreated, projectCreateResponse{
 		ProjectID:        out.ID,
 		Slug:             out.Slug,
@@ -120,6 +122,11 @@ func (d Deps) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 		DefaultArea:      out.DefaultArea,
 		AreasCreated:     out.AreasCreated,
 		TemplatesCreated: out.TemplatesCreated,
+		MCPConnect: onboardingMCPConnect{
+			URL:         mcpURL,
+			MCPJSON:     onboardingMCPJSON(mcpURL),
+			AgentPrompt: onboardingAgentPrompt(mcpURL, out.Slug),
+		},
 	})
 }
 

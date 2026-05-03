@@ -19,6 +19,7 @@ export type ServerConfig = {
   multi_project_deprecated?: string;
   multi_project_switching: boolean;
   project_create_allowed: boolean;
+  public_base_url?: string;
   version: string;
   // providers + bind_addr replace the deprecated auth_mode enum
   // (Decision `decision-auth-model-loopback-and-providers`). Empty
@@ -876,6 +877,7 @@ export type CreateProjectResp = {
   default_area: string;
   areas_created: number;
   templates_created: number;
+  mcp_connect: OnboardingMCPConnect;
 };
 
 export type InviteRole = "editor" | "viewer";

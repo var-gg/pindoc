@@ -80,30 +80,35 @@
 정식 진입점으로 사용한다.
 
 ```
-[1/5] Daemon 기동
+[1/6] Daemon 기동
   git clone https://github.com/var-gg/pindoc.git
   cd pindoc
   docker compose up -d --build
 
-[2/5] Reader 진입
+[2/6] 소유자 정보 설정
   http://localhost:5830/
-  fresh instance: /projects/new?welcome=1 로 자동 redirect
-  직접 진입: http://localhost:5830/projects/new?welcome=1
+  fresh instance: /onboarding/identity 로 자동 redirect
+  Display name / Email / GitHub handle(선택) 입력
+  완료 후 첫 프로젝트 wizard로 이동
 
-[3/5] 첫 Project 생성
+[3/6] 첫 Project 생성
+  직접 진입: http://localhost:5830/projects/new?welcome=1
   Slug              shop-fe
   Name              Shop Frontend
   Primary language  EN / KO / JA 중 선택
   Description       선택 입력
 
-[4/5] Success page
+[4/6] Success page
   "이 프로젝트 열기"는 /p/{slug}/today 로 이동
-  .mcp.json snippet을 복사해 agent workspace에 붙여 넣음
+  MCP URL / .mcp.json snippet / Agent prompt 중 하나를 복사해 agent workspace에 붙여 넣음
 
-[5/5] Harness 설치
+[5/6] Harness 설치
   agent가 pindoc.workspace.detect 후 pindoc.harness.install 호출
   PINDOC.md frontmatter에 project_slug 기록
   MCP tool call은 project_slug per-call 전달
+
+[6/6] 첫 artifact
+  agent가 PINDOC.md를 읽고 pindoc.workspace.detect / task queue sweep 후 첫 문서를 작성
 ```
 
 `pindoc init` CLI는 현재 제품에 없다. 나중에 CLI wizard를 만들 경우 별도

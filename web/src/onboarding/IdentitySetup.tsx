@@ -15,16 +15,18 @@
 // Standalone layout (no Reader chrome) so it works before the
 // project-scoped UI is reachable.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { Check, Copy, Loader2, ShieldCheck } from "lucide-react";
 import { api, type OnboardingIdentityResp } from "../api/client";
+import { useI18n } from "../i18n";
 import "../styles/reader.css";
 
 type CopyTarget = "url" | "mcp_json" | "agent_prompt";
 
 export function IdentitySetup() {
   const navigate = useNavigate();
+  const { t } = useI18n();
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [githubHandle, setGithubHandle] = useState("");
@@ -32,23 +34,6 @@ export function IdentitySetup() {
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [created, setCreated] = useState<OnboardingIdentityResp | null>(null);
-
-  // Pre-fill from /api/config when the daemon already wrote a default
-  // (e.g. operator set PINDOC_USER_NAME). Skips if it errors — the
-  // form still works without the prefill.
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await fetch("/api/users", { headers: { Accept: "application/json" } });
-        if (!r.ok) return;
-        // intentionally a no-op: keep the form blank on a truly fresh
-        // install. We don't want to silently pick "OAuth Test ..."
-        // residue as a default name.
-      } catch {
-        // ignore
-      }
-    })();
-  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -77,6 +62,7 @@ export function IdentitySetup() {
       <IdentitySuccess
         result={created}
         onContinue={() => navigate(created.project.url, { replace: true })}
+        t={t}
       />
     );
   }
@@ -84,80 +70,61 @@ export function IdentitySetup() {
   return (
     <div className="cp-page">
       <div className="cp-welcome">
-        <p className="cp-welcome__step">step 1 — owner identity</p>
-        <h2 className="cp-welcome__title">Welcome to Pindoc</h2>
-        <p className="cp-welcome__sub">
-          Pindoc is loopback-only by default. Tell us who's the owner
-          on this box so every artifact attribution and project
-          ownership row anchors to a stable identity. No env edits or
-          GitHub OAuth needed for this first step — just a name and
-          email you'll recognise later.
-        </p>
+        <p className="cp-welcome__step">{t("onboarding.identity.welcome.step")}</p>
+        <h2 className="cp-welcome__title">{t("onboarding.identity.welcome.title")}</h2>
+        <p className="cp-welcome__sub">{t("onboarding.identity.welcome.subtitle")}</p>
       </div>
       <header className="cp-header">
-        <h1>Set your identity</h1>
-        <p className="cp-subtitle">
-          The first identity created on a fresh instance becomes the
-          owner. Subsequent collaborators join through GitHub OAuth +
-          invite once you flip the daemon to external bind.
-        </p>
+        <h1>{t("onboarding.identity.title")}</h1>
+        <p className="cp-subtitle">{t("onboarding.identity.subtitle")}</p>
       </header>
 
       <form className="cp-form" onSubmit={handleSubmit} noValidate>
         <label className="cp-field">
-          <span className="cp-field__label">Display name</span>
+          <span className="cp-field__label">{t("onboarding.identity.field.display_name.label")}</span>
           <input
             type="text"
             className="cp-field__input"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="Ada Lovelace"
+            placeholder={t("onboarding.identity.field.display_name.placeholder")}
             autoComplete="off"
             spellCheck={false}
             required
           />
-          <span className="cp-field__hint">
-            Shown next to revisions and on the Members panel.
-          </span>
+          <span className="cp-field__hint">{t("onboarding.identity.field.display_name.hint")}</span>
         </label>
         <label className="cp-field">
-          <span className="cp-field__label">Email</span>
+          <span className="cp-field__label">{t("onboarding.identity.field.email.label")}</span>
           <input
             type="email"
             className="cp-field__input"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
+            placeholder={t("onboarding.identity.field.email.placeholder")}
             autoComplete="off"
             spellCheck={false}
             required
           />
-          <span className="cp-field__hint">
-            Used as the canonical anchor — if you later activate GitHub
-            OAuth, the same email links to this row.
-          </span>
+          <span className="cp-field__hint">{t("onboarding.identity.field.email.hint")}</span>
         </label>
         <label className="cp-field">
-          <span className="cp-field__label">GitHub handle (optional)</span>
+          <span className="cp-field__label">{t("onboarding.identity.field.github_handle.label")}</span>
           <input
             type="text"
             className="cp-field__input"
             value={githubHandle}
             onChange={(e) => setGithubHandle(e.target.value)}
-            placeholder="octocat"
+            placeholder={t("onboarding.identity.field.github_handle.placeholder")}
             autoComplete="off"
             spellCheck={false}
           />
-          <span className="cp-field__hint">
-            Pre-fills the @-handle column. You can leave it blank now
-            and add it later via the Members panel.
-          </span>
+          <span className="cp-field__hint">{t("onboarding.identity.field.github_handle.hint")}</span>
         </label>
 
         {errorCode && (
           <div className="cp-error" role="alert">
-            <strong>{errorCode}</strong>
-            {errorMsg && <span> · {errorMsg}</span>}
+            {identityErrorMessage(t, errorCode, errorMsg)}
           </div>
         )}
 
@@ -167,25 +134,23 @@ export function IdentitySetup() {
           disabled={submitting}
         >
           {submitting && <Loader2 className="lucide" aria-hidden />}
-          {submitting ? "Setting up…" : "Create identity"}
+          {submitting ? t("onboarding.identity.submitting") : t("onboarding.identity.submit")}
         </button>
       </form>
 
-      <p className="cp-snippet__harness">
-        Already have a pindoc-admin or env-set identity? The daemon
-        skips this page automatically once <code>server_settings.
-        default_loopback_user_id</code> is bound.
-      </p>
+      <p className="cp-snippet__harness">{t("onboarding.identity.harness_hint")}</p>
     </div>
   );
 }
 
-function IdentitySuccess({
+export function IdentitySuccess({
   result,
   onContinue,
+  t,
 }: {
   result: OnboardingIdentityResp;
   onContinue: () => void;
+  t: (k: string, ...args: Array<string | number>) => string;
 }) {
   const [copied, setCopied] = useState<CopyTarget | null>(null);
 
@@ -199,60 +164,64 @@ function IdentitySuccess({
     <div className="cp-page cp-page--success">
       <header className="cp-header">
         <h1 className="cp-success-title">
-          <ShieldCheck className="lucide" aria-hidden /> Identity set
+          <ShieldCheck className="lucide" aria-hidden /> {t("onboarding.identity.success.title")}
         </h1>
         <p className="cp-subtitle">
-          Welcome, <strong>{result.display_name}</strong>. You own the{" "}
-          <code>{result.project.slug}</code> project. Next step: connect
-          your AI agent to Pindoc.
+          {t("onboarding.identity.success.subtitle.prefix")}{" "}
+          <strong>{result.display_name}</strong>.{" "}
+          {t("onboarding.identity.success.subtitle.project_prefix")}{" "}
+          <code>{result.project.slug}</code>{" "}
+          {t("onboarding.identity.success.subtitle.project_suffix")}
         </p>
       </header>
 
       <section className="cp-snippet">
         <header className="cp-snippet__intro">
-          <h2>Connect Claude Code / Codex / Cursor</h2>
-          <p>
-            Three flavours — pick whichever matches how your agent
-            consumes config. The MCP URL goes loopback-Trust by default,
-            so no token or sign-in is needed yet.
-          </p>
+          <h2>{t("onboarding.identity.success.connect_title")}</h2>
+          <p>{t("onboarding.identity.success.connect_body")}</p>
         </header>
 
         <CopyBlock
-          title="MCP URL only"
-          subtitle="Paste into a single-field MCP host config."
+          title={t("onboarding.identity.success.copy.url.title")}
+          subtitle={t("onboarding.identity.success.copy.url.subtitle")}
           value={result.mcp_connect.url}
           monospace
           copied={copied === "url"}
           onCopy={() => copy(result.mcp_connect.url, "url")}
+          copyLabel={t("onboarding.identity.copy")}
+          copiedLabel={t("onboarding.identity.copied")}
         />
 
         <CopyBlock
-          title=".mcp.json snippet"
-          subtitle="Paste into ~/.config/claude-code/mcp.json (or the equivalent for your client)."
+          title={t("onboarding.identity.success.copy.mcp_json.title")}
+          subtitle={t("onboarding.identity.success.copy.mcp_json.subtitle")}
           value={result.mcp_connect.mcp_json}
           monospace
           multiline
           copied={copied === "mcp_json"}
           onCopy={() => copy(result.mcp_connect.mcp_json, "mcp_json")}
+          copyLabel={t("onboarding.identity.copy")}
+          copiedLabel={t("onboarding.identity.copied")}
         />
 
         <CopyBlock
-          title="Agent prompt"
-          subtitle="Paste into your agent chat. The agent edits the config + verifies pindoc.ping for you."
+          title={t("onboarding.identity.success.copy.agent_prompt.title")}
+          subtitle={t("onboarding.identity.success.copy.agent_prompt.subtitle")}
           value={result.mcp_connect.agent_prompt}
           multiline
           copied={copied === "agent_prompt"}
           onCopy={() => copy(result.mcp_connect.agent_prompt, "agent_prompt")}
+          copyLabel={t("onboarding.identity.copy")}
+          copiedLabel={t("onboarding.identity.copied")}
         />
       </section>
 
       <div className="cp-actions">
         <button type="button" className="cp-link-primary" onClick={onContinue}>
-          Continue to {result.project.slug}
+          {t("onboarding.identity.success.continue", result.project.slug)}
         </button>
         <Link className="cp-link-secondary" to="/admin/providers">
-          Activate GitHub OAuth (later)
+          {t("onboarding.identity.success.activate_oauth")}
         </Link>
       </div>
     </div>
@@ -267,6 +236,8 @@ function CopyBlock({
   multiline,
   copied,
   onCopy,
+  copyLabel,
+  copiedLabel,
 }: {
   title: string;
   subtitle: string;
@@ -275,6 +246,8 @@ function CopyBlock({
   multiline?: boolean;
   copied: boolean;
   onCopy: () => void;
+  copyLabel: string;
+  copiedLabel: string;
 }) {
   return (
     <div className="cp-snippet__box" style={{ marginBottom: "var(--space-4, 16px)" }}>
@@ -287,10 +260,10 @@ function CopyBlock({
           type="button"
           className="cp-snippet__copy"
           onClick={onCopy}
-          aria-label={`Copy ${title}`}
+          aria-label={`${copyLabel} ${title}`}
         >
           {copied ? <Check className="lucide" /> : <Copy className="lucide" />}
-          {copied ? "Copied" : "Copy"}
+          {copied ? copiedLabel : copyLabel}
         </button>
       </header>
       {multiline ? (
@@ -307,4 +280,15 @@ function CopyBlock({
       )}
     </div>
   );
+}
+
+function identityErrorMessage(
+  t: (k: string, ...args: Array<string | number>) => string,
+  errorCode: string,
+  fallback: string | null,
+): string {
+  const key = `onboarding.identity.error.${errorCode}`;
+  const translated = t(key);
+  if (translated !== key) return translated;
+  return fallback || t("onboarding.identity.error.UNKNOWN");
 }

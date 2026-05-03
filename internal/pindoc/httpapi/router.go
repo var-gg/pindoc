@@ -51,6 +51,10 @@ type Deps struct {
 	// project's primary_language. Legacy clients may still read the field,
 	// but canonical Reader URLs are /p/<slug>/...
 	DefaultProjectLocale string
+	// UserLanguage is the operator-selected fallback language from
+	// PINDOC_USER_LANGUAGE. Fresh installs can lack a default project row,
+	// so onboarding uses this when it has to create that project.
+	UserLanguage string
 
 	Embedder  embed.Provider
 	Settings  *settings.Store

@@ -33,12 +33,12 @@ type onboardingIdentityRequest struct {
 }
 
 type onboardingIdentityResponse struct {
-	Status     string                  `json:"status"`
-	UserID     string                  `json:"user_id"`
-	DisplayName string                 `json:"display_name"`
-	Email      string                  `json:"email"`
-	Project    onboardingProjectRef    `json:"project"`
-	MCPConnect onboardingMCPConnect    `json:"mcp_connect"`
+	Status      string               `json:"status"`
+	UserID      string               `json:"user_id"`
+	DisplayName string               `json:"display_name"`
+	Email       string               `json:"email"`
+	Project     onboardingProjectRef `json:"project"`
+	MCPConnect  onboardingMCPConnect `json:"mcp_connect"`
 }
 
 type onboardingProjectRef struct {
@@ -119,9 +119,13 @@ func (d Deps) handleOnboardingIdentity(w http.ResponseWriter, r *http.Request) {
 	if projectSlug == "" {
 		projectSlug = "pindoc"
 	}
-	if err := projects.EnsureDefaultProjectOwnerMembership(r.Context(), d.DB, projectSlug, userID); err != nil && d.Logger != nil {
-		d.Logger.Warn("onboarding owner membership reconcile failed",
-			"err", err, "project_slug", projectSlug, "user_id", userID)
+	if err := ensureOnboardingDefaultProject(r.Context(), d, projectSlug, userID); err != nil {
+		if d.Logger != nil {
+			d.Logger.Error("onboarding default project reconcile failed",
+				"err", err, "project_slug", projectSlug, "user_id", userID)
+		}
+		writeOnboardingError(w, http.StatusInternalServerError, "PROJECT_RECONCILE_FAILED", "failed to create or bind the default project")
+		return
 	}
 
 	mcpURL := onboardingMCPURL(d, r)
@@ -138,10 +142,64 @@ func (d Deps) handleOnboardingIdentity(w http.ResponseWriter, r *http.Request) {
 		MCPConnect: onboardingMCPConnect{
 			URL:         mcpURL,
 			MCPJSON:     onboardingMCPJSON(mcpURL),
-			AgentPrompt: onboardingAgentPrompt(mcpURL, displayName),
+			AgentPrompt: onboardingAgentPrompt(mcpURL, projectSlug),
 		},
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func ensureOnboardingDefaultProject(ctx context.Context, d Deps, projectSlug, userID string) error {
+	if d.DB == nil {
+		return errors.New("database pool not configured")
+	}
+	projectSlug = strings.TrimSpace(projectSlug)
+	userID = strings.TrimSpace(userID)
+	if projectSlug == "" || userID == "" {
+		return nil
+	}
+	var projectID string
+	err := d.DB.QueryRow(ctx, `SELECT id::text FROM projects WHERE slug = $1 LIMIT 1`, projectSlug).Scan(&projectID)
+	if err == nil {
+		return projects.EnsureDefaultProjectOwnerMembership(ctx, d.DB, projectSlug, userID)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("lookup default project: %w", err)
+	}
+
+	tx, err := d.DB.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin default project create: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	lang := onboardingProjectLanguage(d)
+	_, err = projects.CreateProject(ctx, tx, projects.CreateProjectInput{
+		Slug:            projectSlug,
+		Name:            projectSlug,
+		Description:     "Default Pindoc project created during first-run identity setup.",
+		PrimaryLanguage: lang,
+		OwnerUserID:     userID,
+	})
+	if err != nil {
+		if errors.Is(err, projects.ErrSlugTaken) {
+			return projects.EnsureDefaultProjectOwnerMembership(ctx, d.DB, projectSlug, userID)
+		}
+		return fmt.Errorf("create default project: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit default project create: %w", err)
+	}
+	return nil
+}
+
+func onboardingProjectLanguage(d Deps) string {
+	for _, candidate := range []string{d.DefaultProjectLocale, d.UserLanguage, "en"} {
+		lang, err := projects.NormalizeLanguage(candidate)
+		if err == nil {
+			return lang
+		}
+	}
+	return "en"
 }
 
 // upsertOnboardingUser is a thin wrapper that picks the canonical
@@ -230,14 +288,15 @@ func onboardingMCPJSON(mcpURL string) string {
 // and verify it. The prompt asks the agent to add the entry, restart,
 // then call pindoc.ping — covers the full bootstrap loop without the
 // operator hand-editing files.
-func onboardingAgentPrompt(mcpURL, displayName string) string {
-	greeting := "Hi"
-	if strings.TrimSpace(displayName) != "" {
-		greeting = "Hi, I'm " + displayName + ". "
+func onboardingAgentPrompt(mcpURL, projectSlug string) string {
+	projectHint := ""
+	if projectSlug = strings.TrimSpace(projectSlug); projectSlug != "" {
+		projectHint = " Use project_slug=\"" + projectSlug + "\" for project-scoped Pindoc tool calls."
 	}
-	return greeting + "Please register the Pindoc MCP server in this workspace. " +
+	return "Please register the Pindoc MCP server in this workspace. " +
 		"Add this entry to ~/.config/claude-code/mcp.json (or the equivalent for your client):\n\n" +
 		onboardingMCPJSON(mcpURL) +
 		"\nAfter saving, restart your MCP session and call pindoc.ping to confirm the handshake. " +
-		"Then run pindoc.harness.install to drop a PINDOC.md harness into the workspace root."
+		"Then run pindoc.harness.install to drop a PINDOC.md harness into the workspace root." +
+		projectHint
 }
