@@ -4,6 +4,7 @@ import {
   matchReaderRoutePath,
   normalizeReaderSurfaceSegment,
   projectBaseRedirectPath,
+  projectGraphFallbackPath,
   projectSurfacePath,
 } from "../src/readerRoutes";
 
@@ -71,6 +72,14 @@ function testProjectBaseRedirectPathAddsDefaultOrgForLegacyBase(): void {
   );
 }
 
+function testGraphFallbackRedirectsToToday(): void {
+  assertEqual(
+    projectGraphFallbackPath("pindoc", "default"),
+    "/default/p/pindoc/today",
+    "non-dev graph fallback should use the Today surface",
+  );
+}
+
 function testReaderRouteMatchAcceptsOrgScopedAndLegacyPaths(): void {
   const orgScoped = matchReaderRoutePath("/curioustore/p/pindoc/wiki/artifact-a");
   assertEqual(orgScoped?.orgSlug, "curioustore", "org-scoped route org slug");
@@ -99,6 +108,11 @@ function testDevSurfaceGateRequiresDevQueryInProduction(): void {
     "explicit dev query opens dev-only surfaces",
   );
   assertEqual(
+    isReaderDevSurfaceEnabled("?devSurface=1", false),
+    true,
+    "explicit devSurface query opens dev-only surfaces",
+  );
+  assertEqual(
     isReaderDevSurfaceEnabled("", true),
     true,
     "vite dev server opens dev-only surfaces",
@@ -111,5 +125,6 @@ testProjectSurfacePathPreservesCanonicalTasks();
 testProjectSurfacePathAddsOrgContextWhenPresent();
 testProjectBaseRedirectPathPreservesCanonicalOrg();
 testProjectBaseRedirectPathAddsDefaultOrgForLegacyBase();
+testGraphFallbackRedirectsToToday();
 testReaderRouteMatchAcceptsOrgScopedAndLegacyPaths();
 testDevSurfaceGateRequiresDevQueryInProduction();

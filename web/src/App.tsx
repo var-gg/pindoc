@@ -14,7 +14,7 @@ import { ProjectSettingsPage } from "./reader/ProjectSettingsPage";
 import { ReaderShell, type ReaderView } from "./reader/ReaderShell";
 import { SignupCompletePage } from "./signup/SignupCompletePage";
 import { SignupPage } from "./signup/SignupPage";
-import { DEFAULT_READER_ORG_SLUG, isReaderDevSurfaceEnabled, normalizeReaderSurfaceSegment, projectBaseRedirectPath, projectSurfacePath } from "./readerRoutes";
+import { DEFAULT_READER_ORG_SLUG, isReaderDevSurfaceEnabled, normalizeReaderSurfaceSegment, projectBaseRedirectPath, projectGraphFallbackPath, projectSurfacePath } from "./readerRoutes";
 import { findSurface, previews, uiKits } from "./surfaces";
 
 export function App() {
@@ -140,10 +140,16 @@ function DesignSurfaceGate() {
 
 function GraphSurfaceGate() {
   const location = useLocation();
+  const { org, project = "" } = useParams<{ org?: string; project: string }>();
   if (isReaderDevSurfaceEnabled(location.search, import.meta.env.DEV)) {
     return <ReaderRoute view="graph" />;
   }
-  return <ReaderRoute view="reader" unavailableSurface="graph" />;
+  return (
+    <Navigate
+      to={`${projectGraphFallbackPath(project, org ?? DEFAULT_READER_ORG_SLUG)}${location.search || ""}`}
+      replace
+    />
+  );
 }
 
 function ProjectBaseRedirect() {

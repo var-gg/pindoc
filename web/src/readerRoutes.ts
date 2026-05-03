@@ -45,6 +45,10 @@ export function projectBaseRedirectPath(project: string, orgSlug = DEFAULT_READE
   return projectSurfacePath(project, "today", undefined, orgSlug);
 }
 
+export function projectGraphFallbackPath(project: string, orgSlug = DEFAULT_READER_ORG_SLUG): string {
+  return projectSurfacePath(project, "today", undefined, orgSlug);
+}
+
 export function projectRoutePrefix(project: string, orgSlug?: string): string {
   const encodedProject = encodeURIComponent(project);
   const encodedOrg = orgSlug ? `/${encodeURIComponent(orgSlug)}` : "";
@@ -91,7 +95,9 @@ export function isReaderDevSurfaceEnabled(
   const params = typeof search === "string"
     ? new URLSearchParams(search.startsWith("?") ? search.slice(1) : search)
     : search;
-  return params?.get("dev") === "1";
+  return params?.get("dev") === "1"
+    || params?.get("devSurface") === "1"
+    || params?.get("devsurface") === "1";
 }
 
 function safeDecodeURIComponent(value: string): string {
