@@ -55,6 +55,14 @@ Do not set `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED=true` for a writable public
 internet deployment. Use it only behind a trusted LAN or reverse proxy with
 additional access controls.
 
+Pindoc's HTTP daemon is default-deny for cross-origin browser requests. Set
+`PINDOC_ALLOWED_ORIGINS` to a comma-separated allowlist when a trusted frontend
+must call the daemon from another origin. `PINDOC_DEV_MODE=true` enables
+wildcard CORS for local tooling only and should not be used on public instances.
+The daemon also emits baseline security headers and serves asset blobs with a
+hardened CSP; keep equivalent or stricter headers if a reverse proxy rewrites
+responses.
+
 ## Read-Only Public Demo
 
 A public demo should not expose a normal writable daemon. Prefer this shape:

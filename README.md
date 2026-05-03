@@ -149,11 +149,15 @@ The default Docker path is single-user and loopback-only:
 | `PINDOC_AUTH_PROVIDERS` | empty | Identity providers enabled for external requests. Current provider: `github`. |
 | `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED` | `false` | Explicit opt-in for external exposure without an IdP. Use only behind a trusted network/reverse proxy. |
 | `PINDOC_FORCE_OAUTH_LOCAL` | `false` | Development flag that routes loopback `/mcp` calls through OAuth bearer auth for local QA. |
+| `PINDOC_ALLOWED_ORIGINS` | empty | Comma-separated CORS allowlist. Empty means same-origin only; set explicit origins for cross-origin frontends. |
+| `PINDOC_DEV_MODE` | `false` | Development-only flag that permits wildcard CORS for local tooling. Do not enable on public instances. |
 
 Do not expose a writable daemon to the public internet without an identity
 provider. For a public read-only demo, keep `/mcp` and mutating HTTP routes
 blocked at the reverse proxy; see [SECURITY.md](SECURITY.md) and
 [docs/22-public-demo.md](docs/22-public-demo.md).
+The daemon also sets baseline security headers itself, including `nosniff`,
+clickjacking protection, referrer policy, and hardened asset-blob CSP.
 
 For a writable public or cross-device instance, follow
 [docs/oauth-setup.md](docs/oauth-setup.md). It covers GitHub OAuth App setup,

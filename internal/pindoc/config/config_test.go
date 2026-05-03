@@ -218,3 +218,20 @@ func TestLoadForceOAuthLocal(t *testing.T) {
 		t.Fatal("ForceOAuthLocal = false, want true")
 	}
 }
+
+func TestLoadCORSConfig(t *testing.T) {
+	t.Setenv("PINDOC_BIND_ADDR", DefaultBindAddr)
+	t.Setenv("PINDOC_DEV_MODE", "true")
+	t.Setenv("PINDOC_ALLOWED_ORIGINS", " https://docs.example.test/, http://localhost:5173, https://docs.example.test ")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.DevMode {
+		t.Fatal("DevMode = false, want true")
+	}
+	want := []string{"https://docs.example.test", "http://localhost:5173"}
+	if !reflect.DeepEqual(cfg.AllowedOrigins, want) {
+		t.Fatalf("AllowedOrigins = %#v, want %#v", cfg.AllowedOrigins, want)
+	}
+}

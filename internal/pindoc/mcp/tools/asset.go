@@ -50,6 +50,7 @@ type assetToolOutput struct {
 	SuggestedActions []string               `json:"suggested_actions,omitempty"`
 	MessageLocale    string                 `json:"message_locale,omitempty"`
 	ProjectSlug      string                 `json:"project_slug,omitempty"`
+	Warnings         []string               `json:"warnings,omitempty"`
 	Asset            *assetSummary          `json:"asset,omitempty"`
 	AssetRef         string                 `json:"asset_ref,omitempty"`
 	Reused           bool                   `json:"reused,omitempty"`
@@ -264,9 +265,14 @@ func RegisterAssetAttach(server *sdk.Server, deps Deps) {
 			if err != nil {
 				return nil, assetToolOutput{}, err
 			}
+			warnings, err := loadAssetVisibilityWarnings(ctx, deps, scope.ProjectID, summary.ID, head)
+			if err != nil {
+				return nil, assetToolOutput{}, err
+			}
 			return nil, assetToolOutput{
 				Status:      "accepted",
 				ProjectSlug: scope.ProjectSlug,
+				Warnings:    warnings,
 				Asset:       &summary,
 				AssetRef:    assets.Ref(summary.ID),
 				Projection:  &summary.Projection,
@@ -281,6 +287,7 @@ type artifactHeadForAsset struct {
 	ArtifactSlug   string
 	RevisionID     string
 	RevisionNumber int
+	Visibility     string
 }
 
 func decodeAssetUploadInput(in assetUploadInput) ([]byte, string, assetToolOutput) {
@@ -365,7 +372,7 @@ func assetSummaryFromMetadata(projectSlug string, m assets.Metadata, createdAt t
 func loadArtifactHeadForAsset(ctx context.Context, deps Deps, projectID, artifactRef string) (artifactHeadForAsset, error) {
 	var out artifactHeadForAsset
 	err := deps.DB.QueryRow(ctx, `
-		SELECT a.id::text, a.slug, r.id::text, r.revision_number
+		SELECT a.id::text, a.slug, r.id::text, r.revision_number, a.visibility
 		  FROM artifacts a
 		  JOIN artifact_revisions r ON r.artifact_id = a.id
 		 WHERE a.project_id = $1::uuid
@@ -374,9 +381,55 @@ func loadArtifactHeadForAsset(ctx context.Context, deps Deps, projectID, artifac
 		 ORDER BY r.revision_number DESC
 		 LIMIT 1
 	`, projectID, strings.TrimSpace(artifactRef)).Scan(
-		&out.ArtifactID, &out.ArtifactSlug, &out.RevisionID, &out.RevisionNumber,
+		&out.ArtifactID, &out.ArtifactSlug, &out.RevisionID, &out.RevisionNumber, &out.Visibility,
 	)
 	return out, err
+}
+
+func loadAssetVisibilityWarnings(ctx context.Context, deps Deps, projectID, assetID string, head artifactHeadForAsset) ([]string, error) {
+	rows, err := deps.DB.Query(ctx, `
+		SELECT DISTINCT art.visibility
+		  FROM artifact_assets aa
+		  JOIN artifact_revisions ar ON ar.id = aa.artifact_revision_id
+		  JOIN artifacts art ON art.id = aa.artifact_id
+		 WHERE aa.asset_id = $1::uuid
+		   AND art.project_id = $2::uuid
+		   AND art.id <> $3::uuid
+		   AND art.status <> 'archived'
+		   AND ar.revision_number = (
+				SELECT max(r2.revision_number)
+				  FROM artifact_revisions r2
+				 WHERE r2.artifact_id = art.id
+		   )
+	`, assetID, projectID, head.ArtifactID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	seen := map[string]bool{}
+	for rows.Next() {
+		var visibility string
+		if err := rows.Scan(&visibility); err != nil {
+			return nil, err
+		}
+		seen[strings.TrimSpace(visibility)] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	switch strings.TrimSpace(head.Visibility) {
+	case "public":
+		if seen["org"] || seen["private"] {
+			return []string{"ASSET_SHARED_PUBLIC: this immutable asset is also attached to less-public artifacts; attaching it to a public artifact makes the shared blob publicly readable."}, nil
+		}
+	default:
+		if seen["public"] {
+			return []string{"ASSET_ALREADY_PUBLIC: this immutable asset is already attached to a public artifact, so its blob URL is publicly readable."}, nil
+		}
+	}
+	return nil, nil
 }
 
 func insertAssetAttachment(ctx context.Context, deps Deps, head artifactHeadForAsset, assetID, role, actor string) (assetAttachmentResult, error) {

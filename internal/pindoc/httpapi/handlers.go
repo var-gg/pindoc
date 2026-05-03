@@ -1241,11 +1241,15 @@ func (d Deps) handleSPA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+		if strings.EqualFold(filepath.Ext(candidate), ".html") {
+			w.Header().Set("Content-Security-Policy", spaBaselineCSP)
+		}
 		http.ServeFile(w, r, candidate)
 		return
 	}
 	// Fallback — let React Router resolve the path. index.html itself
 	// covers `/`, `/p/...`, `/wiki/...`, etc.
+	w.Header().Set("Content-Security-Policy", spaBaselineCSP)
 	http.ServeFile(w, r, filepath.Join(distAbs, "index.html"))
 }
 

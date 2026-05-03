@@ -132,6 +132,25 @@ func IsImageMime(mimeType string) bool {
 	return strings.HasPrefix(MimeBase(mimeType), "image/")
 }
 
+func IsInlineSafeImageMime(mimeType string) bool {
+	switch MimeBase(mimeType) {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+		return true
+	default:
+		return false
+	}
+}
+
+func ContentTypeForServing(mimeType string) string {
+	base := MimeBase(mimeType)
+	switch base {
+	case "text/plain", "text/markdown", "text/csv", "application/json":
+		return base + "; charset=utf-8"
+	default:
+		return base
+	}
+}
+
 func MimeBase(mimeType string) string {
 	if base, _, err := mime.ParseMediaType(strings.TrimSpace(mimeType)); err == nil {
 		return strings.ToLower(base)

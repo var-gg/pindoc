@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -37,11 +36,13 @@ type assetDetailRow struct {
 type assetBlobRow struct {
 	ID               string
 	ProjectID        string
+	SHA256           string
 	MimeType         string
 	SizeBytes        int64
 	OriginalFilename string
 	StorageDriver    string
 	StorageKey       string
+	CreatedAt        time.Time
 }
 
 type assetAPIError struct {
@@ -51,6 +52,20 @@ type assetAPIError struct {
 
 func writeAssetAPIError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, assetAPIError{ErrorCode: code, Message: message})
+}
+
+type assetBlobAccess string
+
+const (
+	assetBlobAccessDenied    assetBlobAccess = ""
+	assetBlobAccessPrincipal assetBlobAccess = "principal"
+	assetBlobAccessPublic    assetBlobAccess = "public"
+
+	assetBlobCSP = "default-src 'none'; sandbox; img-src 'self'; style-src 'none'; script-src 'none'; base-uri 'none'"
+)
+
+func (a assetBlobAccess) canRead() bool {
+	return a == assetBlobAccessPrincipal || a == assetBlobAccessPublic
 }
 
 func (d Deps) handleAssetBlob(w http.ResponseWriter, r *http.Request) {
@@ -72,18 +87,23 @@ func (d Deps) handleAssetBlob(w http.ResponseWriter, r *http.Request) {
 		writeAssetAPIError(w, http.StatusInternalServerError, "ASSET_LOOKUP_FAILED", "asset lookup failed")
 		return
 	}
-	if ok, err := d.canReadAssetBlob(r.Context(), r, projectSlug, row); err != nil {
+	if access, err := d.canReadAssetBlob(r.Context(), r, projectSlug, row); err != nil {
 		if d.Logger != nil {
 			d.Logger.Warn("asset blob permission lookup failed", "err", err, "project", projectSlug, "asset_id", assetID)
 		}
 		writeAssetAPIError(w, http.StatusInternalServerError, "ASSET_ACCESS_CHECK_FAILED", "asset access check failed")
 		return
-	} else if !ok {
+	} else if !access.canRead() {
 		writeAssetAPIError(w, http.StatusNotFound, "ASSET_NOT_FOUND", "asset not found")
 		return
+	} else {
+		applyAssetBlobCacheHeaders(w, access)
 	}
 	if row.StorageDriver != assets.DriverLocalFS {
-		writeAssetAPIError(w, http.StatusInternalServerError, "ASSET_STORAGE_DRIVER_UNSUPPORTED", "asset storage driver unsupported")
+		if d.Logger != nil {
+			d.Logger.Warn("asset blob storage driver unsupported", "project", projectSlug, "asset_id", row.ID, "driver", row.StorageDriver)
+		}
+		writeAssetAPIError(w, http.StatusNotFound, "ASSET_NOT_FOUND", "asset not found")
 		return
 	}
 	store, err := assets.NewLocalFS(d.AssetRoot)
@@ -96,7 +116,10 @@ func (d Deps) handleAssetBlob(w http.ResponseWriter, r *http.Request) {
 	}
 	rc, err := store.Open(r.Context(), row.StorageKey)
 	if errors.Is(err, os.ErrNotExist) {
-		writeAssetAPIError(w, http.StatusNotFound, "ASSET_BLOB_NOT_FOUND", "asset blob not found")
+		if d.Logger != nil {
+			d.Logger.Warn("asset blob storage key missing", "project", projectSlug, "asset_id", row.ID, "storage_key", row.StorageKey)
+		}
+		writeAssetAPIError(w, http.StatusNotFound, "ASSET_NOT_FOUND", "asset not found")
 		return
 	}
 	if err != nil {
@@ -107,43 +130,60 @@ func (d Deps) handleAssetBlob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rc.Close()
-
-	w.Header().Set("Content-Type", row.MimeType)
-	w.Header().Set("Content-Length", strconv.FormatInt(row.SizeBytes, 10))
-	if row.OriginalFilename != "" {
-		w.Header().Set("Content-Disposition", contentDisposition(row.OriginalFilename, assets.IsImageMime(row.MimeType)))
+	seeker, ok := rc.(io.ReadSeeker)
+	if !ok {
+		if d.Logger != nil {
+			d.Logger.Error("asset localfs open returned non-seeker", "asset_id", row.ID)
+		}
+		writeAssetAPIError(w, http.StatusInternalServerError, "ASSET_BLOB_OPEN_FAILED", "asset blob open failed")
+		return
 	}
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, rc)
+
+	w.Header().Set("Content-Type", assets.ContentTypeForServing(row.MimeType))
+	w.Header().Set("Content-Disposition", contentDisposition(row.OriginalFilename, assets.IsInlineSafeImageMime(row.MimeType)))
+	w.Header().Set("Content-Security-Policy", assetBlobCSP)
+	if row.SHA256 != "" {
+		w.Header().Set("ETag", `W/"`+row.SHA256+`"`)
+	}
+	http.ServeContent(w, r, row.OriginalFilename, row.CreatedAt, seeker)
+}
+
+func applyAssetBlobCacheHeaders(w http.ResponseWriter, access assetBlobAccess) {
+	switch access {
+	case assetBlobAccessPublic:
+		w.Header().Set("Cache-Control", "public, max-age=0, must-revalidate")
+	case assetBlobAccessPrincipal:
+		w.Header().Set("Cache-Control", "private, no-cache")
+	}
 }
 
 func (d Deps) lookupAssetBlob(ctx context.Context, projectSlug, assetID string) (assetBlobRow, error) {
 	var row assetBlobRow
 	err := d.DB.QueryRow(ctx, `
-		SELECT a.id::text, a.project_id::text, a.mime_type, a.size_bytes,
-		       a.original_filename, a.storage_driver, a.storage_key
+		SELECT a.id::text, a.project_id::text, a.sha256, a.mime_type, a.size_bytes,
+		       a.original_filename, a.storage_driver, a.storage_key, a.created_at
 		  FROM assets a
 		  JOIN projects p ON p.id = a.project_id
 		 WHERE p.slug = $1
 		   AND a.id::text = $2
 		 LIMIT 1
 	`, projectSlug, assetID).Scan(
-		&row.ID, &row.ProjectID, &row.MimeType, &row.SizeBytes,
-		&row.OriginalFilename, &row.StorageDriver, &row.StorageKey,
+		&row.ID, &row.ProjectID, &row.SHA256, &row.MimeType, &row.SizeBytes,
+		&row.OriginalFilename, &row.StorageDriver, &row.StorageKey, &row.CreatedAt,
 	)
 	return row, err
 }
 
-func (d Deps) canReadAssetBlob(ctx context.Context, r *http.Request, projectSlug string, row assetBlobRow) (bool, error) {
+func (d Deps) canReadAssetBlob(ctx context.Context, r *http.Request, projectSlug string, row assetBlobRow) (assetBlobAccess, error) {
 	principal := d.principalForRequest(r)
 	if principal != nil {
 		if principal.IsLoopback() {
-			return true, nil
+			return assetBlobAccessPrincipal, nil
 		}
 		if scope, err := pauth.ResolveProject(ctx, d.DB, principal, projectSlug); err == nil && scope.Can("read.artifact") {
-			return true, nil
+			return assetBlobAccessPrincipal, nil
 		} else if err != nil && !errors.Is(err, pauth.ErrProjectAccessDenied) && !errors.Is(err, pauth.ErrProjectNotFound) {
-			return false, err
+			return assetBlobAccessDenied, err
 		}
 	}
 	var public bool
@@ -164,7 +204,13 @@ func (d Deps) canReadAssetBlob(ctx context.Context, r *http.Request, projectSlug
 			   )
 		)
 	`, row.ID, row.ProjectID, projects.VisibilityPublic).Scan(&public)
-	return public, err
+	if err != nil {
+		return assetBlobAccessDenied, err
+	}
+	if public {
+		return assetBlobAccessPublic, nil
+	}
+	return assetBlobAccessDenied, nil
 }
 
 func (d Deps) loadArtifactAssets(ctx context.Context, projectSlug, artifactID string, revisionNumber int) ([]assetDetailRow, error) {

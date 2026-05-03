@@ -65,6 +65,33 @@ func TestValidateContentMIMEAndLimits(t *testing.T) {
 	}
 }
 
+func TestServingContentTypeAndInlineSafety(t *testing.T) {
+	if !IsImageMime("image/svg+xml") {
+		t.Fatal("SVG should remain an image asset for metadata/projection")
+	}
+	if IsInlineSafeImageMime("image/svg+xml") {
+		t.Fatal("SVG should not be served as an inline-safe browser image")
+	}
+	if !IsInlineSafeImageMime("image/png") {
+		t.Fatal("PNG should be inline-safe")
+	}
+
+	cases := map[string]string{
+		"text/markdown":    "text/markdown; charset=utf-8",
+		"text/plain":       "text/plain; charset=utf-8",
+		"text/csv":         "text/csv; charset=utf-8",
+		"application/json": "application/json; charset=utf-8",
+		"image/png":        "image/png",
+		"application/pdf":  "application/pdf",
+		"application/zip":  "application/zip",
+	}
+	for in, want := range cases {
+		if got := ContentTypeForServing(in); got != want {
+			t.Fatalf("ContentTypeForServing(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestAssetRefRoundTrip(t *testing.T) {
 	ref := Ref("123")
 	if ref != "pindoc-asset://123" {

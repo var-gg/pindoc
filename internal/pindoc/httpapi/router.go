@@ -276,7 +276,7 @@ func New(cfg *config.Config, d Deps) http.Handler {
 		mux.HandleFunc("/", d.handleSPA)
 	}
 
-	return withCORS(withRecover(mux, d.Logger))
+	return withSecurityHeaders(withCORS(cfg, withRecover(mux, d.Logger)))
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -289,15 +289,71 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-// withCORS permits the Vite dev server (same origin via its proxy is the
-// normal path, but if the UI is served from a different origin during
-// dev we still accept reads). Production locks this down via reverse
-// proxy config anyway.
-func withCORS(h http.Handler) http.Handler {
+const spaBaselineCSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+
+func withSecurityHeaders(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		h.ServeHTTP(w, r)
+	})
+}
+
+type corsPolicy struct {
+	allowAll bool
+	allowed  map[string]bool
+}
+
+func corsPolicyFromConfig(cfg *config.Config) corsPolicy {
+	if cfg != nil && cfg.DevMode {
+		return corsPolicy{allowAll: true}
+	}
+	policy := corsPolicy{allowed: map[string]bool{}}
+	if cfg != nil {
+		for _, origin := range cfg.AllowedOrigins {
+			origin = normalizeCORSOrigin(origin)
+			if origin != "" {
+				policy.allowed[origin] = true
+			}
+		}
+	}
+	return policy
+}
+
+func normalizeCORSOrigin(origin string) string {
+	return strings.TrimRight(strings.TrimSpace(origin), "/")
+}
+
+func (p corsPolicy) allow(origin string) (string, bool) {
+	origin = normalizeCORSOrigin(origin)
+	if origin == "" {
+		return "", false
+	}
+	if p.allowAll {
+		return "*", true
+	}
+	if p.allowed[origin] {
+		return origin, true
+	}
+	return "", false
+}
+
+// withCORS is default-deny: same-origin requests need no CORS header,
+// configured origins are echoed, and wildcard is restricted to DevMode.
+func withCORS(cfg *config.Config, h http.Handler) http.Handler {
+	policy := corsPolicyFromConfig(cfg)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if allowed, ok := policy.allow(r.Header.Get("Origin")); ok {
+			w.Header().Set("Access-Control-Allow-Origin", allowed)
+			if allowed != "*" {
+				w.Header().Add("Vary", "Origin")
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			}
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

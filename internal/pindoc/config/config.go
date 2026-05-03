@@ -76,6 +76,15 @@ type Config struct {
 	// OSS QA switch for dogfooding the non-loopback auth path locally.
 	ForceOAuthLocal bool
 
+	// DevMode permits permissive local browser tooling defaults such as
+	// wildcard CORS. Production and normal self-host paths keep default-deny
+	// behavior unless AllowedOrigins is explicitly configured.
+	DevMode bool
+
+	// AllowedOrigins is the CORS allowlist decoded from
+	// PINDOC_ALLOWED_ORIGINS. Empty means same-origin only.
+	AllowedOrigins []string
+
 	// InstanceKeyB64 is the base64-encoded 32-byte master key used by
 	// the providers package to AES-GCM encrypt IdP credentials at
 	// rest. Empty when the operator has not opted into the runtime
@@ -212,6 +221,8 @@ func Load() (*Config, error) {
 		BindAddr:                   strings.TrimSpace(env("PINDOC_BIND_ADDR", DefaultBindAddr)),
 		AllowPublicUnauthenticated: envBool("PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED", false),
 		ForceOAuthLocal:            envBool("PINDOC_FORCE_OAUTH_LOCAL", false),
+		DevMode:                    envBool("PINDOC_DEV_MODE", false),
+		AllowedOrigins:             normalizeOrigins(envList("PINDOC_ALLOWED_ORIGINS", nil)),
 		InstanceKeyB64:             strings.TrimSpace(env("PINDOC_INSTANCE_KEY", "")),
 		UserLanguage:               strings.ToLower(env("PINDOC_USER_LANGUAGE", "en")),
 		ReceiptExemptionLimit:      envInt("PINDOC_RECEIPT_EXEMPTION_LIMIT", 5),
@@ -263,6 +274,26 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+func normalizeOrigins(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	seen := map[string]bool{}
+	for _, item := range raw {
+		v := strings.TrimRight(strings.TrimSpace(item), "/")
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // normalizeProviders trims and lowercases each entry, dropping

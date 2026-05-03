@@ -53,6 +53,14 @@ agent workflow를 위한 의도적인 선택이며 public internet security mode
 사용하지 마세요. 신뢰된 LAN 또는 추가 access control이 있는 reverse proxy 뒤에서만
 사용해야 합니다.
 
+Pindoc HTTP daemon은 cross-origin browser request를 기본 거부합니다.
+신뢰된 frontend가 다른 origin에서 daemon을 호출해야 할 때만
+`PINDOC_ALLOWED_ORIGINS`에 콤마 구분 allowlist를 설정하세요.
+`PINDOC_DEV_MODE=true`는 로컬 도구용 wildcard CORS이며 공개 인스턴스에서
+사용하면 안 됩니다. Daemon은 baseline security header와 asset blob hardened
+CSP도 직접 부착하므로 reverse proxy가 응답을 재작성한다면 동등하거나 더 엄격한
+header를 유지해야 합니다.
+
 ## Read-only 공개 데모
 
 공개 데모는 일반적인 writable daemon을 그대로 노출하면 안 됩니다. 권장 형태:

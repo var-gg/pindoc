@@ -94,6 +94,29 @@ func TestAssetToolsUploadReadAttachIntegration(t *testing.T) {
 		t.Fatalf("relation count = %d, want 1", relationCount)
 	}
 
+	publicArtifactID := insertDryRunArtifact(t, ctx, pool, projectID, areaID, "asset-public-target", "Decision", "Asset public target", validDecisionBodyForPropose("asset public context", "asset public decision"))
+	if _, err := pool.Exec(ctx, `UPDATE artifacts SET visibility = 'public' WHERE id = $1::uuid`, publicArtifactID); err != nil {
+		t.Fatalf("mark public artifact: %v", err)
+	}
+	publicAttach := call(ctx, "pindoc.asset.attach", map[string]any{
+		"project_slug": projectSlug,
+		"asset_id":     uploaded.Asset.ID,
+		"artifact":     "asset-public-target",
+		"role":         "attachment",
+	})
+	if publicAttach.Status != "accepted" || len(publicAttach.Warnings) == 0 || !strings.Contains(publicAttach.Warnings[0], "ASSET_SHARED_PUBLIC") {
+		t.Fatalf("public attach warnings = %+v", publicAttach.Warnings)
+	}
+	privateAttach := call(ctx, "pindoc.asset.attach", map[string]any{
+		"project_slug": projectSlug,
+		"asset_id":     uploaded.Asset.ID,
+		"artifact":     "asset-target",
+		"role":         "evidence",
+	})
+	if privateAttach.Status != "accepted" || len(privateAttach.Warnings) == 0 || !strings.Contains(privateAttach.Warnings[0], "ASSET_ALREADY_PUBLIC") {
+		t.Fatalf("private attach warnings = %+v", privateAttach.Warnings)
+	}
+
 	rejected := call(ctx, "pindoc.asset.upload", map[string]any{
 		"project_slug": projectSlug,
 		"bytes_base64": "AAECAwQ=",

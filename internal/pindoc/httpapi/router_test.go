@@ -125,6 +125,114 @@ func TestOAuthUnavailableRoutesDoNotFallThroughToSPA(t *testing.T) {
 	}
 }
 
+func TestSecurityHeadersBaseline(t *testing.T) {
+	handler := New(&config.Config{}, Deps{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; want 200", rec.Code)
+	}
+	headers := rec.Header()
+	if got := headers.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+	if got := headers.Get("X-Frame-Options"); got != "DENY" {
+		t.Fatalf("X-Frame-Options = %q, want DENY", got)
+	}
+	if got := headers.Get("Referrer-Policy"); got != "strict-origin-when-cross-origin" {
+		t.Fatalf("Referrer-Policy = %q", got)
+	}
+}
+
+func TestSPAFallbackHasBaselineCSP(t *testing.T) {
+	dist := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dist, "index.html"), []byte("<!doctype html><title>Pindoc</title>"), 0o644); err != nil {
+		t.Fatalf("write index.html: %v", err)
+	}
+	handler := New(&config.Config{}, Deps{SPADistDir: dist})
+
+	req := httptest.NewRequest(http.MethodGet, "/p/pindoc/wiki", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; want 200", rec.Code)
+	}
+	csp := rec.Header().Get("Content-Security-Policy")
+	for _, want := range []string{"script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:", "connect-src 'self'", "frame-ancestors 'none'"} {
+		if !strings.Contains(csp, want) {
+			t.Fatalf("Content-Security-Policy = %q, missing %q", csp, want)
+		}
+	}
+}
+
+func TestCORSAllowedOriginsMatrix(t *testing.T) {
+	cases := []struct {
+		name        string
+		cfg         *config.Config
+		origin      string
+		wantOrigin  string
+		wantVary    bool
+		wantMethods bool
+	}{
+		{
+			name:        "default denies cross origin",
+			cfg:         &config.Config{},
+			origin:      "https://app.example.test",
+			wantOrigin:  "",
+			wantMethods: false,
+		},
+		{
+			name:        "configured origin echoes",
+			cfg:         &config.Config{AllowedOrigins: []string{"https://app.example.test"}},
+			origin:      "https://app.example.test",
+			wantOrigin:  "https://app.example.test",
+			wantVary:    true,
+			wantMethods: true,
+		},
+		{
+			name:        "unlisted origin denied",
+			cfg:         &config.Config{AllowedOrigins: []string{"https://app.example.test"}},
+			origin:      "https://evil.example.test",
+			wantOrigin:  "",
+			wantMethods: false,
+		},
+		{
+			name:        "dev mode wildcard",
+			cfg:         &config.Config{DevMode: true},
+			origin:      "https://app.example.test",
+			wantOrigin:  "*",
+			wantMethods: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := New(tc.cfg, Deps{})
+			req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+			req.Header.Set("Origin", tc.origin)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d; want 200", rec.Code)
+			}
+			if got := rec.Header().Get("Access-Control-Allow-Origin"); got != tc.wantOrigin {
+				t.Fatalf("Access-Control-Allow-Origin = %q, want %q", got, tc.wantOrigin)
+			}
+			if got := rec.Header().Get("Access-Control-Allow-Methods"); (got != "") != tc.wantMethods {
+				t.Fatalf("Access-Control-Allow-Methods = %q, presence want %v", got, tc.wantMethods)
+			}
+			if got := rec.Header().Values("Vary"); tc.wantVary && !containsHeaderValue(got, "Origin") {
+				t.Fatalf("Vary = %#v, want Origin", got)
+			}
+		})
+	}
+}
+
 func TestTelemetryRequiresInstanceOwner(t *testing.T) {
 	handler := New(&config.Config{}, Deps{})
 
@@ -139,6 +247,17 @@ func TestTelemetryRequiresInstanceOwner(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "INSTANCE_OWNER_REQUIRED") {
 		t.Fatalf("body missing INSTANCE_OWNER_REQUIRED: %s", rec.Body.String())
 	}
+}
+
+func containsHeaderValue(values []string, want string) bool {
+	for _, value := range values {
+		for _, part := range strings.Split(value, ",") {
+			if strings.TrimSpace(part) == want {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // TestConfigDefaultBindReportsLoopback verifies the default boot path
