@@ -178,21 +178,21 @@ func (d Deps) viewerScopeForRequest(r *http.Request) projects.ViewerScope {
 	return projects.ViewerScope{UserID: principal.UserID}
 }
 
-// checkOnboardingRequired returns true when the instance has no projects
-// other than the seed `pindoc` row. Used by /api/config so the SPA can
-// decide whether to redirect a fresh user into the wizard. Errors are
-// logged and treated as "not required" — better to show the legacy
-// landing than to dead-end on an unrelated DB hiccup. Cheap query
-// (single COUNT) but skipped when DB pool is missing for tests that
-// stub Deps.
+// checkOnboardingRequired returns true when the instance has no
+// projects at all. Used by /api/config so the SPA can decide whether
+// to redirect a fresh user into the wizard. Migration 0058 removes
+// the empty `pindoc` bootstrap row on fresh installs, so the count
+// directly reflects "operator has created any project yet?". Errors
+// are logged and treated as "not required" — better to show the
+// legacy landing than to dead-end on an unrelated DB hiccup. Cheap
+// query (single COUNT) but skipped when DB pool is missing for
+// tests that stub Deps.
 func (d Deps) checkOnboardingRequired(ctx context.Context) bool {
 	if d.DB == nil {
 		return false
 	}
 	var count int
-	if err := d.DB.QueryRow(ctx,
-		`SELECT COUNT(*) FROM projects WHERE slug != 'pindoc'`,
-	).Scan(&count); err != nil {
+	if err := d.DB.QueryRow(ctx, `SELECT COUNT(*) FROM projects`).Scan(&count); err != nil {
 		d.Logger.Warn("onboarding check failed; defaulting to not required", "err", err)
 		return false
 	}
