@@ -167,6 +167,19 @@ func TestProjectSettingsPatchIntegration(t *testing.T) {
 	if current.DefaultArtifactVisibility != "private" {
 		t.Fatalf("project current default_artifact_visibility = %q, want private", current.DefaultArtifactVisibility)
 	}
+	// Pin the LEFT JOIN organizations + role/sensitive_ops projection so the
+	// 0055 owner_id drop regression cannot reappear silently. organization_id
+	// is NOT NULL with FK ON DELETE RESTRICT (migration 0049), so a non-empty
+	// organization_slug stays the contract.
+	if current.OrganizationSlug == "" {
+		t.Fatalf("project current organization_slug = empty, want non-empty after LEFT JOIN organizations")
+	}
+	if current.SensitiveOps != "confirm" {
+		t.Fatalf("project current sensitive_ops = %q, want confirm", current.SensitiveOps)
+	}
+	if current.CurrentRole != pauth.RoleOwner {
+		t.Fatalf("project current current_role = %q, want owner", current.CurrentRole)
+	}
 
 	viewerAuto := doInviteRequest(t, handler, oauthSvc, viewerID, http.MethodPatch, "/api/p/"+slug+"/settings", `{"sensitive_ops":"auto"}`)
 	if viewerAuto.Code != http.StatusForbidden {
