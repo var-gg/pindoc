@@ -20,12 +20,32 @@ var readerHiddenProjectPrefixes = []string{
 
 func readerHiddenProjectSlug(slug string) bool {
 	slug = strings.ToLower(strings.TrimSpace(slug))
+	if readerHiddenPindocHexFixtureSlug(slug) {
+		return true
+	}
 	for _, prefix := range readerHiddenProjectPrefixes {
 		if strings.HasPrefix(slug, prefix) {
 			return true
 		}
 	}
 	return false
+}
+
+func readerHiddenPindocHexFixtureSlug(slug string) bool {
+	const prefix = "pindoc-"
+	if !strings.HasPrefix(slug, prefix) {
+		return false
+	}
+	hex := strings.TrimPrefix(slug, prefix)
+	if len(hex) != 16 {
+		return false
+	}
+	for _, c := range hex {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func includeReaderHiddenProjects(r *http.Request) bool {

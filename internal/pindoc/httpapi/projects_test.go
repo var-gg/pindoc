@@ -95,8 +95,14 @@ func TestReaderHiddenProjectSlug(t *testing.T) {
 		{"task-flow-b-1777735961285390100", true},
 		{"task-queue-across-a-1777735962378049400", true},
 		{"task-queue-across-b-1777735962378049400", true},
+		{"pindoc-18abd57be67af9f8", true},
+		{"PINDOC-18ABD57BE67AF9F8", true},
 		{"OAuth-IT-ABC123", true},
 		{"pindoc", false},
+		{"pindoc-tour", false},
+		{"pindoc-18abd57be67af9f", false},
+		{"pindoc-18abd57be67af9fg", false},
+		{"pindoc-18abd57be67af9f8-extra", false},
 		{"customer-docs", false},
 	}
 	for _, c := range cases {
