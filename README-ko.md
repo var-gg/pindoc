@@ -48,14 +48,13 @@ Pindoc은 에이전트가 만든 유효한 작업 흔적을 검색 가능하고 
 
 ## 공개 데모
 
-첫 공개 릴리스에서는 개인 도메인의 read-only Pindoc demo를 붙일 계획입니다.
-Pindoc 자체와 실제 작업 프로젝트 일부를 보여주되, write surface는 막고
-민감정보는 scrub합니다.
+read-only 공개 demo는 OSS 릴리스와 분리된 후속 트랙으로 두고, 이번 OSS
+범위에는 포함하지 않습니다. demo가 뜨기 전까지 README, [docs/](docs/README-ko.md),
+self-host clone이 1차 증거입니다. Pindoc을 end-to-end로 평가하려는 운영자는
+`docker compose up -d --build`로 띄워 본인 artifact를 직접 살펴보면 됩니다.
 
-운영안은 [공개 데모 운영안](docs/22-public-demo-ko.md)에 정리합니다. GIF나
-영상은 필수가 아니라 보조 홍보 자산으로 둡니다. 1차 증거는 직접 눌러볼 수
-있는 live demo와 대표 screenshot입니다. 첫 demo path는
-[공개 데모 story path](docs/25-public-demo-story-path-ko.md)에 정리합니다.
+후속 demo 운영안은 hosted instance 시점에 다시 사용할 수 있도록
+[공개 데모 운영안](docs/22-public-demo-ko.md)에 그대로 둡니다.
 
 ## 빠른 시작
 

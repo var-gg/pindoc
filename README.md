@@ -53,14 +53,14 @@ The next teammate or coding agent can ask Pindoc what matters before it edits.
 
 ## Public Demo
 
-A read-only public demo is planned for the first public release. It will expose
-real Pindoc artifacts from Pindoc itself and selected owner projects, with write
-surfaces blocked and sensitive data scrubbed.
+A read-only public demo is a follow-up track and is not part of this OSS
+release. Until it ships, the README, [docs/](docs/README.md), and a
+self-hosted clone are the primary proof. Operators who want to evaluate
+Pindoc end-to-end run `docker compose up -d --build` and inspect their own
+artifacts.
 
-The demo plan is tracked in [Public Demo Plan](docs/22-public-demo.md).
-The README intentionally treats the live demo as the primary proof; GIF/video
-assets are optional launch material, not a requirement. The first demo path is
-tracked in [Public Demo Story Path](docs/25-public-demo-story-path.md).
+The follow-up demo plan stays in [Public Demo Plan](docs/22-public-demo.md)
+for when a hosted instance is appropriate.
 
 ## Quick Start
 
