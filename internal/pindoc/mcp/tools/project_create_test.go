@@ -24,6 +24,9 @@ func TestProjectCreateDescriptionAdvertisesAreaSeed(t *testing.T) {
 	if !strings.Contains(projectCreateDescription, "git_remote_url") || !strings.Contains(projectCreateDescription, "project_repos") {
 		t.Fatalf("project_create description should advertise git remote project_repos support")
 	}
+	if !strings.Contains(projectCreateDescription, "Optional visibility") || !strings.Contains(projectCreateDescription, "raw SQL update") {
+		t.Fatalf("project_create description should advertise optional project visibility")
+	}
 }
 
 // TestProjectCreateDescriptionRequiresExplicitImmutableLanguage locks the

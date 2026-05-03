@@ -38,6 +38,19 @@ func TestMCPReadArtifactVisibilityWhere(t *testing.T) {
 		t.Fatalf("member args = %v", memberArgs)
 	}
 
+	owner := &mcpReadProjectScope{
+		ProjectScope: &auth.ProjectScope{Role: auth.RoleOwner},
+		UserID:       "11111111-1111-1111-1111-111111111111",
+		Member:       true,
+	}
+	ownerWhere, ownerArgs := mcpReadArtifactVisibilityWhere(owner, "doc", 4)
+	if !strings.Contains(ownerWhere, "doc.visibility = $6") || strings.Contains(ownerWhere, "doc.author_user_id::text") {
+		t.Fatalf("owner where = %q, want private tier without author-only predicate", ownerWhere)
+	}
+	if strings.Join(anyStrings(ownerArgs), ",") != "public,org,private" {
+		t.Fatalf("owner args = %v", ownerArgs)
+	}
+
 	trustedWhere, trustedArgs := mcpReadArtifactVisibilityWhere(&mcpReadProjectScope{TrustedAll: true}, "a", 1)
 	if trustedWhere != "TRUE" || len(trustedArgs) != 0 {
 		t.Fatalf("trusted where = %q args=%v", trustedWhere, trustedArgs)
@@ -68,6 +81,7 @@ func TestMCPReadVisibilityIntegration(t *testing.T) {
 	})
 
 	publicOnly := &auth.Principal{UserID: fixture.outsiderUserID, AgentID: "agent:visibility-test", Source: auth.SourceOAuth}
+	owner := &auth.Principal{UserID: fixture.ownerUserID, AgentID: "agent:visibility-test", Source: auth.SourceOAuth}
 	member := &auth.Principal{UserID: fixture.memberUserID, AgentID: "agent:visibility-test", Source: auth.SourceOAuth}
 	trusted := &auth.Principal{UserID: fixture.ownerUserID, AgentID: "agent:visibility-test", Source: auth.SourceLoopback}
 
@@ -94,6 +108,13 @@ func TestMCPReadVisibilityIntegration(t *testing.T) {
 		"project_slug": fixture.projectSlug,
 		"id_or_slug":   "vis-private-other",
 	}, "not found")
+	ownerPrivate := callVisibilityTool[artifactReadOutput](t, ctx, pool, nil, owner, "pindoc.artifact.read", map[string]any{
+		"project_slug": fixture.projectSlug,
+		"id_or_slug":   "vis-private-self",
+	})
+	if ownerPrivate.Slug != "vis-private-self" {
+		t.Fatalf("owner private non-author read slug = %q", ownerPrivate.Slug)
+	}
 
 	searchProvider := embed.NewStub(32)
 	publicSearch := callVisibilityTool[artifactSearchOutput](t, ctx, pool, searchProvider, publicOnly, "pindoc.artifact.search", map[string]any{
@@ -111,6 +132,14 @@ func TestMCPReadVisibilityIntegration(t *testing.T) {
 	})
 	if got := strings.Join(searchHitSlugs(memberSearch.Hits), ","); got != "vis-org,vis-private-self,vis-public" {
 		t.Fatalf("member search slugs = %s", got)
+	}
+	ownerSearch := callVisibilityTool[artifactSearchOutput](t, ctx, pool, searchProvider, owner, "pindoc.artifact.search", map[string]any{
+		"project_slug": fixture.projectSlug,
+		"query":        "visibility fixture",
+		"top_k":        10,
+	})
+	if got := strings.Join(searchHitSlugs(ownerSearch.Hits), ","); got != "vis-org,vis-private-other,vis-private-self,vis-public" {
+		t.Fatalf("owner search slugs = %s", got)
 	}
 	trustedSearch := callVisibilityTool[artifactSearchOutput](t, ctx, pool, searchProvider, trusted, "pindoc.artifact.search", map[string]any{
 		"project_slug": fixture.projectSlug,

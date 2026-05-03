@@ -146,6 +146,12 @@ func mcpReadArtifactVisibilityWhere(scope *mcpReadProjectScope, alias string, st
 		next++
 	}
 	if scope != nil && strings.TrimSpace(scope.UserID) != "" {
+		if scope.ProjectScope != nil && scope.Role == auth.RoleOwner {
+			clauses = append(clauses, fmt.Sprintf("%s = $%d", visibilityCol, next))
+			args = append(args, projects.VisibilityPrivate)
+			next++
+			return "(" + strings.Join(clauses, " OR ") + ")", args
+		}
 		clauses = append(clauses, fmt.Sprintf("(%s = $%d AND %s::text = $%d)", visibilityCol, next, authorCol, next+1))
 		args = append(args, projects.VisibilityPrivate, strings.TrimSpace(scope.UserID))
 	}

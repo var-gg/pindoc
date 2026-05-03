@@ -28,6 +28,7 @@ type projectInfo struct {
 	Description               string `json:"description,omitempty"`
 	Color                     string `json:"color,omitempty"`
 	PrimaryLanguage           string `json:"primary_language"`
+	Visibility                string `json:"visibility"`
 	SensitiveOps              string `json:"sensitive_ops"`
 	DefaultArtifactVisibility string `json:"default_artifact_visibility"`
 	CurrentRole               string `json:"current_role,omitempty"`
@@ -413,6 +414,7 @@ func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
 		SELECT
 			p.id::text, p.slug, o.slug, p.name, p.description, p.color,
 			p.primary_language, p.primary_language, COALESCE(NULLIF(p.sensitive_ops, ''), 'auto'),
+			COALESCE(NULLIF(p.visibility, ''), 'org'),
 			COALESCE(NULLIF(p.default_artifact_visibility, ''), 'org'), p.created_at,
 			(SELECT count(*) FROM areas     WHERE project_id = p.id),
 			(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
@@ -422,7 +424,7 @@ func (d Deps) handleProjectCurrent(w http.ResponseWriter, r *http.Request) {
 	`, projectPredicate), projectArg).Scan(
 		&out.ID, &out.Slug, &out.OrganizationSlug, &out.Name, &desc, &color,
 		&out.PrimaryLanguage, &out.Locale, &out.SensitiveOps,
-		&out.DefaultArtifactVisibility, &out.CreatedAt,
+		&out.Visibility, &out.DefaultArtifactVisibility, &out.CreatedAt,
 		&out.AreasCount, &out.ArtifactsCount,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {

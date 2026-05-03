@@ -178,7 +178,29 @@ func TestArtifactVisibilityPatchIntegration(t *testing.T) {
 	if patchOut.Status != "ok" || patchOut.ArtifactID != artifactID || patchOut.Visibility != projects.VisibilityPrivate {
 		t.Fatalf("owner patch resp = %+v", patchOut)
 	}
+	if patchOut.Code != "VISIBILITY_UPDATED" || patchOut.Affected != 1 || patchOut.RevisionNumber == 0 {
+		t.Fatalf("owner patch audit fields = %+v", patchOut)
+	}
 	assertArtifactVisibilityHTTP(t, ctx, pool, artifactID, projects.VisibilityPrivate)
+	assertArtifactRevisionNumberHTTP(t, ctx, pool, artifactID, patchOut.RevisionNumber)
+	assertArtifactVisibilityEventHTTP(t, ctx, pool, artifactID, "org", "private")
+
+	updatedAtAfterChange := selectArtifactUpdatedAtHTTP(t, ctx, pool, artifactID)
+	noOpPatch := doInviteRequest(t, handler, oauthSvc, ownerID, http.MethodPatch, "/api/p/"+slug+"/artifacts/"+artifactSlug, `{"visibility":"private"}`)
+	if noOpPatch.Code != http.StatusOK {
+		t.Fatalf("no-op patch status = %d, want 200; body=%s", noOpPatch.Code, noOpPatch.Body.String())
+	}
+	var noOpOut artifactPatchResp
+	if err := json.NewDecoder(noOpPatch.Body).Decode(&noOpOut); err != nil {
+		t.Fatalf("decode no-op patch: %v", err)
+	}
+	if noOpOut.Status != "informational" || noOpOut.Code != "VISIBILITY_NO_OP" || noOpOut.Affected != 0 {
+		t.Fatalf("no-op patch resp = %+v", noOpOut)
+	}
+	assertArtifactRevisionNumberHTTP(t, ctx, pool, artifactID, patchOut.RevisionNumber)
+	if got := selectArtifactUpdatedAtHTTP(t, ctx, pool, artifactID); !got.Equal(updatedAtAfterChange) {
+		t.Fatalf("no-op updated_at changed: before=%s after=%s", updatedAtAfterChange, got)
+	}
 
 	viewerPatch := doInviteRequest(t, handler, oauthSvc, viewerID, http.MethodPatch, "/api/p/"+slug+"/artifacts/"+artifactSlug, `{"visibility":"public"}`)
 	if viewerPatch.Code != http.StatusForbidden {
@@ -253,9 +275,11 @@ func TestLegacyArtifactRoutesApplyVisibilityIntegration(t *testing.T) {
 	publicSlug := "legacy-public-" + suffix
 	orgSlug := "legacy-org-" + suffix
 	privateSlug := "legacy-private-" + suffix
+	privateMemberSlug := "legacy-private-member-" + suffix
 	insertArtifactVisibilityHTTPArtifact(t, ctx, pool, projectID, areaID, publicSlug, projects.VisibilityPublic, ownerID)
 	insertArtifactVisibilityHTTPArtifact(t, ctx, pool, projectID, areaID, orgSlug, projects.VisibilityOrg, ownerID)
 	insertArtifactVisibilityHTTPArtifact(t, ctx, pool, projectID, areaID, privateSlug, projects.VisibilityPrivate, ownerID)
+	insertArtifactVisibilityHTTPArtifact(t, ctx, pool, projectID, areaID, privateMemberSlug, projects.VisibilityPrivate, viewerID)
 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE slug = $1`, slug)
@@ -311,8 +335,13 @@ func TestLegacyArtifactRoutesApplyVisibilityIntegration(t *testing.T) {
 	for _, artifact := range viewerListBody.Artifacts {
 		viewerSlugs[artifact.Slug] = true
 	}
-	if !viewerSlugs[publicSlug] || !viewerSlugs[orgSlug] || viewerSlugs[privateSlug] {
-		t.Fatalf("viewer artifacts = %+v, want public+org and no private", viewerListBody.Artifacts)
+	if !viewerSlugs[publicSlug] || !viewerSlugs[orgSlug] || !viewerSlugs[privateMemberSlug] || viewerSlugs[privateSlug] {
+		t.Fatalf("viewer artifacts = %+v, want public+org+self-private and no other private", viewerListBody.Artifacts)
+	}
+
+	ownerMemberPrivate := doInviteRequest(t, handler, oauthSvc, ownerID, http.MethodGet, "/api/p/"+slug+"/artifacts/"+privateMemberSlug, "")
+	if ownerMemberPrivate.Code != http.StatusOK {
+		t.Fatalf("owner member-authored private detail status = %d, want 200; body=%s", ownerMemberPrivate.Code, ownerMemberPrivate.Body.String())
 	}
 
 	viewerPrivate := doInviteRequest(t, handler, oauthSvc, viewerID, http.MethodGet, "/api/p/"+slug+"/artifacts/"+privateSlug, "")
@@ -363,8 +392,8 @@ func TestLegacyArtifactRoutesApplyVisibilityIntegration(t *testing.T) {
 	if err := json.NewDecoder(loopbackList.Body).Decode(&loopbackBody); err != nil {
 		t.Fatalf("decode loopback list: %v", err)
 	}
-	if len(loopbackBody.Artifacts) != 3 {
-		t.Fatalf("loopback artifacts count = %d, want 3; artifacts=%+v", len(loopbackBody.Artifacts), loopbackBody.Artifacts)
+	if len(loopbackBody.Artifacts) != 4 {
+		t.Fatalf("loopback artifacts count = %d, want 4; artifacts=%+v", len(loopbackBody.Artifacts), loopbackBody.Artifacts)
 	}
 }
 
@@ -443,6 +472,52 @@ func assertArtifactVisibilityHTTP(t *testing.T, ctx context.Context, pool *db.Po
 	if got != want {
 		t.Fatalf("visibility = %q, want %q", got, want)
 	}
+}
+
+func assertArtifactRevisionNumberHTTP(t *testing.T, ctx context.Context, pool *db.Pool, artifactID string, want int) {
+	t.Helper()
+	var got int
+	if err := pool.QueryRow(ctx, `
+		SELECT COALESCE(max(revision_number), 0)
+		  FROM artifact_revisions
+		 WHERE artifact_id = $1::uuid
+	`, artifactID).Scan(&got); err != nil {
+		t.Fatalf("select artifact revision: %v", err)
+	}
+	if got != want {
+		t.Fatalf("revision_number = %d, want %d", got, want)
+	}
+}
+
+func assertArtifactVisibilityEventHTTP(t *testing.T, ctx context.Context, pool *db.Pool, artifactID, from, to string) {
+	t.Helper()
+	var count int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)
+		  FROM events
+		 WHERE subject_id = $1::uuid
+		   AND kind = 'artifact.visibility_changed'
+		   AND payload->>'from' = $2
+		   AND payload->>'to' = $3
+	`, artifactID, from, to).Scan(&count); err != nil {
+		t.Fatalf("select visibility event: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("visibility event count = %d, want 1", count)
+	}
+}
+
+func selectArtifactUpdatedAtHTTP(t *testing.T, ctx context.Context, pool *db.Pool, artifactID string) time.Time {
+	t.Helper()
+	var got time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT updated_at
+		  FROM artifacts
+		 WHERE id = $1::uuid
+	`, artifactID).Scan(&got); err != nil {
+		t.Fatalf("select artifact updated_at: %v", err)
+	}
+	return got
 }
 
 func assertArtifactPatchErrorCode(t *testing.T, body, want string) {

@@ -2439,6 +2439,17 @@
   padding: 0;
   border: 0;
 }
+.project-settings__visibility-stack {
+  display: grid;
+  gap: 16px;
+  min-width: min(420px, 100%);
+}
+.project-settings__visibility-group legend {
+  margin: 0 0 6px;
+  color: var(--fg-2);
+  font-size: 12px;
+  font-weight: 700;
+}
 .project-settings__visibility-option {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
@@ -3872,6 +3883,10 @@
     width: 100%;
   }
   .project-settings__visibility-group {
+    min-width: 0;
+    width: 100%;
+  }
+  .project-settings__visibility-stack {
     min-width: 0;
     width: 100%;
   }

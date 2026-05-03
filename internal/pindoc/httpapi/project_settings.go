@@ -10,12 +10,14 @@ import (
 
 	pauth "github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/policy"
+	"github.com/var-gg/pindoc/internal/pindoc/projects"
 )
 
 type projectSettingsPatchResp struct {
-	Status                     string `json:"status"`
-	SensitiveOps               string `json:"sensitive_ops,omitempty"`
-	DefaultArtifactVisibility  string `json:"default_artifact_visibility,omitempty"`
+	Status                    string `json:"status"`
+	SensitiveOps              string `json:"sensitive_ops,omitempty"`
+	Visibility                string `json:"visibility,omitempty"`
+	DefaultArtifactVisibility string `json:"default_artifact_visibility,omitempty"`
 }
 
 type projectSettingsError struct {
@@ -28,6 +30,7 @@ type projectSettingsError struct {
 // at least one must be present (PROJECT_SETTINGS_EMPTY otherwise).
 type projectSettingsPatch struct {
 	SensitiveOps              *string
+	Visibility                *string
 	DefaultArtifactVisibility *string
 }
 
@@ -83,7 +86,7 @@ func (d Deps) handleProjectSettingsPatch(w http.ResponseWriter, r *http.Request)
 	// Build a dynamic UPDATE that only touches the fields the caller
 	// actually sent. Empty patch is rejected upstream (PROJECT_SETTINGS_
 	// EMPTY), so we always have at least one assignment here.
-	sets := make([]string, 0, 2)
+	sets := make([]string, 0, 3)
 	args := []any{scope.ProjectID}
 	resp := projectSettingsPatchResp{Status: "ok"}
 	if patch.SensitiveOps != nil {
@@ -95,6 +98,11 @@ func (d Deps) handleProjectSettingsPatch(w http.ResponseWriter, r *http.Request)
 		args = append(args, *patch.DefaultArtifactVisibility)
 		sets = append(sets, fmt.Sprintf("default_artifact_visibility = $%d", len(args)))
 		resp.DefaultArtifactVisibility = *patch.DefaultArtifactVisibility
+	}
+	if patch.Visibility != nil {
+		args = append(args, *patch.Visibility)
+		sets = append(sets, fmt.Sprintf("visibility = $%d", len(args)))
+		resp.Visibility = *patch.Visibility
 	}
 
 	q := fmt.Sprintf(`UPDATE projects SET %s WHERE id = $1::uuid`,
@@ -181,6 +189,24 @@ func decodeProjectSettingsPatch(r io.Reader) (projectSettingsPatch, *projectSett
 					Message:   "default_artifact_visibility must be public|org|private",
 				}
 			}
+		case "visibility":
+			var rawTier string
+			if err := json.Unmarshal(v, &rawTier); err != nil {
+				return patch, &projectSettingsError{
+					status:    http.StatusBadRequest,
+					ErrorCode: "VISIBILITY_INVALID",
+					Message:   "visibility must be public|org|private",
+				}
+			}
+			tier := projects.NormalizeVisibility(rawTier)
+			if tier == "" {
+				return patch, &projectSettingsError{
+					status:    http.StatusBadRequest,
+					ErrorCode: "VISIBILITY_INVALID",
+					Message:   "visibility must be public|org|private",
+				}
+			}
+			patch.Visibility = &tier
 		default:
 			return patch, &projectSettingsError{
 				status:    http.StatusBadRequest,
@@ -189,7 +215,7 @@ func decodeProjectSettingsPatch(r io.Reader) (projectSettingsPatch, *projectSett
 			}
 		}
 	}
-	if patch.SensitiveOps == nil && patch.DefaultArtifactVisibility == nil {
+	if patch.SensitiveOps == nil && patch.DefaultArtifactVisibility == nil && patch.Visibility == nil {
 		return patch, &projectSettingsError{
 			status:    http.StatusBadRequest,
 			ErrorCode: "PROJECT_SETTINGS_EMPTY",

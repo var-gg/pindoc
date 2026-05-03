@@ -47,12 +47,13 @@ var reservedSlugs = map[string]struct{}{
 // LANG_REQUIRED / LANG_INVALID) without parsing error strings. Wrappers
 // in mcp/tools, httpapi, and pindoc-admin all match these sentinels.
 var (
-	ErrSlugInvalid  = errors.New("SLUG_INVALID")
-	ErrSlugReserved = errors.New("SLUG_RESERVED")
-	ErrSlugTaken    = errors.New("SLUG_TAKEN")
-	ErrNameRequired = errors.New("NAME_REQUIRED")
-	ErrLangRequired = errors.New("LANG_REQUIRED")
-	ErrLangInvalid  = errors.New("LANG_INVALID")
+	ErrSlugInvalid       = errors.New("SLUG_INVALID")
+	ErrSlugReserved      = errors.New("SLUG_RESERVED")
+	ErrSlugTaken         = errors.New("SLUG_TAKEN")
+	ErrNameRequired      = errors.New("NAME_REQUIRED")
+	ErrLangRequired      = errors.New("LANG_REQUIRED")
+	ErrLangInvalid       = errors.New("LANG_INVALID")
+	ErrVisibilityInvalid = errors.New("VISIBILITY_INVALID")
 )
 
 // CreateProjectInput is the entrypoint-agnostic projection of a "create
@@ -65,6 +66,7 @@ type CreateProjectInput struct {
 	Description     string // optional
 	Color           string // optional CSS color
 	PrimaryLanguage string // required, one of SupportedLanguages
+	Visibility      string // optional, defaults to org
 	GitRemoteURL    string // optional; stored in project_repos as name=origin
 	OrganizationID  string // optional organizations.id; defaults to the bootstrap default Org
 	OwnerUserID     string // optional users.id; creates project_members owner row when present
@@ -79,6 +81,7 @@ type CreateProjectOutput struct {
 	Slug             string
 	Name             string
 	PrimaryLanguage  string
+	Visibility       string
 	DefaultArea      string // always "misc" today; reserved for future override
 	AreasCreated     int    // top-level + starter sub-area rows actually inserted
 	TemplatesCreated int    // len(TemplateSeeds), 4 in V1
@@ -163,6 +166,13 @@ func CreateProject(
 	if err != nil {
 		return zero, err
 	}
+	visibilityRaw := strings.TrimSpace(in.Visibility)
+	visibility := NormalizeVisibility(visibilityRaw)
+	if visibility == "" && visibilityRaw == "" {
+		visibility = VisibilityOrg
+	} else if visibility == "" {
+		return zero, fmt.Errorf("%w: visibility must be public|org|private", ErrVisibilityInvalid)
+	}
 	if gitRemoteURL != "" {
 		if _, err := NormalizeGitRemoteURL(gitRemoteURL); err != nil {
 			return zero, err
@@ -188,10 +198,10 @@ func CreateProject(
 
 	var projectID string
 	err = tx.QueryRow(ctx, `
-		INSERT INTO projects (organization_id, slug, name, description, color, primary_language)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6)
+		INSERT INTO projects (organization_id, slug, name, description, color, primary_language, visibility)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)
 		RETURNING id::text
-	`, orgID, slug, name, descPtr, colorPtr, lang).Scan(&projectID)
+	`, orgID, slug, name, descPtr, colorPtr, lang, visibility).Scan(&projectID)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -227,6 +237,7 @@ func CreateProject(
 		Slug:             slug,
 		Name:             name,
 		PrimaryLanguage:  lang,
+		Visibility:       visibility,
 		DefaultArea:      "misc",
 		AreasCreated:     areasCreated,
 		TemplatesCreated: templatesCreated,

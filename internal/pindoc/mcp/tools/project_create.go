@@ -23,6 +23,7 @@ type projectCreateInput struct {
 	Slug            string `json:"slug" jsonschema:"lowercase kebab-case slug, 2-40 chars, unique project slug"`
 	Name            string `json:"name" jsonschema:"human-readable display name"`
 	PrimaryLanguage string `json:"primary_language" jsonschema:"required; one of en | ko | ja. Must be explicitly confirmed with the user; no default. Immutable after create — recreate the project if wrong"`
+	Visibility      string `json:"visibility,omitempty" jsonschema:"optional; one of public | org | private. Defaults to org. Project-level tier controls whether the project itself is public on /pindoc.org routes."`
 	Description     string `json:"description,omitempty" jsonschema:"one-line description shown on the project switcher; optional"`
 	Color           string `json:"color,omitempty" jsonschema:"CSS color string (hex or oklch) used for the sidebar accent; optional"`
 	GitRemoteURL    string `json:"git_remote_url,omitempty" jsonschema:"optional git remote URL; normalized into project_repos for workspace detection"`
@@ -40,6 +41,7 @@ type projectCreateOutput struct {
 	ID          string `json:"id,omitempty"`
 	Slug        string `json:"slug,omitempty"`
 	Name        string `json:"name,omitempty"`
+	Visibility  string `json:"visibility,omitempty"`
 	URL         string `json:"url,omitempty" jsonschema:"canonical UI path to the project's wiki — share this, not /wiki/..."`
 	DefaultArea string `json:"default_area,omitempty" jsonschema:"slug of the 'misc' area seeded so artifacts can be filed immediately"`
 	// BootstrapReceipt is a one-use search_receipt the agent can pass to
@@ -93,6 +95,7 @@ func RegisterProjectCreate(server *sdk.Server, deps Deps) {
 				Description:     in.Description,
 				Color:           in.Color,
 				PrimaryLanguage: in.PrimaryLanguage,
+				Visibility:      in.Visibility,
 				GitRemoteURL:    in.GitRemoteURL,
 				OwnerUserID:     principalUserID(p),
 			})
@@ -120,6 +123,7 @@ func RegisterProjectCreate(server *sdk.Server, deps Deps) {
 				ID:                out.ID,
 				Slug:              out.Slug,
 				Name:              out.Name,
+				Visibility:        out.Visibility,
 				URL:               fmt.Sprintf("/p/%s/wiki", out.Slug),
 				DefaultArea:       out.DefaultArea,
 				BootstrapReceipt:  bootstrapReceipt,
@@ -168,6 +172,8 @@ func projectCreateErrorCode(err error) string {
 		return "LANG_INVALID"
 	case errors.Is(err, projects.ErrGitRemoteURLInvalid):
 		return "GIT_REMOTE_URL_INVALID"
+	case errors.Is(err, projects.ErrVisibilityInvalid):
+		return "VISIBILITY_INVALID"
 	default:
 		return ""
 	}
@@ -192,6 +198,8 @@ func projectCreateChecklistMessage(lang, code string, err error) string {
 		return "primary_language는 en, ko, ja 중 하나여야 합니다."
 	case "GIT_REMOTE_URL_INVALID":
 		return "git_remote_url은 github.com/owner/repo 형태로 정규화 가능한 Git remote URL이어야 합니다."
+	case "VISIBILITY_INVALID":
+		return "visibility는 public, org, private 중 하나여야 합니다."
 	default:
 		return err.Error()
 	}
@@ -234,6 +242,10 @@ Optional git_remote_url stores the project's origin repository in
 project_repos after normalizing https/ssh/SCP-style Git remote URLs to
 host/owner/repo. This enables future pindoc.workspace.detect lookup by
 git remote get-url origin.
+
+Optional visibility sets the project-level tier on create. Defaults to org;
+use public only when the project should be reachable through the public
+organization route without a raw SQL update.
 `
 
 func projectCreateNextSteps(lang, projectSlug string) []NextToolHint {

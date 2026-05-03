@@ -80,6 +80,7 @@ export type Project = {
   description?: string;
   color?: string;
   primary_language: string;
+  visibility?: VisibilityTier;
   sensitive_ops?: ProjectSensitiveOps;
   default_artifact_visibility?: VisibilityTier;
   current_role?: "owner" | "editor" | "viewer";
@@ -100,12 +101,14 @@ export type VisibilityTier = "public" | "org" | "private";
 
 export type ProjectSettingsPatchInput = {
   sensitive_ops?: ProjectSensitiveOps;
+  visibility?: VisibilityTier;
   default_artifact_visibility?: VisibilityTier;
 };
 
 export type ProjectSettingsPatchResp = {
   status: "ok";
   sensitive_ops?: ProjectSensitiveOps;
+  visibility?: VisibilityTier;
   default_artifact_visibility?: VisibilityTier;
 };
 
@@ -844,10 +847,13 @@ export type ArtifactVisibilityPatchInput = {
 };
 
 export type ArtifactVisibilityPatchResp = {
-  status: "ok";
+  status: "ok" | "informational";
+  code?: string;
   artifact_id: string;
   slug: string;
   visibility: VisibilityTier;
+  affected?: number;
+  revision_number?: number;
 };
 
 export type ArtifactVisibilityPatchError = {
@@ -863,6 +869,7 @@ export type CreateProjectInput = {
   slug: string;
   name: string;
   primary_language: "en" | "ko" | "ja";
+  visibility?: VisibilityTier;
   description?: string;
   color?: string;
   git_remote_url?: string;
@@ -873,6 +880,7 @@ export type CreateProjectResp = {
   slug: string;
   name: string;
   primary_language: string;
+  visibility?: VisibilityTier;
   url: string;
   default_area: string;
   areas_created: number;

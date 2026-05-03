@@ -19,6 +19,19 @@ const (
 	VisibilityPrivate = "private"
 )
 
+func NormalizeVisibility(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case VisibilityPublic:
+		return VisibilityPublic
+	case VisibilityOrg:
+		return VisibilityOrg
+	case VisibilityPrivate:
+		return VisibilityPrivate
+	default:
+		return ""
+	}
+}
+
 // ViewerScope describes who is asking for the visibility-filtered list,
 // so CountVisible / ListVisible can pick the right WHERE clause without
 // each call site re-implementing the rule. Anonymous viewers see

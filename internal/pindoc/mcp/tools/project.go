@@ -45,6 +45,7 @@ type projectCurrentOutput struct {
 	Description      string `json:"description,omitempty"`
 	Color            string `json:"color,omitempty"`
 	PrimaryLanguage  string `json:"primary_language,omitempty"`
+	Visibility       string `json:"visibility,omitempty"`
 	// Locale is a compatibility alias for PrimaryLanguage. Locale is no
 	// longer part of project identity after task-canonical-locale-
 	// migration; clients should treat project_slug as the canonical key.
@@ -206,6 +207,7 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 					p.color,
 					p.primary_language,
 					p.primary_language,
+					COALESCE(NULLIF(p.visibility, ''), 'org'),
 					p.created_at,
 					(SELECT count(*) FROM areas     WHERE project_id = p.id),
 					(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
@@ -215,7 +217,7 @@ func RegisterProjectCurrent(server *sdk.Server, deps Deps) {
 			`, scope.ProjectSlug).Scan(
 				&out.ID, &out.Slug, &out.OrgSlug, &out.Name,
 				&desc, &color,
-				&out.PrimaryLanguage, &out.Locale, &out.CreatedAt,
+				&out.PrimaryLanguage, &out.Locale, &out.Visibility, &out.CreatedAt,
 				&out.AreasCount, &out.ArtifactsCount,
 			)
 			if errors.Is(err, pgx.ErrNoRows) {

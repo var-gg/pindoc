@@ -19,10 +19,13 @@ type artifactPatchRequest struct {
 }
 
 type artifactPatchResp struct {
-	Status     string `json:"status"`
-	ArtifactID string `json:"artifact_id"`
-	Slug       string `json:"slug"`
-	Visibility string `json:"visibility"`
+	Status         string `json:"status"`
+	Code           string `json:"code,omitempty"`
+	ArtifactID     string `json:"artifact_id"`
+	Slug           string `json:"slug"`
+	Visibility     string `json:"visibility"`
+	Affected       int    `json:"affected"`
+	RevisionNumber int    `json:"revision_number,omitempty"`
 }
 
 type artifactPatchError struct {
@@ -84,23 +87,41 @@ func (d Deps) handleArtifactPatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tx, err := d.DB.Begin(r.Context())
+	if err != nil {
+		writeArtifactPatchError(w, artifactPatchError{
+			status:    http.StatusInternalServerError,
+			ErrorCode: "ARTIFACT_PATCH_FAILED",
+			Message:   "begin transaction failed",
+		})
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+
 	var out artifactPatchResp
-	err = d.DB.QueryRow(r.Context(), `
-		UPDATE artifacts
-		   SET visibility = $1,
-		       updated_at = now()
-		 WHERE project_id = $2::uuid
+	var currentVisibility, title, body, completeness, projectID string
+	var tags []string
+	var lastRev int
+	err = tx.QueryRow(r.Context(), `
+		SELECT a.id::text, a.project_id::text, a.slug, a.visibility,
+		       a.title, a.body_markdown, a.tags, a.completeness,
+		       COALESCE((SELECT max(revision_number) FROM artifact_revisions WHERE artifact_id = a.id), 0)
+		  FROM artifacts a
+		 WHERE a.project_id = $1::uuid
 		   AND (
-		        id::text = $3 OR slug = $3 OR
-		        id = (
+		        a.id::text = $2 OR a.slug = $2 OR
+		        a.id = (
 		          SELECT asa.artifact_id
 		            FROM artifact_slug_aliases asa
-		           WHERE asa.project_id = $2::uuid AND asa.old_slug = $3
+		           WHERE asa.project_id = $1::uuid AND asa.old_slug = $2
 		           LIMIT 1
 		        )
 		   )
-		 RETURNING id::text, slug, visibility
-	`, *patch.Visibility, scope.ProjectID, idOrSlug).Scan(&out.ArtifactID, &out.Slug, &out.Visibility)
+		 FOR UPDATE
+	`, scope.ProjectID, idOrSlug).Scan(
+		&out.ArtifactID, &projectID, &out.Slug, &currentVisibility,
+		&title, &body, &tags, &completeness, &lastRev,
+	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeArtifactPatchError(w, artifactPatchError{
 			status:    http.StatusNotFound,
@@ -120,7 +141,110 @@ func (d Deps) handleArtifactPatch(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	out.Visibility = *patch.Visibility
+	if currentVisibility == *patch.Visibility {
+		out.Status = "informational"
+		out.Code = "VISIBILITY_NO_OP"
+		out.Affected = 0
+		if err := tx.Commit(r.Context()); err != nil {
+			writeArtifactPatchError(w, artifactPatchError{
+				status:    http.StatusInternalServerError,
+				ErrorCode: "ARTIFACT_PATCH_FAILED",
+				Message:   "commit failed",
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
+	newRev := lastRev + 1
+	shapePayload, err := json.Marshal(map[string]any{
+		"kind": "visibility_change",
+		"visibility": map[string]string{
+			"from": currentVisibility,
+			"to":   *patch.Visibility,
+		},
+	})
+	if err != nil {
+		writeArtifactPatchError(w, artifactPatchError{
+			status:    http.StatusInternalServerError,
+			ErrorCode: "ARTIFACT_PATCH_FAILED",
+			Message:   "encode visibility audit payload failed",
+		})
+		return
+	}
+	authorID := "user:web-reader"
+	commitMsg := fmt.Sprintf("visibility: %s -> %s", currentVisibility, *patch.Visibility)
+	if _, err := tx.Exec(r.Context(), `
+		INSERT INTO artifact_revisions (
+			artifact_id, revision_number, title, body_markdown, body_hash,
+			tags, completeness, author_kind, author_id, author_version,
+			author_user_id, commit_msg, source_session_ref, revision_shape, shape_payload
+		) VALUES ($1, $2, $3, NULL, $4, $5, $6, 'user', $7, NULL, NULLIF($8, '')::uuid, $9, NULL, 'meta_patch', $10::jsonb)
+	`, out.ArtifactID, newRev, title, sha256HexOf(body), tags, completeness,
+		authorID, strings.TrimSpace(principal.UserID), commitMsg, string(shapePayload),
+	); err != nil {
+		if d.Logger != nil {
+			d.Logger.Error("artifact visibility revision insert", "err", err, "project", projectSlug, "ref", idOrSlug)
+		}
+		writeArtifactPatchError(w, artifactPatchError{
+			status:    http.StatusInternalServerError,
+			ErrorCode: "ARTIFACT_PATCH_FAILED",
+			Message:   "artifact revision insert failed",
+		})
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `
+		UPDATE artifacts
+		   SET visibility = $2,
+		       updated_at = now()
+		 WHERE id = $1::uuid
+	`, out.ArtifactID, *patch.Visibility); err != nil {
+		if d.Logger != nil {
+			d.Logger.Error("artifact visibility head update", "err", err, "project", projectSlug, "ref", idOrSlug)
+		}
+		writeArtifactPatchError(w, artifactPatchError{
+			status:    http.StatusInternalServerError,
+			ErrorCode: "ARTIFACT_PATCH_FAILED",
+			Message:   "artifact update failed",
+		})
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `
+		INSERT INTO events (project_id, kind, subject_id, payload)
+		VALUES ($1, 'artifact.visibility_changed', $2, jsonb_build_object(
+			'revision_number', $3::int,
+			'slug',            $4::text,
+			'author_id',       $5::text,
+			'author_user_id',  NULLIF($6, '')::uuid,
+			'from',            $7::text,
+			'to',              $8::text,
+			'origin',          'http_artifact_visibility'
+		))
+	`, projectID, out.ArtifactID, newRev, out.Slug, authorID, strings.TrimSpace(principal.UserID), currentVisibility, *patch.Visibility); err != nil {
+		if d.Logger != nil {
+			d.Logger.Error("artifact visibility event insert", "err", err, "project", projectSlug, "ref", idOrSlug)
+		}
+		writeArtifactPatchError(w, artifactPatchError{
+			status:    http.StatusInternalServerError,
+			ErrorCode: "ARTIFACT_PATCH_FAILED",
+			Message:   "artifact event insert failed",
+		})
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeArtifactPatchError(w, artifactPatchError{
+			status:    http.StatusInternalServerError,
+			ErrorCode: "ARTIFACT_PATCH_FAILED",
+			Message:   "commit failed",
+		})
+		return
+	}
 	out.Status = "ok"
+	out.Code = "VISIBILITY_UPDATED"
+	out.Affected = 1
+	out.RevisionNumber = newRev
 	writeJSON(w, http.StatusOK, out)
 }
 

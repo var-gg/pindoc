@@ -131,6 +131,26 @@ func TestNormalizeLanguage(t *testing.T) {
 	}
 }
 
+func TestNormalizeVisibility(t *testing.T) {
+	for _, c := range []struct {
+		raw  string
+		want string
+	}{
+		{"public", VisibilityPublic},
+		{" ORG ", VisibilityOrg},
+		{"Private", VisibilityPrivate},
+	} {
+		if got := NormalizeVisibility(c.raw); got != c.want {
+			t.Fatalf("NormalizeVisibility(%q) = %q, want %q", c.raw, got, c.want)
+		}
+	}
+	for _, raw := range []string{"", "deleted", "members"} {
+		if got := NormalizeVisibility(raw); got != "" {
+			t.Fatalf("NormalizeVisibility(%q) = %q, want empty", raw, got)
+		}
+	}
+}
+
 // TestValidateProjectSlug locks the regex shape + reserved-word block.
 // New reserved words go in reservedSlugs, and this test smoke-checks a
 // representative subset — exhaustive enumeration would just duplicate

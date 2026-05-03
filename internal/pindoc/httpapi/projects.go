@@ -20,6 +20,7 @@ type projectCreateRequest struct {
 	Description     string `json:"description,omitempty"`
 	Color           string `json:"color,omitempty"`
 	PrimaryLanguage string `json:"primary_language"`
+	Visibility      string `json:"visibility,omitempty"`
 	GitRemoteURL    string `json:"git_remote_url,omitempty"`
 }
 
@@ -33,6 +34,7 @@ type projectCreateResponse struct {
 	Slug             string               `json:"slug"`
 	Name             string               `json:"name"`
 	PrimaryLanguage  string               `json:"primary_language"`
+	Visibility       string               `json:"visibility"`
 	URL              string               `json:"url"`
 	DefaultArea      string               `json:"default_area"`
 	AreasCreated     int                  `json:"areas_created"`
@@ -88,6 +90,7 @@ func (d Deps) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 		Description:     in.Description,
 		Color:           in.Color,
 		PrimaryLanguage: in.PrimaryLanguage,
+		Visibility:      in.Visibility,
 		GitRemoteURL:    in.GitRemoteURL,
 	})
 	if err != nil {
@@ -118,6 +121,7 @@ func (d Deps) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 		Slug:             out.Slug,
 		Name:             out.Name,
 		PrimaryLanguage:  out.PrimaryLanguage,
+		Visibility:       out.Visibility,
 		URL:              projectCreateDefaultURL(out.Slug),
 		DefaultArea:      out.DefaultArea,
 		AreasCreated:     out.AreasCreated,
@@ -152,6 +156,8 @@ func mapProjectCreateError(err error) (int, string) {
 		return http.StatusBadRequest, "LANG_INVALID"
 	case errors.Is(err, projects.ErrGitRemoteURLInvalid):
 		return http.StatusBadRequest, "GIT_REMOTE_URL_INVALID"
+	case errors.Is(err, projects.ErrVisibilityInvalid):
+		return http.StatusBadRequest, "VISIBILITY_INVALID"
 	default:
 		return http.StatusInternalServerError, "INTERNAL_ERROR"
 	}

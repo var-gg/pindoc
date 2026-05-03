@@ -19,7 +19,7 @@ export function ProjectSettingsPage() {
   const { t } = useI18n();
   const [loadedProject, setLoadedProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState<"review_queue" | "visibility" | null>(null);
+  const [saving, setSaving] = useState<"review_queue" | "project_visibility" | "default_visibility" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const orgSlug = org ?? loadedProject?.organization_slug ?? DEFAULT_READER_ORG_SLUG;
@@ -49,6 +49,7 @@ export function ProjectSettingsPage() {
 
   const sensitiveOps: ProjectSensitiveOps = loadedProject?.sensitive_ops ?? "auto";
   const reviewQueueEnabled = sensitiveOps === "confirm";
+  const projectVisibility = normalizeVisibilityTier(loadedProject?.visibility);
   const defaultVisibility = normalizeVisibilityTier(loadedProject?.default_artifact_visibility);
   const canEdit = loadedProject?.current_role === "owner";
 
@@ -79,9 +80,38 @@ export function ProjectSettingsPage() {
     }
   }
 
+  async function setProjectVisibility(nextVisibility: VisibilityTier) {
+    if (!loadedProject || saving || !canEdit || nextVisibility === projectVisibility) return;
+    setSaving("project_visibility");
+    setNotice(null);
+    try {
+      const resp = await api.projectSettingsPatch(project, {
+        visibility: nextVisibility,
+      });
+      setLoadedProject({
+        ...loadedProject,
+        visibility: resp.visibility ?? nextVisibility,
+      });
+      setNotice({
+        kind: "ok",
+        message: t("settings.project_visibility_saved"),
+      });
+    } catch (e) {
+      const tagged = e as Error & { error_code?: string };
+      setNotice({
+        kind: "err",
+        message: tagged.error_code
+          ? `${tagged.error_code}: ${tagged.message}`
+          : t("settings.save_error"),
+      });
+    } finally {
+      setSaving(null);
+    }
+  }
+
   async function setDefaultVisibility(nextVisibility: VisibilityTier) {
     if (!loadedProject || saving || !canEdit || nextVisibility === defaultVisibility) return;
-    setSaving("visibility");
+    setSaving("default_visibility");
     setNotice(null);
     try {
       const resp = await api.projectSettingsPatch(project, {
@@ -177,10 +207,12 @@ export function ProjectSettingsPage() {
         {!loading && loadedProject && (
           <ProjectSettingsVisibilityPanel
             canEdit={canEdit}
+            projectVisibility={projectVisibility}
             defaultVisibility={defaultVisibility}
-            saving={saving === "visibility"}
+            saving={saving === "project_visibility" ? "project" : saving === "default_visibility" ? "default" : null}
             t={t}
-            onChange={(tier) => void setDefaultVisibility(tier)}
+            onProjectVisibilityChange={(tier) => void setProjectVisibility(tier)}
+            onDefaultVisibilityChange={(tier) => void setDefaultVisibility(tier)}
           />
         )}
 

@@ -22,11 +22,14 @@ func TestDecodeProjectSettingsPatch(t *testing.T) {
 		name             string
 		body             string
 		wantSensitiveOps string // empty means unset
+		wantVisibility   string // empty means unset
 		wantDefaultVis   string // empty means unset
 		wantError        string
 	}{
 		{name: "confirm", body: `{"sensitive_ops":"confirm"}`, wantSensitiveOps: "confirm"},
 		{name: "trim and lower", body: `{"sensitive_ops":" AUTO "}`, wantSensitiveOps: "auto"},
+		{name: "project visibility public", body: `{"visibility":"public"}`, wantVisibility: "public"},
+		{name: "project visibility lower", body: `{"visibility":" PRIVATE "}`, wantVisibility: "private"},
 		{name: "default visibility public", body: `{"default_artifact_visibility":"public"}`, wantDefaultVis: "public"},
 		{name: "default visibility lower", body: `{"default_artifact_visibility":" PRIVATE "}`, wantDefaultVis: "private"},
 		{name: "both fields", body: `{"sensitive_ops":"confirm","default_artifact_visibility":"public"}`, wantSensitiveOps: "confirm", wantDefaultVis: "public"},
@@ -34,6 +37,8 @@ func TestDecodeProjectSettingsPatch(t *testing.T) {
 		{name: "unsupported field", body: `{"sensitive_ops":"auto","name":"x"}`, wantError: "PROJECT_SETTINGS_FIELD_UNSUPPORTED"},
 		{name: "invalid sensitive ops", body: `{"sensitive_ops":"manual"}`, wantError: "SENSITIVE_OPS_INVALID"},
 		{name: "non string sensitive ops", body: `{"sensitive_ops":true}`, wantError: "SENSITIVE_OPS_INVALID"},
+		{name: "invalid project visibility", body: `{"visibility":"deleted"}`, wantError: "VISIBILITY_INVALID"},
+		{name: "non string project visibility", body: `{"visibility":42}`, wantError: "VISIBILITY_INVALID"},
 		{name: "invalid visibility", body: `{"default_artifact_visibility":"deleted"}`, wantError: "DEFAULT_VISIBILITY_INVALID"},
 		{name: "non string visibility", body: `{"default_artifact_visibility":42}`, wantError: "DEFAULT_VISIBILITY_INVALID"},
 		{name: "bad json", body: `{`, wantError: "BAD_JSON"},
@@ -60,6 +65,13 @@ func TestDecodeProjectSettingsPatch(t *testing.T) {
 			}
 			if gotSensitive != c.wantSensitiveOps {
 				t.Errorf("sensitive_ops = %q, want %q", gotSensitive, c.wantSensitiveOps)
+			}
+			gotProjectVis := ""
+			if got.Visibility != nil {
+				gotProjectVis = *got.Visibility
+			}
+			if gotProjectVis != c.wantVisibility {
+				t.Errorf("visibility = %q, want %q", gotProjectVis, c.wantVisibility)
 			}
 			gotVis := ""
 			if got.DefaultArtifactVisibility != nil {
@@ -156,6 +168,19 @@ func TestProjectSettingsPatchIntegration(t *testing.T) {
 	}
 	assertProjectDefaultVisibility(t, ctx, pool, projectID, "private")
 
+	ownerProjectPublic := doInviteRequest(t, handler, oauthSvc, ownerID, http.MethodPatch, "/api/p/"+slug+"/settings", `{"visibility":"public"}`)
+	if ownerProjectPublic.Code != http.StatusOK {
+		t.Fatalf("owner project visibility status = %d, want 200; body=%s", ownerProjectPublic.Code, ownerProjectPublic.Body.String())
+	}
+	var projectVisOut projectSettingsPatchResp
+	if err := json.NewDecoder(ownerProjectPublic.Body).Decode(&projectVisOut); err != nil {
+		t.Fatalf("decode owner project visibility: %v", err)
+	}
+	if projectVisOut.Status != "ok" || projectVisOut.Visibility != "public" {
+		t.Fatalf("owner project visibility resp = %+v", projectVisOut)
+	}
+	assertProjectVisibility(t, ctx, pool, projectID, "public")
+
 	ownerCurrent := doInviteRequest(t, handler, oauthSvc, ownerID, http.MethodGet, "/api/p/"+slug, "")
 	if ownerCurrent.Code != http.StatusOK {
 		t.Fatalf("owner project current status = %d, want 200; body=%s", ownerCurrent.Code, ownerCurrent.Body.String())
@@ -166,6 +191,9 @@ func TestProjectSettingsPatchIntegration(t *testing.T) {
 	}
 	if current.DefaultArtifactVisibility != "private" {
 		t.Fatalf("project current default_artifact_visibility = %q, want private", current.DefaultArtifactVisibility)
+	}
+	if current.Visibility != "public" {
+		t.Fatalf("project current visibility = %q, want public", current.Visibility)
 	}
 	// Pin the LEFT JOIN organizations + role/sensitive_ops projection so the
 	// 0055 owner_id drop regression cannot reappear silently. organization_id
@@ -226,5 +254,20 @@ func assertProjectDefaultVisibility(t *testing.T, ctx context.Context, pool *db.
 	}
 	if got != want {
 		t.Fatalf("default_artifact_visibility = %q, want %q", got, want)
+	}
+}
+
+func assertProjectVisibility(t *testing.T, ctx context.Context, pool *db.Pool, projectID, want string) {
+	t.Helper()
+	var got string
+	if err := pool.QueryRow(ctx, `
+		SELECT visibility
+		  FROM projects
+		 WHERE id = $1::uuid
+	`, projectID).Scan(&got); err != nil {
+		t.Fatalf("select visibility: %v", err)
+	}
+	if got != want {
+		t.Fatalf("visibility = %q, want %q", got, want)
 	}
 }

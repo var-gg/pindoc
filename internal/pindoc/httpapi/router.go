@@ -464,7 +464,14 @@ func (d Deps) artifactVisibilityPredicate(r *http.Request, alias string, startPl
 		args := []any{projects.VisibilityPublic, projects.VisibilityOrg}
 		next += 2
 		if strings.TrimSpace(scope.UserID) != "" {
-			parts = append(parts, fmt.Sprintf("(%s = $%d AND %s::text = $%d)", visibilityCol, next, authorCol, next+1))
+			ownerPredicate := fmt.Sprintf(`EXISTS (
+				SELECT 1
+				  FROM project_members pm
+				 WHERE pm.project_id = %s
+				   AND pm.user_id::text = $%d
+				   AND pm.role = 'owner'
+			)`, sqlColumn(alias, "project_id"), next+1)
+			parts = append(parts, fmt.Sprintf("(%s = $%d AND (%s::text = $%d OR %s))", visibilityCol, next, authorCol, next+1, ownerPredicate))
 			args = append(args, projects.VisibilityPrivate, scope.UserID)
 		}
 		return "(" + strings.Join(parts, " OR ") + ")", args
@@ -506,13 +513,21 @@ func oauthArtifactVisibilityPredicate(alias string, startPlaceholder int, userID
 			   AND om.user_id::text = $%d
 		)
 	)`, projectCol, startPlaceholder+3, projectCol, startPlaceholder+3)
+	ownerPredicate := fmt.Sprintf(`EXISTS (
+		SELECT 1
+		  FROM project_members pm
+		 WHERE pm.project_id = %s
+		   AND pm.user_id::text = $%d
+		   AND pm.role = 'owner'
+	)`, projectCol, startPlaceholder+3)
 	predicate := fmt.Sprintf(
-		"(%s = $%d OR (%s AND (%s = $%d OR (%s = $%d AND %s::text = $%d))))",
+		"(%s = $%d OR (%s AND (%s = $%d OR (%s = $%d AND (%s::text = $%d OR %s)))))",
 		visibilityCol, startPlaceholder,
 		memberPredicate,
 		visibilityCol, startPlaceholder+1,
 		visibilityCol, startPlaceholder+2,
 		authorCol, startPlaceholder+3,
+		ownerPredicate,
 	)
 	return predicate, []any{projects.VisibilityPublic, projects.VisibilityOrg, projects.VisibilityPrivate, userID}
 }
