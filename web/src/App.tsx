@@ -14,6 +14,7 @@ import { ProjectSettingsPage } from "./reader/ProjectSettingsPage";
 import { ReaderShell, type ReaderView } from "./reader/ReaderShell";
 import { SignupCompletePage } from "./signup/SignupCompletePage";
 import { SignupPage } from "./signup/SignupPage";
+import { ConsentPage } from "./oauth/ConsentPage";
 import { DEFAULT_READER_ORG_SLUG, isReaderDevSurfaceEnabled, normalizeReaderSurfaceSegment, projectBaseRedirectPath, projectGraphFallbackPath, projectSurfacePath } from "./readerRoutes";
 import { findSurface, previews, uiKits } from "./surfaces";
 
@@ -79,6 +80,7 @@ export function App() {
       <Route path="/help/design-legend" element={<DesignLegendRedirect />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/signup/complete" element={<SignupCompletePage />} />
+      <Route path="/authorize" element={<ConsentPage />} />
 
       {/* Project bootstrap (Decision project-bootstrap-canonical-flow-
           reader-ui-first-class). The 1급 사용자 진입점 for new

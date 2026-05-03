@@ -171,6 +171,9 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/instance/providers", d.handleInstanceProvidersList)
 	mux.HandleFunc("POST /api/instance/providers", d.handleInstanceProvidersUpsert)
 	mux.HandleFunc("DELETE /api/instance/providers/{idOrName}", d.handleInstanceProvidersDelete)
+	mux.HandleFunc("GET /api/instance/oauth-clients", d.handleOAuthClientsList)
+	mux.HandleFunc("POST /api/instance/oauth-clients", d.handleOAuthClientsCreate)
+	mux.HandleFunc("DELETE /api/instance/oauth-clients/{clientID}", d.handleOAuthClientsDelete)
 
 	// Project-scoped reads. The {project} path segment resolves a row in
 	// projects.slug; 404 if missing so URL shares fail loudly rather than

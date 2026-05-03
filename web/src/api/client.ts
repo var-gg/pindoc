@@ -922,6 +922,53 @@ export type InstanceProviderError = {
   message: string;
 };
 
+export type OAuthClient = {
+  client_id: string;
+  display_name: string;
+  redirect_uris: string[];
+  grant_types: string[];
+  response_types: string[];
+  scopes: string[];
+  public: boolean;
+  has_client_secret: boolean;
+  created_via: "env_seed" | "admin_ui" | "dcr" | string;
+  seed_suppressed: boolean;
+  created_at: string;
+};
+
+export type OAuthClientsResp = {
+  clients: OAuthClient[];
+};
+
+export type OAuthClientCreateInput = {
+  client_id?: string;
+  display_name: string;
+  redirect_uris: string[];
+  public?: boolean;
+};
+
+export type OAuthClientCreateResp = {
+  status: "created";
+  client: OAuthClient;
+  client_secret?: string;
+};
+
+export type OAuthClientDeleteResp = {
+  status: "deleted";
+};
+
+export type OAuthClientError = {
+  error_code: string;
+  message: string;
+};
+
+export type OAuthConsentInfo = {
+  client_id: string;
+  client_display_name: string;
+  scopes: string[];
+  already_granted: boolean;
+};
+
 // Phase D — permission management plane shapes. These mirror
 // internal/pindoc/httpapi/members.go envelopes 1:1. Errors come back
 // as the same { error_code, message } shape every other write
@@ -1507,6 +1554,63 @@ export const api = {
     }
     return (await res.json()) as InstanceProviderOpResp;
   },
+
+  oauthClients: () => j<OAuthClientsResp>("/api/instance/oauth-clients"),
+  createOAuthClient: async (
+    input: OAuthClientCreateInput,
+  ): Promise<OAuthClientCreateResp> => {
+    const res = await fetch("/api/instance/oauth-clients", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      let parsed: OAuthClientError | null = null;
+      try {
+        parsed = (await res.json()) as OAuthClientError;
+      } catch {
+        // fall through
+      }
+      const err = new Error(
+        parsed?.message ?? `${res.status} ${res.statusText}`,
+      ) as Error & Partial<OAuthClientError>;
+      if (parsed) {
+        err.error_code = parsed.error_code;
+        err.message = parsed.message;
+      }
+      throw err;
+    }
+    return (await res.json()) as OAuthClientCreateResp;
+  },
+  deleteOAuthClient: async (
+    clientId: string,
+    options?: { suppressEnvSeed?: boolean },
+  ): Promise<OAuthClientDeleteResp> => {
+    const qs = options?.suppressEnvSeed ? "?suppress_env_seed=1" : "";
+    const res = await fetch(
+      `/api/instance/oauth-clients/${encodeURIComponent(clientId)}${qs}`,
+      { method: "DELETE", headers: { Accept: "application/json" } },
+    );
+    if (!res.ok) {
+      let parsed: OAuthClientError | null = null;
+      try {
+        parsed = (await res.json()) as OAuthClientError;
+      } catch {
+        // fall through
+      }
+      const err = new Error(
+        parsed?.message ?? `${res.status} ${res.statusText}`,
+      ) as Error & Partial<OAuthClientError>;
+      if (parsed) {
+        err.error_code = parsed.error_code;
+        err.message = parsed.message;
+      }
+      throw err;
+    }
+    return (await res.json()) as OAuthClientDeleteResp;
+  },
+  oauthConsent: (query: string) =>
+    j<OAuthConsentInfo>(`/oauth/consent${query.startsWith("?") ? query : `?${query}`}`),
 
   // Ops — instance-wide MCP tool-call telemetry. Reads from the async
   // mcp_tool_calls pipeline (Phase J). window = "1h" | "6h" | "24h" |

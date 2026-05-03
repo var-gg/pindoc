@@ -147,11 +147,17 @@ The default Docker path is single-user and loopback-only:
 | `PINDOC_BIND_ADDR` | `127.0.0.1:5830` | Security intent. Non-loopback values require an IdP or explicit public unauthenticated opt-in. |
 | `PINDOC_AUTH_PROVIDERS` | empty | Identity providers enabled for external requests. Current provider: `github`. |
 | `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED` | `false` | Explicit opt-in for external exposure without an IdP. Use only behind a trusted network/reverse proxy. |
+| `PINDOC_FORCE_OAUTH_LOCAL` | `false` | Development flag that routes loopback `/mcp` calls through OAuth bearer auth for local QA. |
 
 Do not expose a writable daemon to the public internet without an identity
 provider. For a public read-only demo, keep `/mcp` and mutating HTTP routes
 blocked at the reverse proxy; see [SECURITY.md](SECURITY.md) and
 [docs/22-public-demo.md](docs/22-public-demo.md).
+
+For a writable public or cross-device instance, follow
+[docs/oauth-setup.md](docs/oauth-setup.md). It covers GitHub OAuth App setup,
+the `${PINDOC_PUBLIC_BASE_URL}/auth/github/callback` callback rule, runtime
+MCP client registration, and local OAuth QA with `PINDOC_FORCE_OAUTH_LOCAL`.
 
 ## Development
 
@@ -170,6 +176,10 @@ pnpm build
 # Full image build.
 docker build -t pindoc-server:local .
 ```
+
+To test the OAuth bearer path locally while still connecting through
+`127.0.0.1`, set `PINDOC_FORCE_OAUTH_LOCAL=true`; the daemon will warn on boot
+and require Bearer tokens for loopback `/mcp` calls.
 
 On Windows hosts without a local C toolchain, run Go tests through Docker:
 

@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
-import { Loader2, ShieldCheck, Trash2, X } from "lucide-react";
+import { Check, KeyRound, Loader2, Plus, ShieldCheck, Trash2, X } from "lucide-react";
 import {
   api,
   type InstanceProvider,
   type InstanceProvidersResp,
+  type OAuthClient,
+  type OAuthClientsResp,
 } from "../api/client";
+import "../styles/telemetry.css";
 
 // ProvidersPanel — instance-level identity provider admin.
 //
@@ -281,7 +284,225 @@ export function ProvidersPanel() {
             )}
           </section>
         )}
+        <OAuthClientsPanel />
       </main>
     </div>
+  );
+}
+
+type ClientFormState = {
+  displayName: string;
+  redirectUris: string;
+  public: boolean;
+};
+
+function OAuthClientsPanel() {
+  const [data, setData] = useState<OAuthClientsResp | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [errCode, setErrCode] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [newSecret, setNewSecret] = useState<string | null>(null);
+  const [toast, setToast] = useState<Toast | null>(null);
+  const [form, setForm] = useState<ClientFormState>({
+    displayName: "",
+    redirectUris: "http://127.0.0.1:3846/callback",
+    public: true,
+  });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setErr(null);
+    setErrCode(null);
+    try {
+      setData(await api.oauthClients());
+    } catch (e) {
+      const tagged = e as Error & { error_code?: string };
+      setErr(tagged.message);
+      setErrCode(tagged.error_code ?? null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
+    setToast(null);
+    setNewSecret(null);
+    try {
+      const redirectUris = form.redirectUris
+        .split(/\r?\n|,/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const resp = await api.createOAuthClient({
+        display_name: form.displayName.trim(),
+        redirect_uris: redirectUris,
+        public: form.public,
+      });
+      setData((d) => ({ clients: [...(d?.clients ?? []), resp.client] }));
+      setNewSecret(resp.client_secret ?? null);
+      setToast({ kind: "ok", message: "OAuth client registered." });
+      setForm((f) => ({ ...f, displayName: "" }));
+    } catch (e) {
+      const tagged = e as Error & { error_code?: string };
+      setToast({
+        kind: "err",
+        message: tagged.error_code ? `${tagged.error_code}: ${tagged.message}` : tagged.message,
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDelete(client: OAuthClient) {
+    if (deleting) return;
+    if (!window.confirm(`Delete OAuth client ${client.client_id}?`)) {
+      return;
+    }
+    const suppress = client.created_via === "env_seed"
+      ? window.confirm("Suppress boot-time reseed for this env-seeded client?")
+      : false;
+    setDeleting(client.client_id);
+    setToast(null);
+    try {
+      await api.deleteOAuthClient(client.client_id, { suppressEnvSeed: suppress });
+      setData((d) => ({
+        clients: (d?.clients ?? []).filter((item) => item.client_id !== client.client_id),
+      }));
+      setToast({ kind: "ok", message: "OAuth client deleted." });
+    } catch (e) {
+      const tagged = e as Error & { error_code?: string };
+      setToast({
+        kind: "err",
+        message: tagged.error_code ? `${tagged.error_code}: ${tagged.message}` : tagged.message,
+      });
+    } finally {
+      setDeleting(null);
+    }
+  }
+
+  return (
+    <section className="ops__panel">
+      <header className="ops__panel-head">
+        <KeyRound className="lucide" aria-hidden />
+        <h2>OAuth clients</h2>
+      </header>
+
+      <p className="ops__hint">
+        MCP clients can register dynamically via <code>/oauth/register</code>.
+        Operators can also create a client here; confidential client secrets are
+        shown once and stored only as hashes.
+      </p>
+
+      {loading && (
+        <div className="ops__loading">
+          <Loader2 className="lucide" aria-hidden /> Loading...
+        </div>
+      )}
+
+      {err && (
+        <div className="ops__toast ops__toast--err" role="alert">
+          <X className="lucide" aria-hidden />
+          <span>{errCode ? `${errCode}: ${err}` : err}</span>
+        </div>
+      )}
+
+      {!err && (
+        <>
+          <div className="ops__list">
+            {(data?.clients ?? []).map((client) => (
+              <div key={client.client_id} className="ops__row">
+                <div>
+                  <strong>{client.display_name || client.client_id}</strong>
+                  <p>
+                    <code>{client.client_id}</code> · {client.public ? "public" : "confidential"} · {client.created_via}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="ops__danger"
+                  disabled={deleting === client.client_id}
+                  onClick={() => void handleDelete(client)}
+                >
+                  {deleting === client.client_id ? (
+                    <Loader2 className="lucide" aria-hidden />
+                  ) : (
+                    <Trash2 className="lucide" aria-hidden />
+                  )}
+                  Delete
+                </button>
+              </div>
+            ))}
+            {!loading && (data?.clients ?? []).length === 0 && (
+              <p className="ops__hint">No OAuth clients are registered.</p>
+            )}
+          </div>
+
+          <form onSubmit={handleCreate} className="ops__form">
+            <label className="ops__field">
+              <span>Display name</span>
+              <input
+                type="text"
+                value={form.displayName}
+                onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))}
+                placeholder="Cursor"
+                required
+              />
+            </label>
+            <label className="ops__field">
+              <span>Redirect URIs</span>
+              <textarea
+                value={form.redirectUris}
+                onChange={(e) => setForm((f) => ({ ...f, redirectUris: e.target.value }))}
+                rows={3}
+                required
+              />
+            </label>
+            <label className="ops__field ops__field--inline">
+              <input
+                type="checkbox"
+                checked={form.public}
+                onChange={(e) => setForm((f) => ({ ...f, public: e.target.checked }))}
+              />
+              <span>Public client</span>
+            </label>
+            <div className="ops__form-actions">
+              <button type="submit" className="ops__primary" disabled={submitting}>
+                {submitting ? <Loader2 className="lucide" aria-hidden /> : <Plus className="lucide" aria-hidden />}
+                Register client
+              </button>
+            </div>
+          </form>
+
+          {newSecret && (
+            <div className="ops__toast ops__toast--ok" role="status">
+              <Check className="lucide" aria-hidden />
+              <span>Client secret: <code>{newSecret}</code></span>
+            </div>
+          )}
+
+          {toast && (
+            <div
+              className={`ops__toast ops__toast--${toast.kind}`}
+              role={toast.kind === "err" ? "alert" : "status"}
+            >
+              {toast.kind === "err" ? (
+                <X className="lucide" aria-hidden />
+              ) : (
+                <ShieldCheck className="lucide" aria-hidden />
+              )}
+              <span>{toast.message}</span>
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }

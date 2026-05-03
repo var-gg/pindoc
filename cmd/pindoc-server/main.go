@@ -325,6 +325,9 @@ func main() {
 				"hint", "set PINDOC_BIND_ADDR to non-loopback when publishing externally",
 			)
 		}
+		if cfg.ForceOAuthLocal {
+			logger.Warn("PINDOC_FORCE_OAUTH_LOCAL is enabled; loopback /mcp calls require OAuth bearer tokens for local QA only")
+		}
 
 		apiHandler := httpapi.New(cfg, httpapi.Deps{
 			DB:                   pool,
@@ -425,11 +428,7 @@ func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOp
 	streamHandler := sdk.NewStreamableHTTPHandler(getServer, nil)
 	mcp.StartToolsetListChangedNotifier(ctx)
 	var mcpHandler http.Handler = streamHandler
-	if cfg != nil && cfg.HasAuthProvider(config.AuthProviderGitHub) {
-		if oauthSvc == nil {
-			logger.Error("oauth provider configured but oauth service is nil")
-			os.Exit(1)
-		}
+	if oauthSvc != nil {
 		bearer := mcpauth.RequireBearerToken(oauthSvc.TokenVerifier, &mcpauth.RequireBearerTokenOptions{
 			ResourceMetadataURL: oauthSvc.ResourceMetadataURL(),
 			Scopes:              []string{pauth.ScopePindoc},
@@ -439,12 +438,15 @@ func runHTTPDaemon(ctx context.Context, logger *slog.Logger, addr string, baseOp
 		// HTTP transport too. Non-loopback callers still must
 		// present a Pindoc AS JWT.
 		mcpHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if pauth.IsLoopbackRequest(r) {
+			if shouldBypassMCPBearer(cfg, r) {
 				streamHandler.ServeHTTP(w, r)
 				return
 			}
 			bearer.ServeHTTP(w, r)
 		})
+	} else if cfg != nil && cfg.HasAuthProvider(config.AuthProviderGitHub) {
+		logger.Error("oauth provider configured but oauth service is nil")
+		os.Exit(1)
 	}
 
 	mux := http.NewServeMux()
@@ -636,6 +638,13 @@ func daemonPublicBaseURL(publicBaseURL, addr string) string {
 		host = net.JoinHostPort(h, p)
 	}
 	return "http://" + host
+}
+
+func shouldBypassMCPBearer(cfg *config.Config, r *http.Request) bool {
+	if cfg != nil && cfg.ForceOAuthLocal {
+		return false
+	}
+	return pauth.IsLoopbackRequest(r)
 }
 
 func firstNonEmpty(values ...string) string {

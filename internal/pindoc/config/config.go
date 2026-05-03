@@ -71,6 +71,11 @@ type Config struct {
 	// proxy must set this to acknowledge the trust assumption.
 	AllowPublicUnauthenticated bool
 
+	// ForceOAuthLocal routes loopback /mcp calls through the OAuth
+	// bearer middleware when an IdP is active. It is a development and
+	// OSS QA switch for dogfooding the non-loopback auth path locally.
+	ForceOAuthLocal bool
+
 	// InstanceKeyB64 is the base64-encoded 32-byte master key used by
 	// the providers package to AES-GCM encrypt IdP credentials at
 	// rest. Empty when the operator has not opted into the runtime
@@ -206,6 +211,7 @@ func Load() (*Config, error) {
 		AuthProviders:              normalizeProviders(envList("PINDOC_AUTH_PROVIDERS", nil)),
 		BindAddr:                   strings.TrimSpace(env("PINDOC_BIND_ADDR", DefaultBindAddr)),
 		AllowPublicUnauthenticated: envBool("PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED", false),
+		ForceOAuthLocal:            envBool("PINDOC_FORCE_OAUTH_LOCAL", false),
 		InstanceKeyB64:             strings.TrimSpace(env("PINDOC_INSTANCE_KEY", "")),
 		UserLanguage:               strings.ToLower(env("PINDOC_USER_LANGUAGE", "en")),
 		ReceiptExemptionLimit:      envInt("PINDOC_RECEIPT_EXEMPTION_LIMIT", 5),

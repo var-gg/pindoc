@@ -74,11 +74,14 @@ services:
       PINDOC_AGENT_ID: ${PINDOC_AGENT_ID:-}
       PINDOC_WITH_SAMPLE: ${PINDOC_WITH_SAMPLE:-false}
       PINDOC_PUBLIC_BASE_URL: ${PINDOC_PUBLIC_BASE_URL:-http://127.0.0.1:${PINDOC_DAEMON_PORT:-5830}}
+      # Public OAuth setup: docs/oauth-setup.md. PINDOC_OAUTH_* values seed
+      # one boot-time MCP client; runtime clients can use /oauth/register.
       PINDOC_OAUTH_SIGNING_KEY_PATH: ${PINDOC_OAUTH_SIGNING_KEY_PATH:-/var/lib/pindoc/cache/oauth-signing.pem}
       PINDOC_OAUTH_CLIENT_ID: ${PINDOC_OAUTH_CLIENT_ID:-claude-desktop}
       PINDOC_OAUTH_CLIENT_SECRET: ${PINDOC_OAUTH_CLIENT_SECRET:-}
       PINDOC_OAUTH_REDIRECT_URIS: ${PINDOC_OAUTH_REDIRECT_URIS:-http://127.0.0.1:3846/callback,http://localhost:3846/callback}
       PINDOC_OAUTH_REDIRECT_BASE_URL: ${PINDOC_OAUTH_REDIRECT_BASE_URL:-}
+      PINDOC_FORCE_OAUTH_LOCAL: ${PINDOC_FORCE_OAUTH_LOCAL:-false}
       PINDOC_GITHUB_CLIENT_ID: ${PINDOC_GITHUB_CLIENT_ID:-}
       PINDOC_GITHUB_CLIENT_SECRET: ${PINDOC_GITHUB_CLIENT_SECRET:-}
       PINDOC_ASSET_ROOT: ${PINDOC_ASSET_ROOT:-/var/lib/pindoc/assets}

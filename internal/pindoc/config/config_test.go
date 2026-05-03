@@ -207,3 +207,14 @@ func TestLoadOAuthDefaultsAndRedirectList(t *testing.T) {
 		t.Fatalf("OAuthRedirectURIs = %#v, want %#v", cfg.OAuthRedirectURIs, want)
 	}
 }
+
+func TestLoadForceOAuthLocal(t *testing.T) {
+	t.Setenv("PINDOC_FORCE_OAUTH_LOCAL", "true")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.ForceOAuthLocal {
+		t.Fatal("ForceOAuthLocal = false, want true")
+	}
+}

@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/var-gg/pindoc/internal/pindoc/config"
@@ -62,5 +64,17 @@ func TestValidateServerConfig_GitHubCredentialsAreOptional(t *testing.T) {
 				t.Fatalf("validateServerConfig: %v", err)
 			}
 		})
+	}
+}
+
+func TestShouldBypassMCPBearerForceOAuthLocal(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:5830/mcp", nil)
+	req.RemoteAddr = "127.0.0.1:51234"
+
+	if !shouldBypassMCPBearer(&config.Config{}, req) {
+		t.Fatal("default loopback request should bypass bearer middleware")
+	}
+	if shouldBypassMCPBearer(&config.Config{ForceOAuthLocal: true}, req) {
+		t.Fatal("ForceOAuthLocal should route loopback request through bearer middleware")
 	}
 }

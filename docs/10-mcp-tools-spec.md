@@ -104,10 +104,29 @@ loopback 요청은 그대로 신뢰하면서 외부 트래픽만 Pindoc AS의 Be
 | `PINDOC_BIND_ADDR` | `127.0.0.1:5830` | 비-loopback이면 IdP 또는 ALLOW opt-in 필수 |
 | `PINDOC_AUTH_PROVIDERS` | empty | CSV. 현재 `github` 지원 |
 | `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED` | `false` | 외부 노출 + IdP 없음의 명시 opt-in |
+| `PINDOC_FORCE_OAUTH_LOCAL` | `false` | loopback `/mcp`도 bearer middleware를 통과시키는 개발/QA flag |
 
 세 axes 정합 안 맞으면 부팅을 거부(`ErrPublicWithoutAuth`). Decision
 `decision-auth-model-loopback-and-providers`가 이전 4-mode `PINDOC_AUTH_MODE`
 enum을 supersede했다.
+
+MCP OAuth client 등록은 두 경로를 지원한다.
+
+- boot-time seed: `PINDOC_OAUTH_CLIENT_ID`, `PINDOC_OAUTH_CLIENT_SECRET`,
+  `PINDOC_OAUTH_REDIRECT_URIS`
+- runtime: `POST /oauth/register` Dynamic Client Registration 또는 loopback
+  owner용 `/api/instance/oauth-clients`
+
+AS metadata는 `registration_endpoint`와
+`client_id_metadata_document_supported=true`를 노출한다. DCR policy는
+`pindoc offline_access` scope, authorization_code/refresh_token grant, HTTPS 또는
+loopback HTTP redirect_uri만 허용한다.
+
+Authorize UX는 consent-first다. Browser session이 있는 외부 사용자가 새
+client+scope 조합을 승인하지 않았다면 `/oauth/authorize`는 `/authorize` SPA로 302한다.
+Approve는 `oauth_consents`에 grant를 저장하고 code redirect를 수행한다. Deny는
+`access_denied`를 redirect_uri에 돌려준다. 같은 client+scope는 다음 요청부터 화면 없이
+통과하며, 더 넓은 scope 요청은 다시 consent를 요구한다.
 
 ### Project Scope
 

@@ -59,6 +59,7 @@ type OAuthService struct {
 	provider        fosite.OAuth2Provider
 	store           *FositeStore
 	strategy        *foauth2.DefaultJWTStrategy
+	secretHasher    fosite.Hasher
 	signingKey      *rsa.PrivateKey
 	keyID           string
 	issuer          string
@@ -136,13 +137,16 @@ func NewOAuthService(ctx context.Context, pool *db.Pool, cfg OAuthConfig) (*OAut
 		}
 	}
 	if err := store.UpsertClient(ctx, OAuthClient{
-		ID:            clientID,
-		SecretHash:    secretHash,
-		RedirectURIs:  redirectURIs,
-		GrantTypes:    []string{string(fosite.GrantTypeAuthorizationCode), string(fosite.GrantTypeRefreshToken)},
-		ResponseTypes: []string{"code"},
-		Scopes:        SupportedOAuthScopes(),
-		Public:        len(secretHash) == 0,
+		ID:              clientID,
+		DisplayName:     clientID,
+		SecretHash:      secretHash,
+		RedirectURIs:    redirectURIs,
+		GrantTypes:      []string{string(fosite.GrantTypeAuthorizationCode), string(fosite.GrantTypeRefreshToken)},
+		ResponseTypes:   []string{"code"},
+		Scopes:          SupportedOAuthScopes(),
+		Public:          len(secretHash) == 0,
+		CreatedByUserID: strings.TrimSpace(cfg.BootstrapUserID),
+		CreatedVia:      OAuthClientCreatedViaEnvSeed,
 	}); err != nil {
 		return nil, err
 	}
@@ -171,6 +175,7 @@ func NewOAuthService(ctx context.Context, pool *db.Pool, cfg OAuthConfig) (*OAut
 		provider:        provider,
 		store:           store,
 		strategy:        jwtStrategy,
+		secretHasher:    fositeConfig.ClientSecretsHasher,
 		signingKey:      key,
 		keyID:           keyID,
 		issuer:          issuer,
@@ -295,8 +300,11 @@ func (s *OAuthService) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.handleAuthorizationServerMetadata)
 	mux.HandleFunc("GET /.well-known/jwks.json", s.handleJWKS)
 	mux.HandleFunc("GET /oauth/authorize", s.handleAuthorize)
+	mux.HandleFunc("GET /oauth/consent", s.handleConsentInfo)
+	mux.HandleFunc("POST /oauth/authorize/confirm", s.handleAuthorizeConfirm)
 	mux.HandleFunc("POST /oauth/token", s.handleToken)
 	mux.HandleFunc("POST /oauth/revoke", s.handleRevoke)
+	mux.HandleFunc("POST /oauth/register", s.handleDynamicClientRegistration)
 	// Always register the github routes so admin UI hot-reload works:
 	// if no github IdP is currently configured, the handlers 404 via
 	// currentGitHub() == nil. This way provider activation does not
@@ -318,8 +326,11 @@ func RegisterUnavailableOAuthRoutes(mux *http.ServeMux) {
 		"/.well-known/oauth-authorization-server",
 		"/.well-known/jwks.json",
 		"/oauth/authorize",
+		"/oauth/consent",
+		"/oauth/authorize/confirm",
 		"/oauth/token",
 		"/oauth/revoke",
+		"/oauth/register",
 		"/auth/github/login",
 		"/auth/github/callback",
 		"/auth/logout",
@@ -353,6 +364,7 @@ func (s *OAuthService) handleAuthorizationServerMetadata(w http.ResponseWriter, 
 		Issuer:                                 s.issuer,
 		AuthorizationEndpoint:                  s.issuer + "/oauth/authorize",
 		TokenEndpoint:                          s.issuer + "/oauth/token",
+		RegistrationEndpoint:                   s.issuer + "/oauth/register",
 		JWKSURI:                                s.issuer + "/.well-known/jwks.json",
 		ScopesSupported:                        SupportedOAuthScopes(),
 		ResponseTypesSupported:                 []string{"code"},
@@ -362,7 +374,7 @@ func (s *OAuthService) handleAuthorizationServerMetadata(w http.ResponseWriter, 
 		RevocationEndpointAuthMethodsSupported: []string{"none", "client_secret_basic", "client_secret_post"},
 		IntrospectionEndpoint:                  "",
 		CodeChallengeMethodsSupported:          []string{"S256"},
-		ClientIDMetadataDocumentSupported:      false,
+		ClientIDMetadataDocumentSupported:      true,
 	})
 }
 
@@ -389,8 +401,10 @@ func (s *OAuthService) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		ar.GrantAudience(audience)
 	}
 	subject := strings.TrimSpace(s.browserSessionUserID(r))
+	fromBootstrap := false
 	if subject == "" && IsLoopbackRequest(r) {
 		subject = strings.TrimSpace(s.bootstrapUserID)
+		fromBootstrap = subject != ""
 	}
 	if subject == "" {
 		if gh := s.currentGitHub(); gh != nil {
@@ -399,6 +413,17 @@ func (s *OAuthService) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		}
 		s.provider.WriteAuthorizeError(ctx, w, ar, fosite.ErrAccessDenied.WithHint("GitHub OAuth login is required before authorizing this client."))
 		return
+	}
+	if !fromBootstrap {
+		hasConsent, err := s.store.HasConsent(ctx, subject, clientIDFromRequester(ar), []string(ar.GetGrantedScopes()))
+		if err != nil {
+			s.provider.WriteAuthorizeError(ctx, w, ar, fosite.ErrServerError.WithDebug(err.Error()))
+			return
+		}
+		if !hasConsent {
+			http.Redirect(w, r, "/authorize?"+r.URL.RawQuery, http.StatusFound)
+			return
+		}
 	}
 	resp, err := s.provider.NewAuthorizeResponse(ctx, ar, s.newJWTSession(subject))
 	if err != nil {

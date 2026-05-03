@@ -435,6 +435,7 @@ stdio MCP transport
 | `PINDOC_BIND_ADDR` | `127.0.0.1:5830` | 외부 노출 결정 |
 | `PINDOC_AUTH_PROVIDERS` | empty | 활성 IdP CSV (예: `github`) |
 | `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED` | `false` | "외부 노출 + IdP 없음"의 명시적 opt-in |
+| `PINDOC_FORCE_OAUTH_LOCAL` | `false` | loopback `/mcp`도 OAuth bearer path를 타게 하는 개발/QA flag |
 
 비-loopback bind + empty providers + opt-in false 조합은 부팅을 거부한다
 (Public-Without-Auth Refusal — `ErrPublicWithoutAuth` sentinel).
@@ -443,7 +444,7 @@ stdio MCP transport
 
 | 역할 | 실체 |
 |---|---|
-| AS (Authorization Server) | Pindoc daemon (`ory/fosite`) — RFC 9728 PRM + RFC 8414 metadata + `/oauth/{authorize,token,revoke}` |
+| AS (Authorization Server) | Pindoc daemon (`ory/fosite`) — RFC 9728 PRM + RFC 8414 metadata + `/oauth/{authorize,token,revoke,register}` |
 | RS (Resource Server) | Pindoc daemon — Bearer JWT 검증 후 MCP/HTTP 리소스 제공 |
 | IdP (Identity Provider) | 외부 위임 — `PINDOC_AUTH_PROVIDERS`의 항목 (현재 `github` 한 개, 미래 `google` / `local-password` / `passkey` 등) |
 | MCP client | Claude Desktop / Code / Codex / Cursor — Pindoc AS 토큰만 사용 |
@@ -452,6 +453,20 @@ stdio MCP transport
 로그인하든 같은 `users.id`로 수렴한다.
 
 `bootstrapUserID` fallback은 loopback origin에서만 발동한다. Providers 미설정 시 OAuth endpoint들은 SPA로 빠지지 않고 503 + JSON `auth_not_configured`로 응답한다.
+
+MCP client는 Pindoc AS의 Dynamic Client Registration endpoint
+`POST /oauth/register`로 client_id를 받을 수 있다. AS metadata는
+`registration_endpoint`와 `client_id_metadata_document_supported=true`를 노출한다.
+등록 정책은 scope `pindoc offline_access`, authorization_code/refresh_token,
+redirect_uri는 HTTPS 또는 loopback HTTP로 제한한다. Env의
+`PINDOC_OAUTH_CLIENT_*` 값은 부팅 시 초기 client를 seed하는 호환 경로이고,
+runtime source of truth는 `oauth_clients` 테이블이다.
+
+Authorize flow는 browser session 사용자가 처음 보는 client+scope 조합에 대해
+`/authorize` consent SPA로 302한다. Approve는 `oauth_consents`에 user/client/scope
+grant를 저장하고 code를 발급한다. Deny는 redirect_uri로 `access_denied`를 돌려준다.
+같은 scope 재요청은 grant cache hit로 화면 없이 통과하고, 추가 scope는 다시 consent를
+요구한다.
 
 ### 시나리오 매핑
 

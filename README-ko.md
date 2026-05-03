@@ -124,11 +124,17 @@ Docker daemon은 account-level MCP 엔드포인트 하나를 노출합니다.
 | `PINDOC_BIND_ADDR` | `127.0.0.1:5830` | 보안 의도. non-loopback이면 IdP 또는 명시적 unauth opt-in 필요 |
 | `PINDOC_AUTH_PROVIDERS` | empty | 외부 요청용 IdP. 현재 `github` 지원 |
 | `PINDOC_ALLOW_PUBLIC_UNAUTHENTICATED` | `false` | 인증 없는 외부 노출 명시 opt-in |
+| `PINDOC_FORCE_OAUTH_LOCAL` | `false` | 개발용 flag. loopback `/mcp` 호출도 OAuth bearer auth를 타게 함 |
 
 공개 read-only demo는 daemon을 그대로 인터넷에 쓰기 가능하게 여는 방식이
 아니라, reverse proxy에서 `/mcp`와 mutating HTTP route를 막는 방식으로
 운영해야 합니다. 자세한 내용은 [보안 정책](SECURITY-ko.md)과
 [공개 데모 운영안](docs/22-public-demo-ko.md)을 봅니다.
+
+쓰기 가능한 공개 또는 cross-device 인스턴스는
+[docs/oauth-setup-ko.md](docs/oauth-setup-ko.md)를 따릅니다. GitHub OAuth App
+생성, `${PINDOC_PUBLIC_BASE_URL}/auth/github/callback` callback 규칙, 런타임
+MCP client 등록, `PINDOC_FORCE_OAUTH_LOCAL` 로컬 QA 절차를 포함합니다.
 
 ## 개발
 
@@ -143,6 +149,10 @@ pnpm build
 
 docker build -t pindoc-server:local .
 ```
+
+`127.0.0.1`로 접속하면서도 OAuth bearer path를 검증하려면
+`PINDOC_FORCE_OAUTH_LOCAL=true`를 설정합니다. daemon은 boot warning을 남기고
+loopback `/mcp` 호출에도 Bearer token을 요구합니다.
 
 Windows에서 로컬 C toolchain이 없으면 Docker로 Go test를 실행합니다.
 

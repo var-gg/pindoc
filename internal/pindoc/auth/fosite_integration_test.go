@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -155,6 +156,142 @@ func TestAuthorizeBootstrapFallbackRequiresLoopback(t *testing.T) {
 	}
 }
 
+func TestDynamicClientRegistrationIntegration(t *testing.T) {
+	ctx, pool := openOAuthIntegrationDB(t)
+	suffix := uniqueOAuthSuffix()
+	userID := insertOAuthTestUser(t, ctx, pool, suffix)
+	svc, err := NewOAuthService(ctx, pool, OAuthConfig{
+		Issuer:          "http://127.0.0.1:5830",
+		PublicBaseURL:   "http://127.0.0.1:5830",
+		SigningKeyPath:  t.TempDir() + "/oauth.pem",
+		ClientID:        "seed-client-" + suffix,
+		RedirectURIs:    []string{"http://127.0.0.1:3846/callback"},
+		BootstrapUserID: userID,
+	})
+	if err != nil {
+		t.Fatalf("NewOAuthService: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	svc.RegisterRoutes(mux)
+	body := []byte(`{"client_name":"Codex","redirect_uris":["http://127.0.0.1:3846/callback"],"token_endpoint_auth_method":"none","scope":"pindoc offline_access"}`)
+	req := httptest.NewRequest(http.MethodPost, "/oauth/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("DCR status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode DCR response: %v", err)
+	}
+	clientID := requireString(t, out, "client_id")
+	if got := requireString(t, out, "client_name"); got != "Codex" {
+		t.Fatalf("client_name = %q, want Codex", got)
+	}
+	recClient, err := svc.Store().ClientRecord(ctx, clientID)
+	if err != nil {
+		t.Fatalf("ClientRecord(%q): %v", clientID, err)
+	}
+	if recClient.CreatedVia != OAuthClientCreatedViaDCR || !recClient.Public {
+		t.Fatalf("client record = %+v", recClient)
+	}
+}
+
+func TestConsentFlowIntegration(t *testing.T) {
+	ctx, pool := openOAuthIntegrationDB(t)
+	suffix := uniqueOAuthSuffix()
+	userID := insertOAuthTestUser(t, ctx, pool, suffix)
+
+	redirectURI := "http://127.0.0.1:3846/callback"
+	svc, err := NewOAuthService(ctx, pool, OAuthConfig{
+		Issuer:         "http://127.0.0.1:5830",
+		PublicBaseURL:  "http://127.0.0.1:5830",
+		SigningKeyPath: t.TempDir() + "/oauth.pem",
+		ClientID:       "seed-consent-client-" + suffix,
+		RedirectURIs:   []string{redirectURI},
+	})
+	if err != nil {
+		t.Fatalf("NewOAuthService: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	svc.RegisterRoutes(mux)
+	clientID := registerPublicDCRClient(t, mux)
+	cookies := browserSessionCookies(t, svc, userID)
+	verifier := "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJK"
+	authURL := buildAuthorizeURL(t, "http://127.0.0.1:5830", clientID, redirectURI, verifier)
+
+	first := authorizeLocationFromHandlerWithCookies(t, mux, authURL, "203.0.113.10:51234", cookies)
+	if first.Path != "/authorize" {
+		t.Fatalf("first authorize path = %q, want /authorize; location=%s", first.Path, first.String())
+	}
+
+	infoReq := httptest.NewRequest(http.MethodGet, "/oauth/consent?"+first.RawQuery, nil)
+	for _, cookie := range cookies {
+		infoReq.AddCookie(cookie)
+	}
+	infoRec := httptest.NewRecorder()
+	mux.ServeHTTP(infoRec, infoReq)
+	if infoRec.Code != http.StatusOK {
+		t.Fatalf("consent info status = %d, body=%s", infoRec.Code, infoRec.Body.String())
+	}
+
+	approve := confirmAuthorize(t, mux, "approve", first.RawQuery, cookies)
+	code := approve.Query().Get("code")
+	if code == "" {
+		t.Fatalf("approve redirect missing code: %s", approve.String())
+	}
+	token := tokenRequestFromHandler(t, mux, url.Values{
+		"grant_type":    {"authorization_code"},
+		"client_id":     {clientID},
+		"code":          {code},
+		"redirect_uri":  {redirectURI},
+		"code_verifier": {verifier},
+	}, http.StatusOK)
+	accessToken := requireString(t, token, "access_token")
+	info, err := svc.TokenVerifier(ctx, accessToken, nil)
+	if err != nil {
+		t.Fatalf("TokenVerifier after consent: %v", err)
+	}
+	if info.UserID != userID || !contains(info.Scopes, ScopePindoc) {
+		t.Fatalf("TokenInfo after consent = %+v", info)
+	}
+	granted, err := svc.Store().HasConsent(ctx, userID, clientID, SupportedOAuthScopes())
+	if err != nil {
+		t.Fatalf("HasConsent: %v", err)
+	}
+	if !granted {
+		t.Fatal("consent grant was not stored")
+	}
+
+	second := authorizeLocationFromHandlerWithCookies(t, mux, authURL, "203.0.113.10:51234", cookies)
+	if code := second.Query().Get("code"); code == "" {
+		t.Fatalf("cached consent authorize missing code: %s", second.String())
+	}
+
+	denyClientID := "deny-client-" + suffix
+	if err := svc.Store().UpsertClient(ctx, OAuthClient{
+		ID:            denyClientID,
+		DisplayName:   "Deny Client",
+		RedirectURIs:  []string{redirectURI},
+		GrantTypes:    []string{string(fosite.GrantTypeAuthorizationCode), string(fosite.GrantTypeRefreshToken)},
+		ResponseTypes: []string{"code"},
+		Scopes:        SupportedOAuthScopes(),
+		Public:        true,
+		CreatedVia:    OAuthClientCreatedViaDCR,
+	}); err != nil {
+		t.Fatalf("Upsert deny client: %v", err)
+	}
+	denyURL := buildAuthorizeURL(t, "http://127.0.0.1:5830", denyClientID, redirectURI, verifier)
+	denyConsent := authorizeLocationFromHandlerWithCookies(t, mux, denyURL, "203.0.113.10:51234", cookies)
+	denied := confirmAuthorize(t, mux, "deny", denyConsent.RawQuery, cookies)
+	if got := denied.Query().Get("error"); got != "access_denied" {
+		t.Fatalf("deny error = %q, want access_denied; location=%s", got, denied.String())
+	}
+}
+
 func authorizeCode(t *testing.T, serverURL, clientID, redirectURI, verifier string) string {
 	t.Helper()
 	authURL := buildAuthorizeURL(t, serverURL, clientID, redirectURI, verifier)
@@ -198,6 +335,86 @@ func authorizeLocationFromHandler(t *testing.T, handler http.Handler, target, re
 	resp := rec.Result()
 	defer resp.Body.Close()
 	return requireAuthorizeLocation(t, resp)
+}
+
+func authorizeLocationFromHandlerWithCookies(t *testing.T, handler http.Handler, target, remoteAddr string, cookies []*http.Cookie) *url.URL {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = remoteAddr
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	resp := rec.Result()
+	defer resp.Body.Close()
+	return requireAuthorizeLocation(t, resp)
+}
+
+func registerPublicDCRClient(t *testing.T, handler http.Handler) string {
+	t.Helper()
+	body := []byte(`{"client_name":"Codex","redirect_uris":["http://127.0.0.1:3846/callback"],"token_endpoint_auth_method":"none","scope":"pindoc offline_access"}`)
+	req := httptest.NewRequest(http.MethodPost, "/oauth/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("DCR status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode DCR response: %v", err)
+	}
+	return requireString(t, out, "client_id")
+}
+
+func browserSessionCookies(t *testing.T, svc *OAuthService, userID string) []*http.Cookie {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	if err := svc.SetBrowserSessionCookie(rec, userID); err != nil {
+		t.Fatalf("SetBrowserSessionCookie: %v", err)
+	}
+	resp := rec.Result()
+	defer resp.Body.Close()
+	return resp.Cookies()
+}
+
+func confirmAuthorize(t *testing.T, handler http.Handler, action, rawQuery string, cookies []*http.Cookie) *url.URL {
+	t.Helper()
+	form := url.Values{
+		"action": {action},
+		"query":  {rawQuery},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth/authorize/confirm", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.RemoteAddr = "203.0.113.10:51234"
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	resp := rec.Result()
+	defer resp.Body.Close()
+	return requireAuthorizeLocation(t, resp)
+}
+
+func tokenRequestFromHandler(t *testing.T, handler http.Handler, form url.Values, wantStatus int) map[string]any {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	resp := rec.Result()
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("token status = %d, want %d, body=%s", resp.StatusCode, wantStatus, string(body))
+	}
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("token JSON: %v; body=%s", err, string(body))
+	}
+	return out
 }
 
 func requireAuthorizeCode(t *testing.T, resp *http.Response) string {

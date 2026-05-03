@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,6 +23,10 @@ const (
 	defaultAuthorizeCodeTTL = 15 * time.Minute
 	defaultAccessTokenTTL   = time.Hour
 	defaultRefreshTokenTTL  = 30 * 24 * time.Hour
+
+	OAuthClientCreatedViaEnvSeed = "env_seed"
+	OAuthClientCreatedViaAdminUI = "admin_ui"
+	OAuthClientCreatedViaDCR     = "dcr"
 )
 
 var (
@@ -31,6 +36,8 @@ var (
 	_ foauth2.RefreshTokenStorage    = (*FositeStore)(nil)
 	_ foauth2.TokenRevocationStorage = (*FositeStore)(nil)
 	_ pkce.PKCERequestStorage        = (*FositeStore)(nil)
+
+	ErrOAuthClientNotFound = errors.New("auth: oauth client not found")
 )
 
 // FositeStore implements the fosite storage interfaces directly on pgx.
@@ -44,13 +51,32 @@ func NewFositeStore(pool *db.Pool) *FositeStore {
 }
 
 type OAuthClient struct {
-	ID            string
-	SecretHash    []byte
-	RedirectURIs  []string
-	GrantTypes    []string
-	ResponseTypes []string
-	Scopes        []string
-	Public        bool
+	ID              string
+	DisplayName     string
+	SecretHash      []byte
+	RedirectURIs    []string
+	GrantTypes      []string
+	ResponseTypes   []string
+	Scopes          []string
+	Public          bool
+	CreatedByUserID string
+	CreatedVia      string
+	SeedSuppressed  bool
+}
+
+type OAuthClientRecord struct {
+	ID              string
+	DisplayName     string
+	RedirectURIs    []string
+	GrantTypes      []string
+	ResponseTypes   []string
+	Scopes          []string
+	Public          bool
+	HasSecret       bool
+	CreatedByUserID string
+	CreatedVia      string
+	SeedSuppressed  bool
+	CreatedAt       time.Time
 }
 
 func (s *FositeStore) UpsertClient(ctx context.Context, c OAuthClient) error {
@@ -60,6 +86,20 @@ func (s *FositeStore) UpsertClient(ctx context.Context, c OAuthClient) error {
 	c.ID = strings.TrimSpace(c.ID)
 	if c.ID == "" {
 		return errors.New("auth: oauth client id is required")
+	}
+	c.DisplayName = strings.TrimSpace(c.DisplayName)
+	if c.DisplayName == "" {
+		c.DisplayName = c.ID
+	}
+	c.CreatedVia = normalizeOAuthClientCreatedVia(c.CreatedVia)
+	if c.CreatedVia == OAuthClientCreatedViaEnvSeed {
+		suppressed, err := s.envSeedSuppressed(ctx, c.ID)
+		if err != nil {
+			return err
+		}
+		if suppressed {
+			return nil
+		}
 	}
 	if len(c.GrantTypes) == 0 {
 		c.GrantTypes = []string{"authorization_code", "refresh_token"}
@@ -72,17 +112,23 @@ func (s *FositeStore) UpsertClient(ctx context.Context, c OAuthClient) error {
 	}
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO oauth_clients (
-			client_id, secret_hash, redirect_uris, grant_types, response_types, scopes, public, deleted_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, NULL)
+			client_id, display_name, secret_hash, redirect_uris, grant_types,
+			response_types, scopes, public, created_by_user_id, created_via,
+			seed_suppressed, deleted_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, $10, $11, NULL)
 		ON CONFLICT (client_id) DO UPDATE SET
+			display_name = EXCLUDED.display_name,
 			secret_hash = EXCLUDED.secret_hash,
 			redirect_uris = EXCLUDED.redirect_uris,
 			grant_types = EXCLUDED.grant_types,
 			response_types = EXCLUDED.response_types,
 			scopes = EXCLUDED.scopes,
 			public = EXCLUDED.public,
+			created_by_user_id = COALESCE(EXCLUDED.created_by_user_id, oauth_clients.created_by_user_id),
+			created_via = EXCLUDED.created_via,
+			seed_suppressed = EXCLUDED.seed_suppressed,
 			deleted_at = NULL
-	`, c.ID, c.SecretHash, c.RedirectURIs, c.GrantTypes, c.ResponseTypes, c.Scopes, c.Public)
+	`, c.ID, c.DisplayName, c.SecretHash, c.RedirectURIs, c.GrantTypes, c.ResponseTypes, c.Scopes, c.Public, c.CreatedByUserID, c.CreatedVia, c.SeedSuppressed)
 	if err != nil {
 		return fmt.Errorf("upsert oauth client %q: %w", c.ID, err)
 	}
@@ -107,6 +153,197 @@ func (s *FositeStore) GetClient(ctx context.Context, id string) (fosite.Client, 
 		return nil, fmt.Errorf("get oauth client %q: %w", id, err)
 	}
 	return &c, nil
+}
+
+func (s *FositeStore) ListClients(ctx context.Context) ([]OAuthClientRecord, error) {
+	if s == nil || s.pool == nil {
+		return nil, errors.New("auth: nil fosite store")
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT client_id, display_name, redirect_uris, grant_types, response_types,
+		       scopes, public, secret_hash IS NOT NULL AND octet_length(secret_hash) > 0,
+		       COALESCE(created_by_user_id::text, ''), created_via, seed_suppressed, created_at
+		  FROM oauth_clients
+		 WHERE deleted_at IS NULL
+		 ORDER BY created_at ASC, client_id ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list oauth clients: %w", err)
+	}
+	defer rows.Close()
+	out := []OAuthClientRecord{}
+	for rows.Next() {
+		var rec OAuthClientRecord
+		if err := rows.Scan(
+			&rec.ID,
+			&rec.DisplayName,
+			&rec.RedirectURIs,
+			&rec.GrantTypes,
+			&rec.ResponseTypes,
+			&rec.Scopes,
+			&rec.Public,
+			&rec.HasSecret,
+			&rec.CreatedByUserID,
+			&rec.CreatedVia,
+			&rec.SeedSuppressed,
+			&rec.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan oauth client: %w", err)
+		}
+		out = append(out, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate oauth clients: %w", err)
+	}
+	return out, nil
+}
+
+func (s *FositeStore) ClientRecord(ctx context.Context, id string) (OAuthClientRecord, error) {
+	if s == nil || s.pool == nil {
+		return OAuthClientRecord{}, errors.New("auth: nil fosite store")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return OAuthClientRecord{}, ErrOAuthClientNotFound
+	}
+	var rec OAuthClientRecord
+	err := s.pool.QueryRow(ctx, `
+		SELECT client_id, display_name, redirect_uris, grant_types, response_types,
+		       scopes, public, secret_hash IS NOT NULL AND octet_length(secret_hash) > 0,
+		       COALESCE(created_by_user_id::text, ''), created_via, seed_suppressed, created_at
+		  FROM oauth_clients
+		 WHERE client_id = $1 AND deleted_at IS NULL
+		 LIMIT 1
+	`, id).Scan(
+		&rec.ID,
+		&rec.DisplayName,
+		&rec.RedirectURIs,
+		&rec.GrantTypes,
+		&rec.ResponseTypes,
+		&rec.Scopes,
+		&rec.Public,
+		&rec.HasSecret,
+		&rec.CreatedByUserID,
+		&rec.CreatedVia,
+		&rec.SeedSuppressed,
+		&rec.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return OAuthClientRecord{}, ErrOAuthClientNotFound
+	}
+	if err != nil {
+		return OAuthClientRecord{}, fmt.Errorf("get oauth client record %q: %w", id, err)
+	}
+	return rec, nil
+}
+
+func (s *FositeStore) DeleteClient(ctx context.Context, id string, suppressEnvSeed bool) error {
+	if s == nil || s.pool == nil {
+		return errors.New("auth: nil fosite store")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ErrOAuthClientNotFound
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE oauth_clients
+		   SET deleted_at = now(),
+		       seed_suppressed = $2
+		 WHERE client_id = $1 AND deleted_at IS NULL
+	`, id, suppressEnvSeed)
+	if err != nil {
+		return fmt.Errorf("delete oauth client %q: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrOAuthClientNotFound
+	}
+	return nil
+}
+
+func (s *FositeStore) HasConsent(ctx context.Context, userID, clientID string, scopes []string) (bool, error) {
+	if s == nil || s.pool == nil {
+		return false, errors.New("auth: nil fosite store")
+	}
+	userID = strings.TrimSpace(userID)
+	clientID = strings.TrimSpace(clientID)
+	scopes = normalizeOAuthScopes(scopes)
+	if userID == "" || clientID == "" {
+		return false, nil
+	}
+	if len(scopes) == 0 {
+		return true, nil
+	}
+	var granted []string
+	err := s.pool.QueryRow(ctx, `
+		SELECT granted_scopes
+		  FROM oauth_consents
+		 WHERE user_id = $1::uuid AND client_id = $2
+	`, userID, clientID).Scan(&granted)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("lookup oauth consent: %w", err)
+	}
+	grantedSet := map[string]bool{}
+	for _, scope := range granted {
+		grantedSet[scope] = true
+	}
+	for _, scope := range scopes {
+		if !grantedSet[scope] {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func (s *FositeStore) GrantConsent(ctx context.Context, userID, clientID string, scopes []string) error {
+	if s == nil || s.pool == nil {
+		return errors.New("auth: nil fosite store")
+	}
+	userID = strings.TrimSpace(userID)
+	clientID = strings.TrimSpace(clientID)
+	scopes = normalizeOAuthScopes(scopes)
+	if userID == "" {
+		return errors.New("auth: oauth consent user id is required")
+	}
+	if clientID == "" {
+		return errors.New("auth: oauth consent client id is required")
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO oauth_consents (user_id, client_id, granted_scopes)
+		VALUES ($1::uuid, $2, $3)
+		ON CONFLICT (user_id, client_id) DO UPDATE SET
+			granted_scopes = (
+				SELECT ARRAY(
+					SELECT DISTINCT scope
+					  FROM unnest(oauth_consents.granted_scopes || EXCLUDED.granted_scopes) AS scope
+					 ORDER BY scope
+				)
+			),
+			updated_at = now()
+	`, userID, clientID, scopes)
+	if err != nil {
+		return fmt.Errorf("grant oauth consent: %w", err)
+	}
+	return nil
+}
+
+func (s *FositeStore) envSeedSuppressed(ctx context.Context, id string) (bool, error) {
+	var suppressed bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT seed_suppressed
+		  FROM oauth_clients
+		 WHERE client_id = $1 AND deleted_at IS NOT NULL
+		 LIMIT 1
+	`, id).Scan(&suppressed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("lookup oauth env seed suppression %q: %w", id, err)
+	}
+	return suppressed, nil
 }
 
 func (s *FositeStore) ClientAssertionJWTValid(context.Context, string) error {
@@ -490,4 +727,33 @@ func sessionExpiry(session *foauth2.JWTSession, tokenType fosite.TokenType, fall
 		}
 	}
 	return time.Now().UTC().Add(fallback)
+}
+
+func normalizeOAuthClientCreatedVia(v string) string {
+	switch strings.TrimSpace(v) {
+	case OAuthClientCreatedViaAdminUI:
+		return OAuthClientCreatedViaAdminUI
+	case OAuthClientCreatedViaDCR:
+		return OAuthClientCreatedViaDCR
+	default:
+		return OAuthClientCreatedViaEnvSeed
+	}
+}
+
+func normalizeOAuthScopes(scopes []string) []string {
+	if len(scopes) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		scope = strings.TrimSpace(scope)
+		if scope == "" || seen[scope] {
+			continue
+		}
+		seen[scope] = true
+		out = append(out, scope)
+	}
+	sort.Strings(out)
+	return out
 }
