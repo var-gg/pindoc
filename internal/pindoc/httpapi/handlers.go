@@ -86,7 +86,7 @@ func (d Deps) handleConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"default_project_slug":   d.DefaultProjectSlug,
 		"default_project_locale": d.DefaultProjectLocale,
-		"multi_project":          d.deriveMultiProject(r.Context()),
+		"multi_project":          d.deriveMultiProject(r),
 		"public_base_url":        publicBase,
 		"version":                d.Version,
 		// providers + bind_addr replace the deprecated auth_mode enum
@@ -143,11 +143,11 @@ func (d Deps) identityRequired() bool {
 // without the operator flipping an env flag. Errors and a missing DB
 // pool fall back to false — Reader chrome stays single-project rather
 // than spuriously showing a switcher when the lookup hiccups.
-func (d Deps) deriveMultiProject(ctx context.Context) bool {
+func (d Deps) deriveMultiProject(r *http.Request) bool {
 	if d.DB == nil {
 		return false
 	}
-	n, err := projects.CountVisible(ctx, d.DB, "")
+	n, err := projects.CountVisible(r.Context(), d.DB, d.viewerScopeForRequest(r))
 	if err != nil {
 		if d.Logger != nil {
 			d.Logger.Warn("multi_project derivation failed; defaulting to false",
@@ -157,6 +157,17 @@ func (d Deps) deriveMultiProject(ctx context.Context) bool {
 		return false
 	}
 	return projects.IsMultiProject(n)
+}
+
+func (d Deps) viewerScopeForRequest(r *http.Request) projects.ViewerScope {
+	principal := d.principalForRequest(r)
+	if principal == nil || strings.TrimSpace(principal.UserID) == "" {
+		return projects.ViewerScope{AnonymousOnly: true}
+	}
+	if principal.IsLoopback() {
+		return projects.ViewerScope{UserID: principal.UserID, TrustedLocal: true}
+	}
+	return projects.ViewerScope{UserID: principal.UserID}
 }
 
 // checkOnboardingRequired returns true when the instance has no projects
@@ -379,7 +390,7 @@ func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"projects":             out,
 		"default_project_slug": d.DefaultProjectSlug,
-		"multi_project":        d.deriveMultiProject(r.Context()),
+		"multi_project":        d.deriveMultiProject(r),
 	})
 }
 
@@ -463,7 +474,7 @@ type areaRow struct {
 func (d Deps) handleAreas(w http.ResponseWriter, r *http.Request) {
 	slug := projectSlugFrom(r)
 	projectPredicate, projectArg := projectLookupPredicate(r, "projects", 1)
-	visibilityPredicate, visibilityArgs := artifactVisibilityPredicate(r, "x", 3)
+	visibilityPredicate, visibilityArgs := d.artifactVisibilityPredicate(r, "x", 3)
 	// include_templates=true counts _template_* artifacts in artifact_count.
 	// Must stay in lockstep with handleArtifactList's filter so Sidebar
 	// counts == list cardinality. Fixing the Phase 13 regression where
@@ -576,7 +587,7 @@ type authorUserRef struct {
 func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 	slug := projectSlugFrom(r)
 	projectPredicate, projectArg := projectLookupPredicate(r, "p", 1)
-	visibilityPredicate, visibilityArgs := artifactVisibilityPredicate(r, "a", 5)
+	visibilityPredicate, visibilityArgs := d.artifactVisibilityPredicate(r, "a", 5)
 	areaSlug := r.URL.Query().Get("area")
 	typeFilter := r.URL.Query().Get("type")
 	// include_templates=true surfaces _template_* artifacts (Phase 13).
@@ -773,7 +784,7 @@ type verificationNoteRow struct {
 func (d Deps) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	slug := projectSlugFrom(r)
 	projectPredicate, projectArg := projectLookupPredicate(r, "p", 1)
-	visibilityPredicate, visibilityArgs := artifactVisibilityPredicate(r, "a", 3)
+	visibilityPredicate, visibilityArgs := d.artifactVisibilityPredicate(r, "a", 3)
 	ref := r.PathValue("idOrSlug")
 	if ref == "" {
 		writeError(w, http.StatusBadRequest, "missing id or slug")
@@ -1179,7 +1190,7 @@ func (d Deps) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"ok":                   true,
 		"version":              d.Version,
 		"default_project_slug": d.DefaultProjectSlug,
-		"multi_project":        d.deriveMultiProject(r.Context()),
+		"multi_project":        d.deriveMultiProject(r),
 	}
 	if d.Embedder != nil {
 		ei := d.Embedder.Info()

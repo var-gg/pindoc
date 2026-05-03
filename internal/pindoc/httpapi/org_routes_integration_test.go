@@ -149,8 +149,8 @@ func TestOrgProjectArtifactRoutesIntegration(t *testing.T) {
 	if err := json.NewDecoder(legacy.Body).Decode(&legacyBody); err != nil {
 		t.Fatalf("decode legacy artifact list: %v", err)
 	}
-	if len(legacyBody.Artifacts) != 3 {
-		t.Fatalf("legacy artifacts count = %d, want 3; artifacts=%+v", len(legacyBody.Artifacts), legacyBody.Artifacts)
+	if len(legacyBody.Artifacts) != 1 || legacyBody.Artifacts[0].Slug != publicSlug {
+		t.Fatalf("legacy anonymous artifacts = %+v, want only public artifact %q", legacyBody.Artifacts, publicSlug)
 	}
 }
 

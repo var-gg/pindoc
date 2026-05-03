@@ -34,10 +34,9 @@ func TestIsMultiProject(t *testing.T) {
 
 // TestBuildVisibilitySelect locks the three branches of the
 // visibility-aware listing query so a future change here can't silently
-// regress: anonymous viewers see only public, members see public+org
-// scoped to their orgs, and the trusted_local single-user self-host
-// fallback returns everything for compatibility with existing callers
-// that haven't migrated to the scoped API.
+// regress: anonymous/default scopes see only public, members see public
+// plus membership-scoped rows, and explicit trusted_local single-user
+// self-host callers retain full visibility.
 func TestBuildVisibilitySelect(t *testing.T) {
 	const base = "SELECT count(*) FROM projects"
 
@@ -61,37 +60,66 @@ func TestBuildVisibilitySelect(t *testing.T) {
 			"visibility = $1",
 			"visibility = $2",
 			"organization_id::text = ANY($3)",
+			"project_members pm",
+			"organization_members om",
 		} {
 			if !strings.Contains(q, want) {
 				t.Errorf("members query missing %q in %q", want, q)
 			}
 		}
-		if len(args) != 3 {
-			t.Fatalf("expected 3 args (public, org, org_ids), got %d: %#v", len(args), args)
+		if len(args) != 6 {
+			t.Fatalf("expected 6 args (public, org, org_ids, org, private, user_id), got %d: %#v", len(args), args)
 		}
 		if args[0] != VisibilityPublic || args[1] != VisibilityOrg {
 			t.Errorf("first two args should be public/org tier, got %#v", args[:2])
 		}
 	})
 
-	t.Run("trusted_local fallback: no WHERE", func(t *testing.T) {
+	t.Run("default scope: public only", func(t *testing.T) {
 		q, args := buildVisibilitySelect(ViewerScope{}, base)
-		if strings.Contains(q, "WHERE") {
-			t.Errorf("trusted_local fallback should not add WHERE, got %q", q)
+		if !strings.Contains(q, "WHERE visibility = $1") {
+			t.Fatalf("default scope should fail closed to public-only, got %q", q)
 		}
-		if args != nil {
-			t.Errorf("trusted_local fallback should return nil args, got %#v", args)
+		if len(args) != 1 || args[0] != VisibilityPublic {
+			t.Fatalf("default scope args = %#v, want public-only", args)
 		}
 	})
 
-	t.Run("legacy string scope behaves as trusted_local", func(t *testing.T) {
+	t.Run("trusted_local explicit: no WHERE", func(t *testing.T) {
+		q, args := buildVisibilitySelect(ViewerScope{TrustedLocal: true}, base)
+		if strings.Contains(q, "WHERE") {
+			t.Errorf("trusted_local should not add WHERE, got %q", q)
+		}
+		if args != nil {
+			t.Errorf("trusted_local should return nil args, got %#v", args)
+		}
+	})
+
+	t.Run("legacy user string normalizes as trusted_local", func(t *testing.T) {
 		scope := normalizeScope("user-id-string")
+		if !scope.TrustedLocal || scope.UserID != "user-id-string" {
+			t.Fatalf("legacy non-empty string scope = %#v, want trusted_local with user id", scope)
+		}
 		q, args := buildVisibilitySelect(scope, base)
 		if strings.Contains(q, "WHERE") {
 			t.Errorf("legacy string scope should not filter, got %q", q)
 		}
 		if args != nil {
 			t.Errorf("legacy string scope should return nil args, got %#v", args)
+		}
+	})
+
+	t.Run("empty legacy string is anonymous", func(t *testing.T) {
+		scope := normalizeScope(" ")
+		if !scope.AnonymousOnly || scope.TrustedLocal {
+			t.Fatalf("empty string scope = %#v, want anonymous-only", scope)
+		}
+		q, args := buildVisibilitySelect(scope, base)
+		if !strings.Contains(q, "WHERE visibility = $1") {
+			t.Fatalf("empty string scope should be public-only, got %q", q)
+		}
+		if len(args) != 1 || args[0] != VisibilityPublic {
+			t.Fatalf("empty string args = %#v, want public-only", args)
 		}
 	})
 }

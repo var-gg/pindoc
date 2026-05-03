@@ -259,7 +259,11 @@ func deriveMultiProject(ctx context.Context, deps Deps, p *auth.Principal) bool 
 	if deps.DB == nil || p == nil {
 		return false
 	}
-	n, err := projects.CountVisible(ctx, deps.DB, p.UserID)
+	scope := projects.ViewerScope{UserID: p.UserID}
+	if p.IsLoopback() {
+		scope.TrustedLocal = true
+	}
+	n, err := projects.CountVisible(ctx, deps.DB, scope)
 	if err != nil {
 		if deps.Logger != nil {
 			deps.Logger.Warn("multi_project derivation failed; defaulting to false",

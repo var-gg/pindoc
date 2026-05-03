@@ -1,12 +1,14 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -204,6 +206,180 @@ func TestArtifactVisibilityPatchIntegration(t *testing.T) {
 	assertArtifactPatchErrorCode(t, missingPatch.Body.String(), "ARTIFACT_NOT_FOUND")
 }
 
+func TestLegacyArtifactRoutesApplyVisibilityIntegration(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PINDOC_TEST_DATABASE_URL"))
+	if dsn == "" {
+		t.Skip("set PINDOC_TEST_DATABASE_URL to run legacy artifact visibility HTTP DB integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := db.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer pool.Close()
+	if err := db.Migrate(ctx, pool.Pool); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	suffix := fmt.Sprintf("%x", time.Now().UnixNano())
+	slug := "legacy-vis-" + suffix
+	ownerEmail := "legacy-vis-owner-" + suffix + "@example.invalid"
+	viewerEmail := "legacy-vis-viewer-" + suffix + "@example.invalid"
+	ownerID := insertInviteHTTPUser(t, ctx, pool, "Legacy Visibility Owner "+suffix, ownerEmail)
+	viewerID := insertInviteHTTPUser(t, ctx, pool, "Legacy Visibility Viewer "+suffix, viewerEmail)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin create project tx: %v", err)
+	}
+	out, err := projects.CreateProject(ctx, tx, projects.CreateProjectInput{
+		Slug:            slug,
+		Name:            "Legacy Visibility " + suffix,
+		PrimaryLanguage: "en",
+		OwnerUserID:     ownerID,
+	})
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("create project: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit create project tx: %v", err)
+	}
+	projectID := out.ID
+	insertInviteHTTPMember(t, ctx, pool, projectID, viewerID, pauth.RoleViewer)
+	areaID := selectArtifactVisibilityHTTPArea(t, ctx, pool, projectID, "misc")
+	publicSlug := "legacy-public-" + suffix
+	orgSlug := "legacy-org-" + suffix
+	privateSlug := "legacy-private-" + suffix
+	insertArtifactVisibilityHTTPArtifact(t, ctx, pool, projectID, areaID, publicSlug, projects.VisibilityPublic, ownerID)
+	insertArtifactVisibilityHTTPArtifact(t, ctx, pool, projectID, areaID, orgSlug, projects.VisibilityOrg, ownerID)
+	insertArtifactVisibilityHTTPArtifact(t, ctx, pool, projectID, areaID, privateSlug, projects.VisibilityPrivate, ownerID)
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE slug = $1`, slug)
+		_, _ = pool.Exec(context.Background(), `
+			DELETE FROM users
+			 WHERE lower(email) IN ($1, $2)
+		`, strings.ToLower(ownerEmail), strings.ToLower(viewerEmail))
+	})
+
+	oauthSvc, err := pauth.NewOAuthService(ctx, pool, pauth.OAuthConfig{
+		Issuer:             "http://127.0.0.1:5830",
+		PublicBaseURL:      "http://127.0.0.1:5830",
+		RedirectBaseURL:    "http://127.0.0.1:5830",
+		SigningKeyPath:     t.TempDir() + "/oauth.pem",
+		ClientID:           "legacy-visibility-http-" + suffix,
+		RedirectURIs:       []string{"http://127.0.0.1:3846/callback"},
+		GitHubClientID:     "fake-gh-client",
+		GitHubClientSecret: "fake-gh-secret",
+	})
+	if err != nil {
+		t.Fatalf("NewOAuthService: %v", err)
+	}
+	handler := New(&config.Config{
+		AuthProviders: []string{config.AuthProviderGitHub},
+		BindAddr:      "0.0.0.0:5830",
+	}, Deps{
+		DB:                 pool,
+		Logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		DefaultProjectSlug: slug,
+		DefaultUserID:      ownerID,
+		OAuth:              oauthSvc,
+		AuthProviders:      []string{config.AuthProviderGitHub},
+		BindAddr:           "0.0.0.0:5830",
+	})
+
+	viewerOrg := doInviteRequest(t, handler, oauthSvc, viewerID, http.MethodGet, "/api/p/"+slug+"/artifacts/"+orgSlug, "")
+	if viewerOrg.Code != http.StatusOK {
+		t.Fatalf("viewer org detail status = %d, want 200; body=%s", viewerOrg.Code, viewerOrg.Body.String())
+	}
+	viewerList := doInviteRequest(t, handler, oauthSvc, viewerID, http.MethodGet, "/api/p/"+slug+"/artifacts", "")
+	if viewerList.Code != http.StatusOK {
+		t.Fatalf("viewer list status = %d, want 200; body=%s", viewerList.Code, viewerList.Body.String())
+	}
+	var viewerListBody struct {
+		Artifacts []struct {
+			Slug string `json:"slug"`
+		} `json:"artifacts"`
+	}
+	if err := json.NewDecoder(viewerList.Body).Decode(&viewerListBody); err != nil {
+		t.Fatalf("decode viewer list: %v", err)
+	}
+	viewerSlugs := map[string]bool{}
+	for _, artifact := range viewerListBody.Artifacts {
+		viewerSlugs[artifact.Slug] = true
+	}
+	if !viewerSlugs[publicSlug] || !viewerSlugs[orgSlug] || viewerSlugs[privateSlug] {
+		t.Fatalf("viewer artifacts = %+v, want public+org and no private", viewerListBody.Artifacts)
+	}
+
+	viewerPrivate := doInviteRequest(t, handler, oauthSvc, viewerID, http.MethodGet, "/api/p/"+slug+"/artifacts/"+privateSlug, "")
+	if viewerPrivate.Code != http.StatusNotFound {
+		t.Fatalf("viewer private detail status = %d, want 404; body=%s", viewerPrivate.Code, viewerPrivate.Body.String())
+	}
+	if strings.Contains(viewerPrivate.Body.String(), "body_markdown") {
+		t.Fatalf("viewer private detail leaked body_markdown: %s", viewerPrivate.Body.String())
+	}
+
+	viewerRevisions := doInviteRequest(t, handler, oauthSvc, viewerID, http.MethodGet, "/api/p/"+slug+"/artifacts/"+privateSlug+"/revisions", "")
+	if viewerRevisions.Code != http.StatusNotFound {
+		t.Fatalf("viewer private revisions status = %d, want 404; body=%s", viewerRevisions.Code, viewerRevisions.Body.String())
+	}
+	viewerDiff := doInviteRequest(t, handler, oauthSvc, viewerID, http.MethodGet, "/api/p/"+slug+"/artifacts/"+privateSlug+"/diff?from=1&to=1", "")
+	if viewerDiff.Code != http.StatusNotFound {
+		t.Fatalf("viewer private diff status = %d, want 404; body=%s", viewerDiff.Code, viewerDiff.Body.String())
+	}
+	if strings.Contains(viewerDiff.Body.String(), "unified_diff") {
+		t.Fatalf("viewer private diff leaked unified_diff: %s", viewerDiff.Body.String())
+	}
+
+	anonymousList := doInviteRequest(t, handler, nil, "", http.MethodGet, "/api/p/"+slug+"/artifacts", "")
+	if anonymousList.Code != http.StatusOK {
+		t.Fatalf("anonymous list status = %d, want 200; body=%s", anonymousList.Code, anonymousList.Body.String())
+	}
+	var listBody struct {
+		Artifacts []struct {
+			Slug string `json:"slug"`
+		} `json:"artifacts"`
+	}
+	if err := json.NewDecoder(anonymousList.Body).Decode(&listBody); err != nil {
+		t.Fatalf("decode anonymous list: %v", err)
+	}
+	if len(listBody.Artifacts) != 1 || listBody.Artifacts[0].Slug != publicSlug {
+		t.Fatalf("anonymous artifacts = %+v, want only public artifact %q", listBody.Artifacts, publicSlug)
+	}
+
+	loopbackList := doLoopbackVisibilityRequest(handler, http.MethodGet, "/api/p/"+slug+"/artifacts", "")
+	if loopbackList.Code != http.StatusOK {
+		t.Fatalf("loopback list status = %d, want 200; body=%s", loopbackList.Code, loopbackList.Body.String())
+	}
+	var loopbackBody struct {
+		Artifacts []struct {
+			Slug string `json:"slug"`
+		} `json:"artifacts"`
+	}
+	if err := json.NewDecoder(loopbackList.Body).Decode(&loopbackBody); err != nil {
+		t.Fatalf("decode loopback list: %v", err)
+	}
+	if len(loopbackBody.Artifacts) != 3 {
+		t.Fatalf("loopback artifacts count = %d, want 3; artifacts=%+v", len(loopbackBody.Artifacts), loopbackBody.Artifacts)
+	}
+}
+
+func doLoopbackVisibilityRequest(handler http.Handler, method, path, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+	req.RemoteAddr = "127.0.0.1:5830"
+	req.Host = "127.0.0.1:5830"
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec
+}
+
 func selectArtifactVisibilityHTTPArea(t *testing.T, ctx context.Context, pool *db.Pool, projectID, slug string) string {
 	t.Helper()
 	var id string
@@ -217,21 +393,25 @@ func selectArtifactVisibilityHTTPArea(t *testing.T, ctx context.Context, pool *d
 	return id
 }
 
-func insertArtifactVisibilityHTTPArtifact(t *testing.T, ctx context.Context, pool *db.Pool, projectID, areaID, slug, visibility string) string {
+func insertArtifactVisibilityHTTPArtifact(t *testing.T, ctx context.Context, pool *db.Pool, projectID, areaID, slug, visibility string, authorUserID ...string) string {
 	t.Helper()
+	authorID := ""
+	if len(authorUserID) > 0 {
+		authorID = strings.TrimSpace(authorUserID[0])
+	}
 	var id string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO artifacts (
 			project_id, area_id, slug, type, title,
-			body_markdown, body_locale, author_kind, author_id,
+			body_markdown, body_locale, author_kind, author_id, author_user_id,
 			completeness, status, review_state, visibility, published_at
 		) VALUES (
 			$1::uuid, $2::uuid, $3, 'Decision', $3,
-			'body', 'en', 'agent', 'codex',
+			'body', 'en', 'agent', 'codex', NULLIF($5, '')::uuid,
 			'partial', 'published', 'auto_published', $4, now()
 		)
 		RETURNING id::text
-	`, projectID, areaID, slug, visibility).Scan(&id); err != nil {
+	`, projectID, areaID, slug, visibility, authorID).Scan(&id); err != nil {
 		t.Fatalf("insert artifact: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `

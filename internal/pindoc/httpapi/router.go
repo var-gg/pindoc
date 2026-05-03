@@ -374,10 +374,19 @@ func projectLookupPredicate(r *http.Request, alias string, placeholder int) (str
 	return fmt.Sprintf("%s = $%d", projectCol, placeholder), projectSlugFrom(r)
 }
 
-func artifactVisibilityPredicate(r *http.Request, alias string, startPlaceholder int) (string, []any) {
+func (d Deps) artifactVisibilityPredicate(r *http.Request, alias string, startPlaceholder int) (string, []any) {
 	scope, ok := projectRouteContextFrom(r)
 	if !ok || !scope.OrgScoped || scope.Access == orgProjectRouteAccessTrusted {
-		return "TRUE", nil
+		if principal := d.principalForRequest(r); principal != nil && principal.IsLoopback() {
+			return "TRUE", nil
+		}
+		if ok && scope.Access == orgProjectRouteAccessTrusted {
+			return "TRUE", nil
+		}
+		if principal := d.principalForRequest(r); principal != nil && principal.IsOAuth() && strings.TrimSpace(principal.UserID) != "" {
+			return oauthArtifactVisibilityPredicate(alias, startPlaceholder, principal.UserID)
+		}
+		return publicArtifactVisibilityPredicate(alias, startPlaceholder)
 	}
 	if startPlaceholder <= 0 {
 		startPlaceholder = 1
@@ -399,8 +408,52 @@ func artifactVisibilityPredicate(r *http.Request, alias string, startPlaceholder
 		}
 		return "(" + strings.Join(parts, " OR ") + ")", args
 	default:
-		return fmt.Sprintf("%s = $%d", visibilityCol, startPlaceholder), []any{projects.VisibilityPublic}
+		return publicArtifactVisibilityPredicate(alias, startPlaceholder)
 	}
+}
+
+func publicArtifactVisibilityPredicate(alias string, startPlaceholder int) (string, []any) {
+	if startPlaceholder <= 0 {
+		startPlaceholder = 1
+	}
+	return fmt.Sprintf("%s = $%d", sqlColumn(alias, "visibility"), startPlaceholder), []any{projects.VisibilityPublic}
+}
+
+func oauthArtifactVisibilityPredicate(alias string, startPlaceholder int, userID string) (string, []any) {
+	if startPlaceholder <= 0 {
+		startPlaceholder = 1
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return publicArtifactVisibilityPredicate(alias, startPlaceholder)
+	}
+	visibilityCol := sqlColumn(alias, "visibility")
+	projectCol := sqlColumn(alias, "project_id")
+	authorCol := sqlColumn(alias, "author_user_id")
+	memberPredicate := fmt.Sprintf(`(
+		EXISTS (
+			SELECT 1
+			  FROM project_members pm
+			 WHERE pm.project_id = %s
+			   AND pm.user_id::text = $%d
+		)
+		OR EXISTS (
+			SELECT 1
+			  FROM projects vp
+			  JOIN organization_members om ON om.organization_id = vp.organization_id
+			 WHERE vp.id = %s
+			   AND om.user_id::text = $%d
+		)
+	)`, projectCol, startPlaceholder+3, projectCol, startPlaceholder+3)
+	predicate := fmt.Sprintf(
+		"(%s = $%d OR (%s AND (%s = $%d OR (%s = $%d AND %s::text = $%d))))",
+		visibilityCol, startPlaceholder,
+		memberPredicate,
+		visibilityCol, startPlaceholder+1,
+		visibilityCol, startPlaceholder+2,
+		authorCol, startPlaceholder+3,
+	)
+	return predicate, []any{projects.VisibilityPublic, projects.VisibilityOrg, projects.VisibilityPrivate, userID}
 }
 
 func sqlColumn(alias, column string) string {

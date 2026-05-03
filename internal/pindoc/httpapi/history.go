@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -28,19 +29,22 @@ type revisionRow struct {
 }
 
 func (d Deps) handleArtifactRevisions(w http.ResponseWriter, r *http.Request) {
-	projectSlug := projectSlugFrom(r)
+	projectPredicate, projectArg := projectLookupPredicate(r, "p", 1)
+	visibilityPredicate, visibilityArgs := d.artifactVisibilityPredicate(r, "a", 3)
 	ref := r.PathValue("idOrSlug")
 	if ref == "" {
 		writeError(w, http.StatusBadRequest, "missing id or slug")
 		return
 	}
+	args := append([]any{projectArg, ref}, visibilityArgs...)
 	var artifactID, slug, title string
-	err := d.DB.QueryRow(r.Context(), `
+	err := d.DB.QueryRow(r.Context(), fmt.Sprintf(`
 		SELECT a.id::text, a.slug, a.title
 		FROM artifacts a
 		JOIN projects p ON p.id = a.project_id
-		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
-	`, projectSlug, ref).Scan(&artifactID, &slug, &title)
+		WHERE %s AND (a.id::text = $2 OR a.slug = $2)
+		  AND %s
+	`, projectPredicate, visibilityPredicate), args...).Scan(&artifactID, &slug, &title)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "artifact not found")
 		return
@@ -129,7 +133,8 @@ type diffRevOut struct {
 }
 
 func (d Deps) handleArtifactDiff(w http.ResponseWriter, r *http.Request) {
-	projectSlug := projectSlugFrom(r)
+	projectPredicate, projectArg := projectLookupPredicate(r, "p", 1)
+	visibilityPredicate, visibilityArgs := d.artifactVisibilityPredicate(r, "a", 3)
 	ref := r.PathValue("idOrSlug")
 	if ref == "" {
 		writeError(w, http.StatusBadRequest, "missing id or slug")
@@ -140,13 +145,15 @@ func (d Deps) handleArtifactDiff(w http.ResponseWriter, r *http.Request) {
 
 	var artifactID, slug string
 	var latest int
-	err := d.DB.QueryRow(r.Context(), `
+	args := append([]any{projectArg, ref}, visibilityArgs...)
+	err := d.DB.QueryRow(r.Context(), fmt.Sprintf(`
 		SELECT a.id::text, a.slug,
 		       COALESCE((SELECT max(revision_number) FROM artifact_revisions WHERE artifact_id = a.id), 0)
 		FROM artifacts a
 		JOIN projects p ON p.id = a.project_id
-		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
-	`, projectSlug, ref).Scan(&artifactID, &slug, &latest)
+		WHERE %s AND (a.id::text = $2 OR a.slug = $2)
+		  AND %s
+	`, projectPredicate, visibilityPredicate), args...).Scan(&artifactID, &slug, &latest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "artifact not found")
 		return

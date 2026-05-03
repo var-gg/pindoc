@@ -3,6 +3,7 @@ package projects
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 )
@@ -25,6 +26,11 @@ const (
 // the same user across different Orgs is handled by the OrgIDs slice
 // (the union of every Org they have a membership row in).
 type ViewerScope struct {
+	// TrustedLocal preserves the single-user self-host behavior for
+	// loopback/process-trusted callers. It is intentionally explicit so
+	// the zero value fails closed to public-only instead of silently
+	// counting every project.
+	TrustedLocal bool
 	// AnonymousOnly forces the query to behave as if no user is logged in,
 	// even when UserID/OrgIDs are populated. Used by /pindoc.org/{org}/...
 	// public profile rendering: the same Reader code path serves both
@@ -51,10 +57,9 @@ type ViewerScope struct {
 //     project exists" which is the future Phase 3 enterprise tier;
 //     for now no flow sets projects.visibility='private'.)
 //
-// Backwards compat: if scope.UserID is empty AND OrgIDs is empty AND
-// AnonymousOnly is false, the function falls back to "trusted_local"
-// behavior (return total row count) so V1 self-host single-user
-// callers that haven't migrated to the scoped API still work.
+// Backwards compat: legacy string user IDs normalize to TrustedLocal,
+// but new call sites should pass ViewerScope explicitly. The ViewerScope
+// zero value is public-only so accidental empty scopes fail closed.
 func CountVisible(ctx context.Context, pool *db.Pool, scopeOrUserID any) (int, error) {
 	scope := normalizeScope(scopeOrUserID)
 	q, args := buildVisibilitySelect(scope, "SELECT count(*) FROM projects")
@@ -82,10 +87,14 @@ func normalizeScope(in any) ViewerScope {
 	case ViewerScope:
 		return v
 	case string:
-		// Legacy call: just a userID. Treat as trusted_local — return
-		// every row regardless of visibility. Phase D ACL work replaces
-		// this branch with a real membership lookup.
-		return ViewerScope{UserID: v}
+		userID := strings.TrimSpace(v)
+		if userID == "" {
+			return ViewerScope{AnonymousOnly: true}
+		}
+		// Legacy non-empty userID calls are trusted_local for backwards
+		// compatibility. New call sites pass ViewerScope explicitly so the
+		// trust decision stays visible at the edge.
+		return ViewerScope{UserID: userID, TrustedLocal: true}
 	default:
 		return ViewerScope{}
 	}
@@ -93,22 +102,46 @@ func normalizeScope(in any) ViewerScope {
 
 // buildVisibilitySelect appends the WHERE clause that enforces the
 // visibility tiers. Splits into three branches:
+//   - TrustedLocal: no WHERE (loopback/process trust)
 //   - AnonymousOnly: WHERE visibility = 'public'
-//   - has Org memberships: WHERE visibility = 'public'
-//                            OR (visibility = 'org' AND organization_id = ANY($N))
-//   - logged-in but no Org memberships, AnonymousOnly false:
-//                          legacy trusted_local — return everything
-//                          (single-user self-host preserves V1 behavior)
+//   - authenticated: public, org memberships, direct project memberships,
+//     and private projects only when directly joined
 func buildVisibilitySelect(scope ViewerScope, base string) (string, []any) {
+	if scope.TrustedLocal {
+		return base, nil
+	}
 	if scope.AnonymousOnly {
 		return base + " WHERE visibility = $1", []any{VisibilityPublic}
 	}
-	if len(scope.OrgIDs) > 0 {
-		return base + fmt.Sprintf(
-				" WHERE visibility = $1 OR (visibility = $2 AND organization_id::text = ANY($3))"),
-			[]any{VisibilityPublic, VisibilityOrg, scope.OrgIDs}
+	userID := strings.TrimSpace(scope.UserID)
+	if userID == "" && len(scope.OrgIDs) == 0 {
+		return base + " WHERE visibility = $1", []any{VisibilityPublic}
 	}
-	// Trusted_local fallback: no scoping, full row count. Preserves V1
-	// self-host behavior while the membership-aware path rolls out.
-	return base, nil
+	clauses := []string{"visibility = $1"}
+	args := []any{VisibilityPublic}
+	if len(scope.OrgIDs) > 0 {
+		n := len(args) + 1
+		clauses = append(clauses, fmt.Sprintf("(visibility = $%d AND organization_id::text = ANY($%d))", n, n+1))
+		args = append(args, VisibilityOrg, scope.OrgIDs)
+	}
+	if userID != "" {
+		n := len(args) + 1
+		projectMember := fmt.Sprintf(`EXISTS (
+			SELECT 1 FROM project_members pm
+			 WHERE pm.project_id = projects.id
+			   AND pm.user_id::text = $%d
+		)`, n+2)
+		orgMember := fmt.Sprintf(`EXISTS (
+			SELECT 1 FROM organization_members om
+			 WHERE om.organization_id = projects.organization_id
+			   AND om.user_id::text = $%d
+		)`, n+2)
+		membership := "(" + projectMember + " OR " + orgMember + ")"
+		clauses = append(clauses,
+			fmt.Sprintf("(visibility = $%d AND %s)", n, membership),
+			fmt.Sprintf("(visibility = $%d AND %s)", n+1, projectMember),
+		)
+		args = append(args, VisibilityOrg, VisibilityPrivate, userID)
+	}
+	return base + " WHERE " + strings.Join(clauses, " OR "), args
 }
