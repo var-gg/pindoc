@@ -568,6 +568,10 @@
 .artifact-assets__head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--fg-1); }
 .artifact-assets__head h2 { margin: 0; font-size: 14px; font-weight: 650; color: var(--fg-0); }
 .artifact-assets__paperclip { width: 16px; height: 16px; color: var(--fg-3); }
+.artifact-assets__groups { display: grid; gap: 16px; }
+.artifact-assets__group { display: grid; gap: 7px; }
+.artifact-assets__group-title { margin: 0; color: var(--fg-2); font-size: 13px; font-weight: 600; line-height: 1.35; }
+.artifact-assets__group-title span { color: var(--fg-3); font-family: var(--font-mono); font-size: 11px; font-weight: 500; }
 .artifact-assets__list { display: grid; gap: 8px; }
 .artifact-asset { display: grid; grid-template-columns: 32px minmax(0, 1fr) 18px; align-items: center; gap: 10px; min-height: 52px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-2); color: var(--fg-1); text-decoration: none; background: var(--bg-0); }
 .artifact-asset:hover { border-color: var(--border-strong); color: var(--fg-0); background: var(--bg-1); }
