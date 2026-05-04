@@ -1017,6 +1017,10 @@ export type OAuthConsentInfo = {
   client_display_name: string;
   scopes: string[];
   already_granted: boolean;
+  consent_nonce: string;
+  created_via: "env_seed" | "admin_ui" | "dcr" | string;
+  created_at: string;
+  redirect_uris: string[];
 };
 
 // Phase D — permission management plane shapes. These mirror

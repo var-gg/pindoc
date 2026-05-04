@@ -70,6 +70,8 @@ type OAuthService struct {
 	defaultProjectSlug string
 	cookieSecret       []byte
 	dcrLimiter         *dcrRateLimiter
+	consentNonceMu     sync.Mutex
+	consentNonces      map[string]consentNonceRecord
 
 	// github is swapped in-place when the admin UI rotates credentials.
 	// Read paths take a snapshot via currentGitHub() so a swap mid-

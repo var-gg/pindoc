@@ -178,6 +178,14 @@
 .ops__chip--ok { color: var(--ops-ok); }
 .ops__chip--warn { color: #ffd166; }
 
+.ops__spin {
+  animation: ops-spin 1s linear infinite;
+}
+
+@keyframes ops-spin {
+  to { transform: rotate(360deg); }
+}
+
 .ops__form {
   display: grid;
   gap: 12px;
@@ -440,6 +448,48 @@
 .ops__summary dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.ops__trust {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--ops-border);
+  border-radius: 4px;
+  padding: 10px;
+  color: var(--ops-mute);
+}
+
+.ops__trust .ops__chip {
+  justify-self: start;
+}
+
+.ops__scope-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ops__scope-list li {
+  border: 1px solid var(--ops-border);
+  border-radius: 4px;
+  padding: 8px;
+}
+
+.ops__scope-list strong {
+  display: block;
+  color: var(--ops-text);
+}
+
+.ops__scope-list code {
+  display: inline-block;
+  margin-top: 4px;
+}
+
+.ops__scope-list p {
+  margin: 6px 0 0;
+  color: var(--ops-mute);
 }
 
 /* Totals band */

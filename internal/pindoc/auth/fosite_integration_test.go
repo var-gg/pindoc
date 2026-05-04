@@ -248,21 +248,29 @@ func TestConsentFlowIntegration(t *testing.T) {
 		t.Fatalf("first authorize path = %q, want /authorize; location=%s", first.Path, first.String())
 	}
 
-	infoReq := httptest.NewRequest(http.MethodGet, "/oauth/consent?"+first.RawQuery, nil)
-	for _, cookie := range cookies {
-		infoReq.AddCookie(cookie)
+	info := consentInfoFromHandler(t, mux, first.RawQuery, cookies)
+	if info.ConsentNonce == "" {
+		t.Fatal("consent info missing consent_nonce")
 	}
-	infoRec := httptest.NewRecorder()
-	mux.ServeHTTP(infoRec, infoReq)
-	if infoRec.Code != http.StatusOK {
-		t.Fatalf("consent info status = %d, body=%s", infoRec.Code, infoRec.Body.String())
+	if info.CreatedVia != OAuthClientCreatedViaDCR {
+		t.Fatalf("consent info created_via = %q, want dcr", info.CreatedVia)
+	}
+	if info.CreatedAt == "" {
+		t.Fatal("consent info missing created_at")
+	}
+	if len(info.RedirectURIs) != 1 || info.RedirectURIs[0] != redirectURI {
+		t.Fatalf("consent info redirect_uris = %#v, want %q", info.RedirectURIs, redirectURI)
 	}
 
-	approve := confirmAuthorize(t, mux, "approve", first.RawQuery, cookies)
+	rejectConfirmAuthorize(t, mux, "approve", first.RawQuery, "", "http://127.0.0.1:5830", cookies, http.StatusForbidden)
+	rejectConfirmAuthorize(t, mux, "approve", first.RawQuery, info.ConsentNonce, "https://attacker.example", cookies, http.StatusForbidden)
+
+	approve := confirmAuthorize(t, mux, "approve", first.RawQuery, info.ConsentNonce, cookies)
 	code := approve.Query().Get("code")
 	if code == "" {
 		t.Fatalf("approve redirect missing code: %s", approve.String())
 	}
+	rejectConfirmAuthorize(t, mux, "approve", first.RawQuery, info.ConsentNonce, "http://127.0.0.1:5830", cookies, http.StatusForbidden)
 	token := tokenRequestFromHandler(t, mux, url.Values{
 		"grant_type":    {"authorization_code"},
 		"client_id":     {clientID},
@@ -271,12 +279,12 @@ func TestConsentFlowIntegration(t *testing.T) {
 		"code_verifier": {verifier},
 	}, http.StatusOK)
 	accessToken := requireString(t, token, "access_token")
-	info, err := svc.TokenVerifier(ctx, accessToken, nil)
+	tokenInfo, err := svc.TokenVerifier(ctx, accessToken, nil)
 	if err != nil {
 		t.Fatalf("TokenVerifier after consent: %v", err)
 	}
-	if info.UserID != userID || !contains(info.Scopes, ScopePindoc) {
-		t.Fatalf("TokenInfo after consent = %+v", info)
+	if tokenInfo.UserID != userID || !contains(tokenInfo.Scopes, ScopePindoc) {
+		t.Fatalf("TokenInfo after consent = %+v", tokenInfo)
 	}
 	granted, err := svc.Store().HasConsent(ctx, userID, clientID, SupportedOAuthScopes())
 	if err != nil {
@@ -306,7 +314,8 @@ func TestConsentFlowIntegration(t *testing.T) {
 	}
 	denyURL := buildAuthorizeURL(t, "http://127.0.0.1:5830", denyClientID, redirectURI, verifier)
 	denyConsent := authorizeLocationFromHandlerWithCookies(t, mux, denyURL, "203.0.113.10:51234", cookies)
-	denied := confirmAuthorize(t, mux, "deny", denyConsent.RawQuery, cookies)
+	denyInfo := consentInfoFromHandler(t, mux, denyConsent.RawQuery, cookies)
+	denied := confirmAuthorize(t, mux, "deny", denyConsent.RawQuery, denyInfo.ConsentNonce, cookies)
 	if got := denied.Query().Get("error"); got != "access_denied" {
 		t.Fatalf("deny error = %q, want access_denied; location=%s", got, denied.String())
 	}
@@ -399,23 +408,62 @@ func browserSessionCookies(t *testing.T, svc *OAuthService, userID string) []*ht
 	return resp.Cookies()
 }
 
-func confirmAuthorize(t *testing.T, handler http.Handler, action, rawQuery string, cookies []*http.Cookie) *url.URL {
+func consentInfoFromHandler(t *testing.T, handler http.Handler, rawQuery string, cookies []*http.Cookie) consentInfoResponse {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/oauth/consent?"+rawQuery, nil)
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("consent info status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var out consentInfoResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode consent info: %v; body=%s", err, rec.Body.String())
+	}
+	return out
+}
+
+func confirmAuthorize(t *testing.T, handler http.Handler, action, rawQuery, nonce string, cookies []*http.Cookie) *url.URL {
+	t.Helper()
+	resp := postConfirmAuthorize(t, handler, action, rawQuery, nonce, "http://127.0.0.1:5830", cookies)
+	defer resp.Body.Close()
+	return requireAuthorizeLocation(t, resp)
+}
+
+func rejectConfirmAuthorize(t *testing.T, handler http.Handler, action, rawQuery, nonce, origin string, cookies []*http.Cookie, wantStatus int) {
+	t.Helper()
+	resp := postConfirmAuthorize(t, handler, action, rawQuery, nonce, origin, cookies)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("confirm status = %d, want %d, body=%s", resp.StatusCode, wantStatus, string(body))
+	}
+}
+
+func postConfirmAuthorize(t *testing.T, handler http.Handler, action, rawQuery, nonce, origin string, cookies []*http.Cookie) *http.Response {
 	t.Helper()
 	form := url.Values{
 		"action": {action},
 		"query":  {rawQuery},
 	}
+	if strings.TrimSpace(nonce) != "" {
+		form.Set("consent_nonce", nonce)
+	}
 	req := httptest.NewRequest(http.MethodPost, "/oauth/authorize/confirm", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if strings.TrimSpace(origin) != "" {
+		req.Header.Set("Origin", origin)
+	}
 	req.RemoteAddr = "203.0.113.10:51234"
 	for _, cookie := range cookies {
 		req.AddCookie(cookie)
 	}
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	resp := rec.Result()
-	defer resp.Body.Close()
-	return requireAuthorizeLocation(t, resp)
+	return rec.Result()
 }
 
 func tokenRequestFromHandler(t *testing.T, handler http.Handler, form url.Values, wantStatus int) map[string]any {

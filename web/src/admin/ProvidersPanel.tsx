@@ -150,8 +150,8 @@ export function ProvidersPanel() {
 
       <main className="ops__main">
         {loading && (
-          <div className="ops__loading">
-            <Loader2 className="lucide" aria-hidden /> {t("admin.providers.loading")}
+          <div className="ops__loading" role="status" aria-live="polite">
+            <Loader2 className="lucide ops__spin" aria-hidden /> {t("admin.providers.loading")}
           </div>
         )}
 
@@ -437,8 +437,8 @@ function OAuthClientsPanel() {
       </p>
 
       {loading && (
-        <div className="ops__loading">
-          <Loader2 className="lucide" aria-hidden /> {t("admin.oauth_clients.loading")}
+        <div className="ops__loading" role="status" aria-live="polite">
+          <Loader2 className="lucide ops__spin" aria-hidden /> {t("admin.oauth_clients.loading")}
         </div>
       )}
 
