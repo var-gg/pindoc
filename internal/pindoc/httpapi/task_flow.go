@@ -144,7 +144,7 @@ func (d Deps) handleTaskFlow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pathProject := projectSlugFrom(r)
-	in, err := parseTaskFlowHTTPRequest(pathProject, r.URL.Query(), includeReaderHiddenProjects(r))
+	in, err := parseTaskFlowHTTPRequest(pathProject, r.URL.Query(), readerHiddenProjectQueryRequested(r))
 	if err != nil {
 		writeTaskFlowHTTPError(w, http.StatusBadRequest, "BAD_QUERY", err.Error())
 		return
@@ -321,12 +321,16 @@ func (d Deps) resolveTaskFlowHTTPProjects(ctx context.Context, principal *pauth.
 
 func (d Deps) resolveTaskFlowHTTPScope(ctx context.Context, principal *pauth.Principal, slug string, includeHidden bool) (*pauth.ProjectScope, error) {
 	slug = strings.TrimSpace(slug)
-	if slug != "" && readerHiddenProjectSlug(slug) && !includeHidden {
+	hidden := slug != "" && readerHiddenProjectSlug(slug)
+	if hidden && !includeHidden {
 		return nil, errTaskFlowHiddenProject
 	}
 	scope, err := pauth.ResolveProject(ctx, d.DB, principal, slug)
 	if err != nil {
 		return nil, err
+	}
+	if hidden && !includeReaderHiddenProjectsForScope(includeHidden, scope) {
+		return nil, errTaskFlowHiddenProject
 	}
 	if !scope.Can("read.artifact") {
 		return nil, fmt.Errorf("%w: %q", pauth.ErrProjectAccessDenied, slug)
@@ -355,7 +359,7 @@ func (d Deps) visibleTaskFlowHTTPScopes(ctx context.Context, principal *pauth.Pr
 			out = append(out, *scope)
 			continue
 		}
-		if !errors.Is(err, pauth.ErrProjectAccessDenied) && !errors.Is(err, pauth.ErrProjectNotFound) {
+		if !errors.Is(err, pauth.ErrProjectAccessDenied) && !errors.Is(err, pauth.ErrProjectNotFound) && !errors.Is(err, errTaskFlowHiddenProject) {
 			return nil, err
 		}
 	}

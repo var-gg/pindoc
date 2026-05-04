@@ -355,16 +355,22 @@ func (d Deps) handleCurrentUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
-	includeHidden := includeReaderHiddenProjects(r)
+	principal := d.principalForRequest(r)
+	membershipUserID := ""
+	if principal != nil && principal.IsOAuth() {
+		membershipUserID = strings.TrimSpace(principal.UserID)
+	}
 	rows, err := d.DB.Query(r.Context(), `
 		SELECT
 			p.id::text, p.slug, o.slug, p.name, p.description, p.color,
 			p.primary_language, p.created_at,
-			(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived')
+			(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived'),
+			COALESCE(pm.role, '')
 		FROM projects p
 		LEFT JOIN organizations o ON o.id = p.organization_id
+		LEFT JOIN project_members pm ON pm.project_id = p.id AND pm.user_id::text = $1
 		ORDER BY p.created_at
-	`)
+	`, membershipUserID)
 	if err != nil {
 		d.Logger.Error("project list", "err", err)
 		writeError(w, http.StatusInternalServerError, "query failed")
@@ -376,9 +382,10 @@ func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var p projectListRow
 		var desc, color *string
+		var role string
 		if err := rows.Scan(
 			&p.ID, &p.Slug, &p.OrganizationSlug, &p.Name, &desc, &color,
-			&p.PrimaryLanguage, &p.CreatedAt, &p.ArtifactsCount,
+			&p.PrimaryLanguage, &p.CreatedAt, &p.ArtifactsCount, &role,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan failed")
 			return
@@ -391,7 +398,11 @@ func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
 		}
 		p.OrgSlug = p.OrganizationSlug
 		p.ReaderHidden = readerHiddenProjectSlug(p.Slug)
-		if p.ReaderHidden && !includeHidden {
+		scope := &pauth.ProjectScope{Role: role}
+		if principal != nil && principal.IsLoopback() {
+			scope.Role = pauth.RoleOwner
+		}
+		if p.ReaderHidden && !includeReaderHiddenProjects(r, scope) {
 			continue
 		}
 		out = append(out, p)

@@ -71,6 +71,10 @@ Public allow:
 - `/api/p/{project}/read-states`
 - `/api/p/{project}/artifacts/{idOrSlug}/read-state`
 
+Reader-hidden project 확장(`include_hidden=true`, `include_internal=true`,
+`ops=1`, `debug=ops`)은 owner 전용입니다. Public caller는 이런 query token을
+붙여도 필터링된 기본 `/api/projects` 및 task-flow project list만 받아야 합니다.
+
 Public block:
 
 - `/mcp`

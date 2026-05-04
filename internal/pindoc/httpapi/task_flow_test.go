@@ -36,6 +36,32 @@ func TestParseTaskFlowHTTPRequest(t *testing.T) {
 	}
 }
 
+func TestTaskFlowHiddenProjectIncludeRequiresOwnerScope(t *testing.T) {
+	cases := []struct {
+		name      string
+		requested bool
+		role      string
+		want      bool
+	}{
+		{name: "owner with query", requested: true, role: pauth.RoleOwner, want: true},
+		{name: "owner without query", requested: false, role: pauth.RoleOwner, want: false},
+		{name: "viewer with query", requested: true, role: pauth.RoleViewer, want: false},
+		{name: "editor with query", requested: true, role: pauth.RoleEditor, want: false},
+		{name: "nil scope", requested: true, role: "", want: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var scope *pauth.ProjectScope
+			if c.role != "" {
+				scope = &pauth.ProjectScope{Role: c.role}
+			}
+			if got := includeReaderHiddenProjectsForScope(c.requested, scope); got != c.want {
+				t.Fatalf("includeReaderHiddenProjectsForScope(%v, role=%q) = %v, want %v", c.requested, c.role, got, c.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeTaskFlowHTTPActor(t *testing.T) {
 	agent, err := normalizeTaskFlowHTTPActor(&pauth.Principal{AgentID: "codex"}, "agent", "", nil, true, true)
 	if err != nil {

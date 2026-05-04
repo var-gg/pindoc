@@ -73,6 +73,11 @@ Publicly allowed:
 - `/api/p/{project}/read-states`
 - `/api/p/{project}/artifacts/{idOrSlug}/read-state`
 
+Reader-hidden project expansion (`include_hidden=true`, `include_internal=true`,
+`ops=1`, `debug=ops`) is owner-only. Public callers must receive the normal
+filtered `/api/projects` and task-flow project lists even when they add those
+query tokens.
+
 Publicly blocked:
 
 - `/mcp`
