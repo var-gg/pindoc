@@ -320,6 +320,7 @@ function AreaTreeNode({
     ...indent,
     ...(areaVisual ? { "--area-color": `var(${areaVisual.color_token})` } : {}),
   } as React.CSSProperties & Record<"--area-color", string | undefined>;
+  const toggleLabel = expanded ? t("sidebar.collapse_area", areaLabel) : t("sidebar.expand_area", areaLabel);
 
   useEffect(() => {
     if (selectedInside) setExpanded(true);
@@ -327,51 +328,42 @@ function AreaTreeNode({
 
   return (
     <>
-      <Tooltip content={areaTitle}>
-        <button
-          type="button"
-          className={`side-item side-item--area${level > 0 ? " side-item--area-child" : ""}${active ? " active" : ""}${empty ? " empty" : ""}`}
-          style={style}
-          onClick={() => onSelectArea(active ? null : node.slug)}
-        >
-          {hasChildren ? (
-            <span
-              role="button"
-              tabIndex={0}
-              onClick={(e) => {
-                e.stopPropagation();
-                setExpanded((v) => !v);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setExpanded((v) => !v);
-                }
-              }}
-              className="side-item__toggle"
-              aria-label={expanded ? "collapse" : "expand"}
-              style={{ display: "inline-flex", alignItems: "center" }}
-            >
-              {expanded ? <ChevronDown className="lucide" /> : <ChevronRight className="lucide" />}
-            </span>
-          ) : (
-            <span style={{ width: 14, display: "inline-block" }} />
-          )}
-          <AreaIcon className="lucide side-item__area-icon" />
-          <span className="side-item__label">{areaLabel}</span>
-          {!fixed && (
-            <span
-              className="side-item__taxonomy side-item__taxonomy--promoted"
-              aria-label={taxonomyHint}
-            />
-          )}
-          <span className="side-item__count">{subtreeCount}</span>
-          {unreadCount > 0 && (
-            <span className="side-item__unread">{t("sidebar.unread_count", unreadCount)}</span>
-          )}
-        </button>
-      </Tooltip>
+      <div className="side-item-row side-item-row--area" style={style}>
+        {hasChildren ? (
+          <button
+            type="button"
+            className="side-item__toggle"
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+            aria-label={toggleLabel}
+            title={toggleLabel}
+          >
+            {expanded ? <ChevronDown className="lucide" /> : <ChevronRight className="lucide" />}
+          </button>
+        ) : (
+          <span className="side-item__toggle-placeholder" aria-hidden="true" />
+        )}
+        <Tooltip content={areaTitle}>
+          <button
+            type="button"
+            className={`side-item side-item--area${level > 0 ? " side-item--area-child" : ""}${active ? " active" : ""}${empty ? " empty" : ""}`}
+            onClick={() => onSelectArea(active ? null : node.slug)}
+          >
+            <AreaIcon className="lucide side-item__area-icon" />
+            <span className="side-item__label">{areaLabel}</span>
+            {!fixed && (
+              <span
+                className="side-item__taxonomy side-item__taxonomy--promoted"
+                aria-label={taxonomyHint}
+              />
+            )}
+            <span className="side-item__count">{subtreeCount}</span>
+            {unreadCount > 0 && (
+              <span className="side-item__unread">{t("sidebar.unread_count", unreadCount)}</span>
+            )}
+          </button>
+        </Tooltip>
+      </div>
       {hasChildren && expanded && node.children.map((child) => (
         <AreaTreeNode
           key={child.id}

@@ -145,6 +145,8 @@
   "sidebar.type_locked_hint": "task pins Type to Task. Switch to wiki for cross-type filtering.",
   "sidebar.area_fixed_hint": "Fixed taxonomy (docs/19)",
   "sidebar.area_user_promoted_hint": "User-promoted sub-area",
+  "sidebar.expand_area": "Expand %s",
+  "sidebar.collapse_area": "Collapse %s",
   "sidebar.type_fixed_hint": "Fixed Type taxonomy",
   "sidebar.agent_generated": "generated agents",
   "sidebar.agent_system": "system actors",

@@ -145,6 +145,8 @@
   "sidebar.type_locked_hint": "작업 화면에서는 종류가 작업으로 고정됩니다. 교차 필터가 필요하면 문서 화면으로 전환하세요.",
   "sidebar.area_fixed_hint": "Fixed taxonomy (docs/19) · 고정 분류",
   "sidebar.area_user_promoted_hint": "User-promoted sub-area · 사용자 승급",
+  "sidebar.expand_area": "%s 펼치기",
+  "sidebar.collapse_area": "%s 접기",
   "sidebar.type_fixed_hint": "고정 종류 분류",
   "sidebar.agent_generated": "자동 생성 agent",
   "sidebar.agent_system": "시스템 작업자",
