@@ -95,6 +95,42 @@ func TestRequiredH2WarningsParentheticalBilingual(t *testing.T) {
 	}
 }
 
+func TestRequiredH2WarningsStandaloneKoreanEnglishAndMixed(t *testing.T) {
+	cases := []struct {
+		name string
+		typ  string
+		body string
+	}{
+		{
+			name: "decision korean only",
+			typ:  "Decision",
+			body: "## 요약\n\n결론.\n\n## 맥락\n\n배경.\n\n## 결정\n\n결정.\n\n## 근거\n\n근거.\n\n## 대안\n\n대안.\n\n## 결과\n\n결과.\n",
+		},
+		{
+			name: "decision english only",
+			typ:  "Decision",
+			body: "## TL;DR\n\nDecision.\n\n## Context\n\nContext.\n\n## Decision\n\nDecision.\n\n## Rationale\n\nRationale.\n\n## Alternatives considered\n\nAlternatives.\n\n## Consequences\n\nConsequences.\n",
+		},
+		{
+			name: "debug korean only",
+			typ:  "Debug",
+			body: "## 증상\n\n증상.\n\n## 재현\n\n재현.\n\n## 가설\n\n가설.\n\n## 원인\n\n원인.\n\n## 해결\n\n해결.\n\n## 검증\n\n검증.\n",
+		},
+		{
+			name: "task mixed",
+			typ:  "Task",
+			body: "## 목적\n\n목적.\n\n## Scope\n\nScope.\n\n## 코드 좌표\n\n`internal/pindoc/mcp/tools/artifact_propose.go`\n\n## Acceptance criteria\n\n- [ ] acceptance exists.\n\n## 검증\n\nTests pass.\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if warns := requiredH2Warnings(tc.body, tc.typ); len(warns) != 0 {
+				t.Fatalf("%s standalone headings should satisfy %s slots, got %v", tc.name, tc.typ, warns)
+			}
+		})
+	}
+}
+
 func TestRequiredH2SlotsMergeStaleTemplateHintsWithDefaults(t *testing.T) {
 	slots := requiredH2SlotsFromHints("Task", &validatorHints{
 		RequiredH2: []string{"목적", "범위", "TODO"},

@@ -1131,7 +1131,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			warnings = append(warnings, titleLocaleMismatchWarnings(scope.ProjectLocale, in.Title)...)
 			warnings = append(warnings, bodyH1Warnings(in.BodyMarkdown)...)
 			warnings = append(warnings, requiredH2WarningsFor(ctx, deps, scope.ProjectSlug, in.BodyMarkdown, in.Type)...)
-			warnings = append(warnings, sectionDuplicatesEdgesWarnings(in.BodyMarkdown)...)
+			warnings = append(warnings, sectionDuplicatesEdgesWarningsForArtifact(finalSlug, in.BodyMarkdown, ShapeBodyPatch)...)
 			warnings = append(warnings, decisionSubjectAreaWarnings(in)...)
 			slugWarnings, slugSuggestedActions := slugBrevityAdvisory(in, finalSlug)
 			warnings = append(warnings, slugWarnings...)
@@ -1709,7 +1709,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	// Canonical-claim rewrite guard — compare prev/new H2 sections for
 	// types that carry a canonical truth claim (Debug, Decision, Analysis)
 	// and require fresh evidence when that section's content shifts.
-	warnings := updatePathWarnings(ctx, deps, scope.ProjectSlug, in)
+	warnings := updatePathWarnings(ctx, deps, scope.ProjectSlug, currentSlug, shape, in)
 	warnings = append(warnings, repoWarnings...)
 	warnings = append(warnings, acceptanceUncheckedNudgeWarnings(currentType, in.BodyMarkdown, in.CommitMsg)...)
 	warnings = append(warnings, decisionSubjectAreaWarnings(in)...)
@@ -1789,13 +1789,13 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 // place can't produce a duplicate — but runs the structural/pin gates so
 // the agent learns about title length / heading / pin-path issues on
 // revised artifacts too.
-func updatePathWarnings(ctx context.Context, deps Deps, projectSlug string, in artifactProposeInput) []string {
+func updatePathWarnings(ctx context.Context, deps Deps, projectSlug, currentSlug string, shape RevisionShape, in artifactProposeInput) []string {
 	var out []string
 	out = append(out, pinPathWarnings(deps, in.Pins)...)
 	out = append(out, titleQualityWarnings(in.Title, in.BodyLocale, projectTitleJargon(deps))...)
 	out = append(out, bodyH1Warnings(in.BodyMarkdown)...)
 	out = append(out, requiredH2WarningsFor(ctx, deps, projectSlug, in.BodyMarkdown, in.Type)...)
-	out = append(out, sectionDuplicatesEdgesWarnings(in.BodyMarkdown)...)
+	out = append(out, sectionDuplicatesEdgesWarningsForArtifact(currentSlug, in.BodyMarkdown, shape)...)
 	return out
 }
 
@@ -3685,7 +3685,7 @@ func activeTaskContextNextTools(projectSlug, areaSlug string, related []RelatedR
 }
 
 // pinPathWarnings checks every repo-backed pin path against the configured
-// repo root and returns one PIN_PATH_NOT_FOUND:<path> warning per miss.
+// repo root and returns path diagnostics for misses.
 // No-op when deps.RepoRoot is empty (V1 default — the V1.5 git-pinner
 // takes over once it lands). Traversal-escape attempts (..) are rejected
 // as warnings too; the current commit_sha-less pin flow is trust-on-report
@@ -3696,6 +3696,8 @@ func pinPathWarnings(deps Deps, pins []ArtifactPinInput) []string {
 		return nil
 	}
 	var out []string
+	var missing []string
+	checked := 0
 	repoRoot := cleanAbsPath(deps.RepoRoot)
 	for _, p := range pins {
 		kind := pinmodel.NormalizeKind(p.Kind, p.Path)
@@ -3712,10 +3714,15 @@ func pinPathWarnings(deps Deps, pins []ArtifactPinInput) []string {
 			out = append(out, label)
 			continue
 		}
+		checked++
 		if _, err := os.Stat(checkPath); err != nil {
-			out = append(out, "PIN_PATH_NOT_FOUND:"+label)
+			missing = append(missing, "PIN_PATH_NOT_FOUND:"+label)
 		}
 	}
+	if len(out) == 0 && checked > 1 && len(missing) == checked {
+		return []string{fmt.Sprintf("PIN_PATH_UNOBSERVABLE:%d", checked)}
+	}
+	out = append(out, missing...)
 	return out
 }
 
@@ -4040,6 +4047,13 @@ func sectionDuplicatesEdgesWarnings(body string) []string {
 		}
 	}
 	return nil
+}
+
+func sectionDuplicatesEdgesWarningsForArtifact(slug, body string, shape RevisionShape) []string {
+	if isTemplateArtifact(slug) || shape == ShapeAcceptanceTransition || shape == ShapeScopeDefer {
+		return nil
+	}
+	return sectionDuplicatesEdgesWarnings(body)
 }
 
 func normalizeEdgeDuplicateHeading(heading string) string {

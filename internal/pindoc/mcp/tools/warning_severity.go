@@ -55,6 +55,7 @@ var warningSeverityCatalog = map[string]string{
 	"PIN_PATH_NONEXISTENT":               SeverityWarn,
 	"PIN_PATH_OUTSIDE_REPO":              SeverityWarn,
 	"PIN_PATH_NOT_FOUND":                 SeverityWarn,
+	"PIN_PATH_UNOBSERVABLE":              SeverityWarn,
 	"PIN_PATH_REJECTED":                  SeverityWarn,
 	"PIN_REPO_ID_NOT_FOUND":              SeverityWarn,
 	"PIN_REPO_LOCAL_PATHS_MISSING":       SeverityWarn,

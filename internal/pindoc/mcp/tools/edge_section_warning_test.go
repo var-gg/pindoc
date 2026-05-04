@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/var-gg/pindoc/internal/pindoc/projects"
 )
 
 func TestSectionDuplicatesEdgesWarnings(t *testing.T) {
@@ -35,6 +37,34 @@ Narrative only.
 `
 	if got := sectionDuplicatesEdgesWarnings(body); len(got) != 0 {
 		t.Fatalf("clean body should not warn, got %v", got)
+	}
+}
+
+func TestSectionDuplicatesEdgesWarningsSkipTemplateArtifacts(t *testing.T) {
+	for _, seed := range projects.TemplateSeeds {
+		t.Run(seed.Slug, func(t *testing.T) {
+			got := sectionDuplicatesEdgesWarningsForArtifact(seed.Slug, seed.Body, ShapeBodyPatch)
+			if len(got) != 0 {
+				t.Fatalf("template body should not warn for recommended relationship section, got %v", got)
+			}
+		})
+	}
+}
+
+func TestSectionDuplicatesEdgesWarningsSkipAcceptanceTransition(t *testing.T) {
+	body := `## Purpose
+
+Body.
+
+## 연관
+
+This section predates typed edges.
+`
+	if got := sectionDuplicatesEdgesWarningsForArtifact("task-with-legacy-section", body, ShapeAcceptanceTransition); len(got) != 0 {
+		t.Fatalf("acceptance_transition should not re-emit section duplicate warning, got %v", got)
+	}
+	if got := sectionDuplicatesEdgesWarningsForArtifact("task-with-legacy-section", body, ShapeBodyPatch); len(got) != 1 || got[0] != sectionDuplicatesEdgesWarning {
+		t.Fatalf("body_patch should still warn for normal artifacts, got %v", got)
 	}
 }
 

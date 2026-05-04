@@ -40,6 +40,17 @@ func TestPinPathWarningsDistinguishRelativeAndAbsolutePaths(t *testing.T) {
 	}
 }
 
+func TestPinPathWarningsCollapseAllMissingAsUnobservable(t *testing.T) {
+	root := t.TempDir()
+	got := pinPathWarnings(Deps{RepoRoot: root}, []ArtifactPinInput{
+		{Path: "external/a.go", Kind: "code"},
+		{Path: "external/b.go", Kind: "code"},
+	})
+	if len(got) != 1 || got[0] != "PIN_PATH_UNOBSERVABLE:2" {
+		t.Fatalf("all-missing external workspace warning = %v, want PIN_PATH_UNOBSERVABLE:2", got)
+	}
+}
+
 func TestPinDiagnosticHintsPointAtWorkspaceDetect(t *testing.T) {
 	warnings := []string{"PIN_REPO_NOT_REGISTERED:docs/a.md"}
 	actions := strings.Join(pinDiagnosticSuggestedActions(warnings), "\n")
