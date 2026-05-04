@@ -868,7 +868,7 @@ export type ArtifactVisibilityPatchError = {
 export type CreateProjectInput = {
   slug: string;
   name: string;
-  primary_language: "en" | "ko" | "ja";
+  primary_language: "en" | "ko";
   visibility?: VisibilityTier;
   description?: string;
   color?: string;

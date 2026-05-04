@@ -4,6 +4,7 @@ import {
   fieldForProjectCreateError,
   isProjectCreateSubmitDisabled,
   projectCreateErrorMessage,
+  projectReservedSlugCategory,
   validateProjectSlugInput,
 } from "../src/reader/projectSlugPolicy";
 
@@ -192,6 +193,24 @@ function testCreateProjectSlugClientValidation(): void {
   assertEqual(validateProjectSlugInput("var-gg-test"), null, "valid project slug should pass client validation");
 }
 
+function testCreateProjectReservedSlugMessagesUseCategoryExamples(): void {
+  const examples = [
+    ["support", "service"],
+    ["billing", "billing"],
+    ["dashboard", "workspace"],
+    ["signup", "auth"],
+  ] as const;
+
+  for (const [slug, category] of examples) {
+    assertEqual(projectReservedSlugCategory(slug), category, `${slug} should map to ${category}`);
+    for (const copy of [ko, en]) {
+      const t = tFrom(copy as Record<string, string>);
+      const message = projectCreateErrorMessage(t, "SLUG_RESERVED", { slug });
+      assert(message.includes(`/${slug}`), `reserved slug message should include category example /${slug}`);
+    }
+  }
+}
+
 function testCreateProjectSubmitDisabledState(): void {
   assert(
     isProjectCreateSubmitDisabled({ slug: "", name: "Var GG", primaryLanguage: "ko", submitting: false }),
@@ -204,6 +223,10 @@ function testCreateProjectSubmitDisabledState(): void {
   assert(
     isProjectCreateSubmitDisabled({ slug: "admin", name: "Admin", primaryLanguage: "ko", submitting: false }),
     "reserved slug should disable submit",
+  );
+  assert(
+    isProjectCreateSubmitDisabled({ slug: "var-gg", name: "Var GG", primaryLanguage: "ja", submitting: false }),
+    "unsupported JA web language should disable submit",
   );
   assert(
     isProjectCreateSubmitDisabled({ slug: "var-gg", name: "Var GG", primaryLanguage: "ko", submitting: true }),
@@ -222,4 +245,5 @@ testCmdKCopyDoesNotAdvertiseMissingCommands();
 testCreateProjectErrorsHideRawCodes();
 testCreateProjectErrorFieldMapping();
 testCreateProjectSlugClientValidation();
+testCreateProjectReservedSlugMessagesUseCategoryExamples();
 testCreateProjectSubmitDisabledState();

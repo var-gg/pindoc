@@ -58,9 +58,31 @@ function renderCreateProjectWelcome(projectLang: "en" | "ko"): string {
 function testCreateProjectWelcomeUsesSecondStep(): void {
   const korean = renderCreateProjectWelcome("ko");
   assert(korean.includes("2 / 3 단계"), "CreateProject welcome should be step 2 in KO");
+  assert(korean.includes("나중에 만들기"), "CreateProject welcome should expose skip action in KO");
 
   const english = renderCreateProjectWelcome("en");
   assert(english.includes("Step 2 / 3"), "CreateProject welcome should be step 2 in EN");
+  assert(english.includes("Skip for now"), "CreateProject welcome should expose skip action in EN");
+}
+
+function testCreateProjectLanguagePickerIsKoEnOnly(): void {
+  const html = renderCreateProjectWelcome("en");
+  assert(html.includes('value="en"'), "CreateProject should expose EN radio");
+  assert(html.includes('value="ko"'), "CreateProject should expose KO radio");
+  assert(!html.includes('value="ja"'), "CreateProject should not expose unsupported JA radio");
+  assert(html.includes("Choose EN or KO"), "CreateProject language hint should match the two-option picker");
+}
+
+function testCreateProjectPlainFormHasCancelAction(): void {
+  const html = renderToStaticMarkup(
+    <I18nProvider projectLang="en">
+      <MemoryRouter initialEntries={["/projects/new"]}>
+        <CreateProjectPage />
+      </MemoryRouter>
+    </I18nProvider>,
+  );
+
+  assert(html.includes("Cancel"), "CreateProject plain form should expose cancel action");
 }
 
 function testCreateProjectSuccessShowsThreeCopyTargets(): void {
@@ -106,5 +128,7 @@ function testNewProjectKoreanCopyUsesLocalizedStepLabels(): void {
 
 testIdentitySetupLocalizesKoAndEn();
 testCreateProjectWelcomeUsesSecondStep();
+testCreateProjectLanguagePickerIsKoEnOnly();
+testCreateProjectPlainFormHasCancelAction();
 testCreateProjectSuccessShowsThreeCopyTargets();
 testNewProjectKoreanCopyUsesLocalizedStepLabels();

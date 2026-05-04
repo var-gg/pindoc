@@ -11,25 +11,29 @@
 // without depending on the Reader's project-scoped chrome being usable
 // yet.
 import { useEffect, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { Check, Copy, Loader2 } from "lucide-react";
 import { api, type CreateProjectResp } from "../api/client";
 import { useI18n } from "../i18n";
+import { DEFAULT_READER_ORG_SLUG, projectSurfacePath } from "../readerRoutes";
 import {
   fieldForProjectCreateError,
   isProjectCreateSubmitDisabled,
+  PROJECT_CREATE_WEB_LANGUAGES,
   PROJECT_SLUG_HTML_PATTERN,
   projectCreateErrorMessage,
   validateProjectSlugInput,
 } from "./projectSlugPolicy";
 import "../styles/reader.css";
 
-type Lang = "en" | "ko" | "ja";
+type Lang = "en" | "ko";
 type CopyTarget = "url" | "mcp_json" | "agent_prompt";
 
 export function CreateProjectPage() {
   const { t, lang } = useI18n();
   const initialLang: Lang = lang === "ko" ? "ko" : "en";
+  const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   // welcome=1 marks the onboarding wizard entry — LegacyRedirect sends
   // fresh installs here, and the page renders a friendlier header so
@@ -45,6 +49,7 @@ export function CreateProjectPage() {
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [created, setCreated] = useState<CreateProjectResp | null>(null);
   const [copied, setCopied] = useState<CopyTarget | null>(null);
+  const [fallbackProjectSlug, setFallbackProjectSlug] = useState<string | null>(null);
   const slugRef = useRef<HTMLInputElement | null>(null);
   const nameRef = useRef<HTMLInputElement | null>(null);
   const languageRef = useRef<HTMLInputElement | null>(null);
@@ -53,6 +58,20 @@ export function CreateProjectPage() {
   useEffect(() => {
     if (!created) setCopied(null);
   }, [created]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.config()
+      .then((cfg) => {
+        if (!cancelled) setFallbackProjectSlug(cfg.default_project_slug);
+      })
+      .catch(() => {
+        if (!cancelled) setFallbackProjectSlug("pindoc");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const field = fieldForProjectCreateError(errorCode);
@@ -67,11 +86,11 @@ export function CreateProjectPage() {
   }, [errorCode]);
 
   const serverErrorField = fieldForProjectCreateError(errorCode);
-  const serverErrorMessage = errorCode ? projectCreateErrorMessage(t, errorCode) : null;
+  const serverErrorMessage = errorCode ? projectCreateErrorMessage(t, errorCode, { slug }) : null;
   const slugClientErrorCode = validateProjectSlugInput(slug);
   const slugError =
     slugClientErrorCode
-      ? projectCreateErrorMessage(t, slugClientErrorCode)
+      ? projectCreateErrorMessage(t, slugClientErrorCode, { slug })
       : serverErrorField === "slug"
         ? serverErrorMessage
         : null;
@@ -104,6 +123,14 @@ export function CreateProjectPage() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function handleCancel() {
+    if (location.key !== "default") {
+      navigate(-1);
+      return;
+    }
+    navigate(projectSurfacePath(fallbackProjectSlug ?? "pindoc", "today", undefined, DEFAULT_READER_ORG_SLUG), { replace: true });
   }
 
   function reset() {
@@ -207,7 +234,7 @@ export function CreateProjectPage() {
             {t("new_project.field.language")}
           </legend>
           <div className="cp-radio-group" aria-invalid={languageError ? true : undefined}>
-            {(["en", "ko", "ja"] as const).map((l) => (
+            {PROJECT_CREATE_WEB_LANGUAGES.map((l) => (
               <label key={l} className="cp-radio">
                 <input
                   ref={l === "en" ? languageRef : undefined}
@@ -269,6 +296,9 @@ export function CreateProjectPage() {
             {submitting
               ? t("new_project.submitting")
               : t("new_project.submit")}
+          </button>
+          <button type="button" className="cp-link-secondary" onClick={handleCancel}>
+            {isWelcome ? t("new_project.welcome.skip") : t("new_project.cancel")}
           </button>
         </div>
       </form>
