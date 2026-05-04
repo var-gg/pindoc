@@ -5,6 +5,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	artifactpreflight "github.com/var-gg/pindoc/internal/pindoc/artifact/preflight"
+	"github.com/var-gg/pindoc/internal/pindoc/projects"
 )
 
 // TestParseValidatorHints covers the four shapes the preflight layer
@@ -119,7 +122,7 @@ func TestRequiredH2WarningsStandaloneKoreanEnglishAndMixed(t *testing.T) {
 		{
 			name: "task mixed",
 			typ:  "Task",
-			body: "## 목적\n\n목적.\n\n## Scope\n\nScope.\n\n## 코드 좌표\n\n`internal/pindoc/mcp/tools/artifact_propose.go`\n\n## Acceptance criteria\n\n- [ ] acceptance exists.\n\n## 검증\n\nTests pass.\n",
+			body: "## 목적\n\n목적.\n\n## Scope\n\nScope.\n\n## 코드 좌표\n\n`internal/pindoc/mcp/tools/artifact_propose.go`\n\n## Acceptance criteria\n\n- [ ] acceptance exists.\n\n## 검증\n\nTests pass.\n\n## Outcome\n\n- 핵심 결과: result.\n- 코드 변경: commit `abcdef1`.\n- 회귀 진술: regression covered.\n",
 		},
 	}
 	for _, tc := range cases {
@@ -135,7 +138,7 @@ func TestRequiredH2SlotsMergeStaleTemplateHintsWithDefaults(t *testing.T) {
 	slots := requiredH2SlotsFromHints("Task", &validatorHints{
 		RequiredH2: []string{"목적", "범위", "TODO"},
 	})
-	for _, want := range []string{"Purpose", "Scope", "코드 좌표", "TODO", "TC / DoD"} {
+	for _, want := range []string{"Purpose", "Scope", "코드 좌표", "TODO", "TC / DoD", "Outcome"} {
 		if !requiredH2SlotLabelsContain(slots, want) {
 			t.Fatalf("merged Task slots missing %q: %+v", want, slots)
 		}
@@ -184,6 +187,56 @@ func TestTaskPreflightRequiresCodeCoordinatesAndTCDOD(t *testing.T) {
 	_, failed, _ = preflight(context.Background(), Deps{}, "", &missingTCDOD, "en")
 	if !containsString(failed, "MISSING_H2:TC / DoD") {
 		t.Fatalf("Task without TC / DoD should fail H2 validation: %v", failed)
+	}
+}
+
+func TestTaskOutcomeSlotIsSoftWarningAtPropose(t *testing.T) {
+	body := taskBodyWithCodeCoordinate("`internal/pindoc/mcp/tools/artifact_propose.go`")
+	in := artifactProposeInput{
+		Type:         "Task",
+		Title:        "task missing outcome",
+		AreaSlug:     "mcp",
+		AuthorID:     "test-agent",
+		BodyMarkdown: body,
+	}
+
+	_, failed, _ := preflight(context.Background(), Deps{}, "", &in, "ko")
+	if containsString(failed, "MISSING_H2:Outcome") {
+		t.Fatalf("Outcome should be a propose warning, not a blocking H2 failure: %v", failed)
+	}
+
+	warnings := updatePathWarnings(context.Background(), Deps{}, "", "task-missing-outcome", ShapeBodyPatch, in)
+	if !containsString(warnings, "MISSING_H2:Outcome") {
+		t.Fatalf("missing Outcome should surface as accepted-path warning, got %v", warnings)
+	}
+
+	actions := outcomeTemplateSuggestedActionsForWarnings(warnings)
+	claimDone := claimDoneOutcomePreflightOutput(body, nil, nil)
+	if claimDone == nil || !containsString(claimDone.Failed, artifactpreflight.OutcomeSectionMissing) {
+		t.Fatalf("claim_done should still fail without Outcome, got %+v", claimDone)
+	}
+	if !reflect.DeepEqual(actions, claimDone.SuggestedActions) {
+		t.Fatalf("propose warning actions should match claim_done actions\n  propose: %+v\n  claim:   %+v", actions, claimDone.SuggestedActions)
+	}
+}
+
+func TestTaskOutcomeRequiredH2Aliases(t *testing.T) {
+	base := taskBodyWithCodeCoordinate("`internal/pindoc/mcp/tools/artifact_propose.go`")
+	missing := requiredH2Warnings(base, "Task")
+	if !containsString(missing, "MISSING_H2:Outcome") {
+		t.Fatalf("Task body without Outcome should warn, got %v", missing)
+	}
+
+	for _, heading := range []string{"Outcome", "결과", "완료 결과", "산출", "구현 결과"} {
+		t.Run(heading, func(t *testing.T) {
+			body := base + "\n\n## " + heading + "\n\n" +
+				"- 핵심 결과: result.\n" +
+				"- 코드 변경: commit `abcdef1`.\n" +
+				"- 회귀 진술: regression covered.\n"
+			if warnings := requiredH2Warnings(body, "Task"); containsString(warnings, "MISSING_H2:Outcome") {
+				t.Fatalf("%q should satisfy Outcome slot, got %v", heading, warnings)
+			}
+		})
 	}
 }
 
@@ -388,6 +441,28 @@ func TestTemplateHintsForTypesExposeRequiredH2Aliases(t *testing.T) {
 		if !containsExactString(analysis.RequiredH2[0].Aliases, wantAlias) {
 			t.Fatalf("aliases %v missing %q", analysis.RequiredH2[0].Aliases, wantAlias)
 		}
+	}
+}
+
+func TestTemplateTaskBodyIncludesOutcomeWithoutEdgeDuplicateWarning(t *testing.T) {
+	var body string
+	for _, seed := range projects.TemplateSeeds {
+		if seed.Slug == "_template_task" {
+			body = seed.Body
+			break
+		}
+	}
+	if body == "" {
+		t.Fatal("_template_task seed missing")
+	}
+	if !strings.Contains(body, "required_h2=목적,범위,코드 좌표,TODO,TC / DoD,Outcome") {
+		t.Fatalf("_template_task validator missing Outcome required_h2 hint")
+	}
+	if !strings.Contains(body, "## Outcome") {
+		t.Fatalf("_template_task body missing Outcome section")
+	}
+	if warnings := sectionDuplicatesEdgesWarningsForArtifact("_template_task", body, ShapeBodyPatch); containsString(warnings, sectionDuplicatesEdgesWarning) {
+		t.Fatalf("_template_task should not trigger SECTION_DUPLICATES_EDGES, got %v", warnings)
 	}
 }
 

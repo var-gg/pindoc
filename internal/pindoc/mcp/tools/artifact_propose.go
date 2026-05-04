@@ -1167,6 +1167,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			if consentRequiredForUserChatWarning(isConvDerived, resolvedMeta, in.BodyMarkdown) {
 				warnings = append(warnings, "CONSENT_REQUIRED_FOR_USER_CHAT")
 			}
+			suggestedActions = append(suggestedActions, outcomeTemplateSuggestedActionsForWarnings(warnings)...)
 			// Invalidate validator hints when a new `_template_*` row lands
 			// — the pre-insert cache may have a negative-cache entry for
 			// this type that we need to clear so the next propose picks
@@ -1763,6 +1764,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	}
 	suggested = append(suggested, sectionDuplicatesEdgesSuggestedActions(warnings)...)
 	suggested = append(suggested, titleLocaleMismatchSuggestedActions(warnings)...)
+	suggested = append(suggested, outcomeTemplateSuggestedActionsForWarnings(warnings)...)
 
 	// Task propose-경로-warning-영속화: persist update-path warnings +
 	// canonical-rewrite flag into events so Reader Trust Card and future
@@ -2150,6 +2152,9 @@ func preflight(ctx context.Context, deps Deps, projectSlug string, in *artifactP
 	if strings.TrimSpace(in.BodyMarkdown) != "" {
 		hints := getValidatorHints(ctx, deps, projectSlug, in.Type)
 		for _, slot := range missingRequiredH2Slots(in.BodyMarkdown, requiredH2SlotsFromHints(in.Type, hints)) {
+			if softRequiredH2Slot(in.Type, slot) {
+				continue
+			}
 			push(fmt.Sprintf(i18n.T(lang, "preflight.h2_missing"), in.Type, slot.Label), "MISSING_H2:"+slot.Label)
 		}
 		if lines, ok := tldrLineCapViolation(in.BodyMarkdown); ok {
@@ -4092,6 +4097,19 @@ func sectionDuplicatesEdgesSuggestedActions(warnings []string) []string {
 	return nil
 }
 
+func outcomeTemplateSuggestedActionsForWarnings(warnings []string) []string {
+	for _, w := range warnings {
+		label, ok := strings.CutPrefix(w, "MISSING_H2:")
+		if !ok {
+			continue
+		}
+		if h2HeadingMatchesSlot(label, taskOutcomeRequiredH2Slot()) {
+			return artifactpreflight.OutcomeTemplateSuggestedActions()
+		}
+	}
+	return nil
+}
+
 func decisionSubjectAreaWarnings(in artifactProposeInput) []string {
 	if in.Type != "Decision" {
 		return nil
@@ -4274,6 +4292,13 @@ type requiredH2Slot struct {
 	Aliases []string
 }
 
+func taskOutcomeRequiredH2Slot() requiredH2Slot {
+	return requiredH2Slot{
+		Label:   "Outcome",
+		Aliases: []string{"Outcome", "결과", "산출", "완료 결과"},
+	}
+}
+
 // requiredH2Warnings flags missing mandatory H2 sections per Type. Fuzzy
 // match: a slot is satisfied if any of its aliases appear as an H2
 // (case-insensitive). en/ko aliases tolerate the current bilingual
@@ -4293,6 +4318,10 @@ func requiredH2WarningsForSlots(body string, slots []requiredH2Slot) []string {
 		out = append(out, "MISSING_H2:"+slot.Label)
 	}
 	return out
+}
+
+func softRequiredH2Slot(artifactType string, slot requiredH2Slot) bool {
+	return artifactType == "Task" && requiredH2SlotsOverlap(slot, taskOutcomeRequiredH2Slot())
 }
 
 func requiredH2SlotsFor(ctx context.Context, deps Deps, projectSlug, artifactType string) []requiredH2Slot {
@@ -4348,21 +4377,19 @@ func missingRequiredH2Slots(body string, slots []requiredH2Slot) []requiredH2Slo
 	if len(slots) == 0 {
 		return nil
 	}
-	seen := make(map[string]bool)
+	var headings []string
 	for _, line := range strings.Split(body, "\n") {
 		after, ok := strings.CutPrefix(line, "## ")
 		if !ok {
 			continue
 		}
-		for _, key := range h2HeadingKeys(after) {
-			seen[key] = true
-		}
+		headings = append(headings, after)
 	}
 	var out []requiredH2Slot
 	for _, slot := range slots {
 		matched := false
-		for _, alt := range slot.Aliases {
-			if seen[normalizeH2Label(alt)] {
+		for _, heading := range headings {
+			if h2HeadingMatchesSlot(heading, slot) {
 				matched = true
 				break
 			}
@@ -4478,6 +4505,24 @@ func h2HeadingMatchesSlot(heading string, slot requiredH2Slot) bool {
 			}
 		}
 	}
+	if requiredH2SlotsOverlap(slot, taskOutcomeRequiredH2Slot()) {
+		for _, key := range h2HeadingKeys(heading) {
+			if outcomeHeadingKeyMatches(key) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func outcomeHeadingKeyMatches(key string) bool {
+	key = normalizeH2Label(key)
+	for _, alias := range taskOutcomeRequiredH2Slot().Aliases {
+		aliasKey := normalizeH2Label(alias)
+		if key == aliasKey || strings.Contains(key, aliasKey) {
+			return true
+		}
+	}
 	return false
 }
 
@@ -4534,6 +4579,7 @@ func defaultRequiredH2Slots(t string) []requiredH2Slot {
 			{Label: "코드 좌표", Aliases: []string{"코드 좌표", "Code coordinates", "Code coordinate", "Code coords", "리소스 경로", "Resources", "Resource paths", "Resource path"}},
 			{Label: "TODO", Aliases: []string{"TODO", "Acceptance criteria", "Acceptance", "완료 기준", "완료기준"}},
 			{Label: "TC / DoD", Aliases: []string{"TC / DoD", "TC", "DoD", "Test cases", "Definition of done", "테스트", "검증"}},
+			taskOutcomeRequiredH2Slot(),
 		}
 	case "Debug":
 		return []requiredH2Slot{
