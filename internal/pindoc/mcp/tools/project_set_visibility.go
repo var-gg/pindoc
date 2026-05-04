@@ -60,7 +60,33 @@ without raw SQL. No-op calls return status=informational and affected=0.
 				}, nil
 			}
 
-			tag, err := deps.DB.Exec(ctx, `
+			tx, err := deps.DB.Begin(ctx)
+			if err != nil {
+				return nil, projectSetVisibilityOutput{}, fmt.Errorf("project.set_visibility begin tx: %w", err)
+			}
+			defer func() { _ = tx.Rollback(ctx) }()
+
+			var currentVisibility string
+			if err := tx.QueryRow(ctx, `
+				SELECT visibility
+				  FROM projects
+				 WHERE id = $1::uuid
+				 FOR UPDATE
+			`, scope.ProjectID).Scan(&currentVisibility); err != nil {
+				return nil, projectSetVisibilityOutput{}, fmt.Errorf("project.set_visibility lookup: %w", err)
+			}
+			if currentVisibility == tier {
+				return nil, projectSetVisibilityOutput{
+					Status:      "informational",
+					Code:        "PROJECT_VISIBILITY_NO_OP",
+					ProjectID:   scope.ProjectID,
+					ProjectSlug: scope.ProjectSlug,
+					Visibility:  tier,
+					Affected:    0,
+				}, nil
+			}
+
+			tag, err := tx.Exec(ctx, `
 				UPDATE projects
 				   SET visibility = $2,
 				       updated_at = now()
@@ -70,15 +96,25 @@ without raw SQL. No-op calls return status=informational and affected=0.
 			if err != nil {
 				return nil, projectSetVisibilityOutput{}, fmt.Errorf("project.set_visibility update: %w", err)
 			}
-			if tag.RowsAffected() == 0 {
-				return nil, projectSetVisibilityOutput{
-					Status:      "informational",
-					Code:        "PROJECT_VISIBILITY_NO_OP",
-					ProjectID:   scope.ProjectID,
-					ProjectSlug: scope.ProjectSlug,
-					Visibility:  tier,
-					Affected:    0,
-				}, nil
+			actorID := "pindoc.project.set_visibility"
+			if p != nil && strings.TrimSpace(p.AgentID) != "" {
+				actorID = strings.TrimSpace(p.AgentID)
+			}
+			actorUserID := principalUserID(p)
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO events (project_id, kind, subject_id, payload)
+				VALUES ($1, 'project.visibility_changed', $1, jsonb_build_object(
+					'from',          $2::text,
+					'to',            $3::text,
+					'actor_user_id', NULLIF($4, '')::uuid,
+					'actor_id',      $5::text,
+					'origin',        'mcp_project_set_visibility'
+				))
+			`, scope.ProjectID, currentVisibility, tier, actorUserID, actorID); err != nil {
+				return nil, projectSetVisibilityOutput{}, fmt.Errorf("project.set_visibility event: %w", err)
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return nil, projectSetVisibilityOutput{}, fmt.Errorf("project.set_visibility commit: %w", err)
 			}
 			return nil, projectSetVisibilityOutput{
 				Status:      "ok",

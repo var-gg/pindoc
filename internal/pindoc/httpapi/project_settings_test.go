@@ -180,6 +180,13 @@ func TestProjectSettingsPatchIntegration(t *testing.T) {
 		t.Fatalf("owner project visibility resp = %+v", projectVisOut)
 	}
 	assertProjectVisibility(t, ctx, pool, projectID, "public")
+	assertHTTPProjectVisibilityEvent(t, ctx, pool, projectID, "org", "public", ownerID, "user:web-reader", "http_project_settings", 1)
+
+	ownerProjectPublicNoOp := doInviteRequest(t, handler, oauthSvc, ownerID, http.MethodPatch, "/api/p/"+slug+"/settings", `{"visibility":"public"}`)
+	if ownerProjectPublicNoOp.Code != http.StatusOK {
+		t.Fatalf("owner project visibility no-op status = %d, want 200; body=%s", ownerProjectPublicNoOp.Code, ownerProjectPublicNoOp.Body.String())
+	}
+	assertHTTPProjectVisibilityEvent(t, ctx, pool, projectID, "org", "public", ownerID, "user:web-reader", "http_project_settings", 1)
 
 	ownerCurrent := doInviteRequest(t, handler, oauthSvc, ownerID, http.MethodGet, "/api/p/"+slug, "")
 	if ownerCurrent.Code != http.StatusOK {
@@ -269,5 +276,36 @@ func assertProjectVisibility(t *testing.T, ctx context.Context, pool *db.Pool, p
 	}
 	if got != want {
 		t.Fatalf("visibility = %q, want %q", got, want)
+	}
+}
+
+func assertHTTPProjectVisibilityEvent(t *testing.T, ctx context.Context, pool *db.Pool, projectID, from, to, actorUserID, actorID, origin string, wantCount int) {
+	t.Helper()
+	var count int
+	var gotFrom, gotTo, gotActorUserID, gotActorID, gotOrigin string
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)::int,
+		       COALESCE(max(payload->>'from'), ''),
+		       COALESCE(max(payload->>'to'), ''),
+		       COALESCE(max(payload->>'actor_user_id'), ''),
+		       COALESCE(max(payload->>'actor_id'), ''),
+		       COALESCE(max(payload->>'origin'), '')
+		  FROM events
+		 WHERE project_id = $1::uuid
+		   AND subject_id = $1::uuid
+		   AND kind = 'project.visibility_changed'
+	`, projectID).Scan(&count, &gotFrom, &gotTo, &gotActorUserID, &gotActorID, &gotOrigin); err != nil {
+		t.Fatalf("select project visibility event: %v", err)
+	}
+	if count != wantCount {
+		t.Fatalf("project visibility event count = %d, want %d", count, wantCount)
+	}
+	if count == 0 {
+		return
+	}
+	got := strings.Join([]string{gotFrom, gotTo, gotActorUserID, gotActorID, gotOrigin}, "|")
+	want := strings.Join([]string{from, to, actorUserID, actorID, origin}, "|")
+	if got != want {
+		t.Fatalf("project visibility event payload = %s, want %s", got, want)
 	}
 }

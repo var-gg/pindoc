@@ -107,9 +107,77 @@ func (d Deps) handleProjectSettingsPatch(w http.ResponseWriter, r *http.Request)
 
 	q := fmt.Sprintf(`UPDATE projects SET %s WHERE id = $1::uuid`,
 		strings.Join(sets, ", "))
-	if _, err := d.DB.Exec(r.Context(), q, args...); err != nil {
+
+	tx, err := d.DB.Begin(r.Context())
+	if err != nil {
+		if d.Logger != nil {
+			d.Logger.Error("project settings begin tx", "err", err)
+		}
+		handleProjectSettingsError(w, projectSettingsError{
+			status:    http.StatusInternalServerError,
+			ErrorCode: "PROJECT_SETTINGS_UPDATE_FAILED",
+			Message:   "update failed",
+		})
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+
+	currentProjectVisibility := ""
+	if patch.Visibility != nil {
+		if err := tx.QueryRow(r.Context(), `
+			SELECT visibility
+			  FROM projects
+			 WHERE id = $1::uuid
+			 FOR UPDATE
+		`, scope.ProjectID).Scan(&currentProjectVisibility); err != nil {
+			if d.Logger != nil {
+				d.Logger.Error("project settings visibility lookup", "err", err)
+			}
+			handleProjectSettingsError(w, projectSettingsError{
+				status:    http.StatusInternalServerError,
+				ErrorCode: "PROJECT_SETTINGS_UPDATE_FAILED",
+				Message:   "update failed",
+			})
+			return
+		}
+	}
+
+	if _, err := tx.Exec(r.Context(), q, args...); err != nil {
 		if d.Logger != nil {
 			d.Logger.Error("project settings update", "err", err)
+		}
+		handleProjectSettingsError(w, projectSettingsError{
+			status:    http.StatusInternalServerError,
+			ErrorCode: "PROJECT_SETTINGS_UPDATE_FAILED",
+			Message:   "update failed",
+		})
+		return
+	}
+	if patch.Visibility != nil && currentProjectVisibility != *patch.Visibility {
+		if _, err := tx.Exec(r.Context(), `
+			INSERT INTO events (project_id, kind, subject_id, payload)
+			VALUES ($1, 'project.visibility_changed', $1, jsonb_build_object(
+				'from',          $2::text,
+				'to',            $3::text,
+				'actor_user_id', NULLIF($4, '')::uuid,
+				'actor_id',      'user:web-reader',
+				'origin',        'http_project_settings'
+			))
+		`, scope.ProjectID, currentProjectVisibility, *patch.Visibility, strings.TrimSpace(principal.UserID)); err != nil {
+			if d.Logger != nil {
+				d.Logger.Error("project settings visibility event", "err", err)
+			}
+			handleProjectSettingsError(w, projectSettingsError{
+				status:    http.StatusInternalServerError,
+				ErrorCode: "PROJECT_SETTINGS_UPDATE_FAILED",
+				Message:   "update failed",
+			})
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		if d.Logger != nil {
+			d.Logger.Error("project settings commit", "err", err)
 		}
 		handleProjectSettingsError(w, projectSettingsError{
 			status:    http.StatusInternalServerError,
