@@ -652,6 +652,13 @@ cleanup용 `pindoc.artifact.wording_fix` 힌트가 포함된다.
 갖는다. Reader Sidecar는 `evidence` edge를 일반 관계와 분리해 표시하고,
 concrete pin은 References 영역에 계속 우선 표시한다.
 
+Pin commit policy는 lane 별로 분리된다. `pindoc.artifact.propose`와
+`pindoc.artifact.add_pin`에서 `commit_sha`는 code/config pin에 필수이고,
+doc/asset/url/resource pin에는 optional이다. 반면 `pindoc.task.claim_done`의
+명시 `pins[]`는 완료 evidence라서 kind와 무관하게 `commit_sha` 또는 pull
+request URL이 필요하다. 비코드 산출물을 완료 evidence로 남길 때는
+`evidence_artifacts[]`를 우선 사용한다.
+
 ### Output — Sensitive Op + `confirm` 모드
 
 ```typescript
@@ -1501,6 +1508,7 @@ lease/TTL 모델은 별도 Task로 확장한다.
 - `task_meta.status`는 항상 `claimed_done`으로 shallow-merge (다른 task_meta 필드는 보존)
 - 한 revision에 body + meta가 같이 기록됨 — `revision_shape="body_patch"`, `shape_payload={kind:"claim_done", changed_acceptance_count, prev_status, new_status}`
 - 이벤트 `artifact.task_claimed_done` emit
+- 명시 `pins[]`는 완료 evidence로 취급되어 kind와 무관하게 `commit_sha` 또는 pull request URL이 필요
 - 이미 `claimed_done` / `verified` / `cancelled`인 Task는 거절 (위 error_code) — 다음 단계 도구 안내 포함
 
 ### 구현 상태

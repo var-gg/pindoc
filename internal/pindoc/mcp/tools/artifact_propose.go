@@ -242,16 +242,26 @@ type ArtifactPinInput struct {
 	Kind       string `json:"kind,omitempty" jsonschema:"one of code | doc | config | asset | resource | url; omitted kind is inferred from path"`
 	RepoID     string `json:"repo_id,omitempty" jsonschema:"canonical project_repos.id; optional, server auto-maps when omitted"`
 	Repo       string `json:"repo,omitempty" jsonschema:"'origin' default; named remote when multi-repo; code kind only"`
-	CommitSHA  string `json:"commit_sha,omitempty" jsonschema:"code kind only"`
+	CommitSHA  string `json:"commit_sha,omitempty" jsonschema:"code/config required for propose/add_pin; optional for doc/asset/url/resource; claim_done evidence pins are validated separately"`
 	Path       string `json:"path" jsonschema:"code: file path; resource: typed resource ref; url: absolute URL"`
 	LinesStart int    `json:"lines_start,omitempty" jsonschema:"code kind only"`
 	LinesEnd   int    `json:"lines_end,omitempty" jsonschema:"code kind only"`
 }
 
-func normalizePinInputs(pins []ArtifactPinInput) {
-	for i := range pins {
-		pins[i].Kind = pinmodel.NormalizeKind(pins[i].Kind, pins[i].Path)
+func normalizePinInputs(pins []ArtifactPinInput) ([]ArtifactPinInput, string, string) {
+	if len(pins) == 0 {
+		return pins, "", ""
 	}
+	out := make([]ArtifactPinInput, len(pins))
+	copy(out, pins)
+	for i := range out {
+		normalised, code, msg := normalizeAddPinInput(out[i])
+		if code != "" {
+			return nil, code, fmt.Sprintf("pins[%d]: %s", i, msg)
+		}
+		out[i] = normalised
+	}
+	return out, "", ""
 }
 
 // TaskMetaInput is the agent-facing shape for a Task artifact's tracker
@@ -605,7 +615,18 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			// this so existing task_meta is preserved unless the caller
 			// explicitly patches it.
 			applyTaskCreateDefaults(&in)
-			normalizePinInputs(in.Pins)
+			if pins, code, msg := normalizePinInputs(in.Pins); code != "" {
+				return nil, artifactProposeOutput{
+					Status:          "not_ready",
+					ErrorCode:       code,
+					Failed:          []string{code},
+					ErrorCodes:      []string{code},
+					Checklist:       []string{msg},
+					PatchableFields: []string{"pins"},
+				}, nil
+			} else {
+				in.Pins = pins
+			}
 
 			// --- Pre-flight ----------------------------------------------
 			lang := deps.UserLanguage
@@ -2943,7 +2964,7 @@ func insertPins(ctx context.Context, tx pgx.Tx, projectID, artifactID string, pi
 		var commit any = nullIfEmpty(p.CommitSHA)
 		var linesStart any = nullIfZero(p.LinesStart)
 		var linesEnd any = nullIfZero(p.LinesEnd)
-		if kind != "code" && kind != "doc" && kind != "config" && kind != "asset" {
+		if !pinStoresGitCoordinate(kind) {
 			commit, linesStart, linesEnd = nil, nil, nil
 		}
 		if _, err := tx.Exec(ctx, `

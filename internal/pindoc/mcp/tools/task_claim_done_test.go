@@ -280,9 +280,17 @@ func TestValidateClaimDonePins(t *testing.T) {
 			t.Fatalf("expected 1 normalised code pin; got %#v", out)
 		}
 	})
-	t.Run("kind inferred from path when omitted", func(t *testing.T) {
-		out, code, _ := validateClaimDonePins([]ArtifactPinInput{
+	t.Run("ordinary url pin requires evidence coordinate", func(t *testing.T) {
+		_, code, msg := validateClaimDonePins([]ArtifactPinInput{
 			{Path: "https://example.com/spec"},
+		})
+		if code != "CLAIM_DONE_PIN_INVALID:PIN_COMMIT_REQUIRED" {
+			t.Fatalf("expected claim_done pin commit required; got code=%q msg=%q", code, msg)
+		}
+	})
+	t.Run("pull request url pin passes without commit_sha", func(t *testing.T) {
+		out, code, _ := validateClaimDonePins([]ArtifactPinInput{
+			{Path: "https://github.com/var-gg/pindoc/pull/123"},
 		})
 		if code != "" {
 			t.Fatalf("expected ok; got code=%q", code)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -979,7 +980,7 @@ func claimDonePinDedupeKey(repoID string, pin ArtifactPinInput) string {
 	kind := pinmodel.NormalizeKind(pin.Kind, pin.Path)
 	var commit string
 	var linesStart, linesEnd int
-	if addPinUsesGitCoordinate(kind) {
+	if pinStoresGitCoordinate(kind) {
 		commit = strings.TrimSpace(pin.CommitSHA)
 		linesStart = pin.LinesStart
 		linesEnd = pin.LinesEnd
@@ -1009,9 +1010,31 @@ func validateClaimDonePins(pins []ArtifactPinInput) ([]ArtifactPinInput, string,
 		if code != "" {
 			return nil, "CLAIM_DONE_PIN_INVALID:" + code, fmt.Sprintf("pins[%d]: %s", i, msg)
 		}
+		if !claimDonePinHasEvidenceCoordinate(normalised) {
+			return nil, "CLAIM_DONE_PIN_INVALID:PIN_COMMIT_REQUIRED", fmt.Sprintf("pins[%d]: pin.commit_sha or a pull request URL is required for claim_done evidence pins", i)
+		}
 		out[i] = normalised
 	}
 	return out, "", ""
+}
+
+func claimDonePinHasEvidenceCoordinate(pin ArtifactPinInput) bool {
+	if strings.TrimSpace(pin.CommitSHA) != "" {
+		return true
+	}
+	if pin.Kind == "url" {
+		return pinPathLooksLikePullRequest(strings.TrimSpace(pin.Path))
+	}
+	return false
+}
+
+func pinPathLooksLikePullRequest(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return false
+	}
+	path := strings.ToLower(u.Path)
+	return strings.Contains(path, "/pull/") || strings.Contains(path, "/pulls/")
 }
 
 // markUncheckedAsDone returns (newBody, changedCount). Walks every 4-state

@@ -251,12 +251,21 @@ func normalizeAddPinInput(pin ArtifactPinInput) (ArtifactPinInput, string, strin
 		return pin, "PIN_LINES_INVALID", "pin line range is invalid"
 	}
 	if addPinUsesGitCoordinate(pin.Kind) && pin.CommitSHA == "" {
-		return pin, "PIN_COMMIT_REQUIRED", "pin.commit_sha is required for code, doc, config, and asset pins"
+		return pin, "PIN_COMMIT_REQUIRED", "pin.commit_sha is required for code and config pins"
 	}
 	return pin, "", ""
 }
 
 func addPinUsesGitCoordinate(kind string) bool {
+	switch kind {
+	case "code", "config":
+		return true
+	default:
+		return false
+	}
+}
+
+func pinStoresGitCoordinate(kind string) bool {
 	switch kind {
 	case "code", "doc", "config", "asset":
 		return true
@@ -295,7 +304,7 @@ func pinDuplicateExists(ctx context.Context, q pgx.Tx, artifactID, repoID string
 	var commitArg any = strings.TrimSpace(pin.CommitSHA)
 	var linesStartArg any = nullIfZero(pin.LinesStart)
 	var linesEndArg any = nullIfZero(pin.LinesEnd)
-	if !addPinUsesGitCoordinate(kind) {
+	if !pinStoresGitCoordinate(kind) {
 		commitArg, linesStartArg, linesEndArg = nil, nil, nil
 	}
 	var exists bool
