@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { Check, Copy, Loader2 } from "lucide-react";
 import { api, type CreateProjectResp } from "../api/client";
+import { notifyFirstRunConfigChanged } from "../firstRunConfig";
 import { useI18n } from "../i18n";
 import { DEFAULT_READER_ORG_SLUG, projectSurfacePath } from "../readerRoutes";
 import {
@@ -116,6 +117,7 @@ export function CreateProjectPage() {
         primary_language: primaryLanguage,
         description: description.trim() || undefined,
       });
+      notifyFirstRunConfigChanged({ onboarding_required: false });
       setCreated(out);
     } catch (e) {
       const err = e as Error & { error_code?: string };

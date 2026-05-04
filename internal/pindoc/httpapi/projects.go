@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -46,7 +47,7 @@ type projectCreateResponse struct {
 // one error mapper for both surfaces. error_code values match the
 // projects package sentinels (SLUG_INVALID, SLUG_RESERVED, SLUG_TAKEN,
 // NAME_REQUIRED, LANG_REQUIRED, LANG_INVALID, GIT_REMOTE_URL_INVALID)
-// plus generic BAD_JSON / INTERNAL_ERROR.
+// plus INSTANCE_OWNER_REQUIRED and generic BAD_JSON / INTERNAL_ERROR.
 type projectCreateError struct {
 	ErrorCode string `json:"error_code"`
 	Message   string `json:"message"`
@@ -60,10 +61,23 @@ func projectCreateDefaultURL(slug string) string {
 // Behind the wire it does the exact same work pindoc.project.create
 // does — Decision project-bootstrap-canonical-flow-reader-ui-first-class
 // promises a single source of truth across MCP, REST, CLI, and UI; this
-// handler is the REST entrypoint of that quartet. auth_mode is still
-// trusted_local: the daemon binds to 127.0.0.1, so anyone hitting this
-// endpoint already controls the host.
+// handler is the REST entrypoint of that quartet. The caller principal is
+// bound into projects.CreateProject so the new project gets an owner
+// membership row atomically with the rest of the create transaction.
 func (d Deps) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
+	principal := d.principalForRequest(r)
+	ownerUserID := ""
+	if principal != nil {
+		ownerUserID = strings.TrimSpace(principal.UserID)
+	}
+	if ownerUserID == "" {
+		writeJSON(w, http.StatusUnauthorized, projectCreateError{
+			ErrorCode: "INSTANCE_OWNER_REQUIRED",
+			Message:   "project creation requires an identified instance owner",
+		})
+		return
+	}
+
 	var in projectCreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeJSON(w, http.StatusBadRequest, projectCreateError{
@@ -92,6 +106,7 @@ func (d Deps) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 		PrimaryLanguage: in.PrimaryLanguage,
 		Visibility:      in.Visibility,
 		GitRemoteURL:    in.GitRemoteURL,
+		OwnerUserID:     ownerUserID,
 	})
 	if err != nil {
 		status, code := mapProjectCreateError(err)
@@ -113,7 +128,7 @@ func (d Deps) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	d.Logger.Info("project created via REST",
-		"slug", out.Slug, "name", out.Name, "lang", out.PrimaryLanguage)
+		"slug", out.Slug, "name", out.Name, "lang", out.PrimaryLanguage, "owner_user_id", ownerUserID)
 
 	mcpURL := onboardingMCPURL(d, r)
 	writeJSON(w, http.StatusCreated, projectCreateResponse{

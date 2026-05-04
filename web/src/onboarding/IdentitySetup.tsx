@@ -19,6 +19,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { Check, Copy, Loader2, ShieldCheck } from "lucide-react";
 import { api, type OnboardingIdentityResp } from "../api/client";
+import { notifyFirstRunConfigChanged } from "../firstRunConfig";
 import { useI18n } from "../i18n";
 import "../styles/reader.css";
 
@@ -47,6 +48,7 @@ export function IdentitySetup() {
         email: email.trim(),
         github_handle: githubHandle.trim() || undefined,
       });
+      notifyFirstRunConfigChanged({ identity_required: false, onboarding_required: false });
       setCreated(out);
     } catch (e) {
       const err = e as Error & { error_code?: string };

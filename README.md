@@ -100,6 +100,22 @@ directly after identity setup:
 http://localhost:5830/projects/new?welcome=1
 ```
 
+### Repair Ownerless Projects From Older REST Builds
+
+Older builds could create a project through `POST /api/projects` without a
+matching `project_members` owner row. After upgrading, repair any affected
+project by assigning the configured loopback owner:
+
+```sql
+INSERT INTO project_members (project_id, user_id, role)
+SELECT p.id, s.default_loopback_user_id::uuid, 'owner'
+FROM projects p
+CROSS JOIN server_settings s
+WHERE p.slug = '<project-slug>'
+  AND s.default_loopback_user_id IS NOT NULL
+ON CONFLICT (project_id, user_id) DO UPDATE SET role = 'owner';
+```
+
 ## Connect an MCP Client
 
 The Docker daemon exposes one account-level MCP endpoint:

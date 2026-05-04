@@ -6,6 +6,7 @@ import { useI18n } from "./i18n";
 import { IdentitySetup } from "./onboarding/IdentitySetup";
 import { Telemetry } from "./ops/Telemetry";
 import { CommitDetailPage } from "./git/CommitDetailPage";
+import { FIRST_RUN_CONFIG_CHANGED_EVENT, firstRunRedirectTarget, type FirstRunConfig } from "./firstRunConfig";
 import { CreateProjectPage } from "./reader/CreateProjectPage";
 import { Diff } from "./reader/Diff";
 import { History } from "./reader/History";
@@ -21,7 +22,8 @@ import { findSurface, previews, uiKits } from "./surfaces";
 export function App() {
   return (
     <PindocTooltipProvider>
-      <Routes>
+      <FirstRunGuard>
+        <Routes>
         {/* Design-system scaffold. Production keeps it off normal user
           paths; append ?dev=1 to inspect the handoff bundle without
           exposing it through Reader chrome. */}
@@ -120,16 +122,81 @@ export function App() {
       <Route path="/admin/providers" element={<ProvidersPanel />} />
 
       {/* Agent-era first-time identity flow. Fresh installs land
-          here from LegacyRedirect when /api/config.identity_required.
+          here from FirstRunGuard when /api/config.identity_required.
           Once the form is submitted, server_settings binds the new
           users.id and subsequent visits skip this route. */}
       <Route path="/onboarding/identity" element={<IdentitySetup />} />
 
       {/* Bare root. / redirects to /p/:default/today. */}
         <Route path="/" element={<LegacyRedirect base="today" />} />
-      </Routes>
+        </Routes>
+      </FirstRunGuard>
     </PindocTooltipProvider>
   );
+}
+
+type FirstRunGuardState =
+  | { status: "loading" }
+  | { status: "ready"; config: FirstRunConfig }
+  | { status: "error"; message: string };
+
+function FirstRunGuard({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const { t } = useI18n();
+  const [state, setState] = useState<FirstRunGuardState>({ status: "loading" });
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadConfig = async () => {
+      try {
+        const cfg = await api.config();
+        if (!cancelled) {
+          setState({
+            status: "ready",
+            config: {
+              identity_required: cfg.identity_required,
+              onboarding_required: cfg.onboarding_required,
+            },
+          });
+        }
+      } catch (e) {
+        if (!cancelled) setState({ status: "error", message: String(e) });
+      }
+    };
+
+    void loadConfig();
+    const refresh = (event: Event) => {
+      if (event instanceof CustomEvent) {
+        const config = event.detail as Partial<FirstRunConfig>;
+        setState((current) =>
+          current.status === "ready"
+            ? { status: "ready", config: { ...current.config, ...config } }
+            : current,
+        );
+      }
+      void loadConfig();
+    };
+    window.addEventListener(FIRST_RUN_CONFIG_CHANGED_EVENT, refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(FIRST_RUN_CONFIG_CHANGED_EVENT, refresh);
+    };
+  }, []);
+
+  if (state.status === "error") {
+    return (
+      <div className="reader-state reader-state--error">
+        <strong>{t("wiki.error_generic_title")}</strong>
+        <p>{state.message}</p>
+      </div>
+    );
+  }
+  if (state.status === "loading") {
+    return <div className="reader-state">{t("wiki.loading")}</div>;
+  }
+  const target = firstRunRedirectTarget(location.pathname, state.config);
+  if (target) return <Navigate to={target} replace />;
+  return <>{children}</>;
 }
 
 function DesignSurfaceGate() {
@@ -295,28 +362,6 @@ function LegacyRedirect({ base }: { base: "wiki" | "tasks" | "graph" | "inbox" |
       try {
         const cfg = await api.config();
         if (cancelled) return;
-        // Identity intercept first — the agent-era first-time flow
-        // routes a fresh install to /onboarding/identity before any
-        // project chrome loads. Self-correcting: once the form
-        // commits, settings.default_loopback_user_id is bound and
-        // identity_required flips to false on the next /api/config.
-        if (cfg.identity_required) {
-          setTarget(`/onboarding/identity`);
-          return;
-        }
-        // Onboarding intercept (Decision project-bootstrap-canonical-
-        // flow-reader-ui-first-class): when the instance has no
-        // projects other than the seed `pindoc` row, redirect a fresh
-        // user to the new-project wizard instead of the legacy
-        // /p/{default}/{base} landing. The wizard re-uses
-        // /projects/new with `?welcome=1` so the page renders a
-        // friendlier header. Self-correcting — once they create a
-        // project, onboarding_required flips to false on the next
-        // /api/config call.
-        if (cfg.onboarding_required) {
-          setTarget(`/projects/new?welcome=1`);
-          return;
-        }
         const tail = trimLegacyPrefix(location.pathname, base);
         const suffix = tail ? `/${tail}` : "";
         const search = location.search || "";

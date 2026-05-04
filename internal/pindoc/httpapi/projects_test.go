@@ -288,3 +288,89 @@ func TestProjectCreateResponseIncludesMCPConnect(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectCreateRESTBindsOwnerMembershipIntegration(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PINDOC_TEST_DATABASE_URL"))
+	if dsn == "" {
+		t.Skip("set PINDOC_TEST_DATABASE_URL to run REST project create owner integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := db.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer pool.Close()
+	if err := db.Migrate(ctx, pool.Pool); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	suffix := fmt.Sprintf("%x", time.Now().UnixNano())
+	ownerEmail := "rest-create-owner-" + suffix + "@example.invalid"
+	ownerID := insertInviteHTTPUser(t, ctx, pool, "REST Create Owner "+suffix, ownerEmail)
+	projectSlug := "rest-owner-" + suffix
+	anonSlug := "rest-anon-" + suffix
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE slug IN ($1, $2)`, projectSlug, anonSlug)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE lower(email) = $1`, strings.ToLower(ownerEmail))
+	})
+
+	handler := New(&config.Config{BindAddr: "0.0.0.0:5830"}, Deps{
+		DB:                 pool,
+		Logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		DefaultProjectSlug: "pindoc",
+		DefaultUserID:      ownerID,
+		BindAddr:           "0.0.0.0:5830",
+	})
+
+	body := fmt.Sprintf(`{"slug":"%s","name":"REST Owner %s","primary_language":"en"}`, projectSlug, suffix)
+	rec := doLoopbackVisibilityRequest(handler, http.MethodPost, "/api/projects", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("project create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp projectCreateResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode project create: %v", err)
+	}
+	if resp.ProjectID == "" || resp.Slug != projectSlug {
+		t.Fatalf("project create response = %+v", resp)
+	}
+	var role string
+	if err := pool.QueryRow(ctx, `
+		SELECT role
+		  FROM project_members
+		 WHERE project_id = $1::uuid
+		   AND user_id = $2::uuid
+	`, resp.ProjectID, ownerID).Scan(&role); err != nil {
+		t.Fatalf("select owner membership: %v", err)
+	}
+	if role != pauth.RoleOwner {
+		t.Fatalf("project member role = %q, want owner", role)
+	}
+
+	anonBody := fmt.Sprintf(`{"slug":"%s","name":"REST Anonymous %s","primary_language":"en"}`, anonSlug, suffix)
+	anonReq := httptest.NewRequest(http.MethodPost, "/api/projects", strings.NewReader(anonBody))
+	anonReq.RemoteAddr = "203.0.113.10:45678"
+	anonReq.Host = "example.test"
+	anonReq.Header.Set("Content-Type", "application/json")
+	anonRec := httptest.NewRecorder()
+	handler.ServeHTTP(anonRec, anonReq)
+	if anonRec.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous project create status = %d, want 401; body=%s", anonRec.Code, anonRec.Body.String())
+	}
+	var errResp projectCreateError
+	if err := json.NewDecoder(anonRec.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode anonymous error: %v", err)
+	}
+	if errResp.ErrorCode != "INSTANCE_OWNER_REQUIRED" {
+		t.Fatalf("anonymous error_code = %q, want INSTANCE_OWNER_REQUIRED", errResp.ErrorCode)
+	}
+	var anonCount int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM projects WHERE slug = $1`, anonSlug).Scan(&anonCount); err != nil {
+		t.Fatalf("count anonymous project inserts: %v", err)
+	}
+	if anonCount != 0 {
+		t.Fatalf("anonymous project inserts = %d, want 0", anonCount)
+	}
+}
