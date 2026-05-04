@@ -41,6 +41,12 @@ Loopback request는 신뢰하고 local owner identity로 매핑합니다. 이것
 agent workflow를 위한 의도적인 선택이며 public internet security model이
 아닙니다.
 
+MCP asset upload에는 더 엄격한 경계가 하나 더 있습니다. `local_path`는
+daemon이 host filesystem을 읽게 만들기 때문에 loopback principal에게만
+허용됩니다. Non-loopback OAuth agent는 대신 `bytes_base64` 또는
+`content_base64`를 보내야 하며, daemon은 저장 전에 size, MIME type,
+project membership을 계속 검증합니다.
+
 ## 외부 노출
 
 `PINDOC_BIND_ADDR`가 non-loopback이면 다음 중 하나가 참이 아닐 경우 Pindoc은

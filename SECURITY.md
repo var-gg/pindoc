@@ -42,6 +42,12 @@ Loopback requests are trusted and mapped to the local owner identity. This is
 deliberate for local agent workflows; it is not a public internet security
 model.
 
+MCP asset uploads add one stricter boundary: `local_path` is accepted only from
+loopback principals because it makes the daemon read from its host filesystem.
+Non-loopback OAuth agents must send `bytes_base64` or `content_base64` instead;
+the daemon still validates size, MIME type, and project membership before
+storing the asset.
+
 ## External Exposure
 
 If `PINDOC_BIND_ADDR` is non-loopback, Pindoc refuses to start unless one of

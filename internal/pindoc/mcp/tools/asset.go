@@ -87,7 +87,7 @@ func RegisterAssetUpload(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.asset.upload",
-			Description: "Create a project-scoped Asset from a local file path or base64 bytes. Stores an immutable LocalFS blob under PINDOC_ASSET_ROOT (default /var/lib/pindoc/assets), records metadata only, returns a stable pindoc-asset:// reference, and never exposes storage_key/local paths.",
+			Description: "Create a project-scoped Asset from a local file path or base64 bytes. local_path is loopback-only; non-loopback OAuth callers must send bytes_base64/content_base64. Stores an immutable LocalFS blob under PINDOC_ASSET_ROOT (default /var/lib/pindoc/assets), records metadata only, returns a stable pindoc-asset:// reference, and never exposes storage_key/local paths.",
 		},
 		func(ctx context.Context, p *auth.Principal, in assetUploadInput) (*sdk.CallToolResult, assetToolOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -97,7 +97,7 @@ func RegisterAssetUpload(server *sdk.Server, deps Deps) {
 			if !scope.Can("write.artifact") {
 				return nil, assetNotReady(scope.ProjectSlug, "PROJECT_WRITE_REQUIRED", "write access is required to upload project assets"), nil
 			}
-			content, filename, out := decodeAssetUploadInput(in)
+			content, filename, out := decodeAssetUploadInput(in, p)
 			if out.Status == "not_ready" {
 				out.ProjectSlug = scope.ProjectSlug
 				return nil, out, nil
@@ -290,7 +290,7 @@ type artifactHeadForAsset struct {
 	Visibility     string
 }
 
-func decodeAssetUploadInput(in assetUploadInput) ([]byte, string, assetToolOutput) {
+func decodeAssetUploadInput(in assetUploadInput, principal *auth.Principal) ([]byte, string, assetToolOutput) {
 	localPath := strings.TrimSpace(in.LocalPath)
 	bytesB64 := strings.TrimSpace(firstNonEmptyString(in.BytesBase64, in.ContentBase64))
 	if localPath == "" && bytesB64 == "" {
@@ -301,6 +301,9 @@ func decodeAssetUploadInput(in assetUploadInput) ([]byte, string, assetToolOutpu
 	}
 	filename := strings.TrimSpace(in.Filename)
 	if localPath != "" {
+		if !principal.IsLoopback() {
+			return nil, "", assetNotReady("", "ASSET_LOCAL_PATH_LOOPBACK_ONLY", "local_path is restricted to loopback callers; use bytes_base64 from non-loopback agents")
+		}
 		content, err := os.ReadFile(localPath)
 		if err != nil {
 			return nil, "", assetNotReady("", "ASSET_LOCAL_READ_FAILED", "local_path could not be read")

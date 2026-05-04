@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/base64"
 	"io"
 	"log/slog"
 	"os"
@@ -14,6 +15,37 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 )
+
+func TestDecodeAssetUploadInputLocalPathLoopbackOnly(t *testing.T) {
+	tmp := t.TempDir()
+	localPath := tmp + "/asset-note.txt"
+	if err := os.WriteFile(localPath, []byte("loopback asset"), 0o644); err != nil {
+		t.Fatalf("write temp asset: %v", err)
+	}
+
+	oauth := &auth.Principal{UserID: "00000000-0000-0000-0000-000000000001", AgentID: "agent:oauth", Source: auth.SourceOAuth}
+	content, filename, out := decodeAssetUploadInput(assetUploadInput{LocalPath: localPath}, oauth)
+	if out.Status != "not_ready" || out.ErrorCode != "ASSET_LOCAL_PATH_LOOPBACK_ONLY" {
+		t.Fatalf("oauth local_path output = %+v", out)
+	}
+	if content != nil || filename != "" {
+		t.Fatalf("oauth local_path content=%q filename=%q, want empty", string(content), filename)
+	}
+
+	loopback := &auth.Principal{AgentID: "agent:asset-test", Source: auth.SourceLoopback}
+	content, filename, out = decodeAssetUploadInput(assetUploadInput{LocalPath: localPath}, loopback)
+	if out.Status != "" || string(content) != "loopback asset" || filename != "asset-note.txt" {
+		t.Fatalf("loopback local_path content=%q filename=%q output=%+v", string(content), filename, out)
+	}
+
+	content, filename, out = decodeAssetUploadInput(assetUploadInput{
+		BytesBase64: base64.StdEncoding.EncodeToString([]byte("oauth bytes")),
+		Filename:    "oauth.txt",
+	}, oauth)
+	if out.Status != "" || string(content) != "oauth bytes" || filename != "oauth.txt" {
+		t.Fatalf("oauth bytes content=%q filename=%q output=%+v", string(content), filename, out)
+	}
+}
 
 func TestAssetToolsUploadReadAttachIntegration(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("PINDOC_TEST_DATABASE_URL"))
@@ -128,14 +160,97 @@ func TestAssetToolsUploadReadAttachIntegration(t *testing.T) {
 	}
 }
 
+func TestAssetUploadLocalPathLoopbackOnlyIntegration(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PINDOC_TEST_DATABASE_URL"))
+	if dsn == "" {
+		t.Skip("set PINDOC_TEST_DATABASE_URL to run asset local_path trust-boundary integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := db.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer pool.Close()
+	if err := db.Migrate(ctx, pool.Pool); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	suffix := time.Now().UnixNano()
+	projectSlug := "asset-local-path-" + strings.ReplaceAll(time.Unix(0, suffix).Format("150405.000000000"), ".", "-")
+	projectID := insertContextReceiptProject(t, ctx, pool, projectSlug)
+	userID := insertMCPVisibilityUser(t, ctx, pool, "asset-local-path-"+projectSlug+"@example.invalid")
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO project_members (project_id, user_id, role)
+		VALUES ($1::uuid, $2::uuid, 'editor')
+	`, projectID, userID); err != nil {
+		t.Fatalf("insert oauth project member: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1::uuid`, projectID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1::uuid`, userID)
+	})
+
+	tmp := t.TempDir()
+	localPath := tmp + "/host-file.txt"
+	if err := os.WriteFile(localPath, []byte("host-only content"), 0o644); err != nil {
+		t.Fatalf("write local path asset: %v", err)
+	}
+
+	oauthPrincipal := &auth.Principal{UserID: userID, AgentID: "agent:oauth-asset", Source: auth.SourceOAuth}
+	oauthCall := newAssetToolTestCallerWithPrincipal(t, ctx, pool, tmp, oauthPrincipal)
+	rejected := oauthCall(ctx, "pindoc.asset.upload", map[string]any{
+		"project_slug": projectSlug,
+		"local_path":   localPath,
+	})
+	if rejected.Status != "not_ready" || rejected.ErrorCode != "ASSET_LOCAL_PATH_LOOPBACK_ONLY" {
+		t.Fatalf("oauth local_path output = %+v", rejected)
+	}
+	var assetCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM assets WHERE project_id = $1::uuid`, projectID).Scan(&assetCount); err != nil {
+		t.Fatalf("count assets after rejected local_path: %v", err)
+	}
+	if assetCount != 0 {
+		t.Fatalf("assets after rejected local_path = %d, want 0", assetCount)
+	}
+
+	loopbackCall := newAssetToolTestCallerWithPrincipal(t, ctx, pool, tmp, &auth.Principal{AgentID: "agent:asset-test", Source: auth.SourceLoopback})
+	loopback := loopbackCall(ctx, "pindoc.asset.upload", map[string]any{
+		"project_slug": projectSlug,
+		"local_path":   localPath,
+	})
+	if loopback.Status != "accepted" || loopback.Asset == nil || loopback.AssetRef == "" {
+		t.Fatalf("loopback local_path output = %+v", loopback)
+	}
+
+	oauthBytes := oauthCall(ctx, "pindoc.asset.upload", map[string]any{
+		"project_slug": projectSlug,
+		"bytes_base64": base64.StdEncoding.EncodeToString([]byte("oauth bytes content")),
+		"filename":     "oauth-bytes.txt",
+		"mime_type":    "text/plain",
+	})
+	if oauthBytes.Status != "accepted" || oauthBytes.Asset == nil || oauthBytes.AssetRef == "" {
+		t.Fatalf("oauth bytes output = %+v", oauthBytes)
+	}
+}
+
 func newAssetToolTestCaller(t *testing.T, ctx context.Context, pool *db.Pool, assetRoot string) func(context.Context, string, map[string]any) assetToolOutput {
+	t.Helper()
+	return newAssetToolTestCallerWithPrincipal(t, ctx, pool, assetRoot, &auth.Principal{
+		AgentID: "agent:asset-test",
+		Source:  auth.SourceLoopback,
+	})
+}
+
+func newAssetToolTestCallerWithPrincipal(t *testing.T, ctx context.Context, pool *db.Pool, assetRoot string, principal *auth.Principal) func(context.Context, string, map[string]any) assetToolOutput {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	server := sdk.NewServer(&sdk.Implementation{Name: "pindoc-asset-test", Version: "test"}, nil)
 	deps := Deps{
 		DB:        pool,
 		Logger:    logger,
-		AuthChain: auth.NewChain(auth.NewTrustedLocalResolver("", "agent:asset-test")),
+		AuthChain: auth.NewChain(staticAssetToolResolver{p: principal}),
 		AssetRoot: assetRoot,
 	}
 	RegisterAssetUpload(server, deps)
@@ -173,4 +288,12 @@ func newAssetToolTestCaller(t *testing.T, ctx context.Context, pool *db.Pool, as
 		}
 		return out
 	}
+}
+
+type staticAssetToolResolver struct {
+	p *auth.Principal
+}
+
+func (r staticAssetToolResolver) Resolve(context.Context, *sdk.CallToolRequest) (*auth.Principal, error) {
+	return r.p, nil
 }
