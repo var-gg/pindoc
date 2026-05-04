@@ -39,7 +39,7 @@ func RegisterArtifactSummary(server *sdk.Server, deps Deps) {
 			Description: "List every revision since a reference point (since_rev OR since_time) with per-step section_deltas and aggregate stats. Use this when a user asks 'what changed recently on X?' — the steps array is designed to be read aloud directly.",
 		},
 		func(ctx context.Context, p *auth.Principal, in summarySinceInput) (*sdk.CallToolResult, summarySinceOutput, error) {
-			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
+			scope, err := resolveMCPReadProjectScope(ctx, deps.DB, p, in.ProjectSlug)
 			if err != nil {
 				return nil, summarySinceOutput{}, fmt.Errorf("artifact.summary_since: %w", err)
 			}
@@ -49,12 +49,16 @@ func RegisterArtifactSummary(server *sdk.Server, deps Deps) {
 			}
 
 			var artifactID, slug string
+			args := []any{scope.ProjectSlug, ref}
+			visibilityWhere, visibilityArgs := mcpReadArtifactVisibilityWhere(scope, "a", len(args)+1)
+			args = append(args, visibilityArgs...)
 			err = deps.DB.QueryRow(ctx, `
 				SELECT a.id::text, a.slug
 				FROM artifacts a
 				JOIN projects p ON p.id = a.project_id
 				WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
-			`, scope.ProjectSlug, ref).Scan(&artifactID, &slug)
+				  AND `+visibilityWhere+`
+			`, args...).Scan(&artifactID, &slug)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, summarySinceOutput{}, fmt.Errorf("artifact %q not found", ref)
 			}

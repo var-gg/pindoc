@@ -185,6 +185,72 @@ func TestMCPReadVisibilityIntegration(t *testing.T) {
 			t.Fatalf("member audit slugs missing %s: %v", want, auditFindingSlugs(memberAudit.Findings))
 		}
 	}
+
+	memberRevisions := callVisibilityTool[artifactRevisionsOutput](t, ctx, pool, nil, member, "pindoc.artifact.revisions", map[string]any{
+		"project_slug": fixture.projectSlug,
+		"id_or_slug":   "vis-private-self",
+	})
+	if memberRevisions.Slug != "vis-private-self" || len(memberRevisions.Revisions) != 2 {
+		t.Fatalf("member revisions for own private artifact = %+v", memberRevisions)
+	}
+	assertVisibilityToolError(t, ctx, pool, nil, member, "pindoc.artifact.revisions", map[string]any{
+		"project_slug": fixture.projectSlug,
+		"id_or_slug":   "vis-private-other",
+	}, "not found")
+	trustedRevisions := callVisibilityTool[artifactRevisionsOutput](t, ctx, pool, nil, trusted, "pindoc.artifact.revisions", map[string]any{
+		"project_slug": fixture.projectSlug,
+		"id_or_slug":   "vis-private-other",
+	})
+	if trustedRevisions.Slug != "vis-private-other" || len(trustedRevisions.Revisions) != 2 {
+		t.Fatalf("trusted revisions for private other = %+v", trustedRevisions)
+	}
+
+	memberDiff := callVisibilityTool[artifactDiffOutput](t, ctx, pool, nil, member, "pindoc.artifact.diff", map[string]any{
+		"project_slug": fixture.projectSlug,
+		"id_or_slug":   "vis-private-self",
+		"from_rev":     1,
+		"to_rev":       2,
+	})
+	if memberDiff.Slug != "vis-private-self" || !strings.Contains(memberDiff.UnifiedDiff, "updated visibility fixture vis-private-self") {
+		t.Fatalf("member diff for own private artifact = %+v", memberDiff)
+	}
+	assertVisibilityToolError(t, ctx, pool, nil, member, "pindoc.artifact.diff", map[string]any{
+		"project_slug": fixture.projectSlug,
+		"id_or_slug":   "vis-private-other",
+		"from_rev":     1,
+		"to_rev":       2,
+	}, "not found")
+	trustedDiff := callVisibilityTool[artifactDiffOutput](t, ctx, pool, nil, trusted, "pindoc.artifact.diff", map[string]any{
+		"project_slug": fixture.projectSlug,
+		"id_or_slug":   "vis-private-other",
+		"from_rev":     1,
+		"to_rev":       2,
+	})
+	if trustedDiff.Slug != "vis-private-other" || !strings.Contains(trustedDiff.UnifiedDiff, "updated visibility fixture vis-private-other") {
+		t.Fatalf("trusted diff for private other = %+v", trustedDiff)
+	}
+
+	memberSummary := callVisibilityTool[summarySinceOutput](t, ctx, pool, nil, member, "pindoc.artifact.summary_since", map[string]any{
+		"project_slug": fixture.projectSlug,
+		"id_or_slug":   "vis-private-self",
+		"since_rev":    1,
+	})
+	if memberSummary.Slug != "vis-private-self" || len(memberSummary.Steps) != 1 {
+		t.Fatalf("member summary_since for own private artifact = %+v", memberSummary)
+	}
+	assertVisibilityToolError(t, ctx, pool, nil, member, "pindoc.artifact.summary_since", map[string]any{
+		"project_slug": fixture.projectSlug,
+		"id_or_slug":   "vis-private-other",
+		"since_rev":    1,
+	}, "not found")
+	trustedSummary := callVisibilityTool[summarySinceOutput](t, ctx, pool, nil, trusted, "pindoc.artifact.summary_since", map[string]any{
+		"project_slug": fixture.projectSlug,
+		"id_or_slug":   "vis-private-other",
+		"since_rev":    1,
+	})
+	if trustedSummary.Slug != "vis-private-other" || len(trustedSummary.Steps) != 1 {
+		t.Fatalf("trusted summary_since for private other = %+v", trustedSummary)
+	}
 }
 
 type mcpVisibilityFixture struct {
@@ -286,6 +352,7 @@ func insertMCPVisibilityUser(t *testing.T, ctx context.Context, pool *db.Pool, e
 func insertMCPVisibilityArtifact(t *testing.T, ctx context.Context, pool *db.Pool, projectID, areaID, slug, visibility, authorUserID, bodyLocale string) string {
 	t.Helper()
 	body := "## Context\nvisibility fixture " + slug + "\n"
+	updatedBody := body + "updated visibility fixture " + slug + "\n"
 	var id string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO artifacts (
@@ -300,7 +367,33 @@ func insertMCPVisibilityArtifact(t *testing.T, ctx context.Context, pool *db.Poo
 	`, projectID, areaID, slug, "Visibility Fixture "+slug, body, bodyLocale, authorUserID, visibility).Scan(&id); err != nil {
 		t.Fatalf("insert artifact %s: %v", slug, err)
 	}
+	insertMCPVisibilityRevision(t, ctx, pool, id, 1, "Visibility Fixture "+slug, body, authorUserID, "initial visibility fixture")
+	insertMCPVisibilityRevision(t, ctx, pool, id, 2, "Visibility Fixture "+slug, updatedBody, authorUserID, "updated visibility fixture")
+	if _, err := pool.Exec(ctx, `
+		UPDATE artifacts
+		   SET body_markdown = $2,
+		       updated_at = now()
+		 WHERE id = $1::uuid
+	`, id, updatedBody); err != nil {
+		t.Fatalf("update artifact head %s: %v", slug, err)
+	}
 	return id
+}
+
+func insertMCPVisibilityRevision(t *testing.T, ctx context.Context, pool *db.Pool, artifactID string, rev int, title, body, authorUserID, commitMsg string) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO artifact_revisions (
+			artifact_id, revision_number, title, body_markdown, body_hash, tags,
+			completeness, author_kind, author_id, author_user_id, commit_msg, revision_shape
+		)
+		VALUES (
+			$1::uuid, $2, $3, $4, $5, '{}', 'partial',
+			'agent', 'agent:visibility-test', NULLIF($6, '')::uuid, $7, 'body_patch'
+		)
+	`, artifactID, rev, title, body, bodyHash(body), authorUserID, commitMsg); err != nil {
+		t.Fatalf("insert artifact revision %s rev %d: %v", artifactID, rev, err)
+	}
 }
 
 func insertMCPVisibilityChunk(t *testing.T, ctx context.Context, pool *db.Pool, provider embed.Provider, artifactID, text string) {
@@ -367,6 +460,9 @@ func callVisibilityToolRaw(t *testing.T, ctx context.Context, pool *db.Pool, pro
 	RegisterArtifactSearch(server, deps)
 	RegisterArtifactTranslate(server, deps)
 	RegisterArtifactAudit(server, deps)
+	RegisterArtifactRevisions(server, deps)
+	RegisterArtifactDiff(server, deps)
+	RegisterArtifactSummary(server, deps)
 
 	clientTransport, serverTransport := sdk.NewInMemoryTransports()
 	serverSession, err := server.Connect(ctx, serverTransport, nil)

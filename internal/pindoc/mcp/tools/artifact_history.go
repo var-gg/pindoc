@@ -53,7 +53,7 @@ func RegisterArtifactRevisions(server *sdk.Server, deps Deps) {
 			Description: "List every revision of an artifact (newest first). Returns metadata only — call pindoc.artifact.diff for actual body diffs. Use this to answer 'how many times has this been edited and why?'",
 		},
 		func(ctx context.Context, princ *auth.Principal, in artifactRevisionsInput) (*sdk.CallToolResult, artifactRevisionsOutput, error) {
-			scope, err := auth.ResolveProject(ctx, deps.DB, princ, in.ProjectSlug)
+			scope, err := resolveMCPReadProjectScope(ctx, deps.DB, princ, in.ProjectSlug)
 			if err != nil {
 				return nil, artifactRevisionsOutput{}, fmt.Errorf("artifact.revisions: %w", err)
 			}
@@ -70,12 +70,16 @@ func RegisterArtifactRevisions(server *sdk.Server, deps Deps) {
 			}
 
 			var artifactID, slug, title string
+			args := []any{scope.ProjectSlug, ref}
+			visibilityWhere, visibilityArgs := mcpReadArtifactVisibilityWhere(scope, "a", len(args)+1)
+			args = append(args, visibilityArgs...)
 			err = deps.DB.QueryRow(ctx, `
 				SELECT a.id::text, a.slug, a.title
 				FROM artifacts a
 				JOIN projects p ON p.id = a.project_id
 				WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
-			`, scope.ProjectSlug, ref).Scan(&artifactID, &slug, &title)
+				  AND `+visibilityWhere+`
+			`, args...).Scan(&artifactID, &slug, &title)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, artifactRevisionsOutput{}, fmt.Errorf("artifact %q not found", in.IDOrSlug)
 			}
@@ -177,7 +181,7 @@ func RegisterArtifactDiff(server *sdk.Server, deps Deps) {
 			Description: "Compute the diff between two revisions of an artifact. Returns revision_type, meta_delta, acceptance_checklist, and section_deltas before unified_diff; prefer reading those summaries before consuming the full unified_diff. from_rev defaults to latest-1, to_rev to latest.",
 		},
 		func(ctx context.Context, princ *auth.Principal, in artifactDiffInput) (*sdk.CallToolResult, artifactDiffOutput, error) {
-			scope, err := auth.ResolveProject(ctx, deps.DB, princ, in.ProjectSlug)
+			scope, err := resolveMCPReadProjectScope(ctx, deps.DB, princ, in.ProjectSlug)
 			if err != nil {
 				return nil, artifactDiffOutput{}, fmt.Errorf("artifact.diff: %w", err)
 			}
@@ -186,7 +190,7 @@ func RegisterArtifactDiff(server *sdk.Server, deps Deps) {
 				return nil, artifactDiffOutput{}, errors.New("id_or_slug is required")
 			}
 
-			from, to, artifactID, slug, err := resolveDiffRevs(ctx, deps, scope.ProjectSlug, ref, in.FromRev, in.ToRev)
+			from, to, artifactID, slug, err := resolveDiffRevs(ctx, deps, scope, ref, in.FromRev, in.ToRev)
 			if err != nil {
 				return nil, artifactDiffOutput{}, err
 			}
@@ -245,16 +249,20 @@ type loadedRev struct {
 	snapshot diff.RevisionMetaSnapshot
 }
 
-func resolveDiffRevs(ctx context.Context, deps Deps, projectSlug, ref string, fromRev, toRev int) (loadedRev, loadedRev, string, string, error) {
+func resolveDiffRevs(ctx context.Context, deps Deps, scope *mcpReadProjectScope, ref string, fromRev, toRev int) (loadedRev, loadedRev, string, string, error) {
 	var artifactID, slug string
 	var latest int
+	args := []any{scope.ProjectSlug, ref}
+	visibilityWhere, visibilityArgs := mcpReadArtifactVisibilityWhere(scope, "a", len(args)+1)
+	args = append(args, visibilityArgs...)
 	err := deps.DB.QueryRow(ctx, `
 		SELECT a.id::text, a.slug,
 		       COALESCE((SELECT max(revision_number) FROM artifact_revisions WHERE artifact_id = a.id), 0)
 		FROM artifacts a
 		JOIN projects p ON p.id = a.project_id
 		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
-	`, projectSlug, ref).Scan(&artifactID, &slug, &latest)
+		  AND `+visibilityWhere+`
+	`, args...).Scan(&artifactID, &slug, &latest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return loadedRev{}, loadedRev{}, "", "", fmt.Errorf("artifact %q not found", ref)
 	}
