@@ -230,6 +230,199 @@ func TestProjectListReaderHiddenQueryRequiresOwnerIntegration(t *testing.T) {
 	}
 }
 
+func TestHandleProjectListVisibilityMatrixIntegration(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PINDOC_TEST_DATABASE_URL"))
+	if dsn == "" {
+		t.Skip("set PINDOC_TEST_DATABASE_URL to run project list visibility HTTP DB integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := db.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer pool.Close()
+	if err := db.Migrate(ctx, pool.Pool); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	suffix := fmt.Sprintf("%x", time.Now().UnixNano())
+	publicSlug := "project-list-public-" + suffix
+	orgSlug := "project-list-org-" + suffix
+	privateSlug := "project-list-private-" + suffix
+	ownerEmail := "project-list-vis-owner-" + suffix + "@example.invalid"
+	orgMemberEmail := "project-list-vis-org-" + suffix + "@example.invalid"
+	nonMemberEmail := "project-list-vis-non-" + suffix + "@example.invalid"
+	ownerID := insertInviteHTTPUser(t, ctx, pool, "Project List Visibility Owner "+suffix, ownerEmail)
+	orgMemberID := insertInviteHTTPUser(t, ctx, pool, "Project List Visibility Org "+suffix, orgMemberEmail)
+	nonMemberID := insertInviteHTTPUser(t, ctx, pool, "Project List Visibility Non "+suffix, nonMemberEmail)
+
+	insertProjectListVisibilityProject(t, ctx, pool, publicSlug, projects.VisibilityPublic, ownerID)
+	insertProjectListVisibilityProject(t, ctx, pool, orgSlug, projects.VisibilityOrg, ownerID)
+	insertProjectListVisibilityProject(t, ctx, pool, privateSlug, projects.VisibilityPrivate, ownerID)
+	insertProjectListDefaultOrgMember(t, ctx, pool, orgMemberID)
+	t.Cleanup(func() {
+		for _, slug := range []string{publicSlug, orgSlug, privateSlug} {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE slug = $1`, slug)
+		}
+		_, _ = pool.Exec(context.Background(), `
+			DELETE FROM users
+			 WHERE lower(email) IN ($1, $2, $3)
+		`, strings.ToLower(ownerEmail), strings.ToLower(orgMemberEmail), strings.ToLower(nonMemberEmail))
+	})
+
+	oauthSvc, err := pauth.NewOAuthService(ctx, pool, pauth.OAuthConfig{
+		Issuer:             "http://127.0.0.1:5830",
+		PublicBaseURL:      "http://127.0.0.1:5830",
+		RedirectBaseURL:    "http://127.0.0.1:5830",
+		SigningKeyPath:     t.TempDir() + "/oauth.pem",
+		ClientID:           "project-list-vis-" + suffix,
+		RedirectURIs:       []string{"http://127.0.0.1:3846/callback"},
+		GitHubClientID:     "fake-gh-client",
+		GitHubClientSecret: "fake-gh-secret",
+	})
+	if err != nil {
+		t.Fatalf("NewOAuthService: %v", err)
+	}
+	handler := New(&config.Config{
+		AuthProviders: []string{config.AuthProviderGitHub},
+		BindAddr:      "0.0.0.0:5830",
+	}, Deps{
+		DB:                 pool,
+		Logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		DefaultProjectSlug: publicSlug,
+		OAuth:              oauthSvc,
+		AuthProviders:      []string{config.AuthProviderGitHub},
+		BindAddr:           "0.0.0.0:5830",
+	})
+
+	cases := []struct {
+		name     string
+		userID   string
+		loopback bool
+		want     []string
+		notWant  []string
+	}{
+		{
+			name:   "owner sees all tiers by project membership",
+			userID: ownerID,
+			want:   []string{publicSlug, orgSlug, privateSlug},
+		},
+		{
+			name:    "org member sees public and org only",
+			userID:  orgMemberID,
+			want:    []string{publicSlug, orgSlug},
+			notWant: []string{privateSlug},
+		},
+		{
+			name:    "non member sees public only",
+			userID:  nonMemberID,
+			want:    []string{publicSlug},
+			notWant: []string{orgSlug, privateSlug},
+		},
+		{
+			name:    "anonymous sees public only",
+			want:    []string{publicSlug},
+			notWant: []string{orgSlug, privateSlug},
+		},
+		{
+			name:     "trusted local sees all tiers",
+			loopback: true,
+			want:     []string{publicSlug, orgSlug, privateSlug},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var rec *httptest.ResponseRecorder
+			if c.loopback {
+				rec = doLoopbackVisibilityRequest(handler, http.MethodGet, "/api/projects", "")
+			} else {
+				rec = doInviteRequest(t, handler, oauthSvc, c.userID, http.MethodGet, "/api/projects", "")
+			}
+			if rec.Code != http.StatusOK {
+				t.Fatalf("project list status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			out := decodeProjectListResponse(t, rec)
+			for _, slug := range c.want {
+				if _, ok := out.bySlug[slug]; !ok {
+					t.Fatalf("response missing visible project %q; got slugs=%v", slug, projectListSlugs(out.projects))
+				}
+			}
+			for _, slug := range c.notWant {
+				if row, ok := out.bySlug[slug]; ok {
+					t.Fatalf("response exposed non-visible project %q with name=%q artifacts_count=%d", slug, row.Name, row.ArtifactsCount)
+				}
+			}
+			if got, want := out.multiProjectSwitching, len(out.projects) > 1; got != want {
+				t.Fatalf("multi_project_switching = %v, want %v for %d returned rows", got, want, len(out.projects))
+			}
+		})
+	}
+}
+
+type decodedProjectList struct {
+	projects              []projectListRow
+	bySlug                map[string]projectListRow
+	multiProjectSwitching bool
+}
+
+func decodeProjectListResponse(t *testing.T, rec *httptest.ResponseRecorder) decodedProjectList {
+	t.Helper()
+	var raw struct {
+		Projects              []projectListRow `json:"projects"`
+		MultiProjectSwitching bool             `json:"multi_project_switching"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode project list: %v", err)
+	}
+	bySlug := make(map[string]projectListRow, len(raw.Projects))
+	for _, project := range raw.Projects {
+		bySlug[project.Slug] = project
+	}
+	return decodedProjectList{
+		projects:              raw.Projects,
+		bySlug:                bySlug,
+		multiProjectSwitching: raw.MultiProjectSwitching,
+	}
+}
+
+func projectListSlugs(projects []projectListRow) []string {
+	out := make([]string, 0, len(projects))
+	for _, project := range projects {
+		out = append(out, project.Slug)
+	}
+	return out
+}
+
+func insertProjectListVisibilityProject(t *testing.T, ctx context.Context, pool *db.Pool, slug, visibility, ownerID string) string {
+	t.Helper()
+	var projectID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO projects (slug, name, description, organization_id, primary_language, visibility)
+		VALUES ($1, $2, $3, (SELECT id FROM organizations WHERE slug = 'default' LIMIT 1), 'en', $4)
+		RETURNING id::text
+	`, slug, "Project List "+slug, "private metadata "+slug, visibility).Scan(&projectID); err != nil {
+		t.Fatalf("insert visibility project %s: %v", slug, err)
+	}
+	insertInviteHTTPMember(t, ctx, pool, projectID, ownerID, pauth.RoleOwner)
+	return projectID
+}
+
+func insertProjectListDefaultOrgMember(t *testing.T, ctx context.Context, pool *db.Pool, userID string) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO organization_members (organization_id, user_id, role)
+		SELECT id, $1::uuid, 'member'
+		  FROM organizations
+		 WHERE slug = 'default'
+		ON CONFLICT (organization_id, user_id) DO UPDATE SET role = EXCLUDED.role
+	`, userID); err != nil {
+		t.Fatalf("insert default org member: %v", err)
+	}
+}
+
 func projectListContainsSlug(t *testing.T, rec *httptest.ResponseRecorder, slug string) bool {
 	t.Helper()
 	var out struct {

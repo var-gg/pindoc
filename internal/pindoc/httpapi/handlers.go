@@ -358,49 +358,29 @@ func (d Deps) handleCurrentUser(w http.ResponseWriter, r *http.Request) {
 
 func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
 	principal := d.principalForRequest(r)
-	membershipUserID := ""
-	if principal != nil && principal.IsOAuth() {
-		membershipUserID = strings.TrimSpace(principal.UserID)
-	}
-	rows, err := d.DB.Query(r.Context(), `
-		SELECT
-			p.id::text, p.slug, o.slug, p.name, p.description, p.color,
-			p.primary_language, p.created_at,
-			(SELECT count(*) FROM artifacts WHERE project_id = p.id AND status <> 'archived'),
-			COALESCE(pm.role, '')
-		FROM projects p
-		LEFT JOIN organizations o ON o.id = p.organization_id
-		LEFT JOIN project_members pm ON pm.project_id = p.id AND pm.user_id::text = $1
-		ORDER BY p.created_at
-	`, membershipUserID)
+	rows, err := projects.ListVisible(r.Context(), d.DB, d.viewerScopeForRequest(r))
 	if err != nil {
 		d.Logger.Error("project list", "err", err)
 		writeError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
-	defer rows.Close()
 
 	out := []projectListRow{}
-	for rows.Next() {
-		var p projectListRow
-		var desc, color *string
-		var role string
-		if err := rows.Scan(
-			&p.ID, &p.Slug, &p.OrganizationSlug, &p.Name, &desc, &color,
-			&p.PrimaryLanguage, &p.CreatedAt, &p.ArtifactsCount, &role,
-		); err != nil {
-			writeError(w, http.StatusInternalServerError, "scan failed")
-			return
-		}
-		if desc != nil {
-			p.Description = *desc
-		}
-		if color != nil {
-			p.Color = *color
+	for _, row := range rows {
+		p := projectListRow{
+			ID:               row.ID,
+			Slug:             row.Slug,
+			OrganizationSlug: row.OrganizationSlug,
+			Name:             row.Name,
+			Description:      row.Description,
+			Color:            row.Color,
+			PrimaryLanguage:  row.PrimaryLanguage,
+			ArtifactsCount:   row.ArtifactsCount,
+			CreatedAt:        row.CreatedAt,
 		}
 		p.OrgSlug = p.OrganizationSlug
 		p.ReaderHidden = readerHiddenProjectSlug(p.Slug)
-		scope := &pauth.ProjectScope{Role: role}
+		scope := &pauth.ProjectScope{Role: row.Role}
 		if principal != nil && principal.IsLoopback() {
 			scope.Role = pauth.RoleOwner
 		}
@@ -409,7 +389,7 @@ func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, p)
 	}
-	projectCaps := d.deriveMultiProjectCaps(r)
+	projectCaps := projects.CapabilitiesForVisibleCount(len(out))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"projects":                out,
 		"default_project_slug":    d.DefaultProjectSlug,

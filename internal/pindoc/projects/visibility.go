@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 )
@@ -58,6 +59,19 @@ type ViewerScope struct {
 	OrgIDs []string
 }
 
+type ListRow struct {
+	ID               string
+	Slug             string
+	OrganizationSlug string
+	Name             string
+	Description      string
+	Color            string
+	PrimaryLanguage  string
+	ArtifactsCount   int
+	CreatedAt        time.Time
+	Role             string
+}
+
 // CountVisible returns the number of projects visible to the given
 // caller. The query joins on visibility + Org membership:
 //
@@ -79,6 +93,56 @@ func CountVisible(ctx context.Context, pool *db.Pool, scopeOrUserID any) (int, e
 	var n int
 	err := pool.QueryRow(ctx, q, args...).Scan(&n)
 	return n, err
+}
+
+func ListVisible(ctx context.Context, pool *db.Pool, scopeOrUserID any) ([]ListRow, error) {
+	scope := normalizeScope(scopeOrUserID)
+	visibleQuery, args := buildVisibilitySelect(scope, "SELECT * FROM projects")
+	roleArg := len(args) + 1
+	args = append(args, strings.TrimSpace(scope.UserID))
+	query := fmt.Sprintf(`
+		WITH visible_projects AS (
+			%s
+		)
+		SELECT
+			vp.id::text, vp.slug, o.slug, vp.name, vp.description, vp.color,
+			vp.primary_language, vp.created_at,
+			(SELECT count(*) FROM artifacts WHERE project_id = vp.id AND status <> 'archived'),
+			COALESCE(pm.role, '')
+		FROM visible_projects vp
+		LEFT JOIN organizations o ON o.id = vp.organization_id
+		LEFT JOIN project_members pm ON pm.project_id = vp.id AND pm.user_id::text = $%d
+		ORDER BY vp.created_at
+	`, visibleQuery, roleArg)
+
+	rows, err := pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []ListRow{}
+	for rows.Next() {
+		var row ListRow
+		var orgSlug, desc, color *string
+		if err := rows.Scan(
+			&row.ID, &row.Slug, &orgSlug, &row.Name, &desc, &color,
+			&row.PrimaryLanguage, &row.CreatedAt, &row.ArtifactsCount, &row.Role,
+		); err != nil {
+			return nil, err
+		}
+		if orgSlug != nil {
+			row.OrganizationSlug = *orgSlug
+		}
+		if desc != nil {
+			row.Description = *desc
+		}
+		if color != nil {
+			row.Color = *color
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }
 
 // IsMultiProject is the derivation rule the MCP `pindoc.project.current`
