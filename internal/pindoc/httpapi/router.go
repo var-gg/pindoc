@@ -194,8 +194,8 @@ func New(cfg *config.Config, d Deps) http.Handler {
 	mux.HandleFunc("GET /api/p/{project}/task-flow", d.handleTaskFlow)
 	mux.HandleFunc("GET /api/p/{project}/search", d.handleSearch)
 	mux.HandleFunc("GET /api/p/{project}/change-groups", d.handleChangeGroups)
-	mux.HandleFunc("GET /api/p/{project}/inbox", d.handleInbox)
-	mux.HandleFunc("POST /api/p/{project}/inbox/{idOrSlug}/review", d.handleInboxReview)
+	mux.HandleFunc("GET /api/p/{project}/inbox", d.handleLegacyProjectMember(d.handleInbox))
+	mux.HandleFunc("POST /api/p/{project}/inbox/{idOrSlug}/review", d.handleLegacyProjectMember(d.handleInboxReview))
 	mux.HandleFunc("POST /api/p/{project}/invite", d.handleInviteIssue)
 	// Phase D — permission management plane.
 	mux.HandleFunc("GET /api/p/{project}/members", d.handleMembersList)
@@ -549,6 +549,53 @@ func (d Deps) handleOrgProjectMember(next http.HandlerFunc) http.HandlerFunc {
 	return d.handleOrgProject(next, true)
 }
 
+func (d Deps) handleLegacyProjectMember(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if d.DB == nil {
+			writeError(w, http.StatusInternalServerError, "database unavailable")
+			return
+		}
+		projectSlug := strings.TrimSpace(r.PathValue("project"))
+		resolved, err := d.resolveProjectBySlug(r.Context(), projectSlug)
+		if errors.Is(err, projects.ErrProjectNotFound) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		if err != nil {
+			if d.Logger != nil {
+				d.Logger.Error("legacy project resolve", "err", err, "project", projectSlug)
+			}
+			writeError(w, http.StatusInternalServerError, "project lookup failed")
+			return
+		}
+
+		access, userID, canRead, err := d.resolveOrgProjectAccess(r.Context(), r, resolved)
+		if err != nil {
+			if d.Logger != nil {
+				d.Logger.Warn("legacy project access resolve", "err", err, "project", projectSlug)
+			}
+			writeError(w, http.StatusInternalServerError, "project access check failed")
+			return
+		}
+		if !canRead || access == orgProjectRouteAccessPublic {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+
+		scope := projectRouteContext{
+			OrgScoped:   true,
+			OrgID:       resolved.OrgID,
+			OrgSlug:     resolved.OrgSlug,
+			ProjectID:   resolved.ProjectID,
+			ProjectSlug: resolved.ProjectSlug,
+			UserID:      userID,
+			Access:      access,
+		}
+		ctx := context.WithValue(r.Context(), projectRouteContextKey{}, scope)
+		next(w, r.WithContext(ctx))
+	}
+}
+
 func (d Deps) handleOrgProject(next http.HandlerFunc, requireMember bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if d.DB == nil {
@@ -595,6 +642,28 @@ func (d Deps) handleOrgProject(next http.HandlerFunc, requireMember bool) http.H
 		ctx := context.WithValue(r.Context(), projectRouteContextKey{}, scope)
 		next(w, r.WithContext(ctx))
 	}
+}
+
+func (d Deps) resolveProjectBySlug(ctx context.Context, projectSlug string) (*projects.ResolveResult, error) {
+	projectSlug = strings.TrimSpace(projectSlug)
+	if projectSlug == "" {
+		return nil, fmt.Errorf("%w: project_slug is required", projects.ErrProjectNotFound)
+	}
+	var out projects.ResolveResult
+	err := d.DB.QueryRow(ctx, `
+		SELECT p.id::text, p.slug, o.id::text, o.slug, p.visibility
+		  FROM projects p
+		  JOIN organizations o ON o.id = p.organization_id
+		 WHERE p.slug = $1 AND o.deleted_at IS NULL
+		 LIMIT 1
+	`, projectSlug).Scan(&out.ProjectID, &out.ProjectSlug, &out.OrgID, &out.OrgSlug, &out.ProjectVisibility)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("%w: project=%q", projects.ErrProjectNotFound, projectSlug)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("resolve project by slug: %w", err)
+	}
+	return &out, nil
 }
 
 func (d Deps) resolveOrgProjectAccess(ctx context.Context, r *http.Request, resolved *projects.ResolveResult) (orgProjectRouteAccess, string, bool, error) {

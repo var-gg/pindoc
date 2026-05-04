@@ -4,7 +4,7 @@ import { api, buildInboxReviewBody } from "../src/api/client";
 import { I18nProvider } from "../src/i18n";
 import en from "../src/i18n/en.json";
 import ko from "../src/i18n/ko.json";
-import { Inbox, nextInboxFocusIndex } from "../src/reader/Inbox";
+import { Inbox, inboxCardA11yPosition, nextInboxFocusIndex, refreshInboxAfterReview } from "../src/reader/Inbox";
 import { PindocTooltipProvider } from "../src/reader/Tooltip";
 
 function assert(condition: boolean, message: string): void {
@@ -53,6 +53,10 @@ function testInboxI18nKeysExist(): void {
     "inbox.disabled_empty_admin",
     "inbox.error_load",
     "inbox.error_review",
+    "inbox.review_refresh_warning",
+    "inbox.reject_reason_required",
+    "inbox.truncated_notice",
+    "inbox.list_aria",
     "inbox.approved_toast",
     "inbox.rejected_toast",
     "inbox.dialog_reject_title",
@@ -69,14 +73,14 @@ function testInboxI18nKeysExist(): void {
 
 function testReviewBodyUsesAuditInputsAndFallbacks(): void {
   assertEqual(
-    JSON.stringify(buildInboxReviewBody("reject", { reviewerId: " user-1 ", commitMsg: "  duplicate " })),
-    JSON.stringify({ decision: "reject", commit_msg: "duplicate", reviewer_id: "user-1" }),
-    "review body should include trimmed reviewer and reason",
+    JSON.stringify(buildInboxReviewBody("reject", { commitMsg: "  duplicate " })),
+    JSON.stringify({ decision: "reject", commit_msg: "duplicate" }),
+    "review body should include trimmed reason and leave reviewer to the server",
   );
   assertEqual(
-    JSON.stringify(buildInboxReviewBody("approve", { reviewerId: "", commitMsg: "" })),
-    JSON.stringify({ decision: "approve", commit_msg: "Reader Inbox approve" }),
-    "review body should preserve fallback commit message and omit empty reviewer",
+    JSON.stringify(buildInboxReviewBody("approve", { commitMsg: "" })),
+    JSON.stringify({ decision: "approve", commit_msg: "" }),
+    "approve body should preserve empty commit message for backward compatibility",
   );
 }
 
@@ -98,7 +102,6 @@ async function testApiInboxReviewSendsAuditBody(): Promise<void> {
 
   try {
     await api.inboxReview("pindoc", "artifact one", "reject", {
-      reviewerId: "user-123",
       commitMsg: "wrong scope",
     });
   } finally {
@@ -109,8 +112,8 @@ async function testApiInboxReviewSendsAuditBody(): Promise<void> {
   assertEqual(init?.method, "POST", "review method should be POST");
   assertEqual(
     String(init?.body),
-    JSON.stringify({ decision: "reject", commit_msg: "wrong scope", reviewer_id: "user-123" }),
-    "review fetch body should carry reviewer_id and commit_msg",
+    JSON.stringify({ decision: "reject", commit_msg: "wrong scope" }),
+    "review fetch body should carry commit_msg and omit caller-controlled reviewer_id",
   );
 }
 
@@ -120,9 +123,26 @@ function testRovingFocusWraps(): void {
   assertEqual(nextInboxFocusIndex(0, 0, 1), 0, "empty list should keep focus index at zero");
 }
 
+function testInboxCardA11yPosition(): void {
+  assertEqual(inboxCardA11yPosition(1, 5)["aria-posinset"], 2, "card posinset should be 1-based");
+  assertEqual(inboxCardA11yPosition(1, 5)["aria-setsize"], 5, "card setsize should expose total count");
+}
+
+async function testReviewSuccessRefreshesOnce(): Promise<void> {
+  let calls = 0;
+  const ok = await refreshInboxAfterReview(async () => {
+    calls += 1;
+    return true;
+  });
+  assert(ok, "refresh helper should return load result");
+  assertEqual(calls, 1, "review success refresh should call load once");
+}
+
 testDisabledOwnerGetsSettingsCTA();
 testDisabledNonOwnerGetsAdminHint();
 testInboxI18nKeysExist();
 testReviewBodyUsesAuditInputsAndFallbacks();
 await testApiInboxReviewSendsAuditBody();
 testRovingFocusWraps();
+testInboxCardA11yPosition();
+await testReviewSuccessRefreshesOnce();

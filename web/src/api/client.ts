@@ -676,6 +676,9 @@ export type ReadMarkResp = {
 export type InboxResp = {
   project_slug: string;
   count: number;
+  total_count?: number;
+  limit?: number;
+  truncated?: boolean;
   items: ArtifactRef[];
 };
 
@@ -688,13 +691,11 @@ export type InboxReviewResp = {
 };
 
 export type InboxReviewOptions = {
-  reviewerId?: string | null;
   commitMsg?: string | null;
 };
 
 export type InboxReviewBody = {
   decision: "approve" | "reject";
-  reviewer_id?: string;
   commit_msg: string;
 };
 
@@ -702,14 +703,11 @@ export function buildInboxReviewBody(
   decision: "approve" | "reject",
   options: InboxReviewOptions = {},
 ): InboxReviewBody {
-  const reviewer = options.reviewerId?.trim();
-  const commitMsg = options.commitMsg?.trim() || `Reader Inbox ${decision}`;
-  const body: InboxReviewBody = {
+  const commitMsg = options.commitMsg?.trim() ?? "";
+  return {
     decision,
     commit_msg: commitMsg,
   };
-  if (reviewer) body.reviewer_id = reviewer;
-  return body;
 }
 
 export type ReadEventInput = {

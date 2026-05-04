@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	pauth "github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/projects"
@@ -151,6 +152,119 @@ func TestOrgProjectArtifactRoutesIntegration(t *testing.T) {
 	}
 	if len(legacyBody.Artifacts) != 1 || legacyBody.Artifacts[0].Slug != publicSlug {
 		t.Fatalf("legacy anonymous artifacts = %+v, want only public artifact %q", legacyBody.Artifacts, publicSlug)
+	}
+}
+
+func TestOrgProjectInboxRoutesShareLegacyAccessMatrixIntegration(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PINDOC_TEST_DATABASE_URL"))
+	if dsn == "" {
+		t.Skip("set PINDOC_TEST_DATABASE_URL to run org-scoped inbox HTTP DB integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := db.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer pool.Close()
+	if err := db.Migrate(ctx, pool.Pool); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	suffix := fmt.Sprintf("%x", time.Now().UnixNano())
+	orgSlug := "inbox-org-" + suffix
+	projectSlug := "inbox-route-" + suffix
+	ownerID := insertInviteHTTPUser(t, ctx, pool, "Inbox Route Owner "+suffix, "inbox-route-owner-"+suffix+"@example.invalid")
+	outsiderID := insertInviteHTTPUser(t, ctx, pool, "Inbox Route Outsider "+suffix, "inbox-route-outsider-"+suffix+"@example.invalid")
+	orgID := insertOrgRouteHTTPOrg(t, ctx, pool, orgSlug)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin create project tx: %v", err)
+	}
+	out, err := projects.CreateProject(ctx, tx, projects.CreateProjectInput{
+		Slug:            projectSlug,
+		Name:            "Inbox Route " + suffix,
+		PrimaryLanguage: "en",
+		OrganizationID:  orgID,
+		OwnerUserID:     ownerID,
+	})
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("create project: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit create project tx: %v", err)
+	}
+	projectID := out.ID
+	if _, err := pool.Exec(ctx, `UPDATE projects SET visibility = $1 WHERE id = $2::uuid`, projects.VisibilityPublic, projectID); err != nil {
+		t.Fatalf("mark project public: %v", err)
+	}
+	areaID := selectArtifactVisibilityHTTPArea(t, ctx, pool, projectID, "misc")
+	legacyReviewSlug := "legacy-review-" + suffix
+	orgReviewSlug := "org-review-" + suffix
+	insertInboxPendingArtifact(t, ctx, pool, projectID, areaID, legacyReviewSlug, projects.VisibilityPublic, ownerID)
+	insertInboxPendingArtifact(t, ctx, pool, projectID, areaID, orgReviewSlug, projects.VisibilityPublic, ownerID)
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE slug = $1`, projectSlug)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM organizations WHERE slug = $1`, orgSlug)
+		_, _ = pool.Exec(context.Background(), `
+			DELETE FROM users
+			 WHERE lower(email) IN ($1, $2)
+		`, "inbox-route-owner-"+suffix+"@example.invalid", "inbox-route-outsider-"+suffix+"@example.invalid")
+	})
+
+	oauthSvc, err := pauth.NewOAuthService(ctx, pool, pauth.OAuthConfig{
+		Issuer:             "http://127.0.0.1:5830",
+		PublicBaseURL:      "http://127.0.0.1:5830",
+		RedirectBaseURL:    "http://127.0.0.1:5830",
+		SigningKeyPath:     t.TempDir() + "/oauth.pem",
+		ClientID:           "org-inbox-route-" + suffix,
+		RedirectURIs:       []string{"http://127.0.0.1:3846/callback"},
+		GitHubClientID:     "fake-gh-client",
+		GitHubClientSecret: "fake-gh-secret",
+	})
+	if err != nil {
+		t.Fatalf("NewOAuthService: %v", err)
+	}
+	handler := New(&config.Config{
+		AuthProviders: []string{config.AuthProviderGitHub},
+		BindAddr:      "0.0.0.0:5830",
+	}, Deps{
+		DB:                 pool,
+		Logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		DefaultProjectSlug: projectSlug,
+		OAuth:              oauthSvc,
+		AuthProviders:      []string{config.AuthProviderGitHub},
+		BindAddr:           "0.0.0.0:5830",
+	})
+
+	cases := []struct {
+		name   string
+		userID string
+		method string
+		path   string
+		body   string
+		want   int
+	}{
+		{"legacy anonymous get", "", http.MethodGet, "/api/p/" + projectSlug + "/inbox", "", http.StatusNotFound},
+		{"org anonymous get", "", http.MethodGet, "/api/orgs/" + orgSlug + "/p/" + projectSlug + "/inbox", "", http.StatusNotFound},
+		{"legacy outsider get", outsiderID, http.MethodGet, "/api/p/" + projectSlug + "/inbox", "", http.StatusNotFound},
+		{"org outsider get", outsiderID, http.MethodGet, "/api/orgs/" + orgSlug + "/p/" + projectSlug + "/inbox", "", http.StatusNotFound},
+		{"legacy owner get", ownerID, http.MethodGet, "/api/p/" + projectSlug + "/inbox", "", http.StatusOK},
+		{"org owner get", ownerID, http.MethodGet, "/api/orgs/" + orgSlug + "/p/" + projectSlug + "/inbox", "", http.StatusOK},
+		{"legacy owner post", ownerID, http.MethodPost, "/api/p/" + projectSlug + "/inbox/" + legacyReviewSlug + "/review", `{"decision":"approve","commit_msg":"ok"}`, http.StatusOK},
+		{"org owner post", ownerID, http.MethodPost, "/api/orgs/" + orgSlug + "/p/" + projectSlug + "/inbox/" + orgReviewSlug + "/review", `{"decision":"approve","commit_msg":"ok"}`, http.StatusOK},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := doInviteRequest(t, handler, oauthSvc, c.userID, c.method, c.path, c.body)
+			if rec.Code != c.want {
+				t.Fatalf("%s %s status = %d, want %d; body=%s", c.method, c.path, rec.Code, c.want, rec.Body.String())
+			}
+		})
 	}
 }
 

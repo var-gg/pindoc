@@ -28,6 +28,17 @@ type PendingReview = {
 const CARD_CONTROL_SELECTOR = "a, button, input, textarea, select, [contenteditable='true']";
 const DIALOG_FOCUS_SELECTOR = "button, textarea, input, select, a[href], [tabindex]:not([tabindex='-1'])";
 
+export function inboxCardA11yPosition(index: number, total: number): { "aria-posinset": number; "aria-setsize": number } {
+  return {
+    "aria-posinset": index + 1,
+    "aria-setsize": Math.max(total, 0),
+  };
+}
+
+export async function refreshInboxAfterReview(load: () => Promise<boolean>): Promise<boolean> {
+  return load();
+}
+
 export function nextInboxFocusIndex(current: number, count: number, direction: -1 | 1): number {
   if (count <= 0) return 0;
   return (current + direction + count) % count;
@@ -43,37 +54,60 @@ export function Inbox({
   const { t, lang } = useI18n();
   const navigate = useNavigate();
   const [items, setItems] = useState<ArtifactRef[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [truncated, setTruncated] = useState(false);
+  const [limit, setLimit] = useState(0);
   const [loading, setLoading] = useState(() => enabled);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [busySlug, setBusySlug] = useState<string | null>(null);
   const [pendingReview, setPendingReview] = useState<PendingReview | null>(null);
   const [reviewNote, setReviewNote] = useState("");
-  const [reviewerId, setReviewerId] = useState<string | null | undefined>(undefined);
+  const [reviewNoteError, setReviewNoteError] = useState<string | null>(null);
   const [focusIndex, setFocusIndex] = useState(0);
   const cardRefs = useRef<Array<HTMLElement | null>>([]);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const noteRef = useRef<HTMLTextAreaElement | null>(null);
 
-  async function load() {
+  function applyInboxResponse(resp: Awaited<ReturnType<typeof api.inbox>>) {
+    const serverTotal = resp.total_count ?? resp.count;
+    setItems(resp.items);
+    setTotalCount(serverTotal);
+    setTruncated(Boolean(resp.truncated));
+    setLimit(resp.limit ?? resp.items.length);
+    onCountChange?.(serverTotal);
+  }
+
+  async function load(options: { warnOnly?: boolean } = {}): Promise<boolean> {
     if (!enabled) {
       setItems([]);
+      setTotalCount(0);
+      setTruncated(false);
+      setLimit(0);
       setLoading(false);
       setRefreshing(false);
       setError(null);
+      setRefreshWarning(null);
       onCountChange?.(0);
-      return;
+      return true;
     }
     setRefreshing(true);
-    setError(null);
+    if (!options.warnOnly) setError(null);
     try {
       const resp = await api.inbox(projectSlug);
-      setItems(resp.items);
-      onCountChange?.(resp.count);
+      applyInboxResponse(resp);
+      setRefreshWarning(null);
+      return true;
     } catch (e) {
       console.error("Inbox refresh failed", e);
-      setError(t("inbox.error_load"));
+      if (options.warnOnly) {
+        setRefreshWarning(t("inbox.review_refresh_warning"));
+      } else {
+        setError(t("inbox.error_load"));
+      }
+      return false;
     } finally {
       setRefreshing(false);
     }
@@ -82,9 +116,13 @@ export function Inbox({
   useEffect(() => {
     if (!enabled) {
       setItems([]);
+      setTotalCount(0);
+      setTruncated(false);
+      setLimit(0);
       setLoading(false);
       setRefreshing(false);
       setError(null);
+      setRefreshWarning(null);
       setSuccess(null);
       onCountChange?.(0);
       return;
@@ -96,8 +134,7 @@ export function Inbox({
     api.inbox(projectSlug)
       .then((resp) => {
         if (cancelled) return;
-        setItems(resp.items);
-        onCountChange?.(resp.count);
+        applyInboxResponse(resp);
       })
       .catch((e) => {
         console.error("Inbox load failed", e);
@@ -110,22 +147,6 @@ export function Inbox({
       cancelled = true;
     };
   }, [projectSlug, enabled, onCountChange, t]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setReviewerId(undefined);
-    api.currentUser()
-      .then((resp) => {
-        if (!cancelled) setReviewerId(resp.user?.id?.trim() || null);
-      })
-      .catch((e) => {
-        console.error("Inbox current user lookup failed", e);
-        if (!cancelled) setReviewerId(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectSlug]);
 
   useEffect(() => {
     setFocusIndex((current) => Math.min(current, Math.max(0, items.length - 1)));
@@ -141,7 +162,9 @@ export function Inbox({
   function beginReview(item: ArtifactRef, action: ReviewAction) {
     setPendingReview({ item, action });
     setReviewNote("");
+    setReviewNoteError(null);
     setError(null);
+    setRefreshWarning(null);
     setSuccess(null);
   }
 
@@ -149,30 +172,23 @@ export function Inbox({
     if (busySlug) return;
     setPendingReview(null);
     setReviewNote("");
-  }
-
-  async function resolveReviewerId(): Promise<string | undefined> {
-    if (reviewerId !== undefined) return reviewerId || undefined;
-    try {
-      const resp = await api.currentUser();
-      const id = resp.user?.id?.trim() || null;
-      setReviewerId(id);
-      return id || undefined;
-    } catch (e) {
-      console.error("Inbox current user lookup failed", e);
-      setReviewerId(null);
-      return undefined;
-    }
+    setReviewNoteError(null);
   }
 
   async function confirmReview() {
     if (!pendingReview || busySlug) return;
     const { item, action } = pendingReview;
+    if (action === "reject" && reviewNote.trim() === "") {
+      setReviewNoteError(t("inbox.reject_reason_required"));
+      noteRef.current?.focus();
+      return;
+    }
     setBusySlug(item.slug);
     setError(null);
+    setRefreshWarning(null);
+    setReviewNoteError(null);
     try {
       await api.inboxReview(projectSlug, item.slug, action, {
-        reviewerId: await resolveReviewerId(),
         commitMsg: reviewNote,
       });
       const next = items.filter((x) => x.id !== item.id);
@@ -181,6 +197,7 @@ export function Inbox({
       setSuccess(t(action === "approve" ? "inbox.approved_toast" : "inbox.rejected_toast"));
       setPendingReview(null);
       setReviewNote("");
+      await refreshInboxAfterReview(() => load({ warnOnly: true }));
     } catch (e) {
       console.error("Inbox review failed", e);
       setError(t("inbox.error_review"));
@@ -268,9 +285,9 @@ export function Inbox({
     <main className="content">
       <div className="surface-panel inbox-surface">
         <div className="inbox-surface__head">
-          <SurfaceHeader name="inbox" count={items.length} />
+          <SurfaceHeader name="inbox" count={totalCount} />
           <Tooltip content={t("inbox.refresh")}>
-            <button type="button" className="inbox-icon-button" onClick={load} disabled={loading || refreshing || !enabled}>
+            <button type="button" className="inbox-icon-button" onClick={() => void load()} disabled={loading || refreshing || !enabled}>
               <RefreshCw className={refreshing ? "inbox-spin" : undefined} size={15} aria-hidden="true" />
               <span className="sr-only">{t("inbox.refresh")}</span>
             </button>
@@ -278,7 +295,13 @@ export function Inbox({
         </div>
 
         {error && <div className="inbox-error" role="alert">{error}</div>}
+        {refreshWarning && <div className="inbox-error" role="alert">{refreshWarning}</div>}
         {success && <div className="inbox-success" role="status" aria-live="polite">{success}</div>}
+        {truncated && (
+          <div className="inbox-success" role="status" aria-live="polite">
+            {t("inbox.truncated_notice", items.length, totalCount, limit)}
+          </div>
+        )}
         {loading && <EmptyState message={t("inbox.loading")} />}
         {!loading && items.length === 0 && (
           <EmptyState
@@ -287,7 +310,7 @@ export function Inbox({
           />
         )}
         {!loading && items.length > 0 && (
-          <div className="inbox-list">
+          <div className="inbox-list" role="list" aria-label={t("inbox.list_aria", totalCount)}>
             {items.map((item, index) => (
               <article
                 key={item.id}
@@ -299,6 +322,8 @@ export function Inbox({
                 onFocus={() => setFocusIndex(index)}
                 onKeyDown={(e) => handleCardKeyDown(e, item, index)}
                 aria-label={t("inbox.card_aria", item.title)}
+                role="listitem"
+                {...inboxCardA11yPosition(index, totalCount)}
               >
                 <div className="inbox-card__meta">
                   <ArtifactTypeChip type={item.type} />
@@ -381,6 +406,9 @@ export function Inbox({
                     }
                   }}
                   rows={4}
+                  aria-invalid={Boolean(reviewNoteError)}
+                  aria-describedby={reviewNoteError ? "inbox-review-note-error" : undefined}
+                  required={pendingReview.action === "reject"}
                   placeholder={t(
                     pendingReview.action === "approve"
                       ? "inbox.dialog_approve_placeholder"
@@ -388,6 +416,11 @@ export function Inbox({
                   )}
                   disabled={busySlug === pendingReview.item.slug}
                 />
+                {reviewNoteError && (
+                  <p id="inbox-review-note-error" className="inbox-error" role="alert">
+                    {reviewNoteError}
+                  </p>
+                )}
                 <footer className="inbox-review-dialog__actions">
                   <button
                     type="button"

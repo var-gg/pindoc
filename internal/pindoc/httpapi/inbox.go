@@ -3,16 +3,28 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 )
 
+const (
+	defaultInboxLimit          = 200
+	maxInboxLimit              = 200
+	maxInboxReviewCommitBytes  = 4 * 1024
+	inboxRejectReasonErrorCode = "REVIEW_REJECT_REASON_REQUIRED"
+)
+
 type inboxResp struct {
 	ProjectSlug string        `json:"project_slug"`
 	Count       int           `json:"count"`
+	TotalCount  int           `json:"total_count"`
+	Limit       int           `json:"limit"`
+	Truncated   bool          `json:"truncated"`
 	Items       []artifactRow `json:"items"`
 }
 
@@ -30,9 +42,61 @@ type inboxReviewResp struct {
 	RowStatus   string `json:"row_status"`
 }
 
+type inboxAPIError struct {
+	ErrorCode string `json:"error_code"`
+	Message   string `json:"message"`
+}
+
+func writeInboxError(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, inboxAPIError{ErrorCode: code, Message: message})
+}
+
+func parseInboxLimit(r *http.Request) (int, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get("limit"))
+	if raw == "" {
+		return defaultInboxLimit, true
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit <= 0 {
+		return 0, false
+	}
+	if limit > maxInboxLimit {
+		return maxInboxLimit, true
+	}
+	return limit, true
+}
+
 func (d Deps) handleInbox(w http.ResponseWriter, r *http.Request) {
 	slug := projectSlugFrom(r)
-	rows, err := d.DB.Query(r.Context(), `
+	limit, ok := parseInboxLimit(r)
+	if !ok {
+		writeInboxError(w, http.StatusBadRequest, "INBOX_LIMIT_INVALID", "limit must be a positive integer")
+		return
+	}
+
+	projectPredicate, projectArg := projectLookupPredicate(r, "p", 1)
+	visibilityPredicate, visibilityArgs := d.artifactVisibilityPredicate(r, "a", 2)
+	args := append([]any{projectArg}, visibilityArgs...)
+
+	var totalCount int
+	countSQL := fmt.Sprintf(`
+		SELECT count(*)
+		  FROM artifacts a
+		  JOIN projects p ON p.id = a.project_id
+		 WHERE %s
+		   AND a.review_state = 'pending_review'
+		   AND a.status <> 'archived'
+		   AND %s
+	`, projectPredicate, visibilityPredicate)
+	if err := d.DB.QueryRow(r.Context(), countSQL, args...).Scan(&totalCount); err != nil {
+		d.Logger.Error("inbox count query", "err", err)
+		writeError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+
+	listArgs := append(append([]any{}, args...), limit)
+	limitPlaceholder := len(listArgs)
+	rows, err := d.DB.Query(r.Context(), fmt.Sprintf(`
 		SELECT
 			a.id::text, a.slug, a.type, a.title, ar.slug,
 			COALESCE(NULLIF(a.body_locale, ''), NULLIF(p.primary_language, ''), 'en'),
@@ -44,12 +108,13 @@ func (d Deps) handleInbox(w http.ResponseWriter, r *http.Request) {
 		JOIN projects p  ON p.id  = a.project_id
 		JOIN areas    ar ON ar.id = a.area_id
 		LEFT JOIN users u ON u.id = a.author_user_id
-		WHERE p.slug = $1
+		WHERE %s
 		  AND a.review_state = 'pending_review'
 		  AND a.status <> 'archived'
+		  AND %s
 		ORDER BY a.updated_at DESC
-		LIMIT 200
-	`, slug)
+		LIMIT $%d
+	`, projectPredicate, visibilityPredicate, limitPlaceholder), listArgs...)
 	if err != nil {
 		d.Logger.Error("inbox query", "err", err)
 		writeError(w, http.StatusInternalServerError, "query failed")
@@ -98,7 +163,10 @@ func (d Deps) handleInbox(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, inboxResp{
 		ProjectSlug: slug,
-		Count:       len(items),
+		Count:       totalCount,
+		TotalCount:  totalCount,
+		Limit:       limit,
+		Truncated:   totalCount > len(items),
 		Items:       items,
 	})
 }
@@ -134,6 +202,23 @@ func (d Deps) handleInboxReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	commitMsg := strings.TrimSpace(in.CommitMsg)
+	if len([]byte(commitMsg)) > maxInboxReviewCommitBytes {
+		writeInboxError(w, http.StatusBadRequest, "REVIEW_COMMIT_MSG_TOO_LONG", "commit_msg is too long")
+		return
+	}
+	if nextReviewState == "rejected" && commitMsg == "" {
+		writeInboxError(w, http.StatusBadRequest, inboxRejectReasonErrorCode, "reject reason is required")
+		return
+	}
+
+	var reviewerID any
+	if principal := d.principalForRequest(r); principal != nil {
+		if userID := strings.TrimSpace(principal.UserID); userID != "" {
+			reviewerID = userID
+		}
+	}
+
 	tx, err := d.DB.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "begin failed")
@@ -142,24 +227,32 @@ func (d Deps) handleInboxReview(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback(r.Context()) }()
 
 	var out inboxReviewResp
-	err = tx.QueryRow(r.Context(), `
+	projectPredicate, projectArg := projectLookupPredicate(r, "p", 1)
+	visibilityPredicate, visibilityArgs := d.artifactVisibilityPredicate(r, "a", 3)
+	updateArgs := append([]any{projectArg, ref}, visibilityArgs...)
+	nextReviewStatePlaceholder := len(updateArgs) + 1
+	nextStatusPlaceholder := len(updateArgs) + 2
+	updateArgs = append(updateArgs, nextReviewState, nextStatus)
+	err = tx.QueryRow(r.Context(), fmt.Sprintf(`
 		WITH target AS (
 			SELECT a.id
 			  FROM artifacts a
 			  JOIN projects p ON p.id = a.project_id
-			 WHERE p.slug = $1
+			 WHERE %s
 			   AND (a.id::text = $2 OR a.slug = $2)
 			   AND a.review_state = 'pending_review'
+			   AND a.status <> 'archived'
+			   AND %s
 			 LIMIT 1
 		)
 		UPDATE artifacts a
-		   SET review_state = $3,
-		       status       = $4,
+		   SET review_state = $%d,
+		       status       = $%d,
 		       updated_at   = now()
 		  FROM target
 		 WHERE a.id = target.id
 		RETURNING a.id::text, a.slug, a.review_state, a.status
-	`, slug, ref, nextReviewState, nextStatus).Scan(
+	`, projectPredicate, visibilityPredicate, nextReviewStatePlaceholder, nextStatusPlaceholder), updateArgs...).Scan(
 		&out.ArtifactID, &out.Slug, &out.ReviewState, &out.RowStatus,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -172,10 +265,6 @@ func (d Deps) handleInboxReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reviewer := strings.TrimSpace(in.ReviewerID)
-	if reviewer == "" {
-		reviewer = "reader"
-	}
 	if _, err := tx.Exec(r.Context(), `
 		INSERT INTO events (project_id, kind, subject_id, payload)
 		SELECT p.id, $3, $2::uuid, jsonb_build_object(
@@ -184,7 +273,7 @@ func (d Deps) handleInboxReview(w http.ResponseWriter, r *http.Request) {
 		)
 		  FROM projects p
 		 WHERE p.slug = $1
-	`, slug, out.ArtifactID, eventKind, reviewer, strings.TrimSpace(in.CommitMsg)); err != nil {
+	`, slug, out.ArtifactID, eventKind, reviewerID, commitMsg); err != nil {
 		d.Logger.Error("inbox review event", "err", err)
 		writeError(w, http.StatusInternalServerError, "event failed")
 		return
