@@ -487,6 +487,8 @@
   "cmdk.results_label": "Command palette results",
   "cmdk.commits_section_label": "Commits",
   "cmdk.artifacts_section_label": "Artifacts",
+  "cmdk.current_project_section_label": "Current project",
+  "cmdk.global_artifacts_section_label": "Other projects",
   "cmdk.hint": "Search artifacts or a commit SHA in this project.",
   "cmdk.no_hits": "No matching artifacts.",
   "cmdk.commit_result": "Commit %s",

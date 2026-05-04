@@ -1,10 +1,13 @@
 import type { SearchHit } from "../src/api/client";
 import {
+  cmdkArtifactPath,
   CMDK_RELEVANCE_SETTINGS,
   cmdkCommitRows,
   cmdkEmptyCopyKey,
   cmdkNextIndex,
   cmdkOptionId,
+  cmdkOtherProjectHits,
+  cmdkProjectChip,
   cmdkRelevantHits,
   cmdkResultMeta,
   cmdkSections,
@@ -26,6 +29,8 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
 function hit(overrides: Partial<SearchHit> = {}): SearchHit {
   return {
     artifact_id: "a1",
+    project_slug: "pindoc",
+    org_slug: "default",
     slug: "reader-qa",
     type: "Task",
     title: "Reader QA",
@@ -120,8 +125,10 @@ function testCmdKEmptyCopyExistsInBothLocales(): void {
   assertEqual(en["cmdk.dialog_label"], "Command palette", "EN CmdK dialog label");
   assertEqual(ko["cmdk.commits_section_label"], "커밋", "KO CmdK commit section label");
   assertEqual(en["cmdk.commits_section_label"], "Commits", "EN CmdK commit section label");
-  assertEqual(ko["cmdk.artifacts_section_label"], "문서", "KO CmdK artifact section label");
-  assertEqual(en["cmdk.artifacts_section_label"], "Artifacts", "EN CmdK artifact section label");
+  assertEqual(ko["cmdk.current_project_section_label"], "현재 프로젝트", "KO CmdK current project section label");
+  assertEqual(en["cmdk.current_project_section_label"], "Current project", "EN CmdK current project section label");
+  assertEqual(ko["cmdk.global_artifacts_section_label"], "다른 프로젝트", "KO CmdK global section label");
+  assertEqual(en["cmdk.global_artifacts_section_label"], "Other projects", "EN CmdK global section label");
 }
 
 function testCmdKEmptyCopyUsesTrimmedQuery(): void {
@@ -148,18 +155,50 @@ function testCmdKFocusTrapTargets(): void {
 }
 
 function testCmdKSectionsSeparateCommitsAndArtifacts(): void {
-  const artifact = { kind: "artifact" as const, hit: hit({ artifact_id: "a2" }) };
+  const artifact = { kind: "artifact" as const, artifactScope: "current" as const, hit: hit({ artifact_id: "a2" }) };
+  const globalArtifact = { kind: "artifact" as const, artifactScope: "global" as const, hit: hit({ artifact_id: "a3", project_slug: "sister" }) };
   const commit = { kind: "commit" as const, repo: { id: "repo-a", name: "repo-a", default_branch: "main" }, sha: "abcdef1" };
-  const sections = cmdkSections([commit, artifact]);
+  const sections = cmdkSections([commit, artifact, globalArtifact]);
 
-  assertEqual(sections.length, 2, "commit and artifact rows should render in separate sections");
+  assertEqual(sections.length, 3, "commit and artifact rows should render in separate sections");
   assertEqual(sections[0]?.labelKey, "cmdk.commits_section_label", "commit section label key");
   assertEqual(sections[0]?.startIndex, 0, "commit section start index");
-  assertEqual(sections[1]?.labelKey, "cmdk.artifacts_section_label", "artifact section label key");
+  assertEqual(sections[1]?.labelKey, "cmdk.current_project_section_label", "current artifact section label key");
   assertEqual(sections[1]?.startIndex, 1, "artifact section start index");
+  assertEqual(sections[2]?.labelKey, "cmdk.global_artifacts_section_label", "global artifact section label key");
+  assertEqual(sections[2]?.startIndex, 2, "global artifact section start index");
   assertEqual(cmdkSections([artifact]).length, 1, "empty commit section should be hidden");
-  assertEqual(cmdkSections([artifact])[0]?.labelKey, "cmdk.artifacts_section_label", "artifact-only label key");
+  assertEqual(cmdkSections([artifact])[0]?.labelKey, "cmdk.current_project_section_label", "artifact-only label key");
   assertEqual(cmdkOptionId(3), "cmdk-option-3", "stable option id");
+}
+
+function testCmdKGlobalHitsExcludeCurrentProject(): void {
+  const filtered = cmdkOtherProjectHits([
+    hit({ artifact_id: "current", slug: "current", project_slug: "pindoc", org_slug: "default" }),
+    hit({ artifact_id: "sister", slug: "sister", project_slug: "pindoc-sample", org_slug: "default" }),
+  ], "pindoc", "default");
+
+  assertEqual(filtered.map((item) => item.slug).join(","), "sister", "global CmdK hits should exclude current project rows");
+}
+
+function testCmdKProjectChipUsesHitProjectScope(): void {
+  const label = cmdkProjectChip(
+    hit({ project_slug: "pindoc-sample", org_slug: "default" }),
+    "pindoc",
+    "default",
+  );
+
+  assertEqual(label, "pindoc-sample · default", "CmdK project chip should show project and org");
+}
+
+function testCmdKArtifactPathUsesHitProjectScope(): void {
+  const path = cmdkArtifactPath(
+    hit({ project_slug: "pindoc-sample", org_slug: "default", slug: "sister-doc" }),
+    "pindoc",
+    "default",
+  );
+
+  assertEqual(path, "/default/p/pindoc-sample/wiki/sister-doc", "CmdK artifact path should use hit project scope");
 }
 
 function testCmdKCommitRowsUseEveryMatchingRepo(): void {
@@ -201,4 +240,7 @@ testCmdKEmptyCopyUsesTrimmedQuery();
 testCmdKKeyboardJumpNavigation();
 testCmdKFocusTrapTargets();
 testCmdKSectionsSeparateCommitsAndArtifacts();
+testCmdKGlobalHitsExcludeCurrentProject();
+testCmdKProjectChipUsesHitProjectScope();
+testCmdKArtifactPathUsesHitProjectScope();
 testCmdKCommitRowsUseEveryMatchingRepo();

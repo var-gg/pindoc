@@ -483,6 +483,8 @@ export type ArtifactListResp = {
 
 export type SearchHit = {
   artifact_id: string;
+  project_slug: string;
+  org_slug: string;
   slug: string;
   type: string;
   title: string;
@@ -495,6 +497,16 @@ export type SearchHit = {
   completeness?: string;
   task_status?: string;
   task_priority?: string;
+};
+
+export type SearchResp = {
+  query: string;
+  project_slug: string;
+  org_slug?: string;
+  organization_slug?: string;
+  cross_project?: boolean;
+  hits: SearchHit[];
+  notice?: string;
 };
 
 export type RevisionRow = {
@@ -1401,8 +1413,12 @@ export const api = {
     return `${p(project)}/export${q ? `?${q}` : ""}`;
   },
   search: (project: string, q: string) =>
-    j<{ query: string; project_slug: string; hits: SearchHit[]; notice?: string }>(
+    j<SearchResp>(
       `${p(project)}/search?q=${encodeURIComponent(q)}`,
+    ),
+  searchGlobal: (project: string, q: string) =>
+    j<SearchResp>(
+      `${p(project)}/search?q=${encodeURIComponent(q)}&cross_project=1`,
     ),
   revisions: (project: string, idOrSlug: string) =>
     j<RevisionsResp>(`${p(project)}/artifacts/${encodeURIComponent(idOrSlug)}/revisions`),

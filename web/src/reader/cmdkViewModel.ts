@@ -1,15 +1,20 @@
 import type { SearchHit } from "../api/client";
 import { localizedAreaName } from "./areaLocale";
+import { projectSurfacePath } from "../readerRoutes";
 
 type TFn = (key: string, ...args: Array<string | number>) => string;
 
 export type CmdKNavigationKey = "ArrowDown" | "ArrowUp" | "Home" | "End" | "PageDown" | "PageUp";
 
 export type CmdKItemKind = "commit" | "artifact";
+export type CmdKArtifactScope = "current" | "global";
 
-export type CmdKSection<T extends { kind: CmdKItemKind }> = {
-  kind: "commits" | "artifacts";
-  labelKey: "cmdk.commits_section_label" | "cmdk.artifacts_section_label";
+export type CmdKSection<T extends { kind: CmdKItemKind; artifactScope?: CmdKArtifactScope }> = {
+  kind: "commits" | "current_artifacts" | "global_artifacts";
+  labelKey:
+    | "cmdk.commits_section_label"
+    | "cmdk.current_project_section_label"
+    | "cmdk.global_artifacts_section_label";
   items: T[];
   startIndex: number;
 };
@@ -37,6 +42,41 @@ export function cmdkRelevantHits(
 ): SearchHit[] {
   const maxDistance = settings.maxDistance ?? CMDK_RELEVANCE_SETTINGS.maxDistance;
   return hits.filter((hit) => Number.isFinite(hit.distance) && hit.distance <= maxDistance);
+}
+
+export function cmdkOtherProjectHits(
+  hits: SearchHit[],
+  currentProjectSlug: string,
+  currentOrgSlug: string,
+): SearchHit[] {
+  return hits.filter((hit) => {
+    const projectSlug = hit.project_slug || currentProjectSlug;
+    const orgSlug = hit.org_slug || currentOrgSlug;
+    return projectSlug !== currentProjectSlug || orgSlug !== currentOrgSlug;
+  });
+}
+
+export function cmdkProjectChip(
+  hit: SearchHit,
+  fallbackProjectSlug: string,
+  fallbackOrgSlug: string,
+): string {
+  const projectSlug = (hit.project_slug || fallbackProjectSlug).trim();
+  const orgSlug = (hit.org_slug || fallbackOrgSlug).trim();
+  return orgSlug ? `${projectSlug} · ${orgSlug}` : projectSlug;
+}
+
+export function cmdkArtifactPath(
+  hit: SearchHit,
+  fallbackProjectSlug: string,
+  fallbackOrgSlug: string,
+): string {
+  return projectSurfacePath(
+    hit.project_slug || fallbackProjectSlug,
+    "wiki",
+    hit.slug,
+    hit.org_slug || fallbackOrgSlug,
+  );
 }
 
 export function cmdkResultMeta(hit: SearchHit, t: TFn): string {
@@ -81,9 +121,10 @@ export function cmdkOptionId(index: number): string {
   return `cmdk-option-${index}`;
 }
 
-export function cmdkSections<T extends { kind: CmdKItemKind }>(items: T[]): CmdKSection<T>[] {
+export function cmdkSections<T extends { kind: CmdKItemKind; artifactScope?: CmdKArtifactScope }>(items: T[]): CmdKSection<T>[] {
   const commits = items.filter((item) => item.kind === "commit");
-  const artifacts = items.filter((item) => item.kind === "artifact");
+  const currentArtifacts = items.filter((item) => item.kind === "artifact" && item.artifactScope !== "global");
+  const globalArtifacts = items.filter((item) => item.kind === "artifact" && item.artifactScope === "global");
   const sections: CmdKSection<T>[] = [];
   if (commits.length > 0) {
     sections.push({
@@ -93,12 +134,20 @@ export function cmdkSections<T extends { kind: CmdKItemKind }>(items: T[]): CmdK
       startIndex: 0,
     });
   }
-  if (artifacts.length > 0) {
+  if (currentArtifacts.length > 0) {
     sections.push({
-      kind: "artifacts",
-      labelKey: "cmdk.artifacts_section_label",
-      items: artifacts,
+      kind: "current_artifacts",
+      labelKey: "cmdk.current_project_section_label",
+      items: currentArtifacts,
       startIndex: commits.length,
+    });
+  }
+  if (globalArtifacts.length > 0) {
+    sections.push({
+      kind: "global_artifacts",
+      labelKey: "cmdk.global_artifacts_section_label",
+      items: globalArtifacts,
+      startIndex: commits.length + currentArtifacts.length,
     });
   }
   return sections;

@@ -2190,6 +2190,8 @@
 .palette__item.selected .lucide { color: var(--fg-1); }
 .palette__item.selected::before { content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 2px; height: 24px; background: var(--accent); }
 .palette__item .mono { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+.palette__item-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.palette__project-chip { display: inline-flex; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-0); color: var(--fg-2); }
 .palette__item-body {
   min-width: 0;
   display: flex;

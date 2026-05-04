@@ -1224,8 +1224,22 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 	// matches MCP artifact.search / context.for_task / artifact list for
 	// the "sidebar count == list.length" invariant per the Phase 17 follow-up.
 	includeTemplates := r.URL.Query().Get("include_templates") == "true"
+	crossProject := parseSearchCrossProject(r.URL.Query().Get("cross_project"))
 	if d.Embedder == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"query": q, "hits": []any{}, "notice": "embedder not configured"})
+		body := map[string]any{
+			"query":        q,
+			"project_slug": slug,
+			"hits":         []any{},
+			"notice":       "embedder not configured",
+		}
+		if org := orgSlugFrom(r); org != "" {
+			body["org_slug"] = org
+			body["organization_slug"] = org
+		}
+		if crossProject {
+			body["cross_project"] = true
+		}
+		writeJSON(w, http.StatusOK, body)
 		return
 	}
 	res, err := d.Embedder.Embed(r.Context(), embed.Request{Texts: []string{q}, Kind: embed.KindQuery})
@@ -1236,7 +1250,46 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	qVec := embed.VectorString(embed.PadTo768(res.Vectors[0]))
 
-	rows, err := d.DB.Query(r.Context(), `
+	projectPredicate, projectArg := projectLookupPredicate(r, "p", 2)
+	projectFilter := projectPredicate
+	args := []any{qVec, projectArg, includeTemplates}
+	limit := 10
+	if crossProject {
+		visibleProjects, err := projects.ListVisible(r.Context(), d.DB, d.viewerScopeForRequest(r))
+		if err != nil {
+			d.Logger.Error("search visible projects", "err", err)
+			writeError(w, http.StatusInternalServerError, "search failed")
+			return
+		}
+		visibleProjectIDs := make([]string, 0, len(visibleProjects))
+		for _, row := range visibleProjects {
+			visibleProjectIDs = append(visibleProjectIDs, row.ID)
+		}
+		if len(visibleProjectIDs) == 0 {
+			info := d.Embedder.Info()
+			writeJSON(w, http.StatusOK, map[string]any{
+				"query":         q,
+				"project_slug":  slug,
+				"cross_project": true,
+				"hits":          []any{},
+				"embedder_used": map[string]any{
+					"name":      info.Name,
+					"model_id":  info.ModelID,
+					"dimension": info.Dimension,
+				},
+			})
+			return
+		}
+		projectFilter = "p.id::text = ANY($2::text[])"
+		args = []any{qVec, visibleProjectIDs, includeTemplates}
+		limit = 20
+	}
+	visibilityPredicate, visibilityArgs := d.artifactVisibilityPredicate(r, "a", 4)
+	args = append(args, visibilityArgs...)
+	limitArg := len(args) + 1
+	args = append(args, limit)
+
+	rows, err := d.DB.Query(r.Context(), fmt.Sprintf(`
 		WITH scored AS (
 			SELECT DISTINCT ON (c.artifact_id)
 				c.artifact_id, c.heading, c.text,
@@ -1244,13 +1297,15 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 			FROM artifact_chunks c
 			JOIN artifacts a ON a.id = c.artifact_id
 			JOIN projects p ON p.id = a.project_id
-			WHERE p.slug = $2
+			WHERE %s
 			  AND a.status <> 'archived'
 			  AND ($3::bool OR NOT starts_with(a.slug, '_template_'))
+			  AND %s
 			ORDER BY c.artifact_id, distance
 		)
 		SELECT
-			s.artifact_id::text, a.slug, a.type, a.title, ar.slug,
+			s.artifact_id::text, p.slug, COALESCE(o.slug, ''),
+			a.slug, a.type, a.title, ar.slug,
 			COALESCE(s.heading, '') , s.text, s.distance,
 			a.updated_at, a.status, a.completeness,
 			COALESCE(a.task_meta->>'status', ''),
@@ -1258,9 +1313,11 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 		FROM scored s
 		JOIN artifacts a  ON a.id  = s.artifact_id
 		JOIN areas     ar ON ar.id = a.area_id
+		JOIN projects  p  ON p.id  = a.project_id
+		LEFT JOIN organizations o ON o.id = p.organization_id
 		ORDER BY s.distance
-		LIMIT 10
-	`, qVec, slug, includeTemplates)
+		LIMIT $%d
+	`, projectFilter, visibilityPredicate, limitArg), args...)
 	if err != nil {
 		d.Logger.Error("search", "err", err)
 		writeError(w, http.StatusInternalServerError, "search failed")
@@ -1270,6 +1327,8 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	type hit struct {
 		ArtifactID   string    `json:"artifact_id"`
+		ProjectSlug  string    `json:"project_slug"`
+		OrgSlug      string    `json:"org_slug"`
 		Slug         string    `json:"slug"`
 		Type         string    `json:"type"`
 		Title        string    `json:"title"`
@@ -1287,7 +1346,8 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var h hit
 		if err := rows.Scan(
-			&h.ArtifactID, &h.Slug, &h.Type, &h.Title, &h.AreaSlug,
+			&h.ArtifactID, &h.ProjectSlug, &h.OrgSlug,
+			&h.Slug, &h.Type, &h.Title, &h.AreaSlug,
 			&h.Heading, &h.Snippet, &h.Distance,
 			&h.UpdatedAt, &h.Status, &h.Completeness, &h.TaskStatus, &h.TaskPriority,
 		); err != nil {
@@ -1299,8 +1359,12 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, h)
 	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "scan failed")
+		return
+	}
 	info := d.Embedder.Info()
-	writeJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"query":        q,
 		"project_slug": slug,
 		"hits":         out,
@@ -1309,7 +1373,24 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 			"model_id":  info.ModelID,
 			"dimension": info.Dimension,
 		},
-	})
+	}
+	if org := orgSlugFrom(r); org != "" {
+		body["org_slug"] = org
+		body["organization_slug"] = org
+	}
+	if crossProject {
+		body["cross_project"] = true
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
+func parseSearchCrossProject(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func (d Deps) handleHealth(w http.ResponseWriter, r *http.Request) {

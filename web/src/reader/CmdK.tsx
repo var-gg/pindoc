@@ -5,10 +5,13 @@ import { api, type GitRepoSummary, type SearchHit } from "../api/client";
 import { useI18n } from "../i18n";
 import { gitCommitPath, isCommitQuery, shortSha } from "../git/routes";
 import {
+  cmdkArtifactPath,
   cmdkCommitRows,
   cmdkEmptyCopyKey,
   cmdkNextIndex,
   cmdkOptionId,
+  cmdkOtherProjectHits,
+  cmdkProjectChip,
   cmdkRelevantHits,
   cmdkResultMeta,
   cmdkSections,
@@ -16,7 +19,6 @@ import {
   type CmdKFocusTarget,
   type CmdKNavigationKey,
 } from "./cmdkViewModel";
-import { projectRoutePrefix, projectSurfacePath } from "../readerRoutes";
 import { dismissTooltipsForModal } from "./Tooltip";
 
 type Props = {
@@ -35,6 +37,7 @@ type CmdKCommitItem = {
 
 type CmdKArtifactItem = {
   kind: "artifact";
+  artifactScope: "current" | "global";
   hit: SearchHit;
 };
 
@@ -47,7 +50,8 @@ const titleId = "cmdk-title";
 export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
-  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [currentHits, setCurrentHits] = useState<SearchHit[]>([]);
+  const [globalHits, setGlobalHits] = useState<SearchHit[]>([]);
   const [repos, setRepos] = useState<GitRepoSummary[]>([]);
   const [commitItems, setCommitItems] = useState<CmdKCommitItem[]>([]);
   const [notice, setNotice] = useState<string | undefined>();
@@ -59,7 +63,8 @@ export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
   const q = query.trim();
   const items: CmdKItem[] = [
     ...commitItems,
-    ...hits.map((hit) => ({ kind: "artifact" as const, hit })),
+    ...currentHits.map((hit) => ({ kind: "artifact" as const, artifactScope: "current" as const, hit })),
+    ...globalHits.map((hit) => ({ kind: "artifact" as const, artifactScope: "global" as const, hit })),
   ];
   const sections = cmdkSections(items);
 
@@ -79,23 +84,35 @@ export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
   useEffect(() => {
     if (!open) return;
     if (!q) {
-      setHits([]);
+      setCurrentHits([]);
+      setGlobalHits([]);
       setNotice(undefined);
       return;
     }
+    let cancelled = false;
     const id = window.setTimeout(async () => {
       try {
-        const res = await api.search(projectSlug, q);
-        setHits(cmdkRelevantHits(res.hits));
-        setNotice(res.notice);
+        const [projectRes, globalRes] = await Promise.all([
+          api.search(projectSlug, q),
+          api.searchGlobal(projectSlug, q),
+        ]);
+        if (cancelled) return;
+        setCurrentHits(cmdkRelevantHits(projectRes.hits));
+        setGlobalHits(cmdkOtherProjectHits(cmdkRelevantHits(globalRes.hits), projectSlug, orgSlug));
+        setNotice(projectRes.notice || globalRes.notice);
         setSelected(0);
       } catch (err) {
-        setHits([]);
+        if (cancelled) return;
+        setCurrentHits([]);
+        setGlobalHits([]);
         setNotice(String(err));
       }
     }, 150);
-    return () => window.clearTimeout(id);
-  }, [open, query, projectSlug]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(id);
+    };
+  }, [open, query, projectSlug, orgSlug]);
 
   useEffect(() => {
     if (!open || !isCommitQuery(q)) {
@@ -167,7 +184,7 @@ export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
     }
     function activate(item: CmdKItem | undefined) {
       if (item?.kind === "artifact") {
-        navigate(projectSurfacePath(projectSlug, "wiki", item.hit.slug, orgSlug));
+        navigate(cmdkArtifactPath(item.hit, projectSlug, orgSlug));
         onClose();
       }
       if (item?.kind === "commit") {
@@ -246,14 +263,14 @@ export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
                 const i = section.startIndex + offset;
                 return (
                   <button
-                    key={item.kind === "artifact" ? item.hit.artifact_id : `commit-${item.repo.id}-${item.sha}`}
+                    key={item.kind === "artifact" ? `${item.artifactScope}-${item.hit.artifact_id}` : `commit-${item.repo.id}-${item.sha}`}
                     id={cmdkOptionId(i)}
                     className={`palette__item${i === selected ? " selected" : ""}`}
                     role="option"
                     aria-selected={i === selected}
                     onClick={() => {
                       if (item.kind === "artifact") {
-                        navigate(projectSurfacePath(projectSlug, "wiki", item.hit.slug, orgSlug));
+                        navigate(cmdkArtifactPath(item.hit, projectSlug, orgSlug));
                       } else {
                         navigate(gitCommitPath(projectSlug, item.repo.id, item.sha));
                       }
@@ -266,10 +283,17 @@ export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
                       <div className="palette__item-title">
                         {item.kind === "artifact" ? item.hit.title : t("cmdk.commit_result", shortSha(item.sha))}
                       </div>
-                      <div className="mono">
-                        {item.kind === "artifact"
-                          ? `${projectRoutePrefix(projectSlug, orgSlug)} · ${cmdkResultMeta(item.hit, t)}`
-                          : `${item.repo.name || item.repo.id} · ${item.summary || item.repo.default_branch}`}
+                      <div className="mono palette__item-meta">
+                        {item.kind === "artifact" ? (
+                          <>
+                            <span className="palette__project-chip">
+                              {cmdkProjectChip(item.hit, projectSlug, orgSlug)}
+                            </span>
+                            <span>{cmdkResultMeta(item.hit, t)}</span>
+                          </>
+                        ) : (
+                          `${item.repo.name || item.repo.id} · ${item.summary || item.repo.default_branch}`
+                        )}
                       </div>
                       {item.kind === "artifact" && item.hit.snippet && (
                         <div className="palette__snippet">{item.hit.snippet}</div>
