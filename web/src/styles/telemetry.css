@@ -12,6 +12,7 @@
   --ops-accent: #6ea8fe;
   --ops-err: #f08886;
   --ops-ok: #7fd0a0;
+  --ops-warn: #ffd166;
   min-height: 100vh;
   box-sizing: border-box;
   width: 100%;
@@ -229,7 +230,9 @@
 }
 
 .ops__primary,
-.ops__danger {
+.ops__danger,
+.ops__secondary,
+.ops__copy {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -252,9 +255,19 @@
 }
 
 .ops__primary:disabled,
-.ops__danger:disabled {
+.ops__danger:disabled,
+.ops__secondary:disabled,
+.ops__copy:disabled {
   opacity: 0.55;
   cursor: wait;
+}
+
+.ops__secondary {
+  color: var(--ops-mute);
+}
+
+.ops__copy {
+  color: var(--ops-text);
 }
 
 .ops__toast {
@@ -272,6 +285,119 @@
 .ops__toast--err {
   border-color: #5a3034;
   color: var(--ops-err);
+}
+
+.ops__secret-reveal {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  border: 1px solid #6f5528;
+  border-radius: 4px;
+  background: #251f14;
+  color: var(--ops-text);
+  padding: 14px;
+  margin-top: 12px;
+}
+
+.ops__secret-reveal > .lucide {
+  color: var(--ops-warn);
+  margin-top: 2px;
+}
+
+.ops__secret-body {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ops__secret-body h3,
+.ops__secret-body p {
+  margin: 0;
+}
+
+.ops__secret-body h3 {
+  color: var(--ops-warn);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.ops__secret-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.ops__secret-row input {
+  font-family: inherit;
+}
+
+.ops__secret-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.ops__copy-error {
+  color: var(--ops-err);
+  margin: 0;
+}
+
+.confirm-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(3, 5, 8, 0.72);
+}
+
+.confirm-dialog__panel {
+  width: min(460px, 100%);
+  border: 1px solid var(--ops-border);
+  border-radius: 6px;
+  background: var(--ops-surface);
+  color: var(--ops-text);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+  padding: 18px;
+}
+
+.confirm-dialog__header h2 {
+  margin: 0;
+  color: var(--ops-text);
+  font-size: 14px;
+  font-weight: 650;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.confirm-dialog__body {
+  display: grid;
+  gap: 12px;
+  color: var(--ops-mute);
+  margin-top: 10px;
+}
+
+.confirm-dialog__body p {
+  margin: 0;
+}
+
+.confirm-dialog__check {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid var(--ops-border);
+  border-radius: 4px;
+  color: var(--ops-text);
+}
+
+.confirm-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
 }
 
 .ops__list {
@@ -531,5 +657,12 @@
   }
   .ops table {
     min-width: 680px;
+  }
+  .ops__secret-row {
+    grid-template-columns: 1fr;
+  }
+  .confirm-dialog {
+    align-items: end;
+    padding: 12px;
   }
 }
