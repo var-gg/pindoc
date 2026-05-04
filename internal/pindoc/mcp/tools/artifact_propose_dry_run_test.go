@@ -14,6 +14,7 @@ import (
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
+	"github.com/var-gg/pindoc/internal/pindoc/projects"
 	"github.com/var-gg/pindoc/internal/pindoc/receipts"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
 )
@@ -162,6 +163,86 @@ func TestArtifactProposeDryRunDoesNotBypassReceipt(t *testing.T) {
 	})
 	if out.Status != "not_ready" || out.ErrorCode != "NO_SRCH" {
 		t.Fatalf("dry_run without receipt = status=%q code=%q, want not_ready NO_SRCH", out.Status, out.ErrorCode)
+	}
+}
+
+func TestArtifactProposeVisibilityCapIntegration(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PINDOC_TEST_DATABASE_URL"))
+	if dsn == "" {
+		t.Skip("set PINDOC_TEST_DATABASE_URL to run artifact.propose visibility cap DB integration")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := db.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer pool.Close()
+	if err := db.Migrate(ctx, pool.Pool); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	suffix := time.Now().UnixNano()
+	projectSlug := fmt.Sprintf("propose-vis-%d", suffix)
+	projectID := insertContextReceiptProject(t, ctx, pool, projectSlug)
+	insertContextReceiptArea(t, ctx, pool, projectID, "mcp")
+	defer func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1::uuid`, projectID)
+	}()
+
+	call := newArtifactProposeTestCaller(t, ctx, pool, nil)
+	beforeArtifacts := countRows(t, ctx, pool, "artifacts", projectID)
+	orgProjectPublicArtifact := call(ctx, map[string]any{
+		"project_slug":  projectSlug,
+		"area_slug":     "mcp",
+		"type":          "Decision",
+		"title":         "Visibility cap public",
+		"slug":          fmt.Sprintf("vis-cap-public-%d", suffix),
+		"body_markdown": validDecisionBodyForPropose("x", "y"),
+		"author_id":     "codex-test",
+		"visibility":    projects.VisibilityPublic,
+	})
+	if orgProjectPublicArtifact.Status != "not_ready" || orgProjectPublicArtifact.ErrorCode != "VISIBILITY_CAPPED_BY_PROJECT" {
+		t.Fatalf("org project public artifact propose = %+v", orgProjectPublicArtifact)
+	}
+	if got := countRows(t, ctx, pool, "artifacts", projectID); got != beforeArtifacts {
+		t.Fatalf("artifact count after capped propose = %d, want %d", got, beforeArtifacts)
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE projects SET visibility = $1 WHERE id = $2::uuid`, projects.VisibilityPublic, projectID); err != nil {
+		t.Fatalf("set project public: %v", err)
+	}
+	publicProjectPublicArtifact := call(ctx, map[string]any{
+		"project_slug":  projectSlug,
+		"area_slug":     "mcp",
+		"type":          "Decision",
+		"title":         "Visibility cap public allowed",
+		"slug":          fmt.Sprintf("vis-cap-public-ok-%d", suffix),
+		"body_markdown": validDecisionBodyForPropose("x", "y"),
+		"author_id":     "codex-test",
+		"visibility":    projects.VisibilityPublic,
+	})
+	if publicProjectPublicArtifact.Status != "accepted" || !publicProjectPublicArtifact.Created {
+		t.Fatalf("public project public artifact propose = %+v", publicProjectPublicArtifact)
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE projects SET visibility = $1 WHERE id = $2::uuid`, projects.VisibilityPrivate, projectID); err != nil {
+		t.Fatalf("set project private: %v", err)
+	}
+	privateProjectOrgArtifact := call(ctx, map[string]any{
+		"project_slug":  projectSlug,
+		"area_slug":     "mcp",
+		"type":          "Decision",
+		"title":         "Visibility cap org",
+		"slug":          fmt.Sprintf("vis-cap-org-%d", suffix),
+		"body_markdown": validDecisionBodyForPropose("x", "y"),
+		"author_id":     "codex-test",
+		"visibility":    projects.VisibilityOrg,
+	})
+	if privateProjectOrgArtifact.Status != "not_ready" || privateProjectOrgArtifact.ErrorCode != "VISIBILITY_CAPPED_BY_PROJECT" {
+		t.Fatalf("private project org artifact propose = %+v", privateProjectOrgArtifact)
 	}
 }
 

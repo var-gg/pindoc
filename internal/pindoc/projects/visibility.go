@@ -33,6 +33,34 @@ func NormalizeVisibility(raw string) string {
 	}
 }
 
+// VisibilityRank orders tiers by restrictiveness: public < org < private.
+// Invalid tiers return -1 so callers can fail closed.
+func VisibilityRank(raw string) int {
+	switch NormalizeVisibility(raw) {
+	case VisibilityPublic:
+		return 0
+	case VisibilityOrg:
+		return 1
+	case VisibilityPrivate:
+		return 2
+	default:
+		return -1
+	}
+}
+
+// ArtifactVisibilityAllowedByProject reports whether an artifact tier stays
+// within its project's visibility container. A public project can contain any
+// artifact tier; an org project can contain org/private artifacts; a private
+// project can contain private artifacts only.
+func ArtifactVisibilityAllowedByProject(projectVisibility, artifactVisibility string) bool {
+	projectRank := VisibilityRank(projectVisibility)
+	artifactRank := VisibilityRank(artifactVisibility)
+	if projectRank < 0 || artifactRank < 0 {
+		return false
+	}
+	return artifactRank >= projectRank
+}
+
 // ViewerScope describes who is asking for the visibility-filtered list,
 // so CountVisible / ListVisible can pick the right WHERE clause without
 // each call site re-implementing the rule. Anonymous viewers see

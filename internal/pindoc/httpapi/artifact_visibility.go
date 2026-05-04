@@ -99,14 +99,15 @@ func (d Deps) handleArtifactPatch(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback(r.Context()) }()
 
 	var out artifactPatchResp
-	var currentVisibility, title, body, completeness, projectID string
+	var currentVisibility, title, body, completeness, projectID, projectVisibility string
 	var tags []string
 	var lastRev int
 	err = tx.QueryRow(r.Context(), `
-		SELECT a.id::text, a.project_id::text, a.slug, a.visibility,
+		SELECT a.id::text, a.project_id::text, p.visibility, a.slug, a.visibility,
 		       a.title, a.body_markdown, a.tags, a.completeness,
 		       COALESCE((SELECT max(revision_number) FROM artifact_revisions WHERE artifact_id = a.id), 0)
 		  FROM artifacts a
+		  JOIN projects p ON p.id = a.project_id
 		 WHERE a.project_id = $1::uuid
 		   AND (
 		        a.id::text = $2 OR a.slug = $2 OR
@@ -119,7 +120,7 @@ func (d Deps) handleArtifactPatch(w http.ResponseWriter, r *http.Request) {
 		   )
 		 FOR UPDATE
 	`, scope.ProjectID, idOrSlug).Scan(
-		&out.ArtifactID, &projectID, &out.Slug, &currentVisibility,
+		&out.ArtifactID, &projectID, &projectVisibility, &out.Slug, &currentVisibility,
 		&title, &body, &tags, &completeness, &lastRev,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -142,6 +143,14 @@ func (d Deps) handleArtifactPatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out.Visibility = *patch.Visibility
+	if !projects.ArtifactVisibilityAllowedByProject(projectVisibility, *patch.Visibility) {
+		writeArtifactPatchError(w, artifactPatchError{
+			status:    http.StatusBadRequest,
+			ErrorCode: "VISIBILITY_CAPPED_BY_PROJECT",
+			Message:   "artifact visibility cannot be broader than project visibility",
+		})
+		return
+	}
 	if currentVisibility == *patch.Visibility {
 		out.Status = "informational"
 		out.Code = "VISIBILITY_NO_OP"

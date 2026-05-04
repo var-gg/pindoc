@@ -675,15 +675,16 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			// the supersede bookkeeping just before commit.
 
 			// --- Resolve area + project ----------------------------------
-			var projectID, areaID, sensitiveOps, projectDefaultVisibility string
+			var projectID, areaID, sensitiveOps, projectVisibility, projectDefaultVisibility string
 			err = deps.DB.QueryRow(ctx, `
 				SELECT proj.id::text, area.id::text,
 				       COALESCE(NULLIF(proj.sensitive_ops, ''), 'auto'),
+				       proj.visibility,
 				       proj.default_artifact_visibility
 				FROM projects proj
 				JOIN areas area ON area.project_id = proj.id
 				WHERE proj.slug = $1 AND area.slug = $2
-			`, scope.ProjectSlug, in.AreaSlug).Scan(&projectID, &areaID, &sensitiveOps, &projectDefaultVisibility)
+			`, scope.ProjectSlug, in.AreaSlug).Scan(&projectID, &areaID, &sensitiveOps, &projectVisibility, &projectDefaultVisibility)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, artifactProposeOutput{
 					Status:    "not_ready",
@@ -1018,7 +1019,19 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			// values fall back to the project default rather than 500ing
 			// — schema CHECK still guards against bad writes, but a
 			// typo'd visibility shouldn't tank an otherwise valid propose.
-			resolvedVisibility := resolveArtifactVisibility(in.Visibility, projectDefaultVisibility)
+			resolvedVisibility, visibilityAllowed := resolveArtifactVisibilityForProject(in.Visibility, projectDefaultVisibility, projectVisibility)
+			if !visibilityAllowed {
+				return nil, artifactProposeOutput{
+					Status:    "not_ready",
+					ErrorCode: "VISIBILITY_CAPPED_BY_PROJECT",
+					Failed:    []string{"VISIBILITY_CAPPED_BY_PROJECT"},
+					Checklist: []string{
+						fmt.Sprintf(i18n.T(lang, "preflight.visibility_capped_by_project"), resolvedVisibility, projectVisibility),
+					},
+					SuggestedActions: []string{i18n.T(lang, "suggested.visibility_project_cap")},
+					PatchableFields:  patchFieldsFor("VISIBILITY_CAPPED_BY_PROJECT"),
+				}, nil
+			}
 			for attempt := 0; attempt < 10; attempt++ {
 				err = tx.QueryRow(ctx, `
 					INSERT INTO artifacts (
@@ -2855,6 +2868,8 @@ func patchFieldsFor(code string) []string {
 		return []string{"update_of"}
 	case "AREA_UNKNOWN", "AREA_NOT_FOUND", "AREA_EMPTY", "DECISION_AREA_DEPRECATED":
 		return []string{"area_slug"}
+	case "VISIBILITY_CAPPED_BY_PROJECT":
+		return []string{"visibility"}
 	case "TASK_NO_ACCEPTANCE", "TASK_CODE_COORDINATE_MISSING", "TLDR_LINE_CAP", "DEC_NO_SECTIONS", "DBG_NO_REPRO", "DBG_NO_RESOLUTION":
 		return []string{"body_markdown"}
 	case "TITLE_EMPTY":

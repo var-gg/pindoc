@@ -40,6 +40,7 @@ var bundle = Bundle{
 		"preflight.area_name_invalid":                   "✗ name must be 2-60 characters.",
 		"preflight.area_description_too_long":           "✗ description must be 240 characters or fewer.",
 		"preflight.area_create_invalid":                 "✗ area.create input is invalid.",
+		"preflight.visibility_capped_by_project":        "✗ artifact visibility %q is broader than project visibility %q.",
 
 		"suggested.fix_all":                 "Fix every item in the checklist.",
 		"suggested.confirm_types":           "For type: call pindoc.project.current to confirm Tier A/B types your project accepts.",
@@ -52,6 +53,7 @@ var bundle = Bundle{
 		"suggested.commit_msg_hint":         "Provide commit_msg as a one-line rationale (e.g. 'clarify trade-offs' or 'add 2026-04-22 decision').",
 		"suggested.verify_diff":             "If the body differs from what you intended, recompute and retry; otherwise there is nothing to record.",
 		"suggested.read_template_self_heal": "Call pindoc.artifact.read with id_or_slug=%q; following this template hint should let the next artifact.propose self-heal.",
+		"suggested.visibility_project_cap":  "Choose a visibility tier that is at least as restrictive as the project, or make the project public first.",
 
 		"preflight.update_needs_commit":   "✗ commit_msg is required when update_of is set",
 		"preflight.update_target_missing": "✗ update_of target %q not found in this project",
@@ -137,6 +139,7 @@ var bundle = Bundle{
 		"preflight.area_name_invalid":                   "✗ name은 2-60자여야 함.",
 		"preflight.area_description_too_long":           "✗ description은 240자 이하여야 함.",
 		"preflight.area_create_invalid":                 "✗ area.create 입력이 유효하지 않음.",
+		"preflight.visibility_capped_by_project":        "✗ artifact visibility %q 가 project visibility %q 보다 넓음.",
 
 		"suggested.fix_all":                 "체크리스트의 모든 항목을 수정하세요.",
 		"suggested.confirm_types":           "type 확인: pindoc.project.current를 호출해 프로젝트가 수용하는 Tier A/B 타입을 확인하세요.",
@@ -149,6 +152,7 @@ var bundle = Bundle{
 		"suggested.commit_msg_hint":         "commit_msg에 한 줄 사유를 넣으세요 (예: 'trade-off 명확화', '2026-04-22 결정 추가').",
 		"suggested.verify_diff":             "body가 원래 의도와 다르면 다시 계산 후 재시도; 맞다면 기록할 것이 없습니다.",
 		"suggested.read_template_self_heal": "pindoc.artifact.read를 id_or_slug=%q 로 호출하세요. 이 template hint를 따르면 다음 artifact.propose가 self-heal될 수 있습니다.",
+		"suggested.visibility_project_cap":  "project visibility 이상으로 넓지 않은 tier를 고르거나, 먼저 project를 public으로 전환하세요.",
 
 		"preflight.update_needs_commit":   "✗ update_of 지정 시 commit_msg 필수",
 		"preflight.update_target_missing": "✗ update_of 대상 %q 를 이 프로젝트에서 찾을 수 없음",

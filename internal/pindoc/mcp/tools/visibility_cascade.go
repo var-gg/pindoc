@@ -1,6 +1,6 @@
 package tools
 
-import "strings"
+import "github.com/var-gg/pindoc/internal/pindoc/projects"
 
 // resolveArtifactVisibility implements the cascade documented on the
 // Visibility field of artifactProposeInput:
@@ -24,19 +24,15 @@ func resolveArtifactVisibility(explicit, projectDefault string) string {
 	return "org"
 }
 
+func resolveArtifactVisibilityForProject(explicit, projectDefault, projectVisibility string) (string, bool) {
+	tier := resolveArtifactVisibility(explicit, projectDefault)
+	return tier, projects.ArtifactVisibilityAllowedByProject(projectVisibility, tier)
+}
+
 // normalizeVisibility lowercases and trims a visibility tier, returning
 // the canonical value if it matches one of public/org/private and ""
 // otherwise. The empty string signals "not specified" so the cascade
 // can move to the next layer.
 func normalizeVisibility(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "public":
-		return "public"
-	case "org":
-		return "org"
-	case "private":
-		return "private"
-	default:
-		return ""
-	}
+	return projects.NormalizeVisibility(raw)
 }

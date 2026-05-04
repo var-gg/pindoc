@@ -153,6 +153,29 @@ func TestArtifactVisibilityPatchIntegration(t *testing.T) {
 		t.Fatalf("owner detail = %+v, want visibility=org and can_edit_visibility=true", ownerDetail)
 	}
 
+	cappedPublicPatch := doInviteRequest(t, handler, oauthSvc, ownerID, http.MethodPatch, "/api/p/"+slug+"/artifacts/"+artifactSlug, `{"visibility":"public"}`)
+	if cappedPublicPatch.Code != http.StatusBadRequest {
+		t.Fatalf("capped public patch status = %d, want 400; body=%s", cappedPublicPatch.Code, cappedPublicPatch.Body.String())
+	}
+	assertArtifactPatchErrorCode(t, cappedPublicPatch.Body.String(), "VISIBILITY_CAPPED_BY_PROJECT")
+	assertArtifactVisibilityHTTP(t, ctx, pool, artifactID, projects.VisibilityOrg)
+
+	if _, err := pool.Exec(ctx, `UPDATE projects SET visibility = $1 WHERE id = $2::uuid`, projects.VisibilityPublic, projectID); err != nil {
+		t.Fatalf("set project public: %v", err)
+	}
+	ownerPublicPatch := doInviteRequest(t, handler, oauthSvc, ownerID, http.MethodPatch, "/api/p/"+slug+"/artifacts/"+artifactSlug, `{"visibility":"public"}`)
+	if ownerPublicPatch.Code != http.StatusOK {
+		t.Fatalf("owner public patch status = %d, want 200; body=%s", ownerPublicPatch.Code, ownerPublicPatch.Body.String())
+	}
+	var publicPatchOut artifactPatchResp
+	if err := json.NewDecoder(ownerPublicPatch.Body).Decode(&publicPatchOut); err != nil {
+		t.Fatalf("decode owner public patch: %v", err)
+	}
+	if publicPatchOut.Status != "ok" || publicPatchOut.Visibility != projects.VisibilityPublic || publicPatchOut.Affected != 1 {
+		t.Fatalf("owner public patch resp = %+v", publicPatchOut)
+	}
+	assertArtifactVisibilityHTTP(t, ctx, pool, artifactID, projects.VisibilityPublic)
+
 	viewerGet := doInviteRequest(t, handler, oauthSvc, viewerID, http.MethodGet, "/api/p/"+slug+"/artifacts/"+artifactSlug, "")
 	if viewerGet.Code != http.StatusOK {
 		t.Fatalf("viewer get status = %d, want 200; body=%s", viewerGet.Code, viewerGet.Body.String())
@@ -183,7 +206,7 @@ func TestArtifactVisibilityPatchIntegration(t *testing.T) {
 	}
 	assertArtifactVisibilityHTTP(t, ctx, pool, artifactID, projects.VisibilityPrivate)
 	assertArtifactRevisionNumberHTTP(t, ctx, pool, artifactID, patchOut.RevisionNumber)
-	assertArtifactVisibilityEventHTTP(t, ctx, pool, artifactID, "org", "private")
+	assertArtifactVisibilityEventHTTP(t, ctx, pool, artifactID, "public", "private")
 
 	updatedAtAfterChange := selectArtifactUpdatedAtHTTP(t, ctx, pool, artifactID)
 	noOpPatch := doInviteRequest(t, handler, oauthSvc, ownerID, http.MethodPatch, "/api/p/"+slug+"/artifacts/"+artifactSlug, `{"visibility":"private"}`)

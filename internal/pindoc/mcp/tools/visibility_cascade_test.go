@@ -53,3 +53,30 @@ func TestNormalizeVisibility(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveArtifactVisibilityForProject(t *testing.T) {
+	cases := []struct {
+		name       string
+		explicit   string
+		projectDef string
+		projectVis string
+		wantTier   string
+		wantOK     bool
+	}{
+		{"public project allows public artifact", "public", "", "public", "public", true},
+		{"org project caps explicit public", "public", "", "org", "public", false},
+		{"org project allows private artifact", "private", "", "org", "private", true},
+		{"private project caps explicit org", "org", "", "private", "org", false},
+		{"private project allows private default", "", "private", "private", "private", true},
+		{"org project caps public default", "", "public", "org", "public", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			gotTier, gotOK := resolveArtifactVisibilityForProject(c.explicit, c.projectDef, c.projectVis)
+			if gotTier != c.wantTier || gotOK != c.wantOK {
+				t.Fatalf("resolveArtifactVisibilityForProject(%q, %q, %q) = %q/%v, want %q/%v",
+					c.explicit, c.projectDef, c.projectVis, gotTier, gotOK, c.wantTier, c.wantOK)
+			}
+		})
+	}
+}

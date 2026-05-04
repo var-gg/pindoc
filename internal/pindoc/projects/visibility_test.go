@@ -57,6 +57,33 @@ func TestCapabilitiesForVisibleCount(t *testing.T) {
 	}
 }
 
+func TestArtifactVisibilityAllowedByProject(t *testing.T) {
+	cases := []struct {
+		project  string
+		artifact string
+		want     bool
+	}{
+		{VisibilityPublic, VisibilityPublic, true},
+		{VisibilityPublic, VisibilityOrg, true},
+		{VisibilityPublic, VisibilityPrivate, true},
+		{VisibilityOrg, VisibilityPublic, false},
+		{VisibilityOrg, VisibilityOrg, true},
+		{VisibilityOrg, VisibilityPrivate, true},
+		{VisibilityPrivate, VisibilityPublic, false},
+		{VisibilityPrivate, VisibilityOrg, false},
+		{VisibilityPrivate, VisibilityPrivate, true},
+		{"deleted", VisibilityPrivate, false},
+		{VisibilityPublic, "deleted", false},
+	}
+	for _, c := range cases {
+		t.Run(c.project+"->"+c.artifact, func(t *testing.T) {
+			if got := ArtifactVisibilityAllowedByProject(c.project, c.artifact); got != c.want {
+				t.Fatalf("ArtifactVisibilityAllowedByProject(%q, %q) = %v, want %v", c.project, c.artifact, got, c.want)
+			}
+		})
+	}
+}
+
 // TestBuildVisibilitySelect locks the three branches of the
 // visibility-aware listing query so a future change here can't silently
 // regress: anonymous/default scopes see only public, members see public

@@ -253,6 +253,86 @@ func TestMCPReadVisibilityIntegration(t *testing.T) {
 	}
 }
 
+func TestMCPArtifactSetVisibilityCapsIntegration(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PINDOC_TEST_DATABASE_URL"))
+	if dsn == "" {
+		t.Skip("set PINDOC_TEST_DATABASE_URL to run MCP artifact visibility cap DB integration")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	pool, err := db.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer pool.Close()
+	if err := db.Migrate(ctx, pool.Pool); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	fixture := seedMCPVisibilityFixture(t, ctx, pool)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE id = $1::uuid`, fixture.projectID)
+	})
+
+	owner := &auth.Principal{UserID: fixture.ownerUserID, AgentID: "agent:visibility-test", Source: auth.SourceOAuth}
+
+	cappedPublic := callVisibilityTool[artifactSetVisibilityOutput](t, ctx, pool, nil, owner, "pindoc.artifact.set_visibility", map[string]any{
+		"project_slug": fixture.projectSlug,
+		"slug_or_id":   "vis-org",
+		"visibility":   projects.VisibilityPublic,
+	})
+	if cappedPublic.Status != "not_ready" || cappedPublic.ErrorCode != "VISIBILITY_CAPPED_BY_PROJECT" || cappedPublic.Affected != 0 {
+		t.Fatalf("org project public artifact cap = %+v", cappedPublic)
+	}
+	assertMCPArtifactVisibility(t, ctx, pool, fixture.projectID, "vis-org", projects.VisibilityOrg)
+
+	cappedBulk := callVisibilityTool[artifactSetVisibilityOutput](t, ctx, pool, nil, owner, "pindoc.artifact.set_visibility", map[string]any{
+		"project_slug":        fixture.projectSlug,
+		"bulk_all_in_project": true,
+		"confirm":             true,
+		"visibility":          projects.VisibilityPublic,
+	})
+	if cappedBulk.Status != "not_ready" || cappedBulk.ErrorCode != "VISIBILITY_CAPPED_BY_PROJECT" || cappedBulk.Mode != "bulk" || cappedBulk.Affected != 0 || !containsString(cappedBulk.Failed, "VISIBILITY_CAPPED_BY_PROJECT") {
+		t.Fatalf("bulk public cap = %+v", cappedBulk)
+	}
+
+	publicProject := callVisibilityTool[projectSetVisibilityOutput](t, ctx, pool, nil, owner, "pindoc.project.set_visibility", map[string]any{
+		"project_slug": fixture.projectSlug,
+		"visibility":   projects.VisibilityPublic,
+	})
+	if publicProject.Status != "ok" || publicProject.Affected != 1 {
+		t.Fatalf("project public transition = %+v", publicProject)
+	}
+	publicArtifact := callVisibilityTool[artifactSetVisibilityOutput](t, ctx, pool, nil, owner, "pindoc.artifact.set_visibility", map[string]any{
+		"project_slug": fixture.projectSlug,
+		"slug_or_id":   "vis-org",
+		"visibility":   projects.VisibilityPublic,
+	})
+	if publicArtifact.Status != "ok" || publicArtifact.Code != "VISIBILITY_UPDATED" || publicArtifact.Affected != 1 {
+		t.Fatalf("public project allows public artifact = %+v", publicArtifact)
+	}
+	assertMCPArtifactVisibility(t, ctx, pool, fixture.projectID, "vis-org", projects.VisibilityPublic)
+
+	privateProject := callVisibilityTool[projectSetVisibilityOutput](t, ctx, pool, nil, owner, "pindoc.project.set_visibility", map[string]any{
+		"project_slug": fixture.projectSlug,
+		"visibility":   projects.VisibilityPrivate,
+	})
+	if privateProject.Status != "ok" || privateProject.Affected != 1 {
+		t.Fatalf("project private transition = %+v", privateProject)
+	}
+	cappedOrg := callVisibilityTool[artifactSetVisibilityOutput](t, ctx, pool, nil, owner, "pindoc.artifact.set_visibility", map[string]any{
+		"project_slug": fixture.projectSlug,
+		"slug_or_id":   "vis-private-other",
+		"visibility":   projects.VisibilityOrg,
+	})
+	if cappedOrg.Status != "not_ready" || cappedOrg.ErrorCode != "VISIBILITY_CAPPED_BY_PROJECT" || cappedOrg.Affected != 0 {
+		t.Fatalf("private project org artifact cap = %+v", cappedOrg)
+	}
+	assertMCPArtifactVisibility(t, ctx, pool, fixture.projectID, "vis-private-other", projects.VisibilityPrivate)
+}
+
 type mcpVisibilityFixture struct {
 	projectID      string
 	projectSlug    string
@@ -464,6 +544,7 @@ func callVisibilityToolRaw(t *testing.T, ctx context.Context, pool *db.Pool, pro
 	RegisterArtifactDiff(server, deps)
 	RegisterArtifactSummary(server, deps)
 	RegisterProjectSetVisibility(server, deps)
+	RegisterArtifactSetVisibility(server, deps)
 
 	clientTransport, serverTransport := sdk.NewInMemoryTransports()
 	serverSession, err := server.Connect(ctx, serverTransport, nil)
@@ -491,6 +572,22 @@ func callVisibilityToolRaw(t *testing.T, ctx context.Context, pool *db.Pool, pro
 		return nil, errors.New(toolResultText(res))
 	}
 	return res, nil
+}
+
+func assertMCPArtifactVisibility(t *testing.T, ctx context.Context, pool *db.Pool, projectID, slug, want string) {
+	t.Helper()
+	var got string
+	if err := pool.QueryRow(ctx, `
+		SELECT visibility
+		  FROM artifacts
+		 WHERE project_id = $1::uuid
+		   AND slug = $2
+	`, projectID, slug).Scan(&got); err != nil {
+		t.Fatalf("select artifact visibility %s: %v", slug, err)
+	}
+	if got != want {
+		t.Fatalf("%s visibility = %q, want %q", slug, got, want)
+	}
 }
 
 func searchHitSlugs(hits []SearchHit) []string {

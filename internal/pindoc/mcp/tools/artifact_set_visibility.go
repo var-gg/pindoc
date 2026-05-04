@@ -11,6 +11,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
+	"github.com/var-gg/pindoc/internal/pindoc/projects"
 )
 
 type artifactSetVisibilityInput struct {
@@ -104,6 +105,28 @@ Change artifact visibility tier (public|org|private). Single-target via slug_or_
 					Status:    "not_ready",
 					ErrorCode: "TARGET_REQUIRED",
 					Failed:    []string{"TARGET_REQUIRED"},
+				}, nil
+			}
+			mode := "single"
+			if in.BulkAllInProject {
+				mode = "bulk"
+			}
+			var projectVisibility string
+			if err := deps.DB.QueryRow(ctx, `
+				SELECT visibility
+				  FROM projects
+				 WHERE id = $1::uuid
+			`, scope.ProjectID).Scan(&projectVisibility); err != nil {
+				return nil, artifactSetVisibilityOutput{}, fmt.Errorf("artifact.set_visibility project visibility: %w", err)
+			}
+			if !projects.ArtifactVisibilityAllowedByProject(projectVisibility, tier) {
+				return nil, artifactSetVisibilityOutput{
+					Status:     "not_ready",
+					ErrorCode:  "VISIBILITY_CAPPED_BY_PROJECT",
+					Failed:     []string{"VISIBILITY_CAPPED_BY_PROJECT"},
+					Mode:       mode,
+					Visibility: tier,
+					Affected:   0,
 				}, nil
 			}
 
