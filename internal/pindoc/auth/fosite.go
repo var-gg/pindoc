@@ -176,7 +176,7 @@ func NewOAuthService(ctx context.Context, pool *db.Pool, cfg OAuthConfig) (*OAut
 		return nil, err
 	}
 
-	return &OAuthService{
+	svc := &OAuthService{
 		provider:           provider,
 		store:              store,
 		strategy:           jwtStrategy,
@@ -192,7 +192,12 @@ func NewOAuthService(ctx context.Context, pool *db.Pool, cfg OAuthConfig) (*OAut
 		dcrLimiter:         newDCRRateLimiter(),
 		github:             githubOAuth,
 		redirectBaseURL:    redirectBaseURL,
-	}, nil
+	}
+	if _, err := svc.PruneDCRClients(ctx, time.Now().UTC()); err != nil {
+		return nil, fmt.Errorf("prune dcr clients: %w", err)
+	}
+	go svc.runDCRPruneLoop(ctx)
+	return svc, nil
 }
 
 // currentGitHub returns the active githubOAuth snapshot under a read
@@ -287,6 +292,10 @@ func (s *OAuthService) TokenVerifier(ctx context.Context, token string, _ *http.
 	if expiresAt.IsZero() && jwtSession.JWTClaims != nil {
 		expiresAt = jwtSession.JWTClaims.ExpiresAt
 	}
+	clientID := clientIDFromRequester(ar)
+	if err := s.store.TouchClientLastUsed(ctx, clientID); err != nil {
+		return nil, fmt.Errorf("%w: could not update client usage", mcpauth.ErrInvalidToken)
+	}
 	return &mcpauth.TokenInfo{
 		UserID:     subject,
 		Scopes:     scopes,
@@ -294,7 +303,7 @@ func (s *OAuthService) TokenVerifier(ctx context.Context, token string, _ *http.
 		Extra: map[string]any{
 			"source":    SourceOAuth,
 			"token_id":  s.strategy.AccessTokenSignature(ctx, token),
-			"client_id": clientIDFromRequester(ar),
+			"client_id": clientID,
 		},
 	}, nil
 }
@@ -435,6 +444,10 @@ func (s *OAuthService) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.provider.NewAuthorizeResponse(ctx, ar, s.newJWTSession(subject))
 	if err != nil {
 		s.provider.WriteAuthorizeError(ctx, w, ar, err)
+		return
+	}
+	if err := s.store.TouchClientLastUsed(ctx, clientIDFromRequester(ar)); err != nil {
+		s.provider.WriteAuthorizeError(ctx, w, ar, fosite.ErrServerError.WithDebug(err.Error()))
 		return
 	}
 	s.provider.WriteAuthorizeResponse(ctx, w, ar, resp)

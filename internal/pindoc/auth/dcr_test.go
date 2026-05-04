@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -28,5 +29,26 @@ func TestDCRRateLimiter(t *testing.T) {
 	}
 	if !limiter.Allow("203.0.113.10:49000", now.Add(dcrRateLimitWindow+time.Minute), dcrRateLimitPerIP, dcrRateLimitWindow) {
 		t.Fatal("hit after window should be allowed")
+	}
+}
+
+func TestDCRRateLimiterPrunesExpiredUniqueKeys(t *testing.T) {
+	limiter := newDCRRateLimiter()
+	now := time.Unix(1000, 0)
+	for i := 0; i < 1000; i++ {
+		key := fmt.Sprintf("203.0.%d.%d:49000", i/255, i%255)
+		if !limiter.Allow(key, now, dcrRateLimitPerIP, dcrRateLimitWindow) {
+			t.Fatalf("unique key %d rejected", i)
+		}
+	}
+	if got := limiter.Len(); got == 0 {
+		t.Fatal("limiter should hold keys before expiry")
+	}
+	pruned := limiter.PruneExpired(now.Add(dcrRateLimitWindow+time.Second), dcrRateLimitWindow)
+	if pruned == 0 {
+		t.Fatal("PruneExpired removed no expired keys")
+	}
+	if got := limiter.Len(); got != 0 {
+		t.Fatalf("limiter map size after expiry = %d, want 0", got)
 	}
 }

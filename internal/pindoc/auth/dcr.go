@@ -105,6 +105,9 @@ const (
 	dcrRateLimitPerIP  = 5
 	dcrRateLimitWindow = time.Hour
 	dcrMaxClients      = 100
+	dcrClientLifetime  = 90 * 24 * time.Hour
+	dcrClientIdleTTL   = 180 * 24 * time.Hour
+	dcrPruneInterval   = 24 * time.Hour
 )
 
 type dcrRateLimiter struct {
@@ -127,11 +130,15 @@ func (l *dcrRateLimiter) Allow(key string, now time.Time, limit int, window time
 	cutoff := now.Add(-window)
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.pruneExpiredLocked(cutoff)
 	recent := l.hits[key][:0]
 	for _, hit := range l.hits[key] {
 		if hit.After(cutoff) {
 			recent = append(recent, hit)
 		}
+	}
+	if len(recent) == 0 {
+		delete(l.hits, key)
 	}
 	if len(recent) >= limit {
 		l.hits[key] = recent
@@ -140,6 +147,44 @@ func (l *dcrRateLimiter) Allow(key string, now time.Time, limit int, window time
 	recent = append(recent, now)
 	l.hits[key] = recent
 	return true
+}
+
+func (l *dcrRateLimiter) PruneExpired(now time.Time, window time.Duration) int {
+	if l == nil || window <= 0 {
+		return 0
+	}
+	cutoff := now.Add(-window)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.pruneExpiredLocked(cutoff)
+}
+
+func (l *dcrRateLimiter) Len() int {
+	if l == nil {
+		return 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.hits)
+}
+
+func (l *dcrRateLimiter) pruneExpiredLocked(cutoff time.Time) int {
+	pruned := 0
+	for key, hits := range l.hits {
+		recent := hits[:0]
+		for _, hit := range hits {
+			if hit.After(cutoff) {
+				recent = append(recent, hit)
+			}
+		}
+		if len(recent) == 0 {
+			delete(l.hits, key)
+			pruned++
+			continue
+		}
+		l.hits[key] = recent
+	}
+	return pruned
 }
 
 type dcrRegistrationResponse struct {
@@ -151,6 +196,7 @@ type dcrRegistrationResponse struct {
 }
 
 func (s *OAuthService) handleDynamicClientRegistration(w http.ResponseWriter, r *http.Request) {
+	now := time.Now().UTC()
 	mode, err := s.DCRMode(r.Context())
 	if err != nil {
 		writeOAuthJSON(w, http.StatusInternalServerError, dcrError{ErrorCode: "server_error", ErrorDescription: "could not read DCR mode"})
@@ -162,17 +208,16 @@ func (s *OAuthService) handleDynamicClientRegistration(w http.ResponseWriter, r 
 		return
 	}
 	remoteAddr := requestRemoteAddr(r)
-	if !s.allowDCRRegistration(remoteAddr, time.Now()) {
+	if !s.allowDCRRegistration(remoteAddr, now) {
 		writeOAuthJSON(w, http.StatusTooManyRequests, dcrError{ErrorCode: "slow_down", ErrorDescription: "dynamic client registration rate limit exceeded"})
 		return
 	}
-	total, err := s.store.CountDCRClients(r.Context())
-	if err != nil {
+	if err := s.ensureDCRCapacity(r.Context(), now); err != nil {
+		if errors.Is(err, errDCRClientLimitReached) {
+			writeOAuthJSON(w, http.StatusServiceUnavailable, dcrError{ErrorCode: "server_error", ErrorDescription: "dynamic client registration client limit reached"})
+			return
+		}
 		writeOAuthJSON(w, http.StatusInternalServerError, dcrError{ErrorCode: "server_error", ErrorDescription: "could not count DCR clients"})
-		return
-	}
-	if total >= dcrMaxClients {
-		writeOAuthJSON(w, http.StatusServiceUnavailable, dcrError{ErrorCode: "server_error", ErrorDescription: "dynamic client registration client limit reached"})
 		return
 	}
 
@@ -235,6 +280,7 @@ func (s *OAuthService) handleDynamicClientRegistration(w http.ResponseWriter, r 
 	if displayName == "" {
 		displayName = clientID
 	}
+	expiresAt := now.Add(dcrClientLifetime)
 	if err := s.store.UpsertClient(r.Context(), OAuthClient{
 		ID:                clientID,
 		DisplayName:       displayName,
@@ -246,11 +292,24 @@ func (s *OAuthService) handleDynamicClientRegistration(w http.ResponseWriter, r 
 		Public:            public,
 		CreatedVia:        OAuthClientCreatedViaDCR,
 		CreatedRemoteAddr: remoteAddr,
+		CreatedAt:         &now,
+		ExpiresAt:         &expiresAt,
 	}); err != nil {
 		writeOAuthJSON(w, http.StatusInternalServerError, dcrError{ErrorCode: "server_error", ErrorDescription: "could not store client"})
 		return
 	}
-	now := time.Now().UTC()
+	rec, err := s.store.ClientRecord(r.Context(), clientID)
+	if err != nil {
+		writeOAuthJSON(w, http.StatusInternalServerError, dcrError{ErrorCode: "server_error", ErrorDescription: "could not read stored client"})
+		return
+	}
+	issuedAt := rec.CreatedAt
+	if issuedAt.IsZero() {
+		issuedAt = now
+	}
+	if rec.ExpiresAt != nil {
+		expiresAt = *rec.ExpiresAt
+	}
 	writeOAuthJSON(w, http.StatusCreated, dcrRegistrationResponse{
 		ClientRegistrationMetadata: oauthex.ClientRegistrationMetadata{
 			RedirectURIs:            redirectURIs,
@@ -272,9 +331,58 @@ func (s *OAuthService) handleDynamicClientRegistration(w http.ResponseWriter, r 
 		},
 		ClientID:              clientID,
 		ClientSecret:          secret,
-		ClientIDIssuedAt:      now.Unix(),
-		ClientSecretExpiresAt: dcrSecretExpiresAtUnix(time.Time{}),
+		ClientIDIssuedAt:      issuedAt.UTC().Unix(),
+		ClientSecretExpiresAt: dcrSecretExpiresAtUnix(expiresAt),
 	})
+}
+
+var errDCRClientLimitReached = errors.New("auth: dcr client limit reached")
+
+func (s *OAuthService) ensureDCRCapacity(ctx context.Context, now time.Time) error {
+	if s == nil || s.store == nil {
+		return errors.New("auth: nil OAuthService")
+	}
+	total, err := s.store.CountDCRClients(ctx)
+	if err != nil {
+		return err
+	}
+	if total < dcrMaxClients {
+		return nil
+	}
+	if _, err := s.PruneDCRClients(ctx, now); err != nil {
+		return err
+	}
+	total, err = s.store.CountDCRClients(ctx)
+	if err != nil {
+		return err
+	}
+	if total >= dcrMaxClients {
+		return errDCRClientLimitReached
+	}
+	return nil
+}
+
+func (s *OAuthService) PruneDCRClients(ctx context.Context, now time.Time) (DCRPruneResult, error) {
+	if s == nil || s.store == nil {
+		return DCRPruneResult{}, errors.New("auth: nil OAuthService")
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	return s.store.PruneDCRClients(ctx, now.UTC(), dcrClientIdleTTL, s.defaultProjectSlug)
+}
+
+func (s *OAuthService) runDCRPruneLoop(ctx context.Context) {
+	ticker := time.NewTicker(dcrPruneInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			_, _ = s.PruneDCRClients(ctx, now.UTC())
+		}
+	}
 }
 
 func (s *OAuthService) allowDCRRegistration(remoteAddr string, now time.Time) bool {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/ory/fosite"
 	foauth2 "github.com/ory/fosite/handler/oauth2"
 	"github.com/ory/fosite/handler/pkce"
@@ -63,6 +64,8 @@ type OAuthClient struct {
 	CreatedVia        string
 	CreatedRemoteAddr string
 	SeedSuppressed    bool
+	CreatedAt         *time.Time
+	ExpiresAt         *time.Time
 }
 
 type OAuthClientRecord struct {
@@ -79,6 +82,8 @@ type OAuthClientRecord struct {
 	CreatedRemoteAddr string
 	SeedSuppressed    bool
 	CreatedAt         time.Time
+	LastUsedAt        *time.Time
+	ExpiresAt         *time.Time
 }
 
 func (s *FositeStore) UpsertClient(ctx context.Context, c OAuthClient) error {
@@ -116,8 +121,8 @@ func (s *FositeStore) UpsertClient(ctx context.Context, c OAuthClient) error {
 		INSERT INTO oauth_clients (
 			client_id, display_name, secret_hash, redirect_uris, grant_types,
 			response_types, scopes, public, created_by_user_id, created_via,
-			created_remote_addr, seed_suppressed, deleted_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, $10, $11, $12, NULL)
+			created_remote_addr, seed_suppressed, last_used_at, expires_at, created_at, deleted_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, $10, $11, $12, NULL, $13, COALESCE($14::timestamptz, now()), NULL)
 		ON CONFLICT (client_id) DO UPDATE SET
 			display_name = EXCLUDED.display_name,
 			secret_hash = EXCLUDED.secret_hash,
@@ -130,8 +135,9 @@ func (s *FositeStore) UpsertClient(ctx context.Context, c OAuthClient) error {
 			created_via = EXCLUDED.created_via,
 			created_remote_addr = COALESCE(NULLIF(EXCLUDED.created_remote_addr, ''), oauth_clients.created_remote_addr),
 			seed_suppressed = EXCLUDED.seed_suppressed,
+			expires_at = EXCLUDED.expires_at,
 			deleted_at = NULL
-	`, c.ID, c.DisplayName, c.SecretHash, c.RedirectURIs, c.GrantTypes, c.ResponseTypes, c.Scopes, c.Public, c.CreatedByUserID, c.CreatedVia, strings.TrimSpace(c.CreatedRemoteAddr), c.SeedSuppressed)
+	`, c.ID, c.DisplayName, c.SecretHash, c.RedirectURIs, c.GrantTypes, c.ResponseTypes, c.Scopes, c.Public, c.CreatedByUserID, c.CreatedVia, strings.TrimSpace(c.CreatedRemoteAddr), c.SeedSuppressed, nullableTime(c.ExpiresAt), nullableTime(c.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("upsert oauth client %q: %w", c.ID, err)
 	}
@@ -146,7 +152,9 @@ func (s *FositeStore) GetClient(ctx context.Context, id string) (fosite.Client, 
 	err := s.pool.QueryRow(ctx, `
 		SELECT client_id, secret_hash, redirect_uris, grant_types, response_types, scopes, public
 		  FROM oauth_clients
-		 WHERE client_id = $1 AND deleted_at IS NULL
+		 WHERE client_id = $1
+		   AND deleted_at IS NULL
+		   AND (expires_at IS NULL OR expires_at > now())
 		 LIMIT 1
 	`, id).Scan(&c.ID, &c.Secret, &c.RedirectURIs, &c.GrantTypes, &c.ResponseTypes, &c.Scopes, &c.Public)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -166,7 +174,8 @@ func (s *FositeStore) ListClients(ctx context.Context) ([]OAuthClientRecord, err
 		SELECT client_id, display_name, redirect_uris, grant_types, response_types,
 		       scopes, public, secret_hash IS NOT NULL AND octet_length(secret_hash) > 0,
 		       COALESCE(created_by_user_id::text, ''), created_via,
-		       COALESCE(created_remote_addr, ''), seed_suppressed, created_at
+		       COALESCE(created_remote_addr, ''), seed_suppressed, created_at,
+		       last_used_at, expires_at
 		  FROM oauth_clients
 		 WHERE deleted_at IS NULL
 		 ORDER BY created_at ASC, client_id ASC
@@ -178,6 +187,7 @@ func (s *FositeStore) ListClients(ctx context.Context) ([]OAuthClientRecord, err
 	out := []OAuthClientRecord{}
 	for rows.Next() {
 		var rec OAuthClientRecord
+		var lastUsedAt, expiresAt pgtype.Timestamptz
 		if err := rows.Scan(
 			&rec.ID,
 			&rec.DisplayName,
@@ -192,9 +202,13 @@ func (s *FositeStore) ListClients(ctx context.Context) ([]OAuthClientRecord, err
 			&rec.CreatedRemoteAddr,
 			&rec.SeedSuppressed,
 			&rec.CreatedAt,
+			&lastUsedAt,
+			&expiresAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan oauth client: %w", err)
 		}
+		rec.LastUsedAt = timestamptzPtr(lastUsedAt)
+		rec.ExpiresAt = timestamptzPtr(expiresAt)
 		out = append(out, rec)
 	}
 	if err := rows.Err(); err != nil {
@@ -212,11 +226,13 @@ func (s *FositeStore) ClientRecord(ctx context.Context, id string) (OAuthClientR
 		return OAuthClientRecord{}, ErrOAuthClientNotFound
 	}
 	var rec OAuthClientRecord
+	var lastUsedAt, expiresAt pgtype.Timestamptz
 	err := s.pool.QueryRow(ctx, `
 		SELECT client_id, display_name, redirect_uris, grant_types, response_types,
 		       scopes, public, secret_hash IS NOT NULL AND octet_length(secret_hash) > 0,
 		       COALESCE(created_by_user_id::text, ''), created_via,
-		       COALESCE(created_remote_addr, ''), seed_suppressed, created_at
+		       COALESCE(created_remote_addr, ''), seed_suppressed, created_at,
+		       last_used_at, expires_at
 		  FROM oauth_clients
 		 WHERE client_id = $1 AND deleted_at IS NULL
 		 LIMIT 1
@@ -234,6 +250,8 @@ func (s *FositeStore) ClientRecord(ctx context.Context, id string) (OAuthClientR
 		&rec.CreatedRemoteAddr,
 		&rec.SeedSuppressed,
 		&rec.CreatedAt,
+		&lastUsedAt,
+		&expiresAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return OAuthClientRecord{}, ErrOAuthClientNotFound
@@ -241,7 +259,15 @@ func (s *FositeStore) ClientRecord(ctx context.Context, id string) (OAuthClientR
 	if err != nil {
 		return OAuthClientRecord{}, fmt.Errorf("get oauth client record %q: %w", id, err)
 	}
+	rec.LastUsedAt = timestamptzPtr(lastUsedAt)
+	rec.ExpiresAt = timestamptzPtr(expiresAt)
 	return rec, nil
+}
+
+type DCRPruneResult struct {
+	Deleted int
+	Expired int
+	Idle    int
 }
 
 func (s *FositeStore) CountDCRClients(ctx context.Context) (int, error) {
@@ -257,6 +283,117 @@ func (s *FositeStore) CountDCRClients(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("count dcr clients: %w", err)
 	}
 	return count, nil
+}
+
+func (s *FositeStore) TouchClientLastUsed(ctx context.Context, clientID string) error {
+	if s == nil || s.pool == nil {
+		return errors.New("auth: nil fosite store")
+	}
+	clientID = strings.TrimSpace(clientID)
+	if clientID == "" {
+		return nil
+	}
+	_, err := s.pool.Exec(ctx, `
+		UPDATE oauth_clients
+		   SET last_used_at = now()
+		 WHERE client_id = $1
+		   AND created_via = $2
+		   AND deleted_at IS NULL
+		   AND (expires_at IS NULL OR expires_at > now())
+	`, clientID, OAuthClientCreatedViaDCR)
+	if err != nil {
+		return fmt.Errorf("touch oauth client last_used_at %q: %w", clientID, err)
+	}
+	return nil
+}
+
+func (s *FositeStore) PruneDCRClients(ctx context.Context, now time.Time, idleTTL time.Duration, projectSlug string) (DCRPruneResult, error) {
+	if s == nil || s.pool == nil {
+		return DCRPruneResult{}, errors.New("auth: nil fosite store")
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if idleTTL <= 0 {
+		idleTTL = dcrClientIdleTTL
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return DCRPruneResult{}, fmt.Errorf("begin dcr prune: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var result DCRPruneResult
+	err = tx.QueryRow(ctx, `
+		WITH candidates AS (
+			SELECT client_id,
+			       expires_at IS NOT NULL AND expires_at <= $1::timestamptz AS expired,
+			       COALESCE(last_used_at, created_at) <= ($1::timestamptz - ($2::double precision * interval '1 second')) AS idle
+			  FROM oauth_clients
+			 WHERE deleted_at IS NULL
+			   AND created_via = $3
+			   AND (
+			       (expires_at IS NOT NULL AND expires_at <= $1::timestamptz)
+			       OR COALESCE(last_used_at, created_at) <= ($1::timestamptz - ($2::double precision * interval '1 second'))
+			   )
+			 FOR UPDATE
+		),
+		pruned AS (
+			UPDATE oauth_clients oc
+			   SET deleted_at = $1::timestamptz
+			  FROM candidates c
+			 WHERE oc.client_id = c.client_id
+			 RETURNING c.expired, c.idle
+		)
+		SELECT count(*)::int,
+		       count(*) FILTER (WHERE expired)::int,
+		       count(*) FILTER (WHERE idle)::int
+		  FROM pruned
+	`, now.UTC(), idleTTL.Seconds(), OAuthClientCreatedViaDCR).Scan(&result.Deleted, &result.Expired, &result.Idle)
+	if err != nil {
+		return DCRPruneResult{}, fmt.Errorf("prune dcr clients: %w", err)
+	}
+	if result.Deleted > 0 {
+		if err := s.recordDCRPruneEvent(ctx, tx, projectSlug, now.UTC(), result); err != nil {
+			return DCRPruneResult{}, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return DCRPruneResult{}, fmt.Errorf("commit dcr prune: %w", err)
+	}
+	return result, nil
+}
+
+func (s *FositeStore) recordDCRPruneEvent(ctx context.Context, tx pgx.Tx, projectSlug string, now time.Time, result DCRPruneResult) error {
+	projectSlug = strings.TrimSpace(projectSlug)
+	var projectID string
+	err := tx.QueryRow(ctx, `
+		SELECT id::text
+		  FROM projects
+		 WHERE ($1 <> '' AND slug = $1)
+		    OR ($1 = '' AND slug = 'pindoc')
+		 ORDER BY CASE WHEN slug = 'pindoc' THEN 0 ELSE 1 END, created_at ASC
+		 LIMIT 1
+	`, projectSlug).Scan(&projectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("record dcr prune event: default project %q not found", projectSlug)
+	}
+	if err != nil {
+		return fmt.Errorf("record dcr prune event project lookup: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO events (project_id, kind, payload)
+		VALUES ($1::uuid, 'oauth.dcr.clients_pruned', jsonb_build_object(
+			'deleted', $2::int,
+			'expired', $3::int,
+			'idle', $4::int,
+			'pruned_at', $5::timestamptz
+		))
+	`, projectID, result.Deleted, result.Expired, result.Idle, now.UTC())
+	if err != nil {
+		return fmt.Errorf("record dcr prune event: %w", err)
+	}
+	return nil
 }
 
 func (s *FositeStore) DCRMode(ctx context.Context) (string, error) {
@@ -808,4 +945,19 @@ func normalizeOAuthScopes(scopes []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func nullableTime(t *time.Time) any {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	return t.UTC()
+}
+
+func timestamptzPtr(v pgtype.Timestamptz) *time.Time {
+	if !v.Valid {
+		return nil
+	}
+	t := v.Time.UTC()
+	return &t
 }

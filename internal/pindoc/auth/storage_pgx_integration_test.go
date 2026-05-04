@@ -115,6 +115,69 @@ func TestFositeStoreIntegration(t *testing.T) {
 	}
 }
 
+func TestDCRPruneAndCapRetryIntegration(t *testing.T) {
+	ctx, pool := openOAuthIntegrationDB(t)
+	store := NewFositeStore(pool)
+	suffix := uniqueOAuthSuffix()
+	userID := insertOAuthTestUser(t, ctx, pool, suffix)
+	projectSlug := insertOAuthTestProject(t, ctx, pool, suffix, userID)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	for i := 0; i < dcrMaxClients; i++ {
+		createdAt := now
+		expiresAt := now.Add(dcrClientLifetime)
+		if i == 0 {
+			createdAt = now.Add(-100 * 24 * time.Hour)
+			expiresAt = now.Add(-time.Hour)
+		}
+		if err := store.UpsertClient(ctx, OAuthClient{
+			ID:            fmt.Sprintf("dcr-cap-%s-%03d", suffix, i),
+			DisplayName:   "DCR Cap",
+			RedirectURIs:  []string{"http://127.0.0.1:3846/callback"},
+			GrantTypes:    []string{string(fosite.GrantTypeAuthorizationCode), string(fosite.GrantTypeRefreshToken)},
+			ResponseTypes: []string{"code"},
+			Scopes:        SupportedOAuthScopes(),
+			Public:        true,
+			CreatedVia:    OAuthClientCreatedViaDCR,
+			CreatedAt:     &createdAt,
+			ExpiresAt:     &expiresAt,
+		}); err != nil {
+			t.Fatalf("UpsertClient(%d): %v", i, err)
+		}
+	}
+	total, err := store.CountDCRClients(ctx)
+	if err != nil {
+		t.Fatalf("CountDCRClients before: %v", err)
+	}
+	if total != dcrMaxClients {
+		t.Fatalf("DCR client count before = %d, want %d", total, dcrMaxClients)
+	}
+
+	svc := &OAuthService{store: store, defaultProjectSlug: projectSlug}
+	if err := svc.ensureDCRCapacity(ctx, now); err != nil {
+		t.Fatalf("ensureDCRCapacity: %v", err)
+	}
+	total, err = store.CountDCRClients(ctx)
+	if err != nil {
+		t.Fatalf("CountDCRClients after: %v", err)
+	}
+	if total != dcrMaxClients-1 {
+		t.Fatalf("DCR client count after = %d, want %d", total, dcrMaxClients-1)
+	}
+	var eventCount int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)::int
+		  FROM events e
+		  JOIN projects p ON p.id = e.project_id
+		 WHERE p.slug = $1 AND e.kind = 'oauth.dcr.clients_pruned'
+	`, projectSlug).Scan(&eventCount); err != nil {
+		t.Fatalf("select prune event: %v", err)
+	}
+	if eventCount != 1 {
+		t.Fatalf("prune event count = %d, want 1", eventCount)
+	}
+}
+
 func openOAuthIntegrationDB(t *testing.T) (context.Context, *db.Pool) {
 	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv("PINDOC_TEST_DATABASE_URL"))

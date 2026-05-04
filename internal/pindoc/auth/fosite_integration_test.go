@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ory/fosite"
 
@@ -201,8 +202,16 @@ func TestDynamicClientRegistrationIntegration(t *testing.T) {
 	if got := requireString(t, out, "client_name"); got != "Codex" {
 		t.Fatalf("client_name = %q, want Codex", got)
 	}
-	if expires, ok := out["client_secret_expires_at"].(float64); !ok || expires != 0 {
-		t.Fatalf("client_secret_expires_at = %#v, want number 0", out["client_secret_expires_at"])
+	issued, ok := out["client_id_issued_at"].(float64)
+	if !ok || issued <= 0 {
+		t.Fatalf("client_id_issued_at = %#v, want unix timestamp", out["client_id_issued_at"])
+	}
+	expires, ok := out["client_secret_expires_at"].(float64)
+	if !ok || expires <= issued {
+		t.Fatalf("client_secret_expires_at = %#v, want timestamp after issued_at %.0f", out["client_secret_expires_at"], issued)
+	}
+	if got := int64(expires) - int64(issued); got != int64(dcrClientLifetime/time.Second) {
+		t.Fatalf("client_secret_expires_at delta = %d, want %d", got, int64(dcrClientLifetime/time.Second))
 	}
 	recClient, err := svc.Store().ClientRecord(ctx, clientID)
 	if err != nil {
@@ -213,6 +222,12 @@ func TestDynamicClientRegistrationIntegration(t *testing.T) {
 	}
 	if recClient.CreatedRemoteAddr != "203.0.113.10:49000" {
 		t.Fatalf("CreatedRemoteAddr = %q, want request RemoteAddr", recClient.CreatedRemoteAddr)
+	}
+	if recClient.ExpiresAt == nil {
+		t.Fatal("DCR client ExpiresAt is nil")
+	}
+	if got := int64(recClient.ExpiresAt.Sub(recClient.CreatedAt).Seconds()); got != int64(dcrClientLifetime/time.Second) {
+		t.Fatalf("DCR expires_at delta = %d, want %d", got, int64(dcrClientLifetime/time.Second))
 	}
 }
 
@@ -270,6 +285,13 @@ func TestConsentFlowIntegration(t *testing.T) {
 	if code == "" {
 		t.Fatalf("approve redirect missing code: %s", approve.String())
 	}
+	afterAuthorize, err := svc.Store().ClientRecord(ctx, clientID)
+	if err != nil {
+		t.Fatalf("ClientRecord after authorize: %v", err)
+	}
+	if afterAuthorize.LastUsedAt == nil {
+		t.Fatal("DCR client last_used_at was not touched by authorize success")
+	}
 	rejectConfirmAuthorize(t, mux, "approve", first.RawQuery, info.ConsentNonce, "http://127.0.0.1:5830", cookies, http.StatusForbidden)
 	token := tokenRequestFromHandler(t, mux, url.Values{
 		"grant_type":    {"authorization_code"},
@@ -279,12 +301,22 @@ func TestConsentFlowIntegration(t *testing.T) {
 		"code_verifier": {verifier},
 	}, http.StatusOK)
 	accessToken := requireString(t, token, "access_token")
+	if _, err := pool.Exec(ctx, `UPDATE oauth_clients SET last_used_at = NULL WHERE client_id = $1`, clientID); err != nil {
+		t.Fatalf("clear last_used_at: %v", err)
+	}
 	tokenInfo, err := svc.TokenVerifier(ctx, accessToken, nil)
 	if err != nil {
 		t.Fatalf("TokenVerifier after consent: %v", err)
 	}
 	if tokenInfo.UserID != userID || !contains(tokenInfo.Scopes, ScopePindoc) {
 		t.Fatalf("TokenInfo after consent = %+v", tokenInfo)
+	}
+	afterVerify, err := svc.Store().ClientRecord(ctx, clientID)
+	if err != nil {
+		t.Fatalf("ClientRecord after TokenVerifier: %v", err)
+	}
+	if afterVerify.LastUsedAt == nil {
+		t.Fatal("DCR client last_used_at was not touched by token verification")
 	}
 	granted, err := svc.Store().HasConsent(ctx, userID, clientID, SupportedOAuthScopes())
 	if err != nil {

@@ -244,6 +244,38 @@ func TestOAuthStorageMigrationContract(t *testing.T) {
 	}
 }
 
+func TestOAuthDCRLifecycleMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0060_oauth_dcr_lifecycle.sql")
+	if err != nil {
+		t.Fatalf("read oauth dcr lifecycle migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ NULL",
+		"ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL",
+		"SET expires_at = created_at + interval '90 days'",
+		"WHERE created_via = 'dcr'",
+		"CREATE INDEX IF NOT EXISTS idx_oauth_clients_dcr_expires_at",
+		"CREATE INDEX IF NOT EXISTS idx_oauth_clients_dcr_last_used_at",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("oauth dcr lifecycle migration Up missing %q:\n%s", want, up)
+		}
+	}
+	for _, want := range []string{
+		"-- +goose Down",
+		"DROP INDEX IF EXISTS idx_oauth_clients_dcr_last_used_at",
+		"DROP INDEX IF EXISTS idx_oauth_clients_dcr_expires_at",
+		"DROP COLUMN IF EXISTS expires_at",
+		"DROP COLUMN IF EXISTS last_used_at",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("oauth dcr lifecycle migration Down missing %q", want)
+		}
+	}
+}
+
 func TestUsersOAuthProviderMigrationContract(t *testing.T) {
 	raw, err := migrationsFS.ReadFile("migrations/0038_users_oauth_provider.sql")
 	if err != nil {
