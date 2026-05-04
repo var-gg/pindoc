@@ -10,12 +10,26 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
 import mermaid from "mermaid";
-import { Maximize2, Minimize2, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
+import {
+  AlertCircle,
+  AlertTriangle,
+  Info,
+  Lightbulb,
+  Maximize2,
+  Minimize2,
+  RotateCcw,
+  ShieldAlert,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
+import { createHighlighter, type Highlighter } from "shiki";
 import { headingsFromBody, slugifyHeading } from "./slug";
 import { useI18n } from "../i18n";
 import { pindocUrlTransform } from "./urlTransform";
 import { isStructureOverlapHeading, type StructureOverlapSection } from "./structureSections";
+import { remarkGithubAlerts } from "./remarkGithubAlerts";
 
 // Initialize mermaid once per page. Theme follows the Pindoc dark/light
 // class on <html>. We invert the theme selection at render time so fresh
@@ -58,13 +72,121 @@ function queueMermaidRender(render: () => Promise<void>): Promise<void> {
   return next;
 }
 
+// Shiki bootstrap. We mirror the mermaid pattern: lazy-create one
+// highlighter for the page, cache rendered HTML keyed by (theme, lang,
+// source), and re-derive the theme from the DOM on every render so
+// toggles surface fresh syntax colors.
+const SHIKI_LANGS = [
+  "javascript",
+  "typescript",
+  "jsx",
+  "tsx",
+  "html",
+  "css",
+  "scss",
+  "json",
+  "go",
+  "python",
+  "rust",
+  "java",
+  "kotlin",
+  "csharp",
+  "php",
+  "ruby",
+  "swift",
+  "c",
+  "cpp",
+  "bash",
+  "shell",
+  "powershell",
+  "yaml",
+  "toml",
+  "ini",
+  "sql",
+  "xml",
+  "markdown",
+  "diff",
+  "dockerfile",
+  "graphql",
+  "lua",
+] as const;
+const SHIKI_LANG_SET = new Set<string>(SHIKI_LANGS);
+const SHIKI_LANG_ALIASES: Record<string, string> = {
+  js: "javascript",
+  ts: "typescript",
+  sh: "bash",
+  zsh: "bash",
+  ps1: "powershell",
+  yml: "yaml",
+  golang: "go",
+  py: "python",
+  rs: "rust",
+  rb: "ruby",
+  cs: "csharp",
+  "c++": "cpp",
+  "c#": "csharp",
+  docker: "dockerfile",
+  md: "markdown",
+};
+type ShikiTheme = "github-light" | "github-dark";
+let shikiHighlighter: Highlighter | null = null;
+let shikiLoading: Promise<Highlighter> | null = null;
+const shikiCache = new Map<string, string>();
+
+function currentShikiTheme(): ShikiTheme {
+  return document.documentElement.classList.contains("theme-dark")
+    ? "github-dark"
+    : "github-light";
+}
+
+function shikiCacheKey(source: string, lang: string, theme: ShikiTheme): string {
+  return `${theme}\n${lang}\n${source}`;
+}
+
+function normalizeShikiLang(lang: string): string {
+  const lower = lang.toLowerCase();
+  if (SHIKI_LANG_SET.has(lower)) return lower;
+  const alias = SHIKI_LANG_ALIASES[lower];
+  if (alias) return alias;
+  return "plaintext";
+}
+
+async function loadShiki(): Promise<Highlighter> {
+  if (shikiHighlighter) return shikiHighlighter;
+  if (shikiLoading) return shikiLoading;
+  shikiLoading = createHighlighter({
+    themes: ["github-light", "github-dark"],
+    langs: [...SHIKI_LANGS],
+  }).then((h) => {
+    shikiHighlighter = h;
+    shikiLoading = null;
+    return h;
+  });
+  return shikiLoading;
+}
+
+const ALERT_TYPES = ["note", "tip", "important", "warning", "caution"] as const;
+type AlertType = (typeof ALERT_TYPES)[number];
+const ALERT_ICONS: Record<AlertType, typeof Info> = {
+  note: Info,
+  tip: Lightbulb,
+  important: AlertCircle,
+  warning: AlertTriangle,
+  caution: ShieldAlert,
+};
+
+function isAlertType(value: string): value is AlertType {
+  return (ALERT_TYPES as readonly string[]).includes(value);
+}
+
 /**
  * PindocMarkdown wraps react-markdown with the set of renderers Pindoc's
  * PINDOC.md promises agents can rely on. Today: GFM (tables, task lists,
- * strikethrough, autolinks) and Mermaid diagrams via fenced `mermaid`
- * blocks. Agents inspecting pindoc.project.current see this same list
- * under `rendering.markdown` so they never render something we don't
- * display.
+ * strikethrough, autolinks), GitHub-style alerts (`> [!NOTE]` etc.),
+ * soft line breaks, syntax highlighting via Shiki, and Mermaid diagrams
+ * via fenced ```mermaid blocks. Agents inspecting pindoc.project.current
+ * see this same list under `rendering.markdown` so they never render
+ * something we don't display.
  */
 export function PindocMarkdown({
   source,
@@ -119,11 +241,12 @@ function MarkdownBlock({
 
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkBreaks, remarkGithubAlerts]}
       urlTransform={(url) => pindocUrlTransform(url, projectSlug, orgSlug)}
       components={{
         pre: MarkdownPre,
         code: MarkdownCode,
+        blockquote: MarkdownBlockquote,
         h2({ children }) {
           // extractHeadingText flattens children (often an array of
           // strings + inline code + emphasis) back into the plain text
@@ -131,7 +254,30 @@ function MarkdownBlock({
           // unchanged preserves inline formatting on the heading itself.
           const text = extractHeadingText(children);
           const id = headingSlugs[headingIndex++] ?? slugifyHeading(text);
-          return <h2 id={id}>{children}</h2>;
+          return (
+            <h2 id={id}>
+              <HeadingAnchor id={id} />
+              {children}
+            </h2>
+          );
+        },
+        h3({ children }) {
+          const id = slugifyHeading(extractHeadingText(children));
+          return (
+            <h3 id={id}>
+              <HeadingAnchor id={id} />
+              {children}
+            </h3>
+          );
+        },
+        h4({ children }) {
+          const id = slugifyHeading(extractHeadingText(children));
+          return (
+            <h4 id={id}>
+              <HeadingAnchor id={id} />
+              {children}
+            </h4>
+          );
         },
       }}
     >
@@ -140,10 +286,22 @@ function MarkdownBlock({
   );
 }
 
+function HeadingAnchor({ id }: { id: string }) {
+  if (!id) return null;
+  return (
+    <a className="heading-anchor" href={`#${id}`} aria-hidden="true" tabIndex={-1}>
+      #
+    </a>
+  );
+}
+
 function MarkdownPre({ children }: { children?: ReactNode }) {
-  const mermaidSource = mermaidSourceFromPre(children);
-  if (mermaidSource !== null) {
-    return <MermaidBlock source={mermaidSource} />;
+  const fence = fenceContent(children);
+  if (fence?.lang === "mermaid") {
+    return <MermaidBlock source={fence.code} />;
+  }
+  if (fence) {
+    return <ShikiCodeBlock code={fence.code} lang={fence.lang} />;
   }
   return <pre>{children}</pre>;
 }
@@ -158,16 +316,42 @@ function MarkdownCode({
   return <code className={className}>{children}</code>;
 }
 
-function mermaidSourceFromPre(children: unknown): string | null {
+function MarkdownBlockquote({
+  className,
+  children,
+}: {
+  className?: string;
+  children?: ReactNode;
+}) {
+  const { t } = useI18n();
+  const cls = typeof className === "string" ? className : "";
+  const m = /markdown-alert-(\w+)/.exec(cls);
+  if (!m || !isAlertType(m[1])) {
+    return <blockquote className={cls || undefined}>{children}</blockquote>;
+  }
+  const type = m[1];
+  const Icon = ALERT_ICONS[type];
+  return (
+    <blockquote className={cls} data-alert={type}>
+      <p className="markdown-alert-title">
+        <Icon className="lucide" aria-hidden="true" />
+        <span>{t(`reader.alert_${type}`)}</span>
+      </p>
+      {children}
+    </blockquote>
+  );
+}
+
+function fenceContent(children: unknown): { code: string; lang: string } | null {
   const child = Array.isArray(children) && children.length === 1 ? children[0] : children;
   if (!isValidElement(child)) return null;
-
   const props = child.props as { className?: unknown; children?: unknown };
   const className = typeof props.className === "string" ? props.className : "";
-  const match = /(?:^|\s)language-(\w+)(?:\s|$)/.exec(className);
-  if (!match || match[1] !== "mermaid") return null;
-
-  return String(props.children ?? "").trimEnd();
+  const langMatch = /(?:^|\s)language-([\w-]+)(?:\s|$)/.exec(className);
+  return {
+    code: String(props.children ?? "").replace(/\n$/, ""),
+    lang: langMatch?.[1] ?? "",
+  };
 }
 
 type MarkdownRenderBlock =
@@ -294,6 +478,57 @@ function extractHeadingText(node: unknown): string {
     return extractHeadingText(props?.children);
   }
   return "";
+}
+
+function ShikiCodeBlock({ code, lang }: { code: string; lang: string }) {
+  const theme = currentShikiTheme();
+  const normalizedLang = normalizeShikiLang(lang);
+  const cacheKey = shikiCacheKey(code, normalizedLang, theme);
+  const [html, setHtml] = useState<string>(() => shikiCache.get(cacheKey) ?? "");
+
+  useEffect(() => {
+    let cancelled = false;
+    const cached = shikiCache.get(cacheKey);
+    if (cached) {
+      setHtml(cached);
+      return;
+    }
+    setHtml("");
+    void loadShiki().then((h) => {
+      if (cancelled) return;
+      try {
+        const rendered = h.codeToHtml(code, { lang: normalizedLang, theme });
+        shikiCache.set(cacheKey, rendered);
+        setHtml(rendered);
+      } catch {
+        try {
+          const fallback = h.codeToHtml(code, { lang: "plaintext", theme });
+          shikiCache.set(cacheKey, fallback);
+          setHtml(fallback);
+        } catch {
+          // give up — leave the idle <pre> visible below
+        }
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [cacheKey, code, normalizedLang, theme]);
+
+  if (!html) {
+    return (
+      <pre className="shiki shiki--idle" data-lang={normalizedLang}>
+        <code>{code}</code>
+      </pre>
+    );
+  }
+  return (
+    <div
+      className="shiki-block"
+      data-lang={normalizedLang}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
 }
 
 function MermaidBlock({ source }: { source: string }) {

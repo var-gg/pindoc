@@ -620,9 +620,187 @@
 .art-body a:hover { border-bottom-color: var(--accent); color: var(--accent); }
 .art-body img { display: block; max-width: 100%; height: auto; margin: 18px 0 22px; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--bg-1); }
 .art-body blockquote { margin: 20px 0; padding: 12px 16px; border-left: 2px solid var(--border-strong); color: var(--fg-2); font-size: 14.5px; }
-.art-body table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 0 0 16px; width: 100%; }
+.art-body table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 0 0 16px; width: 100%; border: 1px solid var(--border); }
 .art-body th, .art-body td { border: 1px solid var(--border); padding: 6px 10px; font-size: 13.5px; text-align: left; overflow-wrap: anywhere; }
-.art-body th { background: var(--bg-2); font-weight: 600; }
+.art-body th { background: var(--bg-2); font-weight: 600; position: sticky; top: 0; z-index: 1; }
+.art-body tbody tr:nth-child(even) td { background: color-mix(in oklch, var(--bg-2) 45%, transparent); }
+.art-body tbody tr:hover td { background: var(--bg-3); }
+
+/* h4-h6 — surfacing size hierarchy that browser defaults left flat */
+.art-body h4 { font-size: 14.5px; color: var(--fg-0); margin: 22px 0 6px; font-weight: 600; scroll-margin-top: calc(var(--nav-h) + 20px); }
+.art-body h5 { font-size: 13px; color: var(--fg-1); margin: 18px 0 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.art-body h6 { font-size: 12px; color: var(--fg-2); margin: 16px 0 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+
+/* heading anchor — fades in on hover so headings double as deep links */
+.art-body :is(h2, h3, h4) { position: relative; scroll-margin-top: calc(var(--nav-h) + 20px); }
+.art-body .heading-anchor {
+  position: absolute;
+  left: -1em;
+  width: 1em;
+  text-align: center;
+  color: var(--fg-4);
+  text-decoration: none;
+  border-bottom: 0;
+  padding-bottom: 0;
+  font-weight: 400;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.art-body :is(h2, h3, h4):hover .heading-anchor,
+.art-body .heading-anchor:focus-visible {
+  opacity: 1;
+}
+.art-body .heading-anchor:hover {
+  color: var(--accent);
+  border-bottom: 0;
+}
+@media (max-width: 720px) {
+  .art-body .heading-anchor { display: none; }
+}
+
+/* GFM task list — `- [ ]` and `- [x]` rendered as scannable checkboxes */
+.art-body li.task-list-item {
+  list-style: none;
+  margin-left: -22px;
+  padding-left: 4px;
+}
+.art-body li.task-list-item input[type="checkbox"] {
+  margin-right: 8px;
+  transform: translateY(1px);
+  accent-color: var(--accent);
+}
+.art-body li.task-list-item input[type="checkbox"]:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+
+/* keyboard tag — for tutorials and shortcut reference lists */
+.art-body kbd {
+  display: inline-flex;
+  align-items: baseline;
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-1);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+}
+
+/* GitHub Alerts — `> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]` */
+.art-body .markdown-alert {
+  margin: 20px 0;
+  padding: 12px 16px;
+  border: 1px solid var(--alert-border, var(--border));
+  border-left: 3px solid var(--alert-accent, var(--border-strong));
+  border-radius: var(--r-2);
+  background: var(--alert-bg, var(--bg-2));
+  color: var(--fg-1);
+  font-size: 14.5px;
+}
+.art-body .markdown-alert > p { margin: 0 0 8px; }
+.art-body .markdown-alert > p:last-child { margin-bottom: 0; }
+.art-body .markdown-alert-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--alert-accent, var(--fg-0));
+}
+.art-body .markdown-alert-title .lucide {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+.art-body .markdown-alert-note {
+  --alert-accent: var(--accent);
+  --alert-border: color-mix(in oklch, var(--accent) 30%, var(--border));
+  --alert-bg: color-mix(in oklch, var(--accent) 6%, transparent);
+}
+.art-body .markdown-alert-tip {
+  --alert-accent: var(--live);
+  --alert-border: color-mix(in oklch, var(--live) 30%, var(--border));
+  --alert-bg: color-mix(in oklch, var(--live) 6%, transparent);
+}
+.art-body .markdown-alert-important {
+  --alert-accent: var(--type-glossary);
+  --alert-border: color-mix(in oklch, var(--type-glossary) 30%, var(--border));
+  --alert-bg: color-mix(in oklch, var(--type-glossary) 6%, transparent);
+}
+.art-body .markdown-alert-warning {
+  --alert-accent: var(--prio-p1);
+  --alert-border: color-mix(in oklch, var(--prio-p1) 30%, var(--border));
+  --alert-bg: color-mix(in oklch, var(--prio-p1) 6%, transparent);
+}
+.art-body .markdown-alert-caution {
+  --alert-accent: var(--stale);
+  --alert-border: color-mix(in oklch, var(--stale) 30%, var(--border));
+  --alert-bg: color-mix(in oklch, var(--stale) 6%, transparent);
+}
+
+/* GFM footnotes — appear at the end of the body, treated as aside copy */
+.art-body .footnotes {
+  margin-top: 32px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--fg-2);
+}
+.art-body .footnotes ol { padding-left: 22px; }
+.art-body .footnotes li { margin-bottom: 6px; }
+.art-body .footnote-ref { font-size: 11px; vertical-align: super; line-height: 0; padding: 0 2px; border-bottom: 0; }
+.art-body .footnote-backref { margin-left: 4px; font-size: 11px; border-bottom: 0; }
+
+/* Shiki syntax-highlighted code blocks — wrapper supplies border/radius;
+   shiki's own inline background from the github-light/dark theme paints
+   the interior. */
+.art-body .shiki-block {
+  max-width: 100%;
+  margin: 0 0 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  overflow: hidden;
+  position: relative;
+}
+.art-body .shiki-block .shiki {
+  margin: 0;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 0;
+  overflow-x: auto;
+  font-size: 12.5px;
+}
+.art-body .shiki-block .shiki code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: inherit;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.art-body .shiki-block[data-lang]:not([data-lang="plaintext"])::after {
+  content: attr(data-lang);
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+  text-transform: lowercase;
+  pointer-events: none;
+  opacity: 0.7;
+}
+.art-body .shiki--idle {
+  background: var(--bg-2);
+  color: var(--fg-2);
+}
 
 .artifact-assets { margin-top: 30px; padding-top: 18px; border-top: 1px solid var(--border); }
 .artifact-assets__head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--fg-1); }

@@ -143,10 +143,24 @@ var pindocRenderingCaps = RenderingCaps{
 		"task_lists",
 		"strikethrough",
 		"autolink",
+		"footnotes",
+		"soft_breaks",
+		"github_alerts",
+		"syntax_highlighting",
+		"heading_anchors",
+		"keyboard_tag",
 		"mermaid",
 	},
-	CodeLanguages: []string{"any"},
-	Notes:         "Headings H1-H6, ordered/unordered lists, blockquotes, inline code, fenced code, links. Mermaid via ```mermaid fence. Math/KaTeX not supported (M1.x).",
+	CodeLanguages: []string{
+		"javascript", "typescript", "jsx", "tsx",
+		"html", "css", "scss", "json",
+		"go", "python", "rust", "java", "kotlin",
+		"csharp", "php", "ruby", "swift", "c", "cpp",
+		"bash", "shell", "powershell",
+		"yaml", "toml", "ini", "sql", "xml",
+		"markdown", "diff", "dockerfile", "graphql", "lua",
+	},
+	Notes: "Headings H1-H6 (H2-H4 expose hover anchors), ordered/unordered lists, GFM task lists, GFM tables, footnotes, blockquotes, soft line breaks, inline + fenced code with syntax highlighting (Shiki, GitHub themes), <kbd>, GitHub-style alert blockquotes, Mermaid via ```mermaid fence. Math/KaTeX not supported (M1.x).",
 }
 
 // RegisterProjectCurrent wires pindoc.project.current. Returns metadata

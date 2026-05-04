@@ -67,10 +67,24 @@ var pindocRenderingCaps = RenderingCaps{
 		"task_lists",
 		"strikethrough",
 		"autolink",
-		"mermaid", // fenced ```mermaid blocks render as SVG
+		"footnotes",
+		"soft_breaks",         // single newlines render as <br>
+		"github_alerts",       // > [!NOTE] / [!TIP] / [!IMPORTANT] / [!WARNING] / [!CAUTION]
+		"syntax_highlighting", // shiki via github-light/github-dark themes
+		"heading_anchors",     // #-anchor on H2–H4 hover
+		"keyboard_tag",        // <kbd> rendered as keycap
+		"mermaid",             // fenced ```mermaid blocks render as SVG
 	},
-	CodeLanguages: []string{"any"}, // plain monospace rendering for all
-	Notes:         "Headings H1–H6, ordered/unordered lists, blockquotes, inline code, fenced code, links. Mermaid via ```mermaid fence. Math/KaTeX not supported (M1.x).",
+	CodeLanguages: []string{
+		"javascript", "typescript", "jsx", "tsx",
+		"html", "css", "scss", "json",
+		"go", "python", "rust", "java", "kotlin",
+		"csharp", "php", "ruby", "swift", "c", "cpp",
+		"bash", "shell", "powershell",
+		"yaml", "toml", "ini", "sql", "xml",
+		"markdown", "diff", "dockerfile", "graphql", "lua",
+	},
+	Notes: "Headings H1–H6 (H2–H4 expose hover anchors), ordered/unordered lists, GFM task lists, GFM tables, footnotes, blockquotes, soft line breaks, inline + fenced code with syntax highlighting (Shiki, GitHub themes), <kbd>, GitHub-style alert blockquotes, Mermaid via ```mermaid fence. Math/KaTeX not supported (M1.x).",
 }
 
 func (d Deps) handleConfig(w http.ResponseWriter, r *http.Request) {
