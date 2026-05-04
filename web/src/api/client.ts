@@ -471,6 +471,15 @@ export type Artifact = ArtifactRef & {
   can_edit_visibility?: boolean;
 };
 
+export type ArtifactListResp = {
+  project_slug: string;
+  org_slug?: string;
+  organization_slug?: string;
+  artifacts: ArtifactRef[];
+  has_more?: boolean;
+  next_cursor?: string;
+};
+
 export type SearchHit = {
   artifact_id: string;
   slug: string;
@@ -1301,13 +1310,15 @@ export const api = {
       `${p(project)}/areas${q ? `?${q}` : ""}`,
     );
   },
-  artifacts: (project: string, params?: { area?: string; type?: string; includeTemplates?: boolean }) => {
+  artifacts: (project: string, params?: { area?: string; type?: string; includeTemplates?: boolean; cursor?: string; limit?: number }) => {
     const qs = new URLSearchParams();
     if (params?.area) qs.set("area", params.area);
     if (params?.type) qs.set("type", params.type);
     if (params?.includeTemplates) qs.set("include_templates", "true");
+    if (params?.cursor) qs.set("cursor", params.cursor);
+    if (params?.limit) qs.set("limit", String(params.limit));
     const q = qs.toString();
-    return j<{ project_slug: string; artifacts: ArtifactRef[] }>(
+    return j<ArtifactListResp>(
       `${p(project)}/artifacts${q ? `?${q}` : ""}`,
     );
   },

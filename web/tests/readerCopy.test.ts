@@ -37,6 +37,9 @@ function testKoreanReaderChromeCopyHidesRawEnglishLabels(): void {
   const snapshot = [
     ko["wiki.section_areas"],
     ko["sidebar.types"],
+    ko["wiki.load_more"],
+    ko["wiki.loading_more"],
+    ko["wiki.load_more_error"],
     ko["sidebar.agents"],
     ko["sidebar.unread_count"],
     ko["nav.mobile_menu"],
@@ -100,6 +103,7 @@ function testKoreanReaderChromeCopyHidesRawEnglishLabels(): void {
   assertEqual(ko["artifact.visibility.public"], "공개", "KO public visibility label should be localized");
   assertEqual(ko["artifact.visibility.org"], "조직", "KO org visibility label should be localized");
   assertEqual(ko["artifact.visibility.private"], "비공개", "KO private visibility label should be localized");
+  assertEqual(ko["wiki.load_more"], "더 보기", "wiki pagination action should be localized");
 }
 
 function testEnglishNavLabelsUseTitleCase(): void {

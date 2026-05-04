@@ -609,7 +609,16 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
     );
   }
 
-  const { project: projectData, areas, detail, agents, users } = state.data;
+  const {
+    project: projectData,
+    areas,
+    detail,
+    agents,
+    users,
+    artifactsHasMore,
+    artifactsLoadingMore,
+    artifactsLoadMoreError,
+  } = state.data;
   const projectOrgSlug = projectData.organization_slug ?? DEFAULT_READER_ORG_SLUG;
   if (orgSlug !== projectOrgSlug) {
     return (
@@ -760,6 +769,10 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
             projectRole={projectData.current_role}
             graphFocusSlug={graphFocusSlug}
             onGraphFocusChange={handleGraphFocusChange}
+            artifactsHasMore={artifactsHasMore}
+            artifactsLoadingMore={artifactsLoadingMore}
+            artifactsLoadMoreError={artifactsLoadMoreError}
+            onLoadMoreArtifacts={state.loadMoreArtifacts}
             unavailableSurface={unavailableSurface}
           />
         )}
@@ -906,6 +919,10 @@ function Body({
   projectRole,
   graphFocusSlug,
   onGraphFocusChange,
+  artifactsHasMore,
+  artifactsLoadingMore,
+  artifactsLoadMoreError,
+  onLoadMoreArtifacts,
   unavailableSurface,
 }: {
   view: ReaderView;
@@ -938,6 +955,10 @@ function Body({
   projectRole?: "owner" | "editor" | "viewer";
   graphFocusSlug: string | null;
   onGraphFocusChange: (slug: string) => void;
+  artifactsHasMore: boolean;
+  artifactsLoadingMore: boolean;
+  artifactsLoadMoreError: string | null;
+  onLoadMoreArtifacts: () => Promise<void>;
   unavailableSurface?: string;
 }) {
   const { t, lang } = useI18n();
@@ -1195,6 +1216,25 @@ function Body({
                 </article>
               );
             })}
+          </div>
+        )}
+        {(artifactsHasMore || artifactsLoadingMore || artifactsLoadMoreError) && (
+          <div className="artifact-list__pager">
+            {artifactsLoadMoreError && (
+              <span className="artifact-list__pager-error" role="status">
+                {t("wiki.load_more_error")}
+              </span>
+            )}
+            {artifactsHasMore && (
+              <button
+                type="button"
+                className="artifact-list__load-more"
+                onClick={() => void onLoadMoreArtifacts()}
+                disabled={artifactsLoadingMore}
+              >
+                {artifactsLoadingMore ? t("wiki.loading_more") : t("wiki.load_more")}
+              </button>
+            )}
           </div>
         )}
       </div>

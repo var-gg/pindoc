@@ -2,12 +2,14 @@ package httpapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -598,6 +600,68 @@ type artifactRow struct {
 	RecentWarnings []recentWarningRow `json:"recent_warnings,omitempty"`
 }
 
+const (
+	artifactListDefaultLimit = 100
+	artifactListMaxLimit     = 200
+)
+
+type artifactListCursor struct {
+	TaskRank  int       `json:"task_rank"`
+	UpdatedAt time.Time `json:"updated_at"`
+	ID        string    `json:"id"`
+}
+
+func artifactListTaskRank(artifactType string) int {
+	if artifactType == "Task" {
+		return 1
+	}
+	return 0
+}
+
+func parseArtifactListLimit(raw string) (int, error) {
+	if strings.TrimSpace(raw) == "" {
+		return artifactListDefaultLimit, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("invalid limit")
+	}
+	if n > artifactListMaxLimit {
+		return artifactListMaxLimit, nil
+	}
+	return n, nil
+}
+
+func encodeArtifactListCursor(a artifactRow) (string, error) {
+	payload, err := json.Marshal(artifactListCursor{
+		TaskRank:  artifactListTaskRank(a.Type),
+		UpdatedAt: a.UpdatedAt,
+		ID:        a.ID,
+	})
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(payload), nil
+}
+
+func decodeArtifactListCursor(raw string) (*artifactListCursor, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, err
+	}
+	var cursor artifactListCursor
+	if err := json.Unmarshal(payload, &cursor); err != nil {
+		return nil, err
+	}
+	if cursor.TaskRank < 0 || cursor.TaskRank > 1 || cursor.UpdatedAt.IsZero() || strings.TrimSpace(cursor.ID) == "" {
+		return nil, fmt.Errorf("invalid cursor")
+	}
+	return &cursor, nil
+}
+
 // authorUserRef is the thin join projection of users → artifact list.
 // We intentionally omit email so Pindoc-self publication doesn't leak
 // addresses; display_name + github_handle is what Reader needs for the
@@ -614,10 +678,42 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 	visibilityPredicate, visibilityArgs := d.artifactVisibilityPredicate(r, "a", 5)
 	areaSlug := r.URL.Query().Get("area")
 	typeFilter := r.URL.Query().Get("type")
+	limit, err := parseArtifactListLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid limit")
+		return
+	}
+	cursor, err := decodeArtifactListCursor(r.URL.Query().Get("cursor"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid cursor")
+		return
+	}
 	// include_templates=true surfaces _template_* artifacts (Phase 13).
 	// Default hides them so the reader list stays focused on real docs.
 	includeTemplates := r.URL.Query().Get("include_templates") == "true"
 	args := append([]any{projectArg, areaSlug, typeFilter, includeTemplates}, visibilityArgs...)
+
+	cursorPredicate := "TRUE"
+	if cursor != nil {
+		rankArg := len(args) + 1
+		args = append(args, cursor.TaskRank)
+		updatedArg := len(args) + 1
+		args = append(args, cursor.UpdatedAt)
+		idArg := len(args) + 1
+		args = append(args, cursor.ID)
+		cursorPredicate = fmt.Sprintf(`(
+			(CASE WHEN a.type = 'Task' THEN 1 ELSE 0 END) > $%d::int
+			OR (
+				(CASE WHEN a.type = 'Task' THEN 1 ELSE 0 END) = $%d::int
+				AND (
+					a.updated_at < $%d::timestamptz
+					OR (a.updated_at = $%d::timestamptz AND a.id < $%d::uuid)
+				)
+			)
+		)`, rankArg, rankArg, updatedArg, updatedArg, idArg)
+	}
+	limitArg := len(args) + 1
+	args = append(args, limit+1)
 
 	rows, err := d.DB.Query(r.Context(), fmt.Sprintf(`
 		SELECT
@@ -655,9 +751,12 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 		  AND ($3 = '' OR a.type  = $3)
 		  AND ($4::bool OR NOT starts_with(a.slug, '_template_'))
 		  AND %s
-		ORDER BY a.updated_at DESC
-		LIMIT 200
-	`, projectPredicate, visibilityPredicate), args...)
+		  AND %s
+		-- Tasks churn far more than wiki bodies (Decision/Glossary/DataModel/...);
+		-- without this Tasks alone fill the first page and wiki docs vanish from the list.
+		ORDER BY (CASE WHEN a.type = 'Task' THEN 1 ELSE 0 END) ASC, a.updated_at DESC, a.id DESC
+		LIMIT $%d
+	`, projectPredicate, visibilityPredicate, cursorPredicate, limitArg), args...)
 	if err != nil {
 		d.Logger.Error("artifact list", "err", err)
 		writeError(w, http.StatusInternalServerError, "query failed")
@@ -706,9 +805,23 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, a)
 	}
+	hasMore := len(out) > limit
+	if hasMore {
+		out = out[:limit]
+	}
 	body := map[string]any{
 		"project_slug": slug,
 		"artifacts":    out,
+		"has_more":     hasMore,
+	}
+	if hasMore && len(out) > 0 {
+		nextCursor, err := encodeArtifactListCursor(out[len(out)-1])
+		if err != nil {
+			d.Logger.Error("artifact list cursor encode", "err", err)
+			writeError(w, http.StatusInternalServerError, "cursor encode failed")
+			return
+		}
+		body["next_cursor"] = nextCursor
 	}
 	if org := orgSlugFrom(r); org != "" {
 		body["org_slug"] = org
