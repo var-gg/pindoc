@@ -281,6 +281,7 @@ export type AssetRef = {
   blob_url: string;
   is_image: boolean;
   projection: AssetProjection;
+  cross_visibility?: VisibilityTier[];
   display_order: number;
   created_by?: string;
   created_at?: string;

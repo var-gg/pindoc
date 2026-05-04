@@ -28,6 +28,7 @@ type assetDetailRow struct {
 	BlobURL          string            `json:"blob_url"`
 	IsImage          bool              `json:"is_image"`
 	Projection       assets.Projection `json:"projection"`
+	CrossVisibility  []string          `json:"cross_visibility,omitempty"`
 	DisplayOrder     int               `json:"display_order"`
 	CreatedBy        string            `json:"created_by,omitempty"`
 	CreatedAt        time.Time         `json:"created_at,omitzero"`
@@ -220,10 +221,36 @@ func (d Deps) loadArtifactAssets(ctx context.Context, projectSlug, artifactID st
 	rows, err := d.DB.Query(ctx, `
 		SELECT aa.id, ast.id::text, ast.mime_type, ast.size_bytes,
 		       ast.original_filename, aa.role, aa.display_order,
-		       ast.created_by, ast.created_at
+		       ast.created_by, ast.created_at,
+		       ARRAY(
+					SELECT visibility
+					  FROM (
+							SELECT DISTINCT other_art.visibility
+							  FROM artifact_assets aa_other
+							  JOIN artifact_revisions ar_other ON ar_other.id = aa_other.artifact_revision_id
+							  JOIN artifacts other_art ON other_art.id = aa_other.artifact_id
+							 WHERE aa_other.asset_id = aa.asset_id
+							   AND other_art.project_id = cur.project_id
+							   AND other_art.id <> cur.id
+							   AND other_art.status <> 'archived'
+							   AND other_art.visibility <> cur.visibility
+							   AND ar_other.revision_number = (
+									SELECT max(r2.revision_number)
+									  FROM artifact_revisions r2
+									 WHERE r2.artifact_id = other_art.id
+							   )
+					  ) cross_visibility
+					 ORDER BY CASE visibility
+						 WHEN 'public' THEN 1
+						 WHEN 'org' THEN 2
+						 WHEN 'private' THEN 3
+						 ELSE 4
+					 END
+		       ) AS cross_visibility
 		  FROM artifact_assets aa
 		  JOIN assets ast ON ast.id = aa.asset_id
 		  JOIN artifact_revisions ar ON ar.id = aa.artifact_revision_id
+		  JOIN artifacts cur ON cur.id = aa.artifact_id
 		 WHERE aa.artifact_id = $1::uuid
 		   AND ar.revision_number = $2
 		 ORDER BY
@@ -248,7 +275,7 @@ func (d Deps) loadArtifactAssets(ctx context.Context, projectSlug, artifactID st
 		if err := rows.Scan(
 			&relationID, &row.ID, &row.MimeType, &row.SizeBytes,
 			&row.OriginalFilename, &row.Role, &row.DisplayOrder,
-			&row.CreatedBy, &createdAt,
+			&row.CreatedBy, &createdAt, &row.CrossVisibility,
 		); err != nil {
 			return nil, err
 		}

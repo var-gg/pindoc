@@ -628,6 +628,8 @@
 .artifact-assets__head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--fg-1); }
 .artifact-assets__head h2 { margin: 0; font-size: 14px; font-weight: 650; color: var(--fg-0); }
 .artifact-assets__paperclip { width: 16px; height: 16px; color: var(--fg-3); }
+.artifact-assets__inline-warning { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 12px; padding: 8px 10px; border: 1px solid color-mix(in oklch, var(--warning, #a15c00) 38%, var(--border)); border-radius: var(--r-2); background: color-mix(in oklch, var(--warning, #a15c00) 9%, transparent); color: color-mix(in oklch, var(--warning, #a15c00) 86%, var(--fg-0)); font-size: 12px; line-height: 1.35; }
+.artifact-assets__inline-warning .lucide { flex: none; width: 14px; height: 14px; margin-top: 1px; }
 .artifact-assets__groups { display: grid; gap: 16px; }
 .artifact-assets__group { display: grid; gap: 7px; }
 .artifact-assets__group-title { margin: 0; color: var(--fg-2); font-size: 13px; font-weight: 600; line-height: 1.35; }
@@ -640,6 +642,9 @@
 .artifact-asset__body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .artifact-asset__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--fg-0); }
 .artifact-asset__meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--fg-3); }
+.artifact-asset__warning { display: inline-flex; align-items: center; gap: 4px; width: max-content; max-width: 100%; padding: 2px 6px; border: 1px solid color-mix(in oklch, var(--warning, #a15c00) 36%, var(--border)); border-radius: var(--r-1); background: color-mix(in oklch, var(--warning, #a15c00) 9%, transparent); color: color-mix(in oklch, var(--warning, #a15c00) 86%, var(--fg-0)); font-size: 11px; line-height: 1.2; }
+.artifact-asset__warning .lucide { flex: none; width: 12px; height: 12px; }
+.artifact-asset__warning span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artifact-asset__download { width: 16px; height: 16px; color: var(--fg-3); }
 
 .mermaid-diagram {

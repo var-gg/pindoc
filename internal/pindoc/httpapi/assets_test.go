@@ -164,6 +164,37 @@ func TestAssetBlobMostPermissiveVisibilityPolicyIntegration(t *testing.T) {
 	}
 }
 
+func TestArtifactHeadAssetsIncludeCrossVisibilityWarningsIntegration(t *testing.T) {
+	fixture := newAssetHTTPFixture(t)
+	assetID, _ := insertHTTPAsset(t, fixture, "shared.png", "image/png", []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'})
+	attachHTTPAsset(t, fixture, fixture.privateArtifactID, assetID, assets.RoleInlineImage)
+	attachHTTPAsset(t, fixture, fixture.publicArtifactID, assetID, assets.RoleAttachment)
+
+	publicResp := doAssetBlobRequest(
+		fixture.handler,
+		http.MethodGet,
+		"/api/p/"+fixture.projectSlug+"/artifacts/"+fixture.publicArtifactID,
+		"10.0.0.5:54321",
+		nil,
+	)
+	if publicResp.Code != http.StatusOK {
+		t.Fatalf("public artifact status = %d, want 200; body=%s", publicResp.Code, publicResp.Body.String())
+	}
+	assertHeadAssetCrossVisibility(t, publicResp.Body.Bytes(), assetID, assets.RoleAttachment, []string{projects.VisibilityPrivate})
+
+	privateResp := doAssetBlobRequest(
+		fixture.handler,
+		http.MethodGet,
+		"/api/p/"+fixture.projectSlug+"/artifacts/"+fixture.privateArtifactID,
+		"127.0.0.1:5830",
+		nil,
+	)
+	if privateResp.Code != http.StatusOK {
+		t.Fatalf("private artifact status = %d, want 200; body=%s", privateResp.Code, privateResp.Body.String())
+	}
+	assertHeadAssetCrossVisibility(t, privateResp.Body.Bytes(), assetID, assets.RoleInlineImage, []string{projects.VisibilityPublic})
+}
+
 type assetHTTPFixture struct {
 	ctx               context.Context
 	pool              *db.Pool
@@ -307,4 +338,33 @@ func doAssetBlobRequest(handler http.Handler, method, path, remoteAddr string, h
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	return rec
+}
+
+func assertHeadAssetCrossVisibility(t *testing.T, body []byte, assetID, role string, want []string) {
+	t.Helper()
+	var decoded struct {
+		Assets []struct {
+			ID              string   `json:"id"`
+			Role            string   `json:"role"`
+			CrossVisibility []string `json:"cross_visibility"`
+		} `json:"assets"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("decode artifact head: %v; body=%s", err, string(body))
+	}
+	for _, asset := range decoded.Assets {
+		if asset.ID != assetID || asset.Role != role {
+			continue
+		}
+		if len(asset.CrossVisibility) != len(want) {
+			t.Fatalf("cross_visibility length = %d, want %d; asset=%+v", len(asset.CrossVisibility), len(want), asset)
+		}
+		for i := range want {
+			if asset.CrossVisibility[i] != want[i] {
+				t.Fatalf("cross_visibility = %+v, want %+v", asset.CrossVisibility, want)
+			}
+		}
+		return
+	}
+	t.Fatalf("asset %s role %s not found in head response; assets=%+v", assetID, role, decoded.Assets)
 }

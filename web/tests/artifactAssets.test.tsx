@@ -18,8 +18,14 @@ function assertEqual(actual: unknown, expected: unknown, message: string): void 
   }
 }
 
-function asset(role: AssetRef["role"], displayOrder: number, filename: string, id = `${role}-${displayOrder}`): AssetRef {
-  return {
+function asset(
+  role: AssetRef["role"],
+  displayOrder: number,
+  filename: string,
+  id = `${role}-${displayOrder}`,
+  crossVisibility?: AssetRef["cross_visibility"],
+): AssetRef {
+  const ref: AssetRef = {
     id,
     asset_ref: `pindoc-asset://${id}`,
     role,
@@ -31,6 +37,8 @@ function asset(role: AssetRef["role"], displayOrder: number, filename: string, i
     projection: {},
     display_order: displayOrder,
   };
+  if (crossVisibility) ref.cross_visibility = crossVisibility;
+  return ref;
 }
 
 function testAssetGroupsUseEvidencePriority(): void {
@@ -83,11 +91,48 @@ function testArtifactAssetsRenderGroupHeadersAndCards(): void {
   assert(!html.includes("Evidence · text/plain"), "role label should not be duplicated in card metadata");
 }
 
+function testArtifactAssetsRenderCrossVisibilityWarning(): void {
+  const html = renderToStaticMarkup(
+    <I18nProvider projectLang="en">
+      <ArtifactAssets
+        assets={[
+          asset("attachment", 0, "shared.txt", "shared-asset", ["private", "public"]),
+        ]}
+      />
+    </I18nProvider>,
+  );
+
+  assert(
+    html.includes("Shared with public artifacts, private artifacts"),
+    "cross-visibility warning badge should render with stable visibility order",
+  );
+  assert(!html.includes("reader.asset_cross_visibility"), "cross-visibility keys should not fall through");
+}
+
+function testArtifactAssetsRenderInlineImageWarningBanner(): void {
+  const html = renderToStaticMarkup(
+    <I18nProvider projectLang="en">
+      <ArtifactAssets assets={[asset("inline_image", 0, "inline.png", "inline-asset", ["private"])]} />
+    </I18nProvider>,
+  );
+
+  assert(
+    html.includes("Inline images are also attached to private artifacts."),
+    "inline-only cross-visibility warning should render an artifact-level banner",
+  );
+  assert(!html.includes("inline.png"), "inline-only warning should not add inline images to attachment cards");
+}
+
 function testAssetGroupI18nKeysExist(): void {
   const keys = [
     "reader.asset_group_attachment",
     "reader.asset_group_evidence",
     "reader.asset_group_generated_output",
+    "reader.asset_cross_visibility.public",
+    "reader.asset_cross_visibility.org",
+    "reader.asset_cross_visibility.private",
+    "reader.asset_cross_visibility_badge",
+    "reader.asset_cross_visibility_inline_banner",
   ];
 
   for (const key of keys) {
@@ -100,4 +145,6 @@ function testAssetGroupI18nKeysExist(): void {
 
 testAssetGroupsUseEvidencePriority();
 testArtifactAssetsRenderGroupHeadersAndCards();
+testArtifactAssetsRenderCrossVisibilityWarning();
+testArtifactAssetsRenderInlineImageWarningBanner();
 testAssetGroupI18nKeysExist();
