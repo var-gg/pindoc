@@ -220,6 +220,13 @@ docker run --rm -v "${PWD}:/work" -w /work golang:1.25 go test ./...
 - [Security](SECURITY.md)
 - [Design source notes](docs/README.md#design-source-notes)
 
+## Feedback
+
+Long-form questions, feature requests, and design discussions go to
+[GitHub Discussions](https://github.com/var-gg/pindoc/discussions). Bug reports
+go to [GitHub Issues](https://github.com/var-gg/pindoc/issues). The maintainer
+typically responds within a day.
+
 ## Status
 
 Pindoc is in active dogfood. The local self-host path, Reader UI, project/area
