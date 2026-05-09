@@ -1,3 +1,12 @@
 {
-   "signedContributors": []
+  "signedContributors": [
+    {
+      "name": "var-gg",
+      "id": 234993556,
+      "comment_id": 4412254393,
+      "created_at": "2026-05-09T10:11:01Z",
+      "repoId": 1216510419,
+      "pullRequestNo": 4
+    }
+  ]
 }
