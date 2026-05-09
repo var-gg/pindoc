@@ -1276,22 +1276,25 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 
 	ref := normalizeRef(in.UpdateOf)
 
-	var artifactID, projectID, currentBody, currentTitle, currentType, currentSlug, sensitiveOps string
+	var artifactID, projectID, currentBody, currentTitle, currentType, currentSlug, currentAreaSlug, sensitiveOps string
 	var currentTags []string
 	var currentCompleteness string
 	var currentMetaRaw, currentTaskMetaRaw []byte
 	var lastRev int
 	err := deps.DB.QueryRow(ctx, `
 		SELECT a.id::text, a.project_id::text, a.body_markdown, a.title, a.type, a.slug,
+		       ar.slug,
 		       a.tags, a.completeness, a.artifact_meta, a.task_meta,
 		       COALESCE(NULLIF(p.sensitive_ops, ''), 'auto'),
 		       COALESCE((SELECT max(revision_number) FROM artifact_revisions WHERE artifact_id = a.id), 0)
 		FROM artifacts a
 		JOIN projects p ON p.id = a.project_id
+		JOIN areas ar ON ar.id = a.area_id
 		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 		LIMIT 1
 	`, scope.ProjectSlug, ref).Scan(
 		&artifactID, &projectID, &currentBody, &currentTitle, &currentType, &currentSlug,
+		&currentAreaSlug,
 		&currentTags, &currentCompleteness, &currentMetaRaw, &currentTaskMetaRaw, &sensitiveOps, &lastRev,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1547,8 +1550,9 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		}, nil
 	}
 
-	// Area is preserved on update — moving across areas is a supersede,
-	// not a revision. Treat area_slug as a reconfirm-of-current.
+	// Area is preserved on update. Moving across areas is now handled by
+	// pindoc.artifact.set_area so propose cannot silently reclassify an
+	// existing artifact through a body/meta revision.
 	var areaID string
 	if err := deps.DB.QueryRow(ctx, `
 		SELECT area.id::text FROM areas area
@@ -1564,6 +1568,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 			PatchableFields: patchFieldsFor("AREA_UNKNOWN"),
 		}, nil
 	}
+	ignoredAreaWarnings := areaSlugIgnoredWarnings(in.AreaSlug, currentAreaSlug)
 
 	if in.Tags == nil {
 		in.Tags = currentTags
@@ -1675,7 +1680,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	`, projectID, artifactID, newRev, slug, in.AuthorID, in.CommitMsg); err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("event: %w", err)
 	}
-	if err := recordAreaSuggestionResolvedEvent(ctx, tx, projectID, artifactID, areaSuggestionCorrelation(in), in.AreaSlug, slug, in.AuthorID); err != nil {
+	if err := recordAreaSuggestionResolvedEvent(ctx, tx, projectID, artifactID, areaSuggestionCorrelation(in), currentAreaSlug, slug, in.AuthorID); err != nil {
 		return nil, artifactProposeOutput{}, fmt.Errorf("area suggestion resolve event: %w", err)
 	}
 	if reviewState == policy.ReviewStatePending {
@@ -1745,6 +1750,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	// types that carry a canonical truth claim (Debug, Decision, Analysis)
 	// and require fresh evidence when that section's content shifts.
 	warnings := updatePathWarnings(ctx, deps, scope.ProjectSlug, currentSlug, shape, in)
+	warnings = append(warnings, ignoredAreaWarnings...)
 	warnings = append(warnings, repoWarnings...)
 	warnings = append(warnings, acceptanceUncheckedNudgeWarnings(currentType, in.BodyMarkdown, in.CommitMsg)...)
 	warnings = append(warnings, decisionSubjectAreaWarnings(in)...)
@@ -1778,6 +1784,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 	suggested = append(suggested, sectionDuplicatesEdgesSuggestedActions(warnings)...)
 	suggested = append(suggested, titleLocaleMismatchSuggestedActions(warnings)...)
 	suggested = append(suggested, outcomeTemplateSuggestedActionsForWarnings(warnings)...)
+	suggested = append(suggested, areaSlugIgnoredSuggestedActions(warnings)...)
 
 	// Task propose-경로-warning-영속화: persist update-path warnings +
 	// canonical-rewrite flag into events so Reader Trust Card and future
@@ -4123,6 +4130,22 @@ func outcomeTemplateSuggestedActionsForWarnings(warnings []string) []string {
 		}
 	}
 	return nil
+}
+
+func areaSlugIgnoredWarnings(requested, current string) []string {
+	requested = strings.TrimSpace(requested)
+	current = strings.TrimSpace(current)
+	if requested == "" || current == "" || requested == current {
+		return nil
+	}
+	return []string{fmt.Sprintf("AREA_SLUG_IGNORED:requested=%s,current=%s", requested, current)}
+}
+
+func areaSlugIgnoredSuggestedActions(warnings []string) []string {
+	if !hasWarningPrefix(warnings, "AREA_SLUG_IGNORED") {
+		return nil
+	}
+	return []string{"AREA_SLUG_IGNORED: artifact.propose update paths preserve the current area; use pindoc.artifact.set_area for reclassification."}
 }
 
 func decisionSubjectAreaWarnings(in artifactProposeInput) []string {

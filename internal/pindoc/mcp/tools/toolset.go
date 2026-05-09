@@ -13,7 +13,7 @@ import (
 // tool name. RegisteredTools catches catalog membership drift; this salt
 // catches same-name surface drift that client-side schema caches otherwise
 // cannot see.
-const ToolsetSchemaVersion = "2026-05-04-project-visibility"
+const ToolsetSchemaVersion = "2026-05-10-artifact-set-area"
 
 type ToolsetClientAction struct {
 	ID     string         `json:"id"`
@@ -48,6 +48,7 @@ var RegisteredTools = []string{
 	"pindoc.artifact.wording_fix",
 	"pindoc.artifact.add_pin",
 	"pindoc.artifact.set_visibility",
+	"pindoc.artifact.set_area",
 	"pindoc.harness.install",
 	"pindoc.artifact.audit",
 	"pindoc.artifact.search",

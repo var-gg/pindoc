@@ -106,6 +106,24 @@ func TestArtifactAuditFindingsForRow(t *testing.T) {
 		t.Fatalf("stale finding = %+v in %+v", got, staleFindings)
 	}
 
+	concentrationRow := artifactAuditRow{
+		ArtifactID:        "a6",
+		Slug:              "crowded-area-artifact",
+		Type:              "Decision",
+		Title:             "붐비는 area artifact",
+		AreaSlug:          "content",
+		Status:            "published",
+		BodyLocale:        "ko",
+		RevisionNumber:    1,
+		AreaArtifactCount: 87,
+		UpdatedAt:         now,
+	}
+	concentrationFindings := artifactAuditFindingsForRow(Deps{}, scope, concentrationRow, filter)
+	concentration := artifactAuditFindByCode(concentrationFindings, "AREA_CONCENTRATION")
+	if concentration == nil || concentration.FindingKind != artifactAuditKindAreaConcentration || concentration.RecommendedAction != "set_area" || concentration.Severity != SeverityInfo {
+		t.Fatalf("area concentration finding = %+v in %+v", concentration, concentrationFindings)
+	}
+
 	kindFilter := artifactAuditFilter{
 		Limit:    artifactAuditDefaultLimit,
 		Kinds:    map[string]struct{}{artifactAuditKindTaskLifecycle: {}},
@@ -144,6 +162,13 @@ func TestNormalizeArtifactAuditFilter(t *testing.T) {
 	}
 	if _, ok := filter.Kinds[artifactAuditKindTaskLifecycle]; !ok {
 		t.Fatalf("kind filter missing task_lifecycle: %+v", filter.Kinds)
+	}
+	areaFilter, err := normalizeArtifactAuditFilter(artifactAuditInput{Kind: "area_concentration"})
+	if err != nil {
+		t.Fatalf("normalize area_concentration kind: %v", err)
+	}
+	if _, ok := areaFilter.Kinds[artifactAuditKindAreaConcentration]; !ok {
+		t.Fatalf("kind filter missing area_concentration: %+v", areaFilter.Kinds)
 	}
 
 	if _, err := normalizeArtifactAuditFilter(artifactAuditInput{Status: "deleted"}); err == nil {

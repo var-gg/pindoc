@@ -90,6 +90,27 @@ func TestArtifactProposeDryRunIntegration(t *testing.T) {
 		t.Fatalf("persisted create output = status=%q dry=%v created=%v rev=%d", persisted.Status, persisted.DryRun, persisted.Created, persisted.RevisionNumber)
 	}
 
+	ignoredAreaSlug := "other-area"
+	_ = insertContextReceiptArea(t, ctx, pool, projectID, ignoredAreaSlug)
+	ignoredAreaOut := call(ctx, map[string]any{
+		"project_slug":     projectSlug,
+		"area_slug":        ignoredAreaSlug,
+		"type":             "Decision",
+		"title":            "Persisted decision update",
+		"update_of":        persistedSlug,
+		"expected_version": 1,
+		"commit_msg":       "dry run update with ignored area",
+		"body_markdown":    validDecisionBodyForPropose("x2", "y"),
+		"author_id":        "codex-test",
+		"dry_run":          true,
+	})
+	if !hasWarningPrefix(ignoredAreaOut.Warnings, "AREA_SLUG_IGNORED") {
+		t.Fatalf("different update area should warn, warnings=%v", ignoredAreaOut.Warnings)
+	}
+	if len(ignoredAreaOut.SuggestedActions) == 0 || !strings.Contains(strings.Join(ignoredAreaOut.SuggestedActions, "\n"), "pindoc.artifact.set_area") {
+		t.Fatalf("different update area should suggest set_area, actions=%v", ignoredAreaOut.SuggestedActions)
+	}
+
 	updateOut := call(ctx, map[string]any{
 		"project_slug":     projectSlug,
 		"area_slug":        areaSlug,

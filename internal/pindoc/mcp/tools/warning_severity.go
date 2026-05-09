@@ -65,6 +65,7 @@ var warningSeverityCatalog = map[string]string{
 	"RECOMMEND_REPO_REGISTRATION":        SeverityWarn,
 	"SECTION_DUPLICATES_EDGES":           SeverityWarn,
 	"MISSING_COMMIT_MSG_ON_CREATE":       SeverityWarn,
+	"AREA_SLUG_IGNORED":                  SeverityWarn,
 	"acceptance_unchecked":               SeverityWarn,
 
 	// INFO — pointer / reminder.
