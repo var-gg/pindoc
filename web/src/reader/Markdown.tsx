@@ -15,6 +15,10 @@ import mermaid from "mermaid";
 import {
   AlertCircle,
   AlertTriangle,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Copy,
   Info,
   Lightbulb,
   Maximize2,
@@ -25,6 +29,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { createHighlighter, type Highlighter } from "shiki";
+import { visit } from "unist-util-visit";
 import { headingsFromBody, slugifyHeading } from "./slug";
 import { useI18n } from "../i18n";
 import { pindocUrlTransform } from "./urlTransform";
@@ -41,6 +46,7 @@ let mermaidRenderCounter = 0;
 const mermaidSvgCache = new Map<string, string>();
 
 function currentMermaidTheme(): "default" | "dark" {
+  if (typeof document === "undefined") return "default";
   return document.documentElement.classList.contains("theme-dark") ? "dark" : "default";
 }
 
@@ -134,6 +140,7 @@ let shikiLoading: Promise<Highlighter> | null = null;
 const shikiCache = new Map<string, string>();
 
 function currentShikiTheme(): ShikiTheme {
+  if (typeof document === "undefined") return "github-light";
   return document.documentElement.classList.contains("theme-dark")
     ? "github-dark"
     : "github-light";
@@ -174,9 +181,103 @@ const ALERT_ICONS: Record<AlertType, typeof Info> = {
   warning: AlertTriangle,
   caution: ShieldAlert,
 };
+const LONG_CODE_LINE_THRESHOLD = 48;
+const LONG_CODE_CHAR_THRESHOLD = 6000;
 
 function isAlertType(value: string): value is AlertType {
   return (ALERT_TYPES as readonly string[]).includes(value);
+}
+
+type MarkdownAstNode = {
+  type: string;
+  value?: string;
+  lang?: string;
+  meta?: string | null;
+  children?: MarkdownAstNode[];
+  data?: {
+    hName?: string;
+    hProperties?: Record<string, unknown>;
+  };
+};
+
+function remarkCodeMeta() {
+  return (tree: unknown) => {
+    visit(tree as never, "code", (node: MarkdownAstNode) => {
+      const meta = typeof node.meta === "string" ? node.meta.trim() : "";
+      if (!meta) return;
+      const data = (node.data = node.data ?? {});
+      data.hProperties = {
+        ...(data.hProperties ?? {}),
+        "data-meta": meta,
+      };
+    });
+  };
+}
+
+function remarkSafeKbd() {
+  return (tree: unknown) => {
+    visit(tree as never, "paragraph", (node: MarkdownAstNode) => {
+      const children = node.children;
+      if (!children || children.length < 3) return;
+
+      for (let i = 0; i <= children.length - 3; i += 1) {
+        const open = children[i];
+        const body = children[i + 1];
+        const close = children[i + 2];
+        if (!isSafeKbdTriplet(open, body, close)) continue;
+
+        children.splice(i, 3, {
+          type: "kbd",
+          children: [{ type: "text", value: body.value }],
+          data: { hName: "kbd" },
+        });
+      }
+    });
+  };
+}
+
+function isSafeKbdTriplet(
+  open: MarkdownAstNode,
+  body: MarkdownAstNode,
+  close: MarkdownAstNode,
+): boolean {
+  return (
+    open.type === "html" &&
+    /^<kbd\s*>$/i.test(open.value ?? "") &&
+    body.type === "text" &&
+    typeof body.value === "string" &&
+    body.value.length > 0 &&
+    body.value.length <= 80 &&
+    !/[<>]/.test(body.value) &&
+    close.type === "html" &&
+    /^<\/kbd\s*>$/i.test(close.value ?? "")
+  );
+}
+
+export function parseCodeMeta(meta: string): { title: string; showLineNumbers: boolean } {
+  const titleMatch = /\b(?:title|filename)=("([^"]*)"|'([^']*)'|([^\s]+))/i.exec(meta);
+  const title = (titleMatch?.[2] ?? titleMatch?.[3] ?? titleMatch?.[4] ?? "").trim();
+  return {
+    title,
+    showLineNumbers: /\b(?:showLineNumbers|lineNumbers|linenums)\b/i.test(meta),
+  };
+}
+
+export function diffLineClass(line: string): string {
+  if (line.startsWith("+") && !line.startsWith("+++")) return "pindoc-diff-line--add";
+  if (line.startsWith("-") && !line.startsWith("---")) return "pindoc-diff-line--remove";
+  if (line.startsWith("@@")) return "pindoc-diff-line--hunk";
+  return "";
+}
+
+export function decorateDiffHtml(html: string, source: string, lang: string): string {
+  if (normalizeShikiLang(lang) !== "diff") return html;
+  const lines = source.split(/\r?\n/);
+  let index = 0;
+  return html.replace(/<span class="line"/g, (match) => {
+    const cls = diffLineClass(lines[index++] ?? "");
+    return cls ? `<span class="line ${cls}"` : match;
+  });
 }
 
 /**
@@ -241,11 +342,13 @@ function MarkdownBlock({
 
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkBreaks, remarkGithubAlerts]}
+      remarkPlugins={[remarkGfm, remarkBreaks, remarkGithubAlerts, remarkSafeKbd, remarkCodeMeta]}
       urlTransform={(url) => pindocUrlTransform(url, projectSlug, orgSlug)}
       components={{
         pre: MarkdownPre,
         code: MarkdownCode,
+        kbd: MarkdownKbd,
+        table: MarkdownTable,
         blockquote: MarkdownBlockquote,
         h2({ children }) {
           // extractHeadingText flattens children (often an array of
@@ -301,7 +404,7 @@ function MarkdownPre({ children }: { children?: ReactNode }) {
     return <MermaidBlock source={fence.code} />;
   }
   if (fence) {
-    return <ShikiCodeBlock code={fence.code} lang={fence.lang} />;
+    return <ShikiCodeBlock code={fence.code} lang={fence.lang} meta={fence.meta} />;
   }
   return <pre>{children}</pre>;
 }
@@ -314,6 +417,18 @@ function MarkdownCode({
   children?: ReactNode;
 }) {
   return <code className={className}>{children}</code>;
+}
+
+function MarkdownKbd({ children }: { children?: ReactNode }) {
+  return <kbd>{children}</kbd>;
+}
+
+function MarkdownTable({ children }: { children?: ReactNode }) {
+  return (
+    <div className="pindoc-table-scroll">
+      <table>{children}</table>
+    </div>
+  );
 }
 
 function MarkdownBlockquote({
@@ -342,15 +457,16 @@ function MarkdownBlockquote({
   );
 }
 
-function fenceContent(children: unknown): { code: string; lang: string } | null {
+function fenceContent(children: unknown): { code: string; lang: string; meta: string } | null {
   const child = Array.isArray(children) && children.length === 1 ? children[0] : children;
   if (!isValidElement(child)) return null;
-  const props = child.props as { className?: unknown; children?: unknown };
+  const props = child.props as { className?: unknown; children?: unknown; [key: string]: unknown };
   const className = typeof props.className === "string" ? props.className : "";
   const langMatch = /(?:^|\s)language-([\w-]+)(?:\s|$)/.exec(className);
   return {
     code: String(props.children ?? "").replace(/\n$/, ""),
     lang: langMatch?.[1] ?? "",
+    meta: typeof props["data-meta"] === "string" ? props["data-meta"] : "",
   };
 }
 
@@ -480,11 +596,17 @@ function extractHeadingText(node: unknown): string {
   return "";
 }
 
-function ShikiCodeBlock({ code, lang }: { code: string; lang: string }) {
+function ShikiCodeBlock({ code, lang, meta }: { code: string; lang: string; meta: string }) {
+  const { t } = useI18n();
   const theme = currentShikiTheme();
   const normalizedLang = normalizeShikiLang(lang);
+  const codeMeta = parseCodeMeta(meta);
   const cacheKey = shikiCacheKey(code, normalizedLang, theme);
   const [html, setHtml] = useState<string>(() => shikiCache.get(cacheKey) ?? "");
+  const [copied, setCopied] = useState<"idle" | "ok" | "error">("idle");
+  const isLong = code.split(/\r?\n/).length > LONG_CODE_LINE_THRESHOLD || code.length > LONG_CODE_CHAR_THRESHOLD;
+  const [expanded, setExpanded] = useState(!isLong);
+  const collapsed = isLong && !expanded;
 
   useEffect(() => {
     let cancelled = false;
@@ -497,7 +619,7 @@ function ShikiCodeBlock({ code, lang }: { code: string; lang: string }) {
     void loadShiki().then((h) => {
       if (cancelled) return;
       try {
-        const rendered = h.codeToHtml(code, { lang: normalizedLang, theme });
+        const rendered = decorateDiffHtml(h.codeToHtml(code, { lang: normalizedLang, theme }), code, normalizedLang);
         shikiCache.set(cacheKey, rendered);
         setHtml(rendered);
       } catch {
@@ -515,19 +637,73 @@ function ShikiCodeBlock({ code, lang }: { code: string; lang: string }) {
     };
   }, [cacheKey, code, normalizedLang, theme]);
 
-  if (!html) {
-    return (
-      <pre className="shiki shiki--idle" data-lang={normalizedLang}>
-        <code>{code}</code>
-      </pre>
-    );
+  useEffect(() => {
+    setExpanded(!isLong);
+    setCopied("idle");
+  }, [code, isLong]);
+
+  async function copyCode() {
+    if (typeof navigator === "undefined" || !navigator.clipboard) {
+      setCopied("error");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied("ok");
+      globalThis.setTimeout(() => setCopied("idle"), 1400);
+    } catch {
+      setCopied("error");
+      globalThis.setTimeout(() => setCopied("idle"), 1800);
+    }
   }
+
+  const rootClass = [
+    "shiki-block",
+    "code-block",
+    collapsed ? "is-collapsed" : "",
+    codeMeta.showLineNumbers ? "has-line-numbers" : "",
+  ].filter(Boolean).join(" ");
+
   return (
-    <div
-      className="shiki-block"
-      data-lang={normalizedLang}
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    <div className={rootClass} data-lang={normalizedLang}>
+      <div className="code-block__toolbar">
+        <div className="code-block__meta">
+          {codeMeta.title && <span className="code-block__title">{codeMeta.title}</span>}
+          {normalizedLang !== "plaintext" && <span className="code-block__language">{normalizedLang}</span>}
+        </div>
+        <button
+          type="button"
+          className={`code-block__copy${copied === "ok" ? " is-copied" : ""}${copied === "error" ? " is-error" : ""}`}
+          onClick={() => void copyCode()}
+          aria-label={t("reader.code_copy")}
+          title={copied === "error" ? t("reader.code_copy_failed") : t("reader.code_copy")}
+        >
+          {copied === "ok" ? <Check className="lucide" aria-hidden="true" /> : <Copy className="lucide" aria-hidden="true" />}
+          <span>{copied === "ok" ? t("reader.code_copied") : copied === "error" ? t("reader.code_copy_failed") : t("reader.code_copy")}</span>
+        </button>
+      </div>
+      {html ? (
+        <div className="code-block__scroll" dangerouslySetInnerHTML={{ __html: html }} />
+      ) : (
+        <div className="code-block__scroll">
+          <pre className="shiki shiki--idle">
+            <code>{code}</code>
+          </pre>
+        </div>
+      )}
+      {collapsed && <div className="code-block__fade" aria-hidden="true" />}
+      {isLong && (
+        <button
+          type="button"
+          className="code-block__expand"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+        >
+          {expanded ? <ChevronUp className="lucide" aria-hidden="true" /> : <ChevronDown className="lucide" aria-hidden="true" />}
+          <span>{expanded ? t("reader.code_collapse") : t("reader.code_expand")}</span>
+        </button>
+      )}
+    </div>
   );
 }
 
