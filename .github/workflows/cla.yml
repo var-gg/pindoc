@@ -13,7 +13,7 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
   pull-requests: write
   statuses: write
 
@@ -26,17 +26,14 @@ jobs:
         uses: contributor-assistant/github-action@v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # PERSONAL_ACCESS_TOKEN is optional; only needed if the
-          # signatures should be stored in a separate repository. We
-          # keep signatures in the main repo so the default token is
-          # enough.
+          # We keep signatures in this repository, so GITHUB_TOKEN with
+          # contents:write is enough. Do not set remote repository inputs
+          # unless signatures move to a separate repo with a PAT.
         with:
           path-to-signatures: '.github/cla-signatures/v1.json'
           path-to-document: 'https://github.com/var-gg/pindoc/blob/main/CLA.md'
           branch: 'main'
           allowlist: 'dependabot[bot],renovate[bot]'
-          remote-organization-name: 'var-gg'
-          remote-repository-name: 'pindoc'
           custom-notsigned-prcomment: |
             Thanks for contributing to **Pindoc**! Before we can merge
             your pull request, we need you to sign the
