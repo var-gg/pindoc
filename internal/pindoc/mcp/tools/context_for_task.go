@@ -120,6 +120,17 @@ type ApplicableRule struct {
 	HumanURLAbs string `json:"human_url_abs,omitempty"`
 }
 
+// ContextReceiptHint explains how agents should reuse the search_receipt
+// context.for_task issued. This is deliberately prompt-facing, not a new
+// validator input.
+type ContextReceiptHint struct {
+	SearchReceipt             string `json:"search_receipt,omitempty"`
+	Reusable                  bool   `json:"reusable"`
+	CreatePathUsage           string `json:"create_path_usage"`
+	ReceiptlessExemptionLimit int    `json:"receiptless_exemption_limit,omitempty"`
+	ReceiptlessExemption      string `json:"receiptless_exemption,omitempty"`
+}
+
 type contextForTaskOutput struct {
 	TaskDescription string           `json:"task_description"`
 	Landings        []ContextLanding `json:"landings"`
@@ -133,6 +144,10 @@ type contextForTaskOutput struct {
 	// with context.for_task satisfy the search-before-propose gate without
 	// also calling artifact.search.
 	SearchReceipt string `json:"search_receipt,omitempty"`
+	// ReceiptHint makes the common next step explicit: pass the receipt
+	// back to create-path artifact.propose. It also separates normal
+	// reusable receipts from receipt-less bootstrap exemptions.
+	ReceiptHint *ContextReceiptHint `json:"receipt_hint,omitempty"`
 	// TopMatchSimilarityHint is a tiny prompt-only signal for agents. It is
 	// emitted when the nearest landing is close enough that update_of or
 	// supersede_of should be considered before creating a new artifact.
@@ -407,6 +422,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 				out.SearchReceipt = deps.Receipts.Issue(scope.ProjectSlug, in.TaskDescription,
 					contextForTaskReceiptSnapshots(ctx, deps, readScope, targetType, in, out),
 				)
+				out.ReceiptHint = buildContextReceiptHint(deps, out.SearchReceipt)
 			}
 			if err := recordAreaSuggestionEvent(ctx, deps, scope.ProjectSlug, out.SearchReceipt, in.TaskDescription, out.SuggestedAreas); err != nil && deps.Logger != nil {
 				deps.Logger.Warn("area suggestion event failed", "err", err)
@@ -414,6 +430,22 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			return nil, out, rows.Err()
 		},
 	)
+}
+
+func buildContextReceiptHint(deps Deps, receipt string) *ContextReceiptHint {
+	receipt = strings.TrimSpace(receipt)
+	if receipt == "" {
+		return nil
+	}
+	limit := receiptExemptionLimit(deps)
+	return &ContextReceiptHint{
+		SearchReceipt: receipt,
+		Reusable:      true,
+		CreatePathUsage: "Pass this value as basis.search_receipt on create-path pindoc.artifact.propose calls. " +
+			"Search receipts are reusable in the MCP session until expiry or corpus-drift staleness; refresh the receipt if propose reports receipt_unknown, receipt_expired, or receipt_superseded.",
+		ReceiptlessExemptionLimit: limit,
+		ReceiptlessExemption:      fmt.Sprintf("If no search_receipt is supplied, receipt-less bootstrap exemption is only for empty/same-author areas and is capped by receipt_exemption_limit=%d.", limit),
+	}
 }
 
 func applyTopMatchSimilarityHint(out *contextForTaskOutput) {

@@ -25,6 +25,43 @@ func TestTaskMetaPriorityDescriptionIncludesMeanings(t *testing.T) {
 	}
 }
 
+func TestTaskMetaParentSlugDescriptionSeparatesHierarchyFromRelations(t *testing.T) {
+	field, ok := reflect.TypeOf(TaskMetaInput{}).FieldByName("ParentSlug")
+	if !ok {
+		t.Fatalf("TaskMetaInput.ParentSlug field missing")
+	}
+	schema := field.Tag.Get("jsonschema")
+	for _, want := range []string{"board hierarchy only", "relates_to", "implements/blocks/evidence"} {
+		if !strings.Contains(schema, want) {
+			t.Fatalf("parent_slug jsonschema tag %q missing %q", schema, want)
+		}
+	}
+}
+
+func TestArtifactMetaDescriptionIncludesRetrievalAndTrustEffects(t *testing.T) {
+	fields := map[string][]string{
+		"SourceType":        {"trust substrate", "artifact.read/context.for_task"},
+		"ConsentState":      {"consent classification", "privacy guidance"},
+		"Confidence":        {"trust signal", "context.for_task landings"},
+		"Audience":          {"privacy/trust hint", "visibility for access control"},
+		"NextContextPolicy": {"controls future retrieval", "excluded hidden from context surfaces"},
+		"VerificationState": {"evidence status", "trust summaries"},
+	}
+	typ := reflect.TypeOf(ArtifactMetaInput{})
+	for name, wants := range fields {
+		field, ok := typ.FieldByName(name)
+		if !ok {
+			t.Fatalf("ArtifactMetaInput.%s field missing", name)
+		}
+		schema := field.Tag.Get("jsonschema")
+		for _, want := range wants {
+			if !strings.Contains(schema, want) {
+				t.Fatalf("%s jsonschema tag %q missing %q", name, schema, want)
+			}
+		}
+	}
+}
+
 func TestArtifactProposeTitleDescriptionIncludesLocalePrompt(t *testing.T) {
 	field, ok := reflect.TypeOf(artifactProposeInput{}).FieldByName("Title")
 	if !ok {
@@ -80,6 +117,21 @@ func TestArtifactProposeBodyMarkdownOptionalForPatchSchema(t *testing.T) {
 func TestArtifactProposeDescriptionMentionsPatchOnlyUpdate(t *testing.T) {
 	desc := artifactProposeToolDescription
 	for _, want := range []string{"body_patch instead of body_markdown", "update_of + expected_version + body_patch", "omit body_markdown"} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("artifact.propose description missing %q: %q", want, desc)
+		}
+	}
+}
+
+func TestArtifactProposeDescriptionMentionsParentAndMetaGuidance(t *testing.T) {
+	desc := artifactProposeToolDescription
+	for _, want := range []string{
+		"task_meta.parent_slug is board hierarchy only",
+		"relates_to for semantic relationships",
+		"artifact_meta.source_type/confidence/verification_state surface trust",
+		"artifact_meta.next_context_policy affects future retrieval",
+		"audience/consent_state frame privacy and consent",
+	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("artifact.propose description missing %q: %q", want, desc)
 		}

@@ -7,17 +7,17 @@ import (
 
 func TestResolveFallback(t *testing.T) {
 	cases := map[string]string{
-		"":            "en",
-		"en":          "en",
-		"EN":          "en",
-		"ko":          "ko",
-		"ko-KR":       "ko",
-		"ko_KR":       "ko",
-		"ja":          "ja",
-		"ja-JP":       "ja",
-		"zh-Hant-TW":  "en",
-		"unknown":     "en",
-		"  ko  ":      "ko",
+		"":           "en",
+		"en":         "en",
+		"EN":         "en",
+		"ko":         "ko",
+		"ko-KR":      "ko",
+		"ko_KR":      "ko",
+		"ja":         "ja",
+		"ja-JP":      "ja",
+		"zh-Hant-TW": "en",
+		"unknown":    "en",
+		"  ko  ":     "ko",
 	}
 	for input, want := range cases {
 		if got := Resolve(input).Locale; got != want {
@@ -27,23 +27,35 @@ func TestResolveFallback(t *testing.T) {
 }
 
 func TestEvaluateTitle_LengthBounds(t *testing.T) {
-	// Korean MaxRunes=60, MinRunes=8.
+	// Korean MaxRunes=80, MinRunes=8.
 	tooShort := "짧음"
 	got := EvaluateTitle(tooShort, "ko", ProjectOverride{})
 	if !hasCodePrefix(got, "TITLE_TOO_SHORT") {
 		t.Errorf("expected TITLE_TOO_SHORT for %q under ko, got %v", tooShort, got)
 	}
 
-	tooLong := strings.Repeat("가", 80)
-	got = EvaluateTitle(tooLong, "ko", ProjectOverride{})
-	if !hasCodePrefix(got, "TITLE_TOO_LONG") {
-		t.Errorf("expected TITLE_TOO_LONG for 80-char ko title, got %v", got)
+	inBandCJK := strings.Repeat("가", 80)
+	got = EvaluateTitle(inBandCJK, "ko", ProjectOverride{})
+	if hasCodePrefix(got, "TITLE_TOO_LONG") {
+		t.Errorf("80 runes should be in-band for ko, got %v", got)
 	}
-
-	// Same length but locale=en (max 80) — should NOT fire long.
-	got = EvaluateTitle(tooLong, "en", ProjectOverride{})
+	got = EvaluateTitle(inBandCJK, "ja", ProjectOverride{})
+	if hasCodePrefix(got, "TITLE_TOO_LONG") {
+		t.Errorf("80 runes should be in-band for ja, got %v", got)
+	}
+	got = EvaluateTitle(inBandCJK, "en", ProjectOverride{})
 	if hasCodePrefix(got, "TITLE_TOO_LONG") {
 		t.Errorf("80 runes should be in-band for en, got %v", got)
+	}
+
+	tooLong := strings.Repeat("가", 81)
+	got = EvaluateTitle(tooLong, "ko", ProjectOverride{})
+	if !hasCodePrefix(got, "TITLE_TOO_LONG") {
+		t.Errorf("expected TITLE_TOO_LONG for 81-rune ko title, got %v", got)
+	}
+	got = EvaluateTitle(tooLong, "en", ProjectOverride{})
+	if !hasCodePrefix(got, "TITLE_TOO_LONG") {
+		t.Errorf("expected TITLE_TOO_LONG for 81-rune en title, got %v", got)
 	}
 }
 
@@ -111,9 +123,9 @@ func TestEvaluateTitle_OverrideAndBaselineDedup(t *testing.T) {
 }
 
 func TestSlugVerboseThreshold(t *testing.T) {
-	// ko: max 60 → threshold 30
-	if got := SlugVerboseThreshold("ko"); got != 30 {
-		t.Errorf("SlugVerboseThreshold(ko) = %d, want 30", got)
+	// ko: max 80 → threshold 40
+	if got := SlugVerboseThreshold("ko"); got != 40 {
+		t.Errorf("SlugVerboseThreshold(ko) = %d, want 40", got)
 	}
 	// en: max 80 → 40
 	if got := SlugVerboseThreshold("en"); got != 40 {

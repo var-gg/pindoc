@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -71,23 +72,15 @@ func detectWorkspaceFromSources(
 		visibleSet[slug] = true
 	}
 
-	if in.Frontmatter != nil {
-		slug := normalizeDetectSlug(in.Frontmatter.ProjectSlug)
-		if slug != "" {
-			if visibleSet[slug] {
-				return workspaceDetectOutput{
-					ProjectSlug: slug,
-					Confidence:  "high",
-					Via:         "pindoc_md",
-					Reason:      "PINDOC.md frontmatter project_slug is visible to the caller.",
-				}
-			}
-			return workspaceDetectOutput{
-				Confidence: "none",
-				Via:        "pindoc_md",
-				Reason:     "PINDOC.md project_slug is not visible to the caller.",
-			}
-		}
+	if out, ok := workspaceDetectFromFrontmatter(in.Frontmatter, visibleSet, "PINDOC.md frontmatter project_slug is visible to the caller."); ok {
+		return out
+	}
+	if out, ok := workspaceDetectFromFrontmatter(
+		readWorkspacePindocFrontmatter(in.WorkspacePath),
+		visibleSet,
+		"workspace_path/PINDOC.md frontmatter project_slug is visible to the caller.",
+	); ok {
+		return out
 	}
 
 	if remote := strings.TrimSpace(in.GitRemoteURL); remote != "" && remoteLookup != nil {
@@ -150,6 +143,53 @@ func detectWorkspaceFromSources(
 			Candidates: visible,
 			Reason:     "multiple visible projects require an explicit project_slug.",
 		}
+	}
+}
+
+func workspaceDetectFromFrontmatter(frontmatter *pingPindocFrontmatter, visibleSet map[string]bool, visibleReason string) (workspaceDetectOutput, bool) {
+	if frontmatter == nil {
+		return workspaceDetectOutput{}, false
+	}
+	slug := normalizeDetectSlug(frontmatter.ProjectSlug)
+	if slug == "" {
+		return workspaceDetectOutput{}, false
+	}
+	if visibleSet[slug] {
+		return workspaceDetectOutput{
+			ProjectSlug: slug,
+			Confidence:  "high",
+			Via:         "pindoc_md",
+			Reason:      visibleReason,
+		}, true
+	}
+	return workspaceDetectOutput{
+		Confidence: "none",
+		Via:        "pindoc_md",
+		Reason:     "PINDOC.md project_slug is not visible to the caller.",
+	}, true
+}
+
+func readWorkspacePindocFrontmatter(workspacePath string) *pingPindocFrontmatter {
+	root := strings.TrimSpace(workspacePath)
+	if root == "" {
+		return nil
+	}
+	root = filepath.Clean(root)
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return nil
+	}
+	body, err := os.ReadFile(filepath.Join(root, "PINDOC.md"))
+	if err != nil {
+		return nil
+	}
+	meta := parsePindocFrontmatter(string(body))
+	if len(meta) == 0 {
+		return nil
+	}
+	return &pingPindocFrontmatter{
+		ProjectSlug:   meta["project_slug"],
+		SchemaVersion: meta["schema_version"],
 	}
 }
 

@@ -43,6 +43,27 @@ func TestApplyTopMatchSimilarityHint(t *testing.T) {
 	}
 }
 
+func TestBuildContextReceiptHintExplainsReuseAndExemption(t *testing.T) {
+	hint := buildContextReceiptHint(Deps{ReceiptExemptionLimit: 5}, "sr_123")
+	if hint == nil {
+		t.Fatal("expected receipt hint")
+	}
+	if hint.SearchReceipt != "sr_123" || !hint.Reusable {
+		t.Fatalf("receipt hint identity = %+v, want reusable sr_123", hint)
+	}
+	for _, want := range []string{"basis.search_receipt", "reusable", "receipt_superseded"} {
+		if !strings.Contains(hint.CreatePathUsage, want) {
+			t.Fatalf("create path usage %q missing %q", hint.CreatePathUsage, want)
+		}
+	}
+	if hint.ReceiptlessExemptionLimit != 5 || !strings.Contains(hint.ReceiptlessExemption, "receipt_exemption_limit=5") {
+		t.Fatalf("receipt-less exemption hint = %+v", hint)
+	}
+	if got := buildContextReceiptHint(Deps{}, ""); got != nil {
+		t.Fatalf("empty receipt should omit hint, got %+v", got)
+	}
+}
+
 func TestContextForTaskTaskReceiptSnapshotsIntegration(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("PINDOC_TEST_DATABASE_URL"))
 	if dsn == "" {
