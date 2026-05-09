@@ -543,8 +543,10 @@ func callVisibilityToolRaw(t *testing.T, ctx context.Context, pool *db.Pool, pro
 	RegisterArtifactRevisions(server, deps)
 	RegisterArtifactDiff(server, deps)
 	RegisterArtifactSummary(server, deps)
+	RegisterAreaList(server, deps)
 	RegisterProjectSetVisibility(server, deps)
 	RegisterArtifactSetVisibility(server, deps)
+	RegisterArtifactSetArea(server, deps)
 
 	clientTransport, serverTransport := sdk.NewInMemoryTransports()
 	serverSession, err := server.Connect(ctx, serverTransport, nil)

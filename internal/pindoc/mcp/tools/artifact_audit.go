@@ -21,6 +21,7 @@ const (
 	artifactAuditKindStale              = "stale"
 	artifactAuditKindTaskLifecycle      = "task_lifecycle"
 	artifactAuditKindSupersedeCandidate = "supersede_candidate"
+	artifactAuditKindAreaConcentration  = "area_concentration"
 )
 
 type artifactAuditInput struct {
@@ -36,7 +37,7 @@ type artifactAuditInput struct {
 	Status   string   `json:"status,omitempty" jsonschema:"optional artifact status filter: published | stale | superseded | archived"`
 	Statuses []string `json:"statuses,omitempty" jsonschema:"optional artifact status filters: published | stale | superseded | archived"`
 
-	Kind  string   `json:"kind,omitempty" jsonschema:"optional finding kind filter: hygiene | metadata | stale | task_lifecycle | supersede_candidate"`
+	Kind  string   `json:"kind,omitempty" jsonschema:"optional finding kind filter: hygiene | metadata | stale | task_lifecycle | supersede_candidate | area_concentration"`
 	Kinds []string `json:"kinds,omitempty" jsonschema:"optional finding kind filters"`
 
 	Limit             int  `json:"limit,omitempty" jsonschema:"default 50, max 500"`
@@ -95,6 +96,7 @@ type artifactAuditRow struct {
 	TaskMetaRaw       []byte
 	WarningPayloadRaw []byte
 	RevisionNumber    int
+	AreaArtifactCount int
 	UpdatedAt         time.Time
 }
 
@@ -107,7 +109,8 @@ func RegisterArtifactAudit(server *sdk.Server, deps Deps) {
 			Description: strings.TrimSpace(`
 Read-only audit candidate scanner for existing artifacts. Filters by
 area/type/status/kind/limit/include_superseded and returns actionable
-hygiene, metadata, stale, task_lifecycle, and supersede_candidate findings.
+hygiene, metadata, stale, task_lifecycle, supersede_candidate, and
+area_concentration findings.
 It re-runs the current title-locale detector, reads latest-revision
 artifact.warning_raised events, uses the existing age-based stale signal,
 and never mutates or reopens artifacts.
@@ -252,12 +255,13 @@ func normalizeAuditKindFilters(values []string) ([]string, error) {
 		artifactAuditKindStale:              {},
 		artifactAuditKindTaskLifecycle:      {},
 		artifactAuditKindSupersedeCandidate: {},
+		artifactAuditKindAreaConcentration:  {},
 	}
 	out := make([]string, 0, len(raw))
 	for _, v := range raw {
 		v = strings.ToLower(v)
 		if _, ok := valid[v]; !ok {
-			return nil, fmt.Errorf("kind must be one of: hygiene | metadata | stale | task_lifecycle | supersede_candidate")
+			return nil, fmt.Errorf("kind must be one of: hygiene | metadata | stale | task_lifecycle | supersede_candidate | area_concentration")
 		}
 		out = append(out, v)
 	}
@@ -296,7 +300,8 @@ func buildArtifactAudit(ctx context.Context, deps Deps, readScope *mcpReadProjec
 					SELECT max(r.revision_number)
 					FROM artifact_revisions r
 					WHERE r.artifact_id = a.id
-				), 0)::int AS revision_number
+				), 0)::int AS revision_number,
+				count(*) OVER (PARTITION BY ar.slug)::int AS area_artifact_count
 			FROM artifacts a
 			JOIN projects p ON p.id = a.project_id
 			JOIN areas    ar ON ar.id = a.area_id
@@ -320,6 +325,7 @@ func buildArtifactAudit(ctx context.Context, deps Deps, readScope *mcpReadProjec
 			b.task_meta,
 			COALESCE(w.payload, '{}'::jsonb) AS warning_payload,
 			b.revision_number,
+			b.area_artifact_count,
 			b.updated_at
 		FROM base b
 		LEFT JOIN LATERAL (
@@ -355,6 +361,7 @@ func buildArtifactAudit(ctx context.Context, deps Deps, readScope *mcpReadProjec
 			&row.TaskMetaRaw,
 			&row.WarningPayloadRaw,
 			&row.RevisionNumber,
+			&row.AreaArtifactCount,
 			&row.UpdatedAt,
 		); err != nil {
 			return artifactAuditOutput{}, fmt.Errorf("artifact.audit scan: %w", err)
@@ -463,6 +470,11 @@ func artifactAuditFindingsForRow(deps Deps, scope *auth.ProjectScope, row artifa
 			"artifact is superseded and hidden from default retrieval unless include_superseded=true",
 			"ignore")
 	}
+	if row.AreaArtifactCount >= 50 {
+		add(artifactAuditKindAreaConcentration, "AREA_CONCENTRATION",
+			fmt.Sprintf("area %q has %d visible artifact(s) in this audit scope; consider splitting it with pindoc.artifact.set_area", row.AreaSlug, row.AreaArtifactCount),
+			"set_area")
+	}
 
 	return out
 }
@@ -503,7 +515,7 @@ func artifactAuditSeverity(code string) string {
 	switch artifactAuditCodePrefix(code) {
 	case "BODY_LOCALE_INVALID":
 		return SeverityError
-	case "ARTIFACT_STALE_AGE", "ARTIFACT_SUPERSEDED":
+	case "ARTIFACT_STALE_AGE", "ARTIFACT_SUPERSEDED", "AREA_CONCENTRATION":
 		return SeverityInfo
 	default:
 		return warningSeverity(code)

@@ -89,6 +89,7 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 
 	var (
 		artifactID, projectID, currentBody, currentTitle, currentType, currentSlug string
+		currentAreaSlug                                                            string
 		sensitiveOps                                                               string
 		currentTags                                                                []string
 		currentCompleteness                                                        string
@@ -96,15 +97,18 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 	)
 	err := deps.DB.QueryRow(ctx, `
 		SELECT a.id::text, a.project_id::text, a.body_markdown, a.title, a.type, a.slug,
+		       ar.slug,
 		       a.tags, a.completeness,
 		       COALESCE(NULLIF(p.sensitive_ops, ''), 'auto'),
 		       COALESCE((SELECT max(revision_number) FROM artifact_revisions WHERE artifact_id = a.id), 0)
 		FROM artifacts a
 		JOIN projects p ON p.id = a.project_id
+		JOIN areas ar ON ar.id = a.area_id
 		WHERE p.slug = $1 AND (a.id::text = $2 OR a.slug = $2)
 		LIMIT 1
 	`, scope.ProjectSlug, ref).Scan(
 		&artifactID, &projectID, &currentBody, &currentTitle, &currentType, &currentSlug,
+		&currentAreaSlug,
 		&currentTags, &currentCompleteness, &sensitiveOps, &lastRev,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -299,7 +303,9 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 	if hasArtifactMeta {
 		metaOut = &resolvedUpdateMeta
 	}
-	warnings := sortWarningsBySeverity(acceptanceUncheckedNudgeWarnings(currentType, currentBody, in.CommitMsg))
+	rawWarnings := acceptanceUncheckedNudgeWarnings(currentType, currentBody, in.CommitMsg)
+	rawWarnings = append(rawWarnings, areaSlugIgnoredWarnings(in.AreaSlug, currentAreaSlug)...)
+	warnings := sortWarningsBySeverity(rawWarnings)
 	severities := make([]string, len(warnings))
 	for i, w := range warnings {
 		severities[i] = warningSeverity(w)
@@ -316,6 +322,7 @@ func handleUpdateMetaPatch(ctx context.Context, deps Deps, p *auth.Principal, sc
 		RevisionNumber:    newRev,
 		Warnings:          warnings,
 		WarningSeverities: severities,
+		SuggestedActions:  areaSlugIgnoredSuggestedActions(warnings),
 		ArtifactMeta:      metaOut,
 	}
 	if in.DryRun {

@@ -173,6 +173,7 @@ func NewServer(opts Options) (*Server, error) {
 	tools.RegisterArtifactWordingFix(s, deps)
 	tools.RegisterArtifactAddPin(s, deps)
 	tools.RegisterArtifactSetVisibility(s, deps)
+	tools.RegisterArtifactSetArea(s, deps)
 	tools.RegisterHarnessInstall(s, deps)
 	tools.RegisterArtifactAudit(s, deps)
 	tools.RegisterArtifactSearch(s, deps)
