@@ -39,7 +39,7 @@ var localeDataFor = map[string]LocaleData{
 	"ko": {
 		Locale:   "ko",
 		MinRunes: 8,
-		MaxRunes: 60,
+		MaxRunes: 80,
 		JargonTokens: []string{
 			"기타", "내용", "여러", "일반",
 			"임시", "처리", "재판정", "수정 수정",
@@ -48,7 +48,7 @@ var localeDataFor = map[string]LocaleData{
 	"ja": {
 		Locale:   "ja",
 		MinRunes: 10,
-		MaxRunes: 70,
+		MaxRunes: 80,
 		JargonTokens: []string{
 			"その他", "一般", "雑多", "色々", "仮",
 		},

@@ -71,6 +71,11 @@ var pindocRenderingCaps = RenderingCaps{
 		"soft_breaks",         // single newlines render as <br>
 		"github_alerts",       // > [!NOTE] / [!TIP] / [!IMPORTANT] / [!WARNING] / [!CAUTION]
 		"syntax_highlighting", // shiki via github-light/github-dark themes
+		"code_block_copy",     // fenced code toolbar copies raw source
+		"code_block_title",    // title="..." / filename="..." fence metadata
+		"code_block_collapse", // long fenced code blocks can expand/collapse
+		"diff_line_emphasis",  // fenced diff add/remove/hunk line styling
+		"table_scroll",        // GFM tables render in a horizontal scroll wrapper
 		"heading_anchors",     // #-anchor on H2–H4 hover
 		"keyboard_tag",        // <kbd> rendered as keycap
 		"mermaid",             // fenced ```mermaid blocks render as SVG
@@ -84,7 +89,7 @@ var pindocRenderingCaps = RenderingCaps{
 		"yaml", "toml", "ini", "sql", "xml",
 		"markdown", "diff", "dockerfile", "graphql", "lua",
 	},
-	Notes: "Headings H1–H6 (H2–H4 expose hover anchors), ordered/unordered lists, GFM task lists, GFM tables, footnotes, blockquotes, soft line breaks, inline + fenced code with syntax highlighting (Shiki, GitHub themes), <kbd>, GitHub-style alert blockquotes, Mermaid via ```mermaid fence. Math/KaTeX not supported (M1.x).",
+	Notes: "Headings H1–H6 (H2–H4 expose hover anchors), ordered/unordered lists, GFM task lists, GFM tables with scroll containment, footnotes, blockquotes, soft line breaks, inline + fenced code with syntax highlighting (Shiki, GitHub themes), code copy/title/collapse controls, diff line emphasis, safe <kbd>, GitHub-style alert blockquotes, Mermaid via ```mermaid fence. Math/KaTeX not supported (M1.x).",
 }
 
 func (d Deps) handleConfig(w http.ResponseWriter, r *http.Request) {

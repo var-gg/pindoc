@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,28 @@ func TestWorkspaceDetectPriorityChain(t *testing.T) {
 
 	got = detectWorkspaceFromSources(workspaceDetectInput{}, []string{"pindoc", "vargg"}, nil)
 	assertWorkspaceDetect(t, got, "", "none", "fallback_required", []string{"pindoc", "vargg"})
+}
+
+func TestWorkspaceDetectReadsObservablePindocMD(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "PINDOC.md"), []byte(`---
+project_slug: survival-manager
+schema_version: 1
+---
+
+# PINDOC.md
+`), 0o600); err != nil {
+		t.Fatalf("write PINDOC.md: %v", err)
+	}
+
+	got := detectWorkspaceFromSources(workspaceDetectInput{
+		WorkspacePath: root,
+		GitRemoteURL:  "https://github.com/var-gg/other.git",
+	}, []string{"other", "survival-manager"}, func(string) (string, bool) { return "other", true })
+	assertWorkspaceDetect(t, got, "survival-manager", "high", "pindoc_md", nil)
+	if !strings.Contains(got.Reason, "workspace_path/PINDOC.md") {
+		t.Fatalf("reason should mention filesystem PINDOC.md source, got %q", got.Reason)
+	}
 }
 
 func TestWorkspaceDetectMembershipGuard(t *testing.T) {
