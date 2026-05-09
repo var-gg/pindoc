@@ -644,3 +644,36 @@ func TestVisibilityMigrationContract(t *testing.T) {
 		}
 	}
 }
+
+func TestReaderPerformanceIndexesMigrationContract(t *testing.T) {
+	raw, err := migrationsFS.ReadFile("migrations/0062_reader_performance_indexes.sql")
+	if err != nil {
+		t.Fatalf("read reader performance indexes migration: %v", err)
+	}
+	sql := string(raw)
+	up := extractUp(sql)
+	for _, want := range []string{
+		"idx_events_warning_subject_created",
+		"WHERE kind = 'artifact.warning_raised'",
+		"idx_artifact_revisions_created",
+		"idx_artifacts_project_reader_order",
+		"idx_artifacts_task_project_assignee_priority",
+		"idx_artifact_chunks_embedding_hnsw",
+		"USING hnsw (embedding vector_cosine_ops)",
+	} {
+		if !strings.Contains(up, want) {
+			t.Fatalf("reader performance indexes migration Up missing %q:\n%s", want, up)
+		}
+	}
+	for _, want := range []string{
+		"DROP INDEX IF EXISTS idx_artifact_chunks_embedding_hnsw",
+		"DROP INDEX IF EXISTS idx_artifacts_task_project_assignee_priority",
+		"DROP INDEX IF EXISTS idx_artifacts_project_reader_order",
+		"DROP INDEX IF EXISTS idx_artifact_revisions_created",
+		"DROP INDEX IF EXISTS idx_events_warning_subject_created",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("reader performance indexes migration Down missing %q", want)
+		}
+	}
+}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, ChevronDown, ChevronRight, FolderOpen, LayoutTemplate } from "lucide-react";
-import { api, type Area, type ArtifactReadState, type ArtifactRef, type Project } from "../api/client";
+import type { Area, ArtifactReadState, ArtifactRef, Project } from "../api/client";
 import { useI18n } from "../i18n";
 import { agentAvatar } from "./avatars";
 import { compareAreas, isFixedTaxonomyArea, localizedAreaName } from "./areaLocale";
@@ -35,6 +35,7 @@ type Props = {
   showInternalAgents?: boolean;
   showProjectSwitcher: boolean;
   projectCreateAllowed: boolean;
+  readStates?: ArtifactReadState[] | null;
 };
 
 // AreaNode is the tree-enriched Area: same fields + resolved children.
@@ -101,24 +102,10 @@ export function Sidebar({
   showInternalAgents = false,
   showProjectSwitcher,
   projectCreateAllowed,
+  readStates = null,
 }: Props) {
   const { t, lang } = useI18n();
-  const [readStates, setReadStates] = useState<ArtifactReadState[] | null>(null);
   const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    api.readStates(projectSlug)
-      .then((resp) => {
-        if (!cancelled) setReadStates(resp.states);
-      })
-      .catch(() => {
-        if (!cancelled) setReadStates(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectSlug]);
 
   const regular = areas.filter((a) => !a.is_cross_cutting);
   const crossCutting = areas.filter((a) => a.is_cross_cutting);

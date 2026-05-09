@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { Bot, CircleHelp, PanelRightOpen, UserRound, X } from "lucide-react";
 import type { Aggregate } from "./useReaderData";
-import { api, type Artifact, type ArtifactRef, type Area } from "../api/client";
+import { api, type Artifact, type ArtifactReadState, type ArtifactRef, type Area } from "../api/client";
 import { useI18n } from "../i18n";
 import { DEFAULT_READER_ORG_SLUG, projectSurfacePath } from "../readerRoutes";
 import { InviteModal } from "../project/InviteModal";
@@ -118,6 +118,7 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
   const [graphFocusDetail, setGraphFocusDetail] = useState<Artifact | null>(null);
   const [graphFocusLoading, setGraphFocusLoading] = useState(false);
   const [graphFocusReason, setGraphFocusReason] = useState<StartFocusReason | null>(null);
+  const [readStates, setReadStates] = useState<ArtifactReadState[] | null>(null);
   // Surface·Type·Area 3축: Surface is owned by the URL segment (wiki|tasks|
   // graph|inbox — already carried in `view` prop). Area and Type are the
   // secondary filters layered on top and survive round-trips through the
@@ -141,6 +142,25 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
   const [multiProjectSwitching, setMultiProjectSwitching] = useState(false);
   const [projectCreateAllowed, setProjectCreateAllowed] = useState(false);
   const [mobileChrome, setMobileChrome] = useState(false);
+
+  useEffect(() => {
+    if (!project) {
+      setReadStates(null);
+      return;
+    }
+    let cancelled = false;
+    setReadStates(null);
+    api.readStates(project)
+      .then((resp) => {
+        if (!cancelled) setReadStates(resp.states);
+      })
+      .catch(() => {
+        if (!cancelled) setReadStates(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project]);
 
   useEffect(() => {
     let cancelled = false;
@@ -736,6 +756,7 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
           showInternalAgents={opsDebug}
           showProjectSwitcher={mobileChrome && multiProjectSwitching}
           projectCreateAllowed={projectCreateAllowed && (mobileChrome || !multiProjectSwitching)}
+          readStates={readStates}
         />
         {children ?? (
           <Body
@@ -769,6 +790,8 @@ export function ReaderShell({ view, unavailableSurface, orgSlug = DEFAULT_READER
             projectRole={projectData.current_role}
             graphFocusSlug={graphFocusSlug}
             onGraphFocusChange={handleGraphFocusChange}
+            includeTemplates={showTemplates}
+            readStates={readStates}
             artifactsHasMore={artifactsHasMore}
             artifactsLoadingMore={artifactsLoadingMore}
             artifactsLoadMoreError={artifactsLoadMoreError}
@@ -919,6 +942,8 @@ function Body({
   projectRole,
   graphFocusSlug,
   onGraphFocusChange,
+  includeTemplates,
+  readStates,
   artifactsHasMore,
   artifactsLoadingMore,
   artifactsLoadMoreError,
@@ -955,6 +980,8 @@ function Body({
   projectRole?: "owner" | "editor" | "viewer";
   graphFocusSlug: string | null;
   onGraphFocusChange: (slug: string) => void;
+  includeTemplates: boolean;
+  readStates: ArtifactReadState[] | null;
   artifactsHasMore: boolean;
   artifactsLoadingMore: boolean;
   artifactsLoadMoreError: string | null;
@@ -1027,6 +1054,7 @@ function Body({
         badgeFilters={badgeFilters}
         focusSlug={graphFocusSlug}
         onFocusChange={onGraphFocusChange}
+        includeTemplates={includeTemplates}
         areaNameBySlug={areaNameBySlug}
         onSelectArea={onSelectArea}
       />
@@ -1053,6 +1081,7 @@ function Body({
         onSelectArea={onSelectArea}
         selectedArtifactSlug={selectedInspectorSlug}
         onSelectArtifact={onSelectInspectorArtifact}
+        artifactReadStates={readStates}
       />
     );
   }

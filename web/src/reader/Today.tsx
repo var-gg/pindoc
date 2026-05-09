@@ -20,6 +20,7 @@ type Props = {
   onSelectArea: (areaSlug: string) => void;
   selectedArtifactSlug: string | null;
   onSelectArtifact: (slug: string) => void;
+  artifactReadStates?: ArtifactReadState[] | null;
 };
 
 type KindFilter =
@@ -38,13 +39,13 @@ export function Today({
   onSelectArea,
   selectedArtifactSlug,
   onSelectArtifact,
+  artifactReadStates = null,
 }: Props) {
   const { t, lang } = useI18n();
   const [data, setData] = useState<TodayResp | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<KindFilter>("all");
   const [autoOpen, setAutoOpen] = useState(false);
-  const [readStates, setReadStates] = useState<Map<string, ArtifactReadState>>(new Map());
   const [gitRepos, setGitRepos] = useState<GitRepoSummary[]>([]);
   const [marking, setMarking] = useState(false);
   const streamRef = useRef<HTMLDivElement | null>(null);
@@ -70,24 +71,11 @@ export function Today({
     };
   }, [projectSlug, selectedArea]);
 
-  // Layer 2 read states for visual chips on each card. Refetch only when
-  // the project changes — area/filter changes never invalidate this map.
-  useEffect(() => {
-    let cancelled = false;
-    api.readStates(projectSlug)
-      .then((resp) => {
-        if (cancelled) return;
-        const m = new Map<string, ArtifactReadState>();
-        for (const s of resp.states) m.set(s.artifact_id, s);
-        setReadStates(m);
-      })
-      .catch(() => {
-        // Soft-fail: read states are decorative, not gating.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectSlug]);
+  const readStates = useMemo(() => {
+    const m = new Map<string, ArtifactReadState>();
+    for (const s of artifactReadStates ?? []) m.set(s.artifact_id, s);
+    return m;
+  }, [artifactReadStates]);
 
   useEffect(() => {
     let cancelled = false;

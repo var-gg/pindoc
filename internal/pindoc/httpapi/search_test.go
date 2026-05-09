@@ -121,12 +121,29 @@ func TestSearchCrossProjectVisibilityIntegration(t *testing.T) {
 		}
 	}
 	assertHTTPSearchHitScope(t, owner.Hits, sisterPrivate, sisterSlug, orgBSlug)
+
+	taskSlug := "cmdk-filter-task-" + suffix
+	taskID := insertArtifactVisibilityHTTPArtifact(t, ctx, pool, sisterID, sisterAreaID, taskSlug, projects.VisibilityPublic, ownerID)
+	if _, err := pool.Exec(ctx, `UPDATE artifacts SET type = 'Task' WHERE id = $1::uuid`, taskID); err != nil {
+		t.Fatalf("mark search artifact task: %v", err)
+	}
+	insertHTTPSearchChunk(t, ctx, pool, embedder, taskID, query)
+
+	taskFiltered := decodeHTTPSearchResponse(t, doInviteRequest(t, handler, oauthSvc, ownerID, http.MethodGet, path+"&type=task", ""))
+	taskFilteredSlugs := searchSlugSet(taskFiltered.Hits)
+	if len(taskFilteredSlugs) != 1 || !taskFilteredSlugs[taskSlug] {
+		t.Fatalf("type-filtered search slugs = %s, want only %s", strings.Join(searchSlugs(taskFiltered.Hits), ","), taskSlug)
+	}
+	if taskFiltered.Hits[0].Type != "Task" {
+		t.Fatalf("type-filtered hit type = %q, want Task", taskFiltered.Hits[0].Type)
+	}
 }
 
 type httpSearchHit struct {
 	Slug        string `json:"slug"`
 	ProjectSlug string `json:"project_slug"`
 	OrgSlug     string `json:"org_slug"`
+	Type        string `json:"type"`
 }
 
 type httpSearchResponse struct {
