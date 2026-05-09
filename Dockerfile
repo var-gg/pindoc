@@ -3,7 +3,7 @@ FROM node:20-bookworm-slim AS web-builder
 WORKDIR /src/web
 
 COPY web/package.json web/pnpm-lock.yaml ./
-RUN corepack enable && pnpm install --frozen-lockfile
+RUN corepack enable && corepack prepare pnpm@10.30.2 --activate && pnpm install --frozen-lockfile
 
 COPY web/ ./
 RUN pnpm build

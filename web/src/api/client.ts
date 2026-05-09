@@ -481,6 +481,18 @@ export type ArtifactListResp = {
   next_cursor?: string;
 };
 
+export type GraphEdgeRef = {
+  source_id: string;
+  target_id: string;
+  relation: string;
+};
+
+export type GraphEdgesResp = {
+  project_slug: string;
+  edges: GraphEdgeRef[];
+  truncated?: boolean;
+};
+
 export type SearchHit = {
   artifact_id: string;
   project_slug: string;
@@ -507,6 +519,10 @@ export type SearchResp = {
   cross_project?: boolean;
   hits: SearchHit[];
   notice?: string;
+};
+
+export type SearchOptions = {
+  type?: string;
 };
 
 export type RevisionRow = {
@@ -790,6 +806,14 @@ function gitQuery(params: Record<string, string | undefined>): string {
   for (const [key, value] of Object.entries(params)) {
     if (value) qs.set(key, value);
   }
+  return qs.toString();
+}
+
+function searchQuery(q: string, params: SearchOptions & { crossProject?: boolean } = {}): string {
+  const qs = new URLSearchParams();
+  qs.set("q", q);
+  if (params.crossProject) qs.set("cross_project", "1");
+  if (params.type) qs.set("type", params.type);
   return qs.toString();
 }
 
@@ -1341,6 +1365,12 @@ export const api = {
   },
   artifact: (project: string, idOrSlug: string) =>
     j<Artifact>(`${p(project)}/artifacts/${encodeURIComponent(idOrSlug)}`),
+  graphEdges: (project: string, params?: { includeTemplates?: boolean }) => {
+    const qs = new URLSearchParams();
+    if (params?.includeTemplates) qs.set("include_templates", "true");
+    const q = qs.toString();
+    return j<GraphEdgesResp>(`${p(project)}/graph-edges${q ? `?${q}` : ""}`);
+  },
   inbox: (project: string) => j<InboxResp>(`${p(project)}/inbox`),
   inboxReview: async (
     project: string,
@@ -1412,13 +1442,13 @@ export const api = {
     const q = qs.toString();
     return `${p(project)}/export${q ? `?${q}` : ""}`;
   },
-  search: (project: string, q: string) =>
+  search: (project: string, q: string, options?: SearchOptions) =>
     j<SearchResp>(
-      `${p(project)}/search?q=${encodeURIComponent(q)}`,
+      `${p(project)}/search?${searchQuery(q, options)}`,
     ),
-  searchGlobal: (project: string, q: string) =>
+  searchGlobal: (project: string, q: string, options?: SearchOptions) =>
     j<SearchResp>(
-      `${p(project)}/search?q=${encodeURIComponent(q)}&cross_project=1`,
+      `${p(project)}/search?${searchQuery(q, { ...options, crossProject: true })}`,
     ),
   revisions: (project: string, idOrSlug: string) =>
     j<RevisionsResp>(`${p(project)}/artifacts/${encodeURIComponent(idOrSlug)}/revisions`),

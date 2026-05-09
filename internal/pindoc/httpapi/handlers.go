@@ -656,6 +656,80 @@ func decodeArtifactListCursor(raw string) (*artifactListCursor, error) {
 	return &cursor, nil
 }
 
+const maxGraphEdges = 5000
+
+type graphEdgesResponse struct {
+	ProjectSlug string         `json:"project_slug"`
+	Edges       []graphEdgeRow `json:"edges"`
+	Truncated   bool           `json:"truncated,omitempty"`
+}
+
+type graphEdgeRow struct {
+	SourceID string `json:"source_id"`
+	TargetID string `json:"target_id"`
+	Relation string `json:"relation"`
+}
+
+func (d Deps) handleGraphEdges(w http.ResponseWriter, r *http.Request) {
+	slug := projectSlugFrom(r)
+	projectPredicate, projectArg := projectLookupPredicate(r, "p", 1)
+	sourceVisibilityPredicate, sourceVisibilityArgs := d.artifactVisibilityPredicate(r, "s", 2)
+	targetVisibilityPredicate, targetVisibilityArgs := d.artifactVisibilityPredicate(r, "t", 2+len(sourceVisibilityArgs))
+	includeTemplates := r.URL.Query().Get("include_templates") == "true"
+
+	args := append([]any{projectArg}, sourceVisibilityArgs...)
+	args = append(args, targetVisibilityArgs...)
+	includeTemplatesArg := len(args) + 1
+	args = append(args, includeTemplates)
+	limitArg := len(args) + 1
+	args = append(args, maxGraphEdges+1)
+
+	rows, err := d.DB.Query(r.Context(), fmt.Sprintf(`
+		SELECT e.source_id::text, e.target_id::text, e.relation
+		FROM artifact_edges e
+		JOIN artifacts s ON s.id = e.source_id
+		JOIN artifacts t ON t.id = e.target_id
+		JOIN projects p ON p.id = s.project_id AND p.id = t.project_id
+		WHERE %s
+		  AND s.status <> 'archived'
+		  AND t.status <> 'archived'
+		  AND ($%d::bool OR (NOT starts_with(s.slug, '_template_') AND NOT starts_with(t.slug, '_template_')))
+		  AND %s
+		  AND %s
+		ORDER BY e.created_at, e.id
+		LIMIT $%d
+	`, projectPredicate, includeTemplatesArg, sourceVisibilityPredicate, targetVisibilityPredicate, limitArg), args...)
+	if err != nil {
+		d.Logger.Error("graph edges query", "err", err)
+		writeError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+	defer rows.Close()
+
+	edges := []graphEdgeRow{}
+	for rows.Next() {
+		var edge graphEdgeRow
+		if err := rows.Scan(&edge.SourceID, &edge.TargetID, &edge.Relation); err != nil {
+			writeError(w, http.StatusInternalServerError, "scan failed")
+			return
+		}
+		edges = append(edges, edge)
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "scan failed")
+		return
+	}
+	truncated := len(edges) > maxGraphEdges
+	if truncated {
+		edges = edges[:maxGraphEdges]
+	}
+	writeJSON(w, http.StatusOK, graphEdgesResponse{
+		ProjectSlug: slug,
+		Edges:       edges,
+		Truncated:   truncated,
+	})
+}
+
 // authorUserRef is the thin join projection of users → artifact list.
 // We intentionally omit email so Pindoc-self publication doesn't leak
 // addresses; display_name + github_handle is what Reader needs for the
@@ -716,29 +790,12 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 			a.visibility,
 			a.completeness, a.status, a.review_state,
 			a.author_id, a.published_at, a.updated_at, a.task_meta, a.artifact_meta,
-			wr.recent_warnings,
+			'[]'::jsonb AS recent_warnings,
 			u.id::text, u.display_name, u.github_handle
 		FROM artifacts a
 		JOIN projects p  ON p.id  = a.project_id
 		JOIN areas    ar ON ar.id = a.area_id
 		LEFT JOIN users u ON u.id = a.author_user_id
-		LEFT JOIN LATERAL (
-			SELECT COALESCE(jsonb_agg(jsonb_build_object(
-				'codes', COALESCE(e.payload->'codes', '[]'::jsonb),
-				'revision_number', COALESCE(NULLIF(e.payload->>'revision_number', '')::int, 0),
-				'author_id', NULLIF(e.payload->>'author_id', ''),
-				'canonical_rewrite_without_evidence',
-					COALESCE((e.payload->>'canonical_rewrite_without_evidence')::boolean, false),
-				'created_at', e.created_at
-			) ORDER BY e.created_at DESC), '[]'::jsonb) AS recent_warnings
-			FROM (
-				SELECT payload, created_at
-				  FROM events
-				 WHERE subject_id = a.id AND kind = 'artifact.warning_raised'
-				 ORDER BY created_at DESC
-				 LIMIT 5
-			) e
-		) wr ON true
 		WHERE %s
 		  AND a.status <> 'archived'
 		  AND ($2 = '' OR ar.slug = $2)
@@ -802,6 +859,13 @@ func (d Deps) handleArtifactList(w http.ResponseWriter, r *http.Request) {
 	hasMore := len(out) > limit
 	if hasMore {
 		out = out[:limit]
+	}
+	if warnings, err := d.loadRecentWarningsBatch(r.Context(), artifactRowIDs(out)); err != nil {
+		d.Logger.Warn("artifact list warning batch lookup failed", "err", err)
+	} else {
+		for i := range out {
+			out[i].RecentWarnings = warnings[out[i].ID]
+		}
 	}
 	body := map[string]any{
 		"project_slug": slug,
@@ -1097,7 +1161,7 @@ func (d Deps) loadRecentWarnings(ctx context.Context, artifactID string) ([]rece
 		SELECT payload, created_at
 		  FROM events
 		 WHERE subject_id = $1 AND kind = 'artifact.warning_raised'
-		 ORDER BY created_at DESC
+		 ORDER BY created_at DESC, id DESC
 		 LIMIT 5
 	`, artifactID)
 	if err != nil {
@@ -1111,28 +1175,88 @@ func (d Deps) loadRecentWarnings(ctx context.Context, artifactID string) ([]rece
 		if err := rows.Scan(&payload, &createdAt); err != nil {
 			return nil, err
 		}
-		var parsed struct {
-			Codes                           []string `json:"codes"`
-			RevisionNumber                  int      `json:"revision_number"`
-			AuthorID                        string   `json:"author_id"`
-			CanonicalRewriteWithoutEvidence bool     `json:"canonical_rewrite_without_evidence"`
-		}
-		if err := json.Unmarshal(payload, &parsed); err != nil {
-			// Skip malformed rows rather than 500 — an older payload
-			// shape shouldn't break the whole artifact detail call.
-			d.Logger.Warn("warning event payload unmarshal failed",
-				"artifact_id", artifactID, "err", err)
+		row, ok := parseRecentWarningRow(payload, createdAt)
+		if !ok {
+			d.Logger.Warn("warning event payload unmarshal failed", "artifact_id", artifactID)
 			continue
 		}
-		out = append(out, recentWarningRow{
-			Codes:                           parsed.Codes,
-			RevisionNumber:                  parsed.RevisionNumber,
-			AuthorID:                        parsed.AuthorID,
-			CanonicalRewriteWithoutEvidence: parsed.CanonicalRewriteWithoutEvidence,
-			CreatedAt:                       createdAt,
-		})
+		out = append(out, row)
 	}
 	return out, nil
+}
+
+func artifactRowIDs(rows []artifactRow) []string {
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.ID != "" {
+			out = append(out, row.ID)
+		}
+	}
+	return out
+}
+
+func (d Deps) loadRecentWarningsBatch(ctx context.Context, artifactIDs []string) (map[string][]recentWarningRow, error) {
+	out := map[string][]recentWarningRow{}
+	if len(artifactIDs) == 0 {
+		return out, nil
+	}
+	rows, err := d.DB.Query(ctx, `
+		WITH ranked AS (
+			SELECT
+				subject_id::text AS artifact_id,
+				payload,
+				created_at,
+				row_number() OVER (
+					PARTITION BY subject_id
+					ORDER BY created_at DESC, id DESC
+				) AS rn
+			FROM events
+			WHERE kind = 'artifact.warning_raised'
+			  AND subject_id = ANY($1::uuid[])
+		)
+		SELECT artifact_id, payload, created_at
+		FROM ranked
+		WHERE rn <= 5
+		ORDER BY artifact_id, created_at DESC
+	`, artifactIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var artifactID string
+		var payload []byte
+		var createdAt time.Time
+		if err := rows.Scan(&artifactID, &payload, &createdAt); err != nil {
+			return nil, err
+		}
+		row, ok := parseRecentWarningRow(payload, createdAt)
+		if !ok {
+			d.Logger.Warn("warning event payload unmarshal failed", "artifact_id", artifactID)
+			continue
+		}
+		out[artifactID] = append(out[artifactID], row)
+	}
+	return out, rows.Err()
+}
+
+func parseRecentWarningRow(payload []byte, createdAt time.Time) (recentWarningRow, bool) {
+	var parsed struct {
+		Codes                           []string `json:"codes"`
+		RevisionNumber                  int      `json:"revision_number"`
+		AuthorID                        string   `json:"author_id"`
+		CanonicalRewriteWithoutEvidence bool     `json:"canonical_rewrite_without_evidence"`
+	}
+	if err := json.Unmarshal(payload, &parsed); err != nil {
+		return recentWarningRow{}, false
+	}
+	return recentWarningRow{
+		Codes:                           parsed.Codes,
+		RevisionNumber:                  parsed.RevisionNumber,
+		AuthorID:                        parsed.AuthorID,
+		CanonicalRewriteWithoutEvidence: parsed.CanonicalRewriteWithoutEvidence,
+		CreatedAt:                       createdAt,
+	}, true
 }
 
 // loadArtifactPins returns artifact_pins rows sorted by insertion order.
@@ -1224,6 +1348,7 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 	// matches MCP artifact.search / context.for_task / artifact list for
 	// the "sidebar count == list.length" invariant per the Phase 17 follow-up.
 	includeTemplates := r.URL.Query().Get("include_templates") == "true"
+	typeFilter := strings.TrimSpace(r.URL.Query().Get("type"))
 	crossProject := parseSearchCrossProject(r.URL.Query().Get("cross_project"))
 	if d.Embedder == nil {
 		body := map[string]any{
@@ -1252,7 +1377,7 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	projectPredicate, projectArg := projectLookupPredicate(r, "p", 2)
 	projectFilter := projectPredicate
-	args := []any{qVec, projectArg, includeTemplates}
+	args := []any{qVec, projectArg, includeTemplates, typeFilter}
 	limit := 10
 	if crossProject {
 		visibleProjects, err := projects.ListVisible(r.Context(), d.DB, d.viewerScopeForRequest(r))
@@ -1281,18 +1406,20 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		projectFilter = "p.id::text = ANY($2::text[])"
-		args = []any{qVec, visibleProjectIDs, includeTemplates}
+		args = []any{qVec, visibleProjectIDs, includeTemplates, typeFilter}
 		limit = 20
 	}
-	visibilityPredicate, visibilityArgs := d.artifactVisibilityPredicate(r, "a", 4)
+	visibilityPredicate, visibilityArgs := d.artifactVisibilityPredicate(r, "a", 5)
 	args = append(args, visibilityArgs...)
+	candidateLimitArg := len(args) + 1
+	args = append(args, searchCandidateLimit(limit))
 	limitArg := len(args) + 1
 	args = append(args, limit)
 
 	rows, err := d.DB.Query(r.Context(), fmt.Sprintf(`
-		WITH scored AS (
-			SELECT DISTINCT ON (c.artifact_id)
-				c.artifact_id, c.heading, c.text,
+		WITH nearest AS MATERIALIZED (
+			SELECT
+				c.id AS chunk_id, c.artifact_id,
 				c.embedding <=> $1::vector AS distance
 			FROM artifact_chunks c
 			JOIN artifacts a ON a.id = c.artifact_id
@@ -1300,24 +1427,33 @@ func (d Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 			WHERE %s
 			  AND a.status <> 'archived'
 			  AND ($3::bool OR NOT starts_with(a.slug, '_template_'))
+			  AND ($4::text = '' OR lower(a.type) = lower($4::text))
 			  AND %s
-			ORDER BY c.artifact_id, distance
+			ORDER BY c.embedding <=> $1::vector
+			LIMIT $%d
+		),
+		scored AS (
+			SELECT DISTINCT ON (artifact_id)
+				chunk_id, artifact_id, distance
+			FROM nearest
+			ORDER BY artifact_id, distance
 		)
 		SELECT
 			s.artifact_id::text, p.slug, COALESCE(o.slug, ''),
 			a.slug, a.type, a.title, ar.slug,
-			COALESCE(s.heading, '') , s.text, s.distance,
+			COALESCE(c.heading, '') , c.text, s.distance,
 			a.updated_at, a.status, a.completeness,
 			COALESCE(a.task_meta->>'status', ''),
 			COALESCE(a.task_meta->>'priority', '')
 		FROM scored s
+		JOIN artifact_chunks c ON c.id = s.chunk_id
 		JOIN artifacts a  ON a.id  = s.artifact_id
 		JOIN areas     ar ON ar.id = a.area_id
 		JOIN projects  p  ON p.id  = a.project_id
 		LEFT JOIN organizations o ON o.id = p.organization_id
 		ORDER BY s.distance
 		LIMIT $%d
-	`, projectFilter, visibilityPredicate, limitArg), args...)
+	`, projectFilter, visibilityPredicate, candidateLimitArg, limitArg), args...)
 	if err != nil {
 		d.Logger.Error("search", "err", err)
 		writeError(w, http.StatusInternalServerError, "search failed")
@@ -1391,6 +1527,20 @@ func parseSearchCrossProject(raw string) bool {
 	default:
 		return false
 	}
+}
+
+func searchCandidateLimit(finalLimit int) int {
+	if finalLimit <= 0 {
+		return 200
+	}
+	n := finalLimit * 50
+	if n < 200 {
+		return 200
+	}
+	if n > 2000 {
+		return 2000
+	}
+	return n
 }
 
 func (d Deps) handleHealth(w http.ResponseWriter, r *http.Request) {

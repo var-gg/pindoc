@@ -9,6 +9,7 @@ import {
   cmdkOtherProjectHits,
   cmdkProjectChip,
   cmdkRelevantHits,
+  cmdkResultDetailMeta,
   cmdkResultMeta,
   cmdkSections,
   cmdkTrapTabTarget,
@@ -94,6 +95,21 @@ function testCmdKMetaShowsArtifactStatusSignalsWhenAvailable(): void {
   assertEqual(meta, "Decision · UI · Published/Partial · Updated 2026-05-02", "CmdK result meta with artifact signals");
 }
 
+function testCmdKDetailMetaOmitsChipSignals(): void {
+  const meta = cmdkResultDetailMeta(hit({
+    task_status: "open",
+    task_priority: "p1",
+    heading: "Acceptance Criteria",
+    updated_at: "2026-05-02T12:00:00Z",
+  }), t);
+
+  assertEqual(meta, "Open · P1 · Updated 2026-05-02 · Acceptance Criteria", "CmdK detail meta should omit type and area");
+}
+
+function testCmdKDetailMetaCanBeEmpty(): void {
+  assertEqual(cmdkResultDetailMeta(hit(), t), "", "CmdK detail meta should be optional when only chip signals exist");
+}
+
 function testCmdKFiltersIrrelevantNonsenseQueryHits(): void {
   const filtered = cmdkRelevantHits([
     hit({ artifact_id: "nonsense-1", slug: "nonsense-1", distance: 0.7291 }),
@@ -125,6 +141,10 @@ function testCmdKEmptyCopyExistsInBothLocales(): void {
   assertEqual(en["cmdk.dialog_label"], "Command palette", "EN CmdK dialog label");
   assertEqual(ko["cmdk.commits_section_label"], "커밋", "KO CmdK commit section label");
   assertEqual(en["cmdk.commits_section_label"], "Commits", "EN CmdK commit section label");
+  assertEqual(ko["cmdk.scope_all"], "전체 문서", "KO CmdK all scope label");
+  assertEqual(en["cmdk.scope_all"], "All docs", "EN CmdK all scope label");
+  assertEqual(ko["cmdk.scope_tasks"], "Task", "KO CmdK task scope label");
+  assertEqual(en["cmdk.scope_tasks"], "Tasks", "EN CmdK task scope label");
   assertEqual(ko["cmdk.current_project_section_label"], "현재 프로젝트", "KO CmdK current project section label");
   assertEqual(en["cmdk.current_project_section_label"], "Current project", "EN CmdK current project section label");
   assertEqual(ko["cmdk.global_artifacts_section_label"], "다른 프로젝트", "KO CmdK global section label");
@@ -232,6 +252,8 @@ testCmdKMetaDoesNotDependOnDistanceForDisplay();
 testCmdKMetaShowsSectionContextWhenAvailable();
 testCmdKMetaShowsLifecycleSignalsWhenAvailable();
 testCmdKMetaShowsArtifactStatusSignalsWhenAvailable();
+testCmdKDetailMetaOmitsChipSignals();
+testCmdKDetailMetaCanBeEmpty();
 testCmdKFiltersIrrelevantNonsenseQueryHits();
 testCmdKKeepsRelevantTopResults();
 testCmdKRelevanceCutoffIsCentralized();

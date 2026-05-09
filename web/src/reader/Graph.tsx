@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { api, type Artifact, type ArtifactRef } from "../api/client";
+import { api, type ArtifactRef, type GraphEdgeRef } from "../api/client";
 import { useI18n } from "../i18n";
 import { projectSurfacePath } from "../readerRoutes";
 import { EmptyState, SurfaceHeader } from "./SurfacePrimitives";
@@ -44,6 +44,7 @@ type Props = {
   // local copy.
   focusSlug: string | null;
   onFocusChange: (slug: string) => void;
+  includeTemplates?: boolean;
   // Atlas minimap support (P2). areaNameBySlug provides display labels;
   // onSelectArea is the parent handler that pivots the surface filter
   // to the clicked area_slug. Both optional so the surface stays usable
@@ -80,15 +81,15 @@ export function GraphSurface({
   badgeFilters,
   focusSlug,
   onFocusChange,
+  includeTemplates = false,
   areaNameBySlug,
   onSelectArea,
 }: Props) {
   const { t, lang } = useI18n();
   const navigate = useNavigate();
-  const [details, setDetails] = useState<Record<string, Artifact>>({});
+  const [edgeRows, setEdgeRows] = useState<GraphEdgeRef[]>([]);
   const [loadingEdges, setLoadingEdges] = useState(false);
   const [hoverId, setHoverId] = useState<string | null>(null);
-  const nodeKey = useMemo(() => list.map((a) => a.slug).join("\x00"), [list]);
   const hasActiveFilters = Boolean(selectedArea || selectedType || badgeFilters.length > 0);
 
   const cameraRef = useRef<GraphViewBox>(FULL_GRAPH_FRAME);
@@ -106,25 +107,19 @@ export function GraphSurface({
     return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   }, []);
 
-  // Detail fetch — same shape as before but only used for hover peek
-  // bodies and edge enumeration. The full force layout used to spin on
-  // every node detail; the ego mode lets us defer non-visible details.
+  // Edge fetch is project-wide and light. The graph filters it against
+  // the current artifact list client-side so this stays one request per
+  // project instead of one detail request per node.
   useEffect(() => {
-    if (list.length === 0) {
-      setDetails({});
-      setLoadingEdges(false);
-      return;
-    }
     let cancelled = false;
     setLoadingEdges(true);
-    Promise.all(list.map((a) => api.artifact(projectSlug, a.slug).catch(() => null)))
-      .then((rows) => {
+    api.graphEdges(projectSlug, { includeTemplates })
+      .then((resp) => {
         if (cancelled) return;
-        const next: Record<string, Artifact> = {};
-        for (const row of rows) {
-          if (row) next[row.id] = row;
-        }
-        setDetails(next);
+        setEdgeRows(resp.edges);
+      })
+      .catch(() => {
+        if (!cancelled) setEdgeRows([]);
       })
       .finally(() => {
         if (!cancelled) setLoadingEdges(false);
@@ -132,7 +127,7 @@ export function GraphSurface({
     return () => {
       cancelled = true;
     };
-  }, [projectSlug, nodeKey, list]);
+  }, [projectSlug, includeTemplates]);
 
   const focusId = useMemo(() => {
     if (!focusSlug) return null;
@@ -143,26 +138,24 @@ export function GraphSurface({
     const byID = new Map(list.map((a) => [a.id, a]));
     const seen = new Set<string>();
     const edges: Array<GraphLayoutEdge & { relation: string; crossArea: boolean; sourceRef: ArtifactRef; targetRef: ArtifactRef }> = [];
-    for (const source of list) {
-      const detail = details[source.id];
-      for (const edge of detail?.relates_to ?? []) {
-        const target = byID.get(edge.artifact_id);
-        if (!target) continue;
-        const key = `${source.id}::${edge.artifact_id}::${edge.relation}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        edges.push({
-          source: source.id,
-          target: edge.artifact_id,
-          relation: edge.relation,
-          crossArea: source.area_slug !== target.area_slug,
-          sourceRef: source,
-          targetRef: target,
-        });
-      }
+    for (const edge of edgeRows) {
+      const source = byID.get(edge.source_id);
+      const target = byID.get(edge.target_id);
+      if (!source || !target) continue;
+      const key = `${edge.source_id}::${edge.target_id}::${edge.relation}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      edges.push({
+        source: edge.source_id,
+        target: edge.target_id,
+        relation: edge.relation,
+        crossArea: source.area_slug !== target.area_slug,
+        sourceRef: source,
+        targetRef: target,
+      });
     }
     return edges;
-  }, [details, list]);
+  }, [edgeRows, list]);
 
   const ego = useMemo(() => {
     if (!focusId) {
@@ -304,7 +297,7 @@ export function GraphSurface({
     ? t("graph.empty_filtered")
     : t("graph.empty");
 
-  const hoverDetail = hoverId ? details[hoverId] : null;
+  const hoverDetail = hoverId ? list.find((artifact) => artifact.id === hoverId) ?? null : null;
   const hoverPos = hoverId ? layout.positions.get(hoverId) : null;
 
   return (

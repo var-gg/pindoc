@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useNavigate } from "react-router";
-import { FileText, GitCommit, Search } from "lucide-react";
+import { CheckSquare, FileText, GitCommit, Search } from "lucide-react";
 import { api, type GitRepoSummary, type SearchHit } from "../api/client";
 import { useI18n } from "../i18n";
 import { gitCommitPath, isCommitQuery, shortSha } from "../git/routes";
@@ -13,13 +13,15 @@ import {
   cmdkOtherProjectHits,
   cmdkProjectChip,
   cmdkRelevantHits,
-  cmdkResultMeta,
+  cmdkResultDetailMeta,
   cmdkSections,
-  cmdkTrapTabTarget,
-  type CmdKFocusTarget,
   type CmdKNavigationKey,
 } from "./cmdkViewModel";
+import { localizedAreaName } from "./areaLocale";
+import { typeChipClass } from "./typeChip";
 import { dismissTooltipsForModal } from "./Tooltip";
+import { visualArea, visualLabel, visualType } from "./visualLanguage";
+import { visualIconComponent } from "./visualLanguageIcons";
 
 type Props = {
   projectSlug: string;
@@ -42,14 +44,17 @@ type CmdKArtifactItem = {
 };
 
 type CmdKItem = CmdKCommitItem | CmdKArtifactItem;
+type CmdKSearchScope = "all" | "tasks";
 
 const inputId = "cmdk-input";
 const listboxId = "cmdk-listbox";
 const titleId = "cmdk-title";
+const taskSearchType = "Task";
 
 export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
+  const [searchScope, setSearchScope] = useState<CmdKSearchScope>("all");
   const [currentHits, setCurrentHits] = useState<SearchHit[]>([]);
   const [globalHits, setGlobalHits] = useState<SearchHit[]>([]);
   const [repos, setRepos] = useState<GitRepoSummary[]>([]);
@@ -92,14 +97,17 @@ export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
     let cancelled = false;
     const id = window.setTimeout(async () => {
       try {
-        const [projectRes, globalRes] = await Promise.all([
-          api.search(projectSlug, q),
-          api.searchGlobal(projectSlug, q),
-        ]);
+        const searchOptions = searchScope === "tasks" ? { type: taskSearchType } : undefined;
+        const resp = q.length < 3
+          ? await api.search(projectSlug, q, searchOptions)
+          : await api.searchGlobal(projectSlug, q, searchOptions);
         if (cancelled) return;
-        setCurrentHits(cmdkRelevantHits(projectRes.hits));
-        setGlobalHits(cmdkOtherProjectHits(cmdkRelevantHits(globalRes.hits), projectSlug, orgSlug));
-        setNotice(projectRes.notice || globalRes.notice);
+        const hits = cmdkRelevantHits(resp.hits).filter((hit) => (
+          searchScope === "tasks" ? hit.type.toLowerCase() === taskSearchType.toLowerCase() : true
+        ));
+        setCurrentHits(hits.filter((hit) => hit.project_slug === projectSlug));
+        setGlobalHits(q.length < 3 ? [] : cmdkOtherProjectHits(hits, projectSlug, orgSlug));
+        setNotice(resp.notice);
         setSelected(0);
       } catch (err) {
         if (cancelled) return;
@@ -112,7 +120,7 @@ export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
       cancelled = true;
       window.clearTimeout(id);
     };
-  }, [open, query, projectSlug, orgSlug]);
+  }, [open, query, projectSlug, orgSlug, searchScope]);
 
   useEffect(() => {
     if (!open || !isCommitQuery(q)) {
@@ -168,19 +176,19 @@ export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
 
   useEffect(() => {
     if (!open) return;
-    function optionNodes(): HTMLElement[] {
-      return Array.from(paletteRef.current?.querySelectorAll<HTMLElement>(".palette__item") ?? []);
-    }
-    function focusTrapTarget(e: KeyboardEvent): CmdKFocusTarget | null {
+    function focusTrapTarget(e: KeyboardEvent): HTMLElement | null {
       const input = inputRef.current;
-      const options = optionNodes();
+      if (!input) return null;
+      const controls = Array.from(paletteRef.current?.querySelectorAll<HTMLElement>(".palette__scope-button, .palette__item") ?? []);
+      const focusable = [input, ...controls];
       const active = document.activeElement;
-      if (active !== input && !options.includes(active as HTMLElement)) {
-        return "input";
+      const currentIndex = focusable.findIndex((node) => node === active);
+      if (currentIndex < 0) {
+        return input;
       }
-      const optionIndex = options.findIndex((node) => node === active);
-      const current: CmdKFocusTarget = optionIndex >= 0 ? optionIndex : "input";
-      return cmdkTrapTabTarget(current, options.length, e.shiftKey);
+      if (e.shiftKey && currentIndex === 0) return focusable[focusable.length - 1] ?? input;
+      if (!e.shiftKey && currentIndex === focusable.length - 1) return input;
+      return null;
     }
     function activate(item: CmdKItem | undefined) {
       if (item?.kind === "artifact") {
@@ -192,6 +200,10 @@ export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
         onClose();
       }
     }
+    function scopeButtonHasFocus(): boolean {
+      const active = document.activeElement;
+      return active instanceof HTMLElement && active.classList.contains("palette__scope-button");
+    }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -202,9 +214,10 @@ export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
         const target = focusTrapTarget(e);
         if (target === null) return;
         e.preventDefault();
-        const options = optionNodes();
-        if (target === "input") inputRef.current?.focus();
-        if (typeof target === "number") options[target]?.focus();
+        target.focus();
+        return;
+      }
+      if ((e.key === "Enter" || e.key === " ") && scopeButtonHasFocus()) {
         return;
       }
       if (
@@ -250,6 +263,32 @@ export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
           />
           <span className="kbd">esc</span>
         </div>
+        <div className="palette__scope" role="group" aria-label={t("cmdk.scope_label")}>
+          <button
+            type="button"
+            className={`palette__scope-button${searchScope === "all" ? " is-active" : ""}`}
+            aria-pressed={searchScope === "all"}
+            onClick={() => {
+              setSearchScope("all");
+              setSelected(0);
+            }}
+          >
+            <Search className="lucide" aria-hidden="true" />
+            <span>{t("cmdk.scope_all")}</span>
+          </button>
+          <button
+            type="button"
+            className={`palette__scope-button${searchScope === "tasks" ? " is-active" : ""}`}
+            aria-pressed={searchScope === "tasks"}
+            onClick={() => {
+              setSearchScope("tasks");
+              setSelected(0);
+            }}
+          >
+            <CheckSquare className="lucide" aria-hidden="true" />
+            <span>{t("cmdk.scope_tasks")}</span>
+          </button>
+        </div>
         <div className="palette__section" id={listboxId} role="listbox" aria-label={t("cmdk.results_label")}>
           {items.length === 0 && (
             <div className="palette__empty">
@@ -285,12 +324,7 @@ export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
                       </div>
                       <div className="mono palette__item-meta">
                         {item.kind === "artifact" ? (
-                          <>
-                            <span className="palette__project-chip">
-                              {cmdkProjectChip(item.hit, projectSlug, orgSlug)}
-                            </span>
-                            <span>{cmdkResultMeta(item.hit, t)}</span>
-                          </>
+                          <ArtifactResultMeta hit={item.hit} projectSlug={projectSlug} orgSlug={orgSlug} />
                         ) : (
                           `${item.repo.name || item.repo.id} · ${item.summary || item.repo.default_branch}`
                         )}
@@ -320,5 +354,45 @@ export function CmdK({ projectSlug, orgSlug, open, onClose }: Props) {
         </div>
       </div>
     </div>
+  );
+}
+
+function ArtifactResultMeta({
+  hit,
+  projectSlug,
+  orgSlug,
+}: {
+  hit: SearchHit;
+  projectSlug: string;
+  orgSlug: string;
+}) {
+  const { t, lang } = useI18n();
+  const typeEntry = visualType(hit.type);
+  const TypeIcon = visualIconComponent(typeEntry?.icon);
+  const typeLabel = typeEntry ? visualLabel(typeEntry, lang) : hit.type;
+  const areaEntry = visualArea(hit.area_slug);
+  const AreaIcon = visualIconComponent(areaEntry?.icon ?? "Folder");
+  const areaLabel = areaEntry ? visualLabel(areaEntry, lang) : localizedAreaName(t, hit.area_slug, hit.area_slug);
+  const areaStyle = areaEntry
+    ? ({ "--area-color": `var(${areaEntry.color_token})` } as CSSProperties)
+    : undefined;
+  const areaClassName = `chip-area chip-area--visual${areaEntry ? "" : " chip-area--custom"}`;
+  const detailMeta = cmdkResultDetailMeta(hit, t);
+
+  return (
+    <>
+      <span className={`${typeChipClass(hit.type)} type-chip--visual type-chip--compact`} aria-label={typeLabel} title={typeLabel}>
+        <TypeIcon className="lucide" aria-hidden="true" />
+        <span>{typeEntry?.canonical ?? hit.type}</span>
+      </span>
+      <span className={areaClassName} style={areaStyle} aria-label={areaLabel} title={areaLabel}>
+        <AreaIcon className="lucide" aria-hidden="true" />
+        <span>{areaLabel}</span>
+      </span>
+      <span className="palette__project-chip">
+        {cmdkProjectChip(hit, projectSlug, orgSlug)}
+      </span>
+      {detailMeta && <span>{detailMeta}</span>}
+    </>
   );
 }

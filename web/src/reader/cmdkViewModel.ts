@@ -94,6 +94,21 @@ export function cmdkResultMeta(hit: SearchHit, t: TFn): string {
   return parts.join(" · ");
 }
 
+export function cmdkResultDetailMeta(hit: SearchHit, t: TFn): string {
+  // Type and Area render as visual chips in Cmd-K rows. This keeps the
+  // remaining metadata readable without repeating the same signals twice.
+  const parts: string[] = [];
+  const lifecycle = cmdkLifecycleLabel(hit, t);
+  if (lifecycle) parts.push(lifecycle);
+  if (hit.task_priority) parts.push(hit.task_priority.toUpperCase());
+  if (hit.updated_at) parts.push(t("cmdk.updated", hit.updated_at.slice(0, 10)));
+  const heading = hit.heading?.trim();
+  if (heading && heading !== hit.title) {
+    parts.push(heading);
+  }
+  return parts.join(" · ");
+}
+
 export function cmdkNextIndex(current: number, count: number, key: CmdKNavigationKey): number {
   if (count <= 0) return current;
   const bounded = Math.min(Math.max(current, 0), count - 1);
