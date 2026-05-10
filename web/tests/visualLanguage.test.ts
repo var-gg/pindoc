@@ -25,7 +25,7 @@ function testTokenCounts(): void {
   assertEqual(Object.keys(visualLanguage.relations).length, 6, "Relation token count");
   assertEqual(Object.keys(visualLanguage.pins).length, 6, "Pin token count");
   assertEqual(Object.keys(visualLanguage.meta_enums).length, 6, "Meta enum group count");
-  assertEqual(Object.keys(visualLanguage.quick_actions).length, 5, "Quick action count");
+  assertEqual(Object.keys(visualLanguage.quick_actions).length, 6, "Quick action count");
   assertEqual(topLevelVisualAreaSlugs.length, 8, "Top-level area count");
 }
 

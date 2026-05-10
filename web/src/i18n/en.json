@@ -193,6 +193,7 @@
   "sidecar.quick_actions": "Quick actions",
   "sidecar.quick_verify_request": "Copy verification request",
   "sidecar.quick_update_request": "Copy update request",
+  "sidecar.quick_copy_markdown": "Copy Markdown",
   "sidecar.quick_copy_link": "Copy share link",
   "sidecar.quick_copy_agent_ref": "Copy agent ref",
   "sidecar.quick_history": "Open revision history",
