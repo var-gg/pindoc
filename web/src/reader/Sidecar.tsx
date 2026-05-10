@@ -390,6 +390,7 @@ function QuickActions({ detail, artifactHref }: { detail: Artifact; artifactHref
   > = [
     { id: "verify_request", kind: "button", onClick: () => copyWithToast(`Verify ${agentRef}`, visualLabel(visualQuickAction("verify_request"), lang)) },
     { id: "update_request", kind: "button", onClick: () => copyWithToast(`Update ${agentRef}`, visualLabel(visualQuickAction("update_request"), lang)) },
+    { id: "copy_markdown", kind: "button", onClick: () => copyWithToast(detail.body_markdown, visualLabel(visualQuickAction("copy_markdown"), lang)) },
     { id: "copy_link", kind: "button", onClick: () => copyWithToast(absoluteHref, visualLabel(visualQuickAction("copy_link"), lang)) },
     { id: "copy_agent_ref", kind: "button", onClick: () => copyWithToast(agentRef, visualLabel(visualQuickAction("copy_agent_ref"), lang)) },
     { id: "history", kind: "link", to: `${artifactHref}/history` },

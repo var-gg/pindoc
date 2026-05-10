@@ -109,6 +109,7 @@ export const visualLanguage = {
   quick_actions: {
     verify_request: quickActionEntry("CheckCircle2", "--quick-verify", "Copy verification request", "검증 요청 복사", "Copy a request that asks an agent to verify this artifact.", "이 artifact 검증을 요청하는 문구를 복사."),
     update_request: quickActionEntry("Pencil", "--quick-update", "Copy update request", "수정 요청 복사", "Copy a request that asks an agent to update this artifact.", "이 artifact 수정을 요청하는 문구를 복사."),
+    copy_markdown: quickActionEntry("FileText", "--quick-copy-markdown", "Copy Markdown", "Markdown 복사", "Copy the raw Markdown body for this artifact.", "이 artifact의 원문 Markdown 본문을 복사."),
     copy_link: quickActionEntry("Share2", "--quick-copy-link", "Copy share link", "공유 링크 복사", "Copy the browser URL for this artifact.", "이 artifact의 브라우저 URL을 복사."),
     copy_agent_ref: quickActionEntry("Clipboard", "--quick-agent-ref", "Copy agent ref", "agent ref 복사", "Copy the pindoc:// reference for agent prompts.", "agent prompt에 쓰는 pindoc:// 참조를 복사."),
     history: quickActionEntry("History", "--quick-history", "Open revision history", "수정 이력 열기", "Open the revision timeline for this artifact.", "이 artifact의 revision timeline을 열기."),

@@ -168,6 +168,14 @@ function testSidecarIdentityFallsBackForMissingTitleAndUnknownType(): void {
   assert(html.includes("runbook-slug"), "Missing title should fall back to the slug");
 }
 
+function testSidecarExposesRawMarkdownCopyAction(): void {
+  const en = renderSidecar(detail, "en");
+  assert(en.includes('aria-label="Copy Markdown"'), "EN Sidecar should expose a raw Markdown copy action");
+
+  const ko = renderSidecar(detail, "ko");
+  assert(ko.includes('aria-label="Markdown 복사"'), "KO Sidecar should expose a raw Markdown copy action");
+}
+
 function testKoreanReaderVisibilityLabelIsLocalized(): void {
   const html = renderReaderSurface({ ...detail, visibility: "org" }, "ko");
   assert(html.includes("공개 범위: 조직"), "KO visibility chip aria label should use Korean label");
@@ -178,4 +186,5 @@ function testKoreanReaderVisibilityLabelIsLocalized(): void {
 testEnglishRenderingDoesNotUseKoreanMeridiem();
 testSidecarIdentityUsesLocalizedTypeAndHumanTitle();
 testSidecarIdentityFallsBackForMissingTitleAndUnknownType();
+testSidecarExposesRawMarkdownCopyAction();
 testKoreanReaderVisibilityLabelIsLocalized();
