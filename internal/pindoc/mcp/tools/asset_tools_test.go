@@ -47,6 +47,19 @@ func TestDecodeAssetUploadInputLocalPathLoopbackOnly(t *testing.T) {
 	}
 }
 
+func TestAssetToolDescriptionsClarifyDockerAndInlineImages(t *testing.T) {
+	for _, want := range []string{"Docker Desktop on Windows", "tools/push-asset.ps1", "docker cp", "/tmp/pindoc-asset-upload", "asset.blob_url"} {
+		if !strings.Contains(assetUploadToolDescription, want) {
+			t.Fatalf("asset upload description missing %q: %q", want, assetUploadToolDescription)
+		}
+	}
+	for _, want := range []string{"metadata only", "does not insert image Markdown", "body_markdown", "![alt](asset.blob_url)", "role=inline_image"} {
+		if !strings.Contains(assetAttachToolDescription, want) {
+			t.Fatalf("asset attach description missing %q: %q", want, assetAttachToolDescription)
+		}
+	}
+}
+
 func TestAssetToolsUploadReadAttachIntegration(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("PINDOC_TEST_DATABASE_URL"))
 	if dsn == "" {

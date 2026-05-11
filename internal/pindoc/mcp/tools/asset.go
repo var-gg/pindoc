@@ -40,6 +40,10 @@ type assetAttachInput struct {
 	ExpectedHead int    `json:"expected_head,omitempty" jsonschema:"optional current artifact revision_number guard; omitted attaches to current head"`
 }
 
+const assetUploadToolDescription = "Create a project-scoped Asset from a local file path or base64 bytes. local_path is evaluated on the MCP server host/container and is loopback-only; non-loopback OAuth callers must send bytes_base64/content_base64. In Docker Desktop on Windows, host paths such as A:\\path\\image.png are not visible inside the Linux container; copy the file with tools/push-asset.ps1 or docker cp to a container path such as /tmp/pindoc-asset-upload/... and pass that container path as local_path. Stores an immutable LocalFS blob under PINDOC_ASSET_ROOT (default /var/lib/pindoc/assets), records metadata only, returns asset.blob_url plus a stable pindoc-asset:// reference, and never exposes storage_key/local paths."
+
+const assetAttachToolDescription = "Attach an Asset to an artifact's current head revision as inline_image, attachment, evidence, or generated_output. The relation is revision-scoped; repeated identical attaches are idempotent. Attachment is metadata only: it does not insert image Markdown into body_markdown. For a Reader-visible inline image, first upload the asset, then include Markdown such as ![alt](asset.blob_url) in the artifact body and attach the same asset with role=inline_image."
+
 type assetToolOutput struct {
 	Status           string                 `json:"status"`
 	ErrorCode        string                 `json:"error_code,omitempty"`
@@ -87,7 +91,7 @@ func RegisterAssetUpload(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.asset.upload",
-			Description: "Create a project-scoped Asset from a local file path or base64 bytes. local_path is loopback-only; non-loopback OAuth callers must send bytes_base64/content_base64. Stores an immutable LocalFS blob under PINDOC_ASSET_ROOT (default /var/lib/pindoc/assets), records metadata only, returns a stable pindoc-asset:// reference, and never exposes storage_key/local paths.",
+			Description: assetUploadToolDescription,
 		},
 		func(ctx context.Context, p *auth.Principal, in assetUploadInput) (*sdk.CallToolResult, assetToolOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -222,7 +226,7 @@ func RegisterAssetAttach(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.asset.attach",
-			Description: "Attach an Asset to an artifact's current head revision as inline_image, attachment, evidence, or generated_output. The relation is revision-scoped; repeated identical attaches are idempotent.",
+			Description: assetAttachToolDescription,
 		},
 		func(ctx context.Context, p *auth.Principal, in assetAttachInput) (*sdk.CallToolResult, assetToolOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
