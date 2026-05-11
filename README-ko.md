@@ -111,7 +111,33 @@ Docker daemon은 account-level MCP 엔드포인트 하나를 노출합니다.
 
 프로젝트 scope는 URL이 아니라 각 tool input의 `project_slug`로 결정됩니다.
 `pindoc.harness.install`이 만든 워크스페이스는 `PINDOC.md` frontmatter에
-기본 project slug를 저장합니다.
+기본 project slug를 저장합니다. `pindoc.workspace.detect`는 현재
+워크스페이스에 맞는 slug를 찾아주지만 daemon-wide `PINDOC_PROJECT` 기본값을
+바꾸지는 않습니다. 여러 프로젝트가 한 Docker daemon에 붙어 있으면 세션 sweep
+후에도 감지된 `project_slug`를 명시해서 넘기는 것이 안전합니다.
+
+`completeness=draft`는 비공개 초안이 아니라 성숙도/trust 상태입니다. MCP
+write가 accepted 되면 artifact는 published 상태가 되고, visibility가 허용하면
+Reader에 보입니다. 일반 사용자 surface에 보이면 안 되는 내용은
+`visibility=private` 또는 review workflow를 써야 합니다.
+
+## Docker Desktop / Windows asset upload
+
+`pindoc.asset.upload(local_path=...)`는 Windows 클라이언트 경로가 아니라 MCP
+server host/container 안의 경로를 읽습니다. Docker Desktop에서는 먼저 파일을
+`pindoc-server-daemon` 컨테이너 안으로 복사합니다.
+
+```powershell
+pwsh -File tools/push-asset.ps1 A:\path\image.png -ProjectSlug survival-manager
+```
+
+스크립트는 `pindoc.asset.upload`에 넣을 JSON input과
+`/tmp/pindoc-asset-upload/...` container-local path를 출력합니다.
+
+Reader에 inline image가 실제로 보이려면 두 단계가 모두 필요합니다.
+
+1. `body_markdown`에 `![alt](<asset.blob_url>)`를 넣습니다. 렌더링 source입니다.
+2. `pindoc.asset.attach`를 `role="inline_image"`로 호출합니다. revision metadata와 evidence입니다.
 
 ## 설정
 

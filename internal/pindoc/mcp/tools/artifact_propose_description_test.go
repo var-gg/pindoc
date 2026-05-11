@@ -107,16 +107,78 @@ func TestArtifactProposeBodyMarkdownOptionalForPatchSchema(t *testing.T) {
 		t.Fatalf("body_markdown json tag should be omitempty for body_patch-only updates, got %q", tag)
 	}
 	schema := field.Tag.Get("jsonschema")
-	for _, want := range []string{"omit on update_of", "body_patch"} {
+	for _, want := range []string{"omit on update_of", "body_patch", "asset.blob_url", "asset.attach stores metadata"} {
 		if !strings.Contains(schema, want) {
 			t.Fatalf("body_markdown jsonschema tag %q missing %q", schema, want)
 		}
 	}
 }
 
+func TestArtifactProposeSlugDescriptionRecommendsShortExplicitSlug(t *testing.T) {
+	field, ok := reflect.TypeOf(artifactProposeInput{}).FieldByName("Slug")
+	if !ok {
+		t.Fatalf("artifactProposeInput.Slug field missing")
+	}
+	schema := field.Tag.Get("jsonschema")
+	for _, want := range []string{"title is long", "concise stable slug", "update_of/asset.attach"} {
+		if !strings.Contains(schema, want) {
+			t.Fatalf("slug jsonschema tag %q missing %q", schema, want)
+		}
+	}
+}
+
+func TestArtifactProposeCompletenessDescriptionClarifiesDraftVisibility(t *testing.T) {
+	field, ok := reflect.TypeOf(artifactProposeInput{}).FieldByName("Completeness")
+	if !ok {
+		t.Fatalf("artifactProposeInput.Completeness field missing")
+	}
+	schema := field.Tag.Get("jsonschema")
+	for _, want := range []string{"draft is a visible", "not a hidden private draft", "visibility/private"} {
+		if !strings.Contains(schema, want) {
+			t.Fatalf("completeness jsonschema tag %q missing %q", schema, want)
+		}
+	}
+}
+
+func TestBodyPatchModeDescriptionIncludesExamples(t *testing.T) {
+	field, ok := reflect.TypeOf(BodyPatchInput{}).FieldByName("Mode")
+	if !ok {
+		t.Fatalf("BodyPatchInput.Mode field missing")
+	}
+	schema := field.Tag.Get("jsonschema")
+	for _, want := range []string{"Examples", "append_text", "section_heading", "checkbox_state"} {
+		if !strings.Contains(schema, want) {
+			t.Fatalf("body_patch.mode jsonschema tag %q missing %q", schema, want)
+		}
+	}
+}
+
 func TestArtifactProposeDescriptionMentionsPatchOnlyUpdate(t *testing.T) {
 	desc := artifactProposeToolDescription
-	for _, want := range []string{"body_patch instead of body_markdown", "update_of + expected_version + body_patch", "omit body_markdown"} {
+	for _, want := range []string{
+		"body_patch instead of body_markdown",
+		"update_of + expected_version + body_patch",
+		"omit body_markdown",
+		"append_text",
+		"section_replace",
+		"checkbox_toggle",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("artifact.propose description missing %q: %q", want, desc)
+		}
+	}
+}
+
+func TestArtifactProposeDescriptionMentionsDraftSlugAndAssetGuidance(t *testing.T) {
+	desc := artifactProposeToolDescription
+	for _, want := range []string{
+		"completeness=draft is visible",
+		"not hidden/private",
+		"pass a short explicit slug",
+		"quote the accepted response slug exactly",
+		"asset.blob_url",
+		"asset.attach records revision metadata",
+	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("artifact.propose description missing %q: %q", want, desc)
 		}
