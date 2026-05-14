@@ -47,6 +47,29 @@ func TestDecodeAssetUploadInputLocalPathLoopbackOnly(t *testing.T) {
 	}
 }
 
+func TestDecodeAssetUploadInputWindowsHostPathFailureGuidance(t *testing.T) {
+	loopback := &auth.Principal{AgentID: "agent:asset-test", Source: auth.SourceLoopback}
+	content, filename, out := decodeAssetUploadInput(assetUploadInput{LocalPath: `A:\pindoc\missing-image.png`}, loopback)
+	if out.Status != "not_ready" || out.ErrorCode != "ASSET_LOCAL_READ_FAILED" {
+		t.Fatalf("windows host local_path output = %+v", out)
+	}
+	if content != nil || filename != "" {
+		t.Fatalf("windows host local_path content=%q filename=%q, want empty", string(content), filename)
+	}
+	if len(out.ErrorCodes) == 0 || out.ErrorCodes[0] != "ASSET_LOCAL_READ_FAILED" {
+		t.Fatalf("windows host local_path error_codes = %v", out.ErrorCodes)
+	}
+	if len(out.ChecklistItems) == 0 || out.ChecklistItems[0].Code != "ASSET_LOCAL_READ_FAILED" {
+		t.Fatalf("windows host local_path checklist_items = %+v", out.ChecklistItems)
+	}
+	actions := strings.Join(out.SuggestedActions, "\n")
+	for _, want := range []string{"tools/push-asset.ps1", "/tmp/pindoc-asset-upload", "bytes_base64", "Docker Desktop"} {
+		if !strings.Contains(actions, want) {
+			t.Fatalf("windows host local_path suggested_actions missing %q: %v", want, out.SuggestedActions)
+		}
+	}
+}
+
 func TestAssetToolDescriptionsClarifyDockerAndInlineImages(t *testing.T) {
 	for _, want := range []string{"Docker Desktop on Windows", "tools/push-asset.ps1", "docker cp", "/tmp/pindoc-asset-upload", "asset.blob_url"} {
 		if !strings.Contains(assetUploadToolDescription, want) {

@@ -310,7 +310,7 @@ func decodeAssetUploadInput(in assetUploadInput, principal *auth.Principal) ([]b
 		}
 		content, err := os.ReadFile(localPath)
 		if err != nil {
-			return nil, "", assetNotReady("", "ASSET_LOCAL_READ_FAILED", "local_path could not be read")
+			return nil, "", assetLocalReadFailed(localPath)
 		}
 		if filename == "" {
 			filename = filepath.Base(localPath)
@@ -478,6 +478,10 @@ func assetValidationOutput(projectSlug string, err error) assetToolOutput {
 }
 
 func assetNotReady(projectSlug, code, message string) assetToolOutput {
+	return assetNotReadyWithActions(projectSlug, code, message, nil)
+}
+
+func assetNotReadyWithActions(projectSlug, code, message string, suggestedActions []string) assetToolOutput {
 	code = strings.TrimSpace(code)
 	if code == "" {
 		code = "ASSET_NOT_READY"
@@ -486,14 +490,48 @@ func assetNotReady(projectSlug, code, message string) assetToolOutput {
 	if message == "" {
 		message = code
 	}
+	if len(suggestedActions) == 0 {
+		suggestedActions = []string{message}
+	}
 	return assetToolOutput{
 		Status:           "not_ready",
 		ErrorCode:        code,
+		ErrorCodes:       []string{code},
 		Failed:           []string{code},
 		Checklist:        []string{message},
-		SuggestedActions: []string{message},
+		ChecklistItems:   []ErrorChecklistItem{{Code: code, Message: message}},
+		SuggestedActions: suggestedActions,
 		ProjectSlug:      projectSlug,
 	}
+}
+
+func assetLocalReadFailed(localPath string) assetToolOutput {
+	message := "local_path could not be read from the MCP server host/container"
+	actions := []string{
+		"Verify local_path is a path visible to the MCP server process, not just the client machine.",
+		"Use bytes_base64/content_base64 with filename and mime_type when the MCP client can read the file.",
+	}
+	if looksLikeWindowsDrivePath(localPath) {
+		message = "Windows host local_path is not visible inside the MCP server container"
+		actions = []string{
+			"Run tools/push-asset.ps1 -Path <Windows path> -ProjectSlug <project_slug>, then pass the returned /tmp/pindoc-asset-upload/... local_path to pindoc.asset.upload.",
+			"Alternatively send bytes_base64/content_base64 with filename and mime_type from the MCP client.",
+			"Do not pass A:\\... directly when Pindoc is running inside Docker Desktop's Linux container.",
+		}
+	}
+	return assetNotReadyWithActions("", "ASSET_LOCAL_READ_FAILED", message, actions)
+}
+
+func looksLikeWindowsDrivePath(path string) bool {
+	path = strings.TrimSpace(path)
+	if len(path) < 3 || path[1] != ':' {
+		return false
+	}
+	drive := path[0]
+	if !((drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z')) {
+		return false
+	}
+	return path[2] == '\\' || path[2] == '/'
 }
 
 func normalizeAssetLookup(ref string) string {
