@@ -121,6 +121,27 @@ func TestArtifactReadNotFoundErrorHintsForShareURL(t *testing.T) {
 	}
 }
 
+func TestArtifactReadNotFoundErrorIncludesProjectCandidates(t *testing.T) {
+	ref := normalizeArtifactReadRef("task-campaign-encounter-v2-catalog", "pindoc")
+	err := artifactReadNotFoundError(
+		"task-campaign-encounter-v2-catalog",
+		&auth.ProjectScope{ProjectSlug: "pindoc", ProjectLocale: "ko"},
+		ref,
+		artifactReadProjectCandidate{
+			ProjectSlug: "survival-manager",
+			Slug:        "task-campaign-encounter-v2-catalog",
+			Title:       "Campaign Encounter V2 Catalog",
+			HumanURL:    "/p/survival-manager/wiki/task-campaign-encounter-v2-catalog",
+		},
+	)
+	msg := err.Error()
+	for _, want := range []string{"other visible project", "project_slug=\"survival-manager\"", "Retry with the matching project_slug"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q missing %q", msg, want)
+		}
+	}
+}
+
 func TestBuildTaskAttentionNegativeTypeGateCoversNonTaskTypes(t *testing.T) {
 	nonTaskTypes := []string{
 		"Analysis",

@@ -19,6 +19,30 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
 )
 
+func TestDryRunProposeOutputPreservesPlannedRevisionNumber(t *testing.T) {
+	out := dryRunProposeOutput(artifactProposeOutput{
+		Status:         "accepted",
+		ArtifactID:     "artifact-1",
+		Slug:           "slug-1",
+		AgentRef:       "pindoc://slug-1",
+		HumanURL:       "/p/pindoc/wiki/slug-1",
+		Created:        true,
+		RevisionNumber: 17,
+		PinsStored:     2,
+		EdgesStored:    3,
+		Superseded:     true,
+	}, false)
+	if !out.DryRun || out.RevisionNumber != 0 || out.PlannedRevisionNumber != 17 {
+		t.Fatalf("dry-run revisions = dry:%v rev:%d planned:%d", out.DryRun, out.RevisionNumber, out.PlannedRevisionNumber)
+	}
+	if out.ArtifactID != "" || out.Slug != "" || out.AgentRef != "" || out.HumanURL != "" {
+		t.Fatalf("dry-run create should clear target identity: %+v", out)
+	}
+	if out.PinsStored != 0 || out.EdgesStored != 0 || out.Superseded {
+		t.Fatalf("dry-run should clear persisted side effects: pins=%d edges=%d superseded=%v", out.PinsStored, out.EdgesStored, out.Superseded)
+	}
+}
+
 func TestArtifactProposeDryRunIntegration(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("PINDOC_TEST_DATABASE_URL"))
 	if dsn == "" {
@@ -65,8 +89,8 @@ func TestArtifactProposeDryRunIntegration(t *testing.T) {
 			{"target_id": evidenceID, "relation": "evidence"},
 		},
 	})
-	if out.Status != "accepted" || !out.DryRun || out.Created || out.ArtifactID != "" || out.RevisionNumber != 0 {
-		t.Fatalf("dry_run create output = status=%q dry=%v created=%v artifact_id=%q rev=%d", out.Status, out.DryRun, out.Created, out.ArtifactID, out.RevisionNumber)
+	if out.Status != "accepted" || !out.DryRun || out.Created || out.ArtifactID != "" || out.RevisionNumber != 0 || out.PlannedRevisionNumber != 1 {
+		t.Fatalf("dry_run create output = status=%q dry=%v created=%v artifact_id=%q rev=%d planned=%d", out.Status, out.DryRun, out.Created, out.ArtifactID, out.RevisionNumber, out.PlannedRevisionNumber)
 	}
 	if got := countRows(t, ctx, pool, "artifacts", projectID); got != beforeArtifacts {
 		t.Fatalf("artifact count after dry_run create = %d, want %d", got, beforeArtifacts)
@@ -123,8 +147,8 @@ func TestArtifactProposeDryRunIntegration(t *testing.T) {
 		"author_id":        "codex-test",
 		"dry_run":          true,
 	})
-	if updateOut.Status != "accepted" || !updateOut.DryRun || updateOut.Created || updateOut.RevisionNumber != 0 {
-		t.Fatalf("dry_run update output = status=%q dry=%v created=%v rev=%d", updateOut.Status, updateOut.DryRun, updateOut.Created, updateOut.RevisionNumber)
+	if updateOut.Status != "accepted" || !updateOut.DryRun || updateOut.Created || updateOut.RevisionNumber != 0 || updateOut.PlannedRevisionNumber != 2 {
+		t.Fatalf("dry_run update output = status=%q dry=%v created=%v rev=%d planned=%d", updateOut.Status, updateOut.DryRun, updateOut.Created, updateOut.RevisionNumber, updateOut.PlannedRevisionNumber)
 	}
 	assertArtifactHead(t, ctx, pool, persisted.ArtifactID, 1, persistedBody)
 

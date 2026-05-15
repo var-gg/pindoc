@@ -131,10 +131,18 @@ type ContextReceiptHint struct {
 	ReceiptlessExemption      string `json:"receiptless_exemption,omitempty"`
 }
 
+type ProjectSlugDefaultHint struct {
+	ProjectSlug string   `json:"project_slug,omitempty"`
+	Via         string   `json:"via,omitempty"`
+	Reason      string   `json:"reason,omitempty"`
+	Candidates  []string `json:"candidates,omitempty"`
+}
+
 type contextForTaskOutput struct {
-	TaskDescription string           `json:"task_description"`
-	Landings        []ContextLanding `json:"landings"`
-	Notice          string           `json:"notice,omitempty"`
+	TaskDescription    string                  `json:"task_description"`
+	Landings           []ContextLanding        `json:"landings"`
+	Notice             string                  `json:"notice,omitempty"`
+	ProjectSlugDefault *ProjectSlugDefaultHint `json:"project_slug_default,omitempty"`
 	// SuggestedAreas proposes landing areas for a future artifact. It is
 	// advisory and omitted only by older servers; low-confidence runs return
 	// an empty array so existing callers stay backward-compatible.
@@ -242,6 +250,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 				return nil, contextForTaskOutput{}, fmt.Errorf("context.for_task: %w", err)
 			}
 			scope := readScope.ProjectScope
+			projectDefaultHint := contextProjectSlugDefaultHint(ctx)
 			if strings.TrimSpace(in.TaskDescription) == "" {
 				return nil, contextForTaskOutput{}, fmt.Errorf("task_description is required")
 			}
@@ -270,15 +279,18 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			templateHints := templateHintsForTypes(ctx, deps, scope.ProjectSlug, []string{targetType})
 			if deps.Embedder == nil {
 				applicableRules := loadApplicableRulesForContext(ctx, deps, readScope, firstAreaFilter(in.Areas), targetType, ruleLimit)
-				return nil, contextForTaskOutput{
+				out := contextForTaskOutput{
 					TaskDescription:    in.TaskDescription,
 					Notice:             "embedder not configured on this server; context.for_task disabled",
+					ProjectSlugDefault: projectDefaultHint,
 					TemplateHints:      templateHints,
 					RecentChangeGroups: recentChangeGroups,
 					ApplicableRules:    applicableRules,
 					CallerInFlight:     callerInFlight,
 					PinCandidates:      buildPinCandidatesAttention(ctx, deps, p, scope, nil),
-				}, nil
+				}
+				applyContextProjectSlugDefaultNotice(&out)
+				return nil, out, nil
 			}
 
 			res, err := deps.Embedder.Embed(ctx, embed.Request{
@@ -339,6 +351,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			out := contextForTaskOutput{
 				TaskDescription:    in.TaskDescription,
 				Landings:           []ContextLanding{},
+				ProjectSlugDefault: projectDefaultHint,
 				SuggestedAreas:     []AreaSuggestion{},
 				TemplateHints:      templateHints,
 				RecentChangeGroups: recentChangeGroups,
@@ -427,6 +440,7 @@ func RegisterContextForTask(server *sdk.Server, deps Deps) {
 			if err := recordAreaSuggestionEvent(ctx, deps, scope.ProjectSlug, out.SearchReceipt, in.TaskDescription, out.SuggestedAreas); err != nil && deps.Logger != nil {
 				deps.Logger.Warn("area suggestion event failed", "err", err)
 			}
+			applyContextProjectSlugDefaultNotice(&out)
 			return nil, out, rows.Err()
 		},
 	)
@@ -445,6 +459,34 @@ func buildContextReceiptHint(deps Deps, receipt string) *ContextReceiptHint {
 			"Search receipts are reusable in the MCP session until expiry or corpus-drift staleness; refresh the receipt if propose reports receipt_unknown, receipt_expired, or receipt_superseded.",
 		ReceiptlessExemptionLimit: limit,
 		ReceiptlessExemption:      fmt.Sprintf("If no search_receipt is supplied, receipt-less bootstrap exemption is only for empty/same-author areas and is capped by receipt_exemption_limit=%d.", limit),
+	}
+}
+
+func contextProjectSlugDefaultHint(ctx context.Context) *ProjectSlugDefaultHint {
+	res, ok := projectSlugDefaultResultFromContext(ctx)
+	if !ok || strings.TrimSpace(res.ProjectSlug) == "" {
+		return nil
+	}
+	return &ProjectSlugDefaultHint{
+		ProjectSlug: res.ProjectSlug,
+		Via:         res.Via,
+		Reason:      res.Reason,
+		Candidates:  append([]string(nil), res.Candidates...),
+	}
+}
+
+func applyContextProjectSlugDefaultNotice(out *contextForTaskOutput) {
+	if out == nil || out.ProjectSlugDefault == nil {
+		return
+	}
+	hint := out.ProjectSlugDefault
+	msg := fmt.Sprintf("project_slug omitted; using default project_slug=%q via %s. Pass project_slug explicitly for cross-project tasks.", hint.ProjectSlug, hint.Via)
+	if strings.TrimSpace(out.Notice) == "" {
+		out.Notice = msg
+		return
+	}
+	if !strings.Contains(out.Notice, msg) {
+		out.Notice += " " + msg
 	}
 }
 

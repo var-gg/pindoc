@@ -133,6 +133,14 @@ type EdgeRef struct {
 	HumanURLAbs string `json:"human_url_abs,omitempty"`
 }
 
+type artifactReadProjectCandidate struct {
+	ProjectSlug string
+	Slug        string
+	Title       string
+	HumanURL    string
+	HumanURLAbs string
+}
+
 // RegisterArtifactRead wires pindoc.artifact.read.
 func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
@@ -225,7 +233,8 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 			)
 			_ = desc // reserved; project.description not part of read response
 			if errors.Is(err, pgx.ErrNoRows) {
-				return nil, artifactReadOutput{}, artifactReadNotFoundError(in.IDOrSlug, scope, ref)
+				candidates := artifactReadProjectCandidates(ctx, deps, p, scope, ref)
+				return nil, artifactReadOutput{}, artifactReadNotFoundError(in.IDOrSlug, scope, ref, candidates...)
 			}
 			if err != nil {
 				return nil, artifactReadOutput{}, fmt.Errorf("read: %w", err)
@@ -721,7 +730,84 @@ func splitPathSegments(path string) []string {
 	return segments
 }
 
-func artifactReadNotFoundError(raw string, scope *auth.ProjectScope, ref artifactReadRef) error {
+func artifactReadProjectCandidates(ctx context.Context, deps Deps, p *auth.Principal, currentScope *auth.ProjectScope, ref artifactReadRef) []artifactReadProjectCandidate {
+	if deps.DB == nil || strings.TrimSpace(ref.Value) == "" {
+		return nil
+	}
+	visible, err := visibleProjectSlugs(ctx, deps, p)
+	if err != nil {
+		if deps.Logger != nil {
+			deps.Logger.Warn("artifact.read cross-project candidate lookup failed", "err", err)
+		}
+		return nil
+	}
+	currentSlug := ""
+	if currentScope != nil {
+		currentSlug = currentScope.ProjectSlug
+	}
+	var out []artifactReadProjectCandidate
+	for _, slug := range visible {
+		if slug == "" || slug == currentSlug {
+			continue
+		}
+		readScope, err := resolveMCPReadProjectScope(ctx, deps.DB, p, slug)
+		if err != nil {
+			continue
+		}
+		candidate, ok := artifactReadProjectCandidateForScope(ctx, deps, readScope, ref.Value)
+		if !ok {
+			continue
+		}
+		out = append(out, candidate)
+		if len(out) >= 5 {
+			break
+		}
+	}
+	return out
+}
+
+func artifactReadProjectCandidateForScope(ctx context.Context, deps Deps, readScope *mcpReadProjectScope, idOrSlug string) (artifactReadProjectCandidate, bool) {
+	var out artifactReadProjectCandidate
+	if deps.DB == nil || readScope == nil || readScope.ProjectScope == nil || strings.TrimSpace(idOrSlug) == "" {
+		return out, false
+	}
+	args := []any{readScope.ProjectSlug, strings.TrimSpace(idOrSlug)}
+	visibilityWhere, visibilityArgs := mcpReadArtifactVisibilityWhere(readScope, "a", len(args)+1)
+	args = append(args, visibilityArgs...)
+	err := deps.DB.QueryRow(ctx, fmt.Sprintf(`
+		SELECT a.slug, a.title
+		  FROM artifacts a
+		  JOIN projects proj ON proj.id = a.project_id
+		 WHERE proj.slug = $1
+		   AND (
+		        a.id::text = $2 OR a.slug = $2 OR
+		        a.id = (
+		           SELECT asa.artifact_id
+		             FROM artifact_slug_aliases asa
+		            WHERE asa.project_id = proj.id AND asa.old_slug = $2
+		            LIMIT 1
+		        )
+		   )
+		   AND a.status <> 'archived'
+		   AND %s
+		 LIMIT 1
+	`, visibilityWhere), args...).Scan(&out.Slug, &out.Title)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return out, false
+	}
+	if err != nil {
+		if deps.Logger != nil {
+			deps.Logger.Warn("artifact.read project candidate lookup failed", "project_slug", readScope.ProjectSlug, "err", err)
+		}
+		return out, false
+	}
+	out.ProjectSlug = readScope.ProjectSlug
+	out.HumanURL = HumanURL(readScope.ProjectSlug, readScope.ProjectLocale, out.Slug)
+	out.HumanURLAbs = AbsHumanURL(deps.Settings, readScope.ProjectSlug, readScope.ProjectLocale, out.Slug)
+	return out, true
+}
+
+func artifactReadNotFoundError(raw string, scope *auth.ProjectScope, ref artifactReadRef, candidates ...artifactReadProjectCandidate) error {
 	projectScope := ""
 	if scope != nil {
 		projectScope = scope.ProjectSlug
@@ -734,5 +820,28 @@ func artifactReadNotFoundError(raw string, scope *auth.ProjectScope, ref artifac
 			msg += "; input looks like a share URL, extract the wiki slug and retry with id_or_slug"
 		}
 	}
+	if len(candidates) > 0 {
+		parts := make([]string, 0, len(candidates))
+		for _, candidate := range candidates {
+			parts = append(parts, artifactReadProjectCandidateSummary(candidate))
+		}
+		msg += "; same artifact ref exists in other visible project(s): " + strings.Join(parts, "; ") + ". Retry with the matching project_slug"
+	}
 	return errors.New(msg)
+}
+
+func artifactReadProjectCandidateSummary(candidate artifactReadProjectCandidate) string {
+	parts := []string{fmt.Sprintf("project_slug=%q", candidate.ProjectSlug)}
+	if candidate.Slug != "" {
+		parts = append(parts, fmt.Sprintf("slug=%q", candidate.Slug))
+	}
+	if candidate.Title != "" {
+		parts = append(parts, fmt.Sprintf("title=%q", candidate.Title))
+	}
+	if candidate.HumanURLAbs != "" {
+		parts = append(parts, fmt.Sprintf("human_url=%q", candidate.HumanURLAbs))
+	} else if candidate.HumanURL != "" {
+		parts = append(parts, fmt.Sprintf("human_url=%q", candidate.HumanURL))
+	}
+	return strings.Join(parts, " ")
 }
