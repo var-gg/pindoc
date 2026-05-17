@@ -481,7 +481,11 @@ type artifactProposeOutput struct {
 	PublishedAt    time.Time `json:"published_at,omitzero"`
 	Created        bool      `json:"created"`         // false on updates
 	RevisionNumber int       `json:"revision_number"` // 1 on create, N+1 on update
-	DryRun         bool      `json:"dry_run,omitempty"`
+	// PlannedRevisionNumber preserves dry-run compatibility
+	// (revision_number remains 0) while still showing the revision that
+	// publish would create.
+	PlannedRevisionNumber int  `json:"planned_revision_number,omitempty"`
+	DryRun                bool `json:"dry_run,omitempty"`
 
 	// Phase 11a: surface what was actually persisted so agents get
 	// confirmation of edge/pin storage without a second read.
@@ -3110,6 +3114,7 @@ func fallbackCreateCommitMsg(title string) string {
 }
 
 func dryRunProposeOutput(out artifactProposeOutput, keepTargetIdentity bool) artifactProposeOutput {
+	out.PlannedRevisionNumber = out.RevisionNumber
 	out.DryRun = true
 	out.Created = false
 	out.PublishedAt = time.Time{}
@@ -3886,10 +3891,10 @@ func pinDiagnosticSuggestedActions(warnings []string) []string {
 	}
 	var out []string
 	if hasWarningPrefix(warnings, "PIN_REPO_") || hasWarningPrefix(warnings, "RECOMMEND_REPO_REGISTRATION") {
-		out = append(out, "Pin repo diagnostics: run pindoc.workspace.detect and ensure the project has a project_repos row with name/remote/local_paths matching this workspace.")
+		out = append(out, "Pin repo diagnostics: run pindoc.workspace.detect to confirm the intended project_slug; register or repair a project_repos row for this project with name/remote/local_paths matching this checkout. If the repo is already registered, pass the canonical repo_id on the pin to bypass name/path auto-mapping.")
 	}
 	if hasWarningPrefix(warnings, "PIN_PATH_") {
-		out = append(out, "Pin path diagnostics: use repo-relative paths when possible; absolute paths are accepted only when they are inside the mapped repo root and are not written back to artifact bodies.")
+		out = append(out, "Pin path diagnostics: use repo-relative paths from the registered repo root; PIN_PATH_UNOBSERVABLE means every checked path was missing from this server checkout, so verify project_repos.local_paths or pass repo_id with a path relative to that repo.")
 	}
 	return out
 }

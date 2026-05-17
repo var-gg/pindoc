@@ -52,9 +52,14 @@ func TestPinPathWarningsCollapseAllMissingAsUnobservable(t *testing.T) {
 }
 
 func TestPinDiagnosticHintsPointAtWorkspaceDetect(t *testing.T) {
-	warnings := []string{"PIN_REPO_NOT_REGISTERED:docs/a.md"}
+	warnings := []string{"PIN_REPO_NOT_REGISTERED:docs/a.md", "PIN_PATH_UNOBSERVABLE:1"}
 	actions := strings.Join(pinDiagnosticSuggestedActions(warnings), "\n")
-	if !strings.Contains(actions, "pindoc.workspace.detect") || !strings.Contains(actions, "project_repos") {
+	for _, want := range []string{"pindoc.workspace.detect", "project_repos", "repo_id", "repo-relative", "local_paths", "PIN_PATH_UNOBSERVABLE"} {
+		if !strings.Contains(actions, want) {
+			t.Fatalf("pin diagnostic actions %q missing %q", actions, want)
+		}
+	}
+	if !strings.Contains(actions, "path relative to that repo") {
 		t.Fatalf("pin diagnostic actions are not actionable: %q", actions)
 	}
 	tools := pinDiagnosticNextTools(warnings)
