@@ -71,19 +71,33 @@ func NormalizeGitRemoteURL(raw string) (string, error) {
 }
 
 func AddProjectRepo(ctx context.Context, q repoQueryer, in ProjectRepoInput) (string, error) {
+	id, _, err := UpsertProjectRepo(ctx, q, in)
+	return id, err
+}
+
+// UpsertProjectRepo inserts or updates a project_repos row keyed by
+// (project_id, git_remote_url). created reports whether the row was inserted
+// (true) or an existing row was updated (false), letting MCP callers surface
+// "registered" vs "refreshed" outcomes without an extra round-trip.
+//
+// in.GitRemoteURL is required (project_repos.git_remote_url is the join key
+// for pin.repo_id resolution); empty input yields a no-op return ("", false,
+// nil) so callers can pass through optional projects.CreateProjectInput
+// fields without branching.
+func UpsertProjectRepo(ctx context.Context, q repoQueryer, in ProjectRepoInput) (string, bool, error) {
 	if q == nil {
-		return "", errors.New("project repo insert: nil queryer")
+		return "", false, errors.New("project repo upsert: nil queryer")
 	}
 	projectID := strings.TrimSpace(in.ProjectID)
 	if projectID == "" {
-		return "", errors.New("project repo insert: project id is required")
+		return "", false, errors.New("project repo upsert: project id is required")
 	}
 	normalized, err := NormalizeGitRemoteURL(in.GitRemoteURL)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if normalized == "" {
-		return "", nil
+		return "", false, nil
 	}
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
@@ -96,7 +110,14 @@ func AddProjectRepo(ctx context.Context, q repoQueryer, in ProjectRepoInput) (st
 	urls := normalizeRepoStringSet(append([]string{normalized, strings.TrimSpace(in.GitRemoteURL)}, in.URLs...))
 	localPaths := normalizeRepoPathSet(in.LocalPaths)
 
-	var id string
+	// xmax = 0 on the returned row indicates the row was created by this
+	// statement; any non-zero xmax means the ON CONFLICT branch ran and we
+	// updated an existing row. This is the standard Postgres pattern for
+	// distinguishing insert vs upsert-update in a single round-trip.
+	var (
+		id       string
+		inserted bool
+	)
 	if err := q.QueryRow(ctx, `
 		INSERT INTO project_repos (
 			project_id, git_remote_url, git_remote_url_original, name, default_branch,
@@ -112,11 +133,11 @@ func AddProjectRepo(ctx context.Context, q repoQueryer, in ProjectRepoInput) (st
 			urls = (
 				SELECT ARRAY(SELECT DISTINCT v FROM unnest(project_repos.urls || EXCLUDED.urls) AS v WHERE v <> '')
 			)
-		RETURNING id::text
-	`, projectID, normalized, strings.TrimSpace(in.GitRemoteURL), name, branch, localPaths, urls).Scan(&id); err != nil {
-		return "", fmt.Errorf("project repo insert: %w", err)
+		RETURNING id::text, (xmax = 0)
+	`, projectID, normalized, strings.TrimSpace(in.GitRemoteURL), name, branch, localPaths, urls).Scan(&id, &inserted); err != nil {
+		return "", false, fmt.Errorf("project repo upsert: %w", err)
 	}
-	return id, nil
+	return id, inserted, nil
 }
 
 func EnsureDefaultProjectRepo(ctx context.Context, q repoQueryer, projectSlug, rawRemote string) error {

@@ -74,6 +74,86 @@ func TestProjectReposIntegration(t *testing.T) {
 	assertProjectRepoCascade(t, ctx, tx, out.ID)
 }
 
+func TestUpsertProjectRepoIdempotent(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PINDOC_TEST_DATABASE_URL"))
+	if dsn == "" {
+		t.Skip("set PINDOC_TEST_DATABASE_URL to run UpsertProjectRepo idempotency test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	pool, err := db.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer pool.Close()
+	if err := db.Migrate(ctx, pool.Pool); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	out, err := CreateProject(ctx, tx, CreateProjectInput{
+		Slug:            "upsert-idempotent-" + suffix,
+		Name:            "Upsert Idempotent",
+		PrimaryLanguage: "en",
+	})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	remote := fmt.Sprintf("https://github.com/upsert-it-%s/sample.git", suffix)
+
+	// First call — fresh row, created=true.
+	id1, created1, err := UpsertProjectRepo(ctx, tx, ProjectRepoInput{
+		ProjectID:    out.ID,
+		GitRemoteURL: remote,
+		LocalPaths:   []string{"/tmp/upsert-it/checkout"},
+	})
+	if err != nil {
+		t.Fatalf("UpsertProjectRepo first call: %v", err)
+	}
+	if id1 == "" {
+		t.Fatalf("UpsertProjectRepo returned empty id on insert")
+	}
+	if !created1 {
+		t.Fatalf("UpsertProjectRepo created flag = false on first insert, want true")
+	}
+
+	// Second call — same key, different local_path. created=false, paths merged.
+	id2, created2, err := UpsertProjectRepo(ctx, tx, ProjectRepoInput{
+		ProjectID:    out.ID,
+		GitRemoteURL: remote,
+		LocalPaths:   []string{"/tmp/upsert-it/another-checkout"},
+	})
+	if err != nil {
+		t.Fatalf("UpsertProjectRepo second call: %v", err)
+	}
+	if id2 != id1 {
+		t.Fatalf("UpsertProjectRepo returned different id on update: %q vs %q", id2, id1)
+	}
+	if created2 {
+		t.Fatalf("UpsertProjectRepo created flag = true on second call, want false")
+	}
+
+	var localPaths []string
+	if err := tx.QueryRow(ctx, `
+		SELECT local_paths FROM project_repos WHERE id = $1::uuid
+	`, id1).Scan(&localPaths); err != nil {
+		t.Fatalf("read local_paths: %v", err)
+	}
+	if len(localPaths) != 2 {
+		t.Fatalf("local_paths = %v, want 2 merged entries", localPaths)
+	}
+	assertProjectRepoCount(t, ctx, tx, out.ID, 1)
+}
+
 func assertProjectRepoRow(t *testing.T, ctx context.Context, tx pgx.Tx, projectID, wantRemote, wantOriginal string) {
 	t.Helper()
 	var gotRemote, gotOriginal, gotName, gotBranch string

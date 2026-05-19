@@ -913,6 +913,30 @@ Tasks, and use a pinned project_slug on follow-up calls. The
 harness.install response carries a session_bootstrap object that new
 clients should consume directly to drive this handshake.
 
+### Registering a workspace repo (project_repos)
+
+When workspace.detect returns a next_action with tool="pindoc.project.set_repo",
+the resolved project has no project_repos row matching the caller's
+git_remote_url. The args object is ready to replay verbatim:
+
+    {
+      "tool": "pindoc.project.set_repo",
+      "args": {
+        "project_slug": "...",
+        "git_remote_url": "...",
+        "local_paths": ["..."]
+      },
+      "reason": "..."
+    }
+
+project.set_repo is owner-only and idempotent on (project_id,
+git_remote_url); local_paths and urls merge into the existing row. Call it
+once per workspace checkout (or whenever the git_remote_url changes), then
+re-run workspace.detect — the second call resolves via via="git_remote"
+with confidence=high. Skipping this leaves pin.add_pin emitting
+PIN_REPO_NOT_REGISTERED + PIN_PATH_UNOBSERVABLE for every pin in the
+workspace; the pin saves but path verification is silently disabled.
+
 ## Toolset version drift
 
 Every MCP tool response includes toolset_version. Keep the first value

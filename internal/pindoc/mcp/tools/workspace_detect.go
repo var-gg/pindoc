@@ -22,12 +22,24 @@ type workspaceDetectInput struct {
 }
 
 type workspaceDetectOutput struct {
-	ProjectSlug    string   `json:"project_slug,omitempty"`
-	Confidence     string   `json:"confidence" jsonschema:"one of high | medium | low | none"`
-	Via            string   `json:"via" jsonschema:"one of pindoc_md | git_remote | directory_match | fallback_only_one | fallback_required"`
-	Candidates     []string `json:"candidates,omitempty"`
-	Reason         string   `json:"reason,omitempty"`
-	ToolsetVersion string   `json:"toolset_version,omitempty"`
+	ProjectSlug    string                     `json:"project_slug,omitempty"`
+	Confidence     string                     `json:"confidence" jsonschema:"one of high | medium | low | none"`
+	Via            string                     `json:"via" jsonschema:"one of pindoc_md | git_remote | directory_match | fallback_only_one | fallback_required"`
+	Candidates     []string                   `json:"candidates,omitempty"`
+	Reason         string                     `json:"reason,omitempty"`
+	Warnings       []string                   `json:"warnings,omitempty" jsonschema:"non-blocking warnings; current codes: PROJECT_REPOS_EMPTY_FOR_PINDOC_MD_MATCH"`
+	NextAction     *workspaceDetectNextAction `json:"next_action,omitempty" jsonschema:"suggested tool call to close a recoverable gap (e.g. register a missing project_repos row)"`
+	ToolsetVersion string                     `json:"toolset_version,omitempty"`
+}
+
+// workspaceDetectNextAction is the hint shape the harness can replay
+// directly: tool name + args ready for CallTool. Reason is the human-
+// readable rationale surfaced when the agent declines or the user wants
+// to know why the suggestion appeared.
+type workspaceDetectNextAction struct {
+	Tool   string         `json:"tool"`
+	Args   map[string]any `json:"args"`
+	Reason string         `json:"reason"`
 }
 
 func RegisterWorkspaceDetect(server *sdk.Server, deps Deps) {
@@ -58,7 +70,84 @@ func handleWorkspaceDetect(ctx context.Context, deps Deps, p *auth.Principal, in
 		}
 		return slug, true
 	}
-	return detectWorkspaceFromSources(in, visible, lookup), nil
+	out := detectWorkspaceFromSources(in, visible, lookup)
+	enrichWorkspaceDetectWithRegisterHint(ctx, deps, in, &out)
+	return out, nil
+}
+
+// enrichWorkspaceDetectWithRegisterHint attaches a project.set_repo
+// next_action when the resolved project_slug has zero project_repos rows
+// matching the caller's git_remote_url. Closes the dogfood gap where
+// pin.add_pin emits PIN_REPO_NOT_REGISTERED for a workspace that
+// workspace.detect resolved successfully via a non-git_remote path
+// (PINDOC.md frontmatter, fallback_only_one, directory_match).
+//
+// Only fires when the caller provided a parseable git_remote_url and the
+// project owns no row for that normalized remote — git_remote-resolved
+// detections already confirm the row exists, so no hint is needed there.
+func enrichWorkspaceDetectWithRegisterHint(ctx context.Context, deps Deps, in workspaceDetectInput, out *workspaceDetectOutput) {
+	if out == nil || out.ProjectSlug == "" {
+		return
+	}
+	if out.Via == "git_remote" {
+		// git_remote path already confirmed the row.
+		return
+	}
+	rawRemote := strings.TrimSpace(in.GitRemoteURL)
+	if rawRemote == "" {
+		return
+	}
+	normalized, err := projects.NormalizeGitRemoteURL(rawRemote)
+	if err != nil || normalized == "" {
+		return
+	}
+	if deps.DB == nil {
+		return
+	}
+	var exists bool
+	if err := deps.DB.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			  FROM project_repos pr
+			  JOIN projects p ON p.id = pr.project_id
+			 WHERE p.slug = $1
+			   AND pr.git_remote_url = $2
+		)
+	`, out.ProjectSlug, normalized).Scan(&exists); err != nil {
+		return
+	}
+	if exists {
+		return
+	}
+
+	args := map[string]any{
+		"project_slug":   out.ProjectSlug,
+		"git_remote_url": rawRemote,
+	}
+	if local := strings.TrimSpace(in.WorkspacePath); local != "" {
+		args["local_paths"] = []string{local}
+	}
+	out.NextAction = &workspaceDetectNextAction{
+		Tool: "pindoc.project.set_repo",
+		Args: args,
+		Reason: "project_repos has no row mapping " + normalized +
+			" to project_slug " + out.ProjectSlug +
+			". Register the workspace so pin.repo_id auto-mapping and PIN_REPO_NOT_REGISTERED both resolve.",
+	}
+	if out.Via == "pindoc_md" {
+		out.Warnings = appendUniqueWarning(out.Warnings, "PROJECT_REPOS_EMPTY_FOR_PINDOC_MD_MATCH")
+	} else {
+		out.Warnings = appendUniqueWarning(out.Warnings, "PROJECT_REPOS_EMPTY_FOR_DETECTED_PROJECT")
+	}
+}
+
+func appendUniqueWarning(existing []string, code string) []string {
+	for _, w := range existing {
+		if w == code {
+			return existing
+		}
+	}
+	return append(existing, code)
 }
 
 func detectWorkspaceFromSources(

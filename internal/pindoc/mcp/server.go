@@ -160,6 +160,7 @@ func NewServer(opts Options) (*Server, error) {
 
 	tools.RegisterProjectCurrent(s, deps)
 	tools.RegisterProjectCreate(s, deps)
+	tools.RegisterProjectSetRepo(s, deps)
 	tools.RegisterProjectSetVisibility(s, deps)
 	tools.RegisterProjectExport(s, deps)
 	tools.RegisterWorkspaceDetect(s, deps)
