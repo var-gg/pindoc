@@ -2044,6 +2044,38 @@ func recordReviewRequiredEvent(ctx context.Context, tx pgx.Tx, projectID, artifa
 	return err
 }
 
+// loadProjectAreaSlugs returns the set of every area slug in the
+// project. Decision area-taxonomy-profiled-skeleton T6 uses it to
+// validate artifact_meta.applies_to_areas rule scopes against real
+// areas — the field is plain JSONB with no foreign key.
+func loadProjectAreaSlugs(ctx context.Context, deps Deps, projectSlug string) (map[string]bool, error) {
+	// preflight runs in unit tests with a zero-value Deps (no DB). A nil
+	// map signals "could not enumerate" so the caller skips the existence
+	// check rather than treating every slug as unknown.
+	if deps.DB == nil {
+		return nil, nil
+	}
+	rows, err := deps.DB.Query(ctx, `
+		SELECT a.slug
+		  FROM areas a
+		  JOIN projects p ON p.id = a.project_id
+		 WHERE p.slug = $1
+	`, projectSlug)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return nil, err
+		}
+		out[s] = true
+	}
+	return out, rows.Err()
+}
+
 // preflight runs the cheap synchronous checks. Returns a list of ✗-prefixed
 // lines (legacy natural-language) + parallel stable-code list + short
 // ErrorCode for the first failure. Empty lists mean clean.
@@ -2142,10 +2174,22 @@ func preflight(ctx context.Context, deps Deps, projectSlug string, in *artifactP
 				push(fmt.Sprintf("artifact_meta.verification_state %q is not one of verified|partially_verified|unverified", v), "META_VERIFICATION_INVALID")
 			}
 		}
-		for _, area := range m.AppliesToAreas {
-			if !validRuleAreaScope(area) {
-				push(fmt.Sprintf("artifact_meta.applies_to_areas contains invalid scope %q; use area_slug, *, or wildcard scope like ui/*", area), "META_APPLIES_AREA_INVALID")
-				break
+		if len(m.AppliesToAreas) > 0 {
+			// Decision area-taxonomy-profiled-skeleton T6: reject an
+			// applies_to_areas scope whose slug is not a real area —
+			// the field is plain JSONB with no foreign key, so an
+			// unknown slug makes the rule silently no-op.
+			knownAreas, areaErr := loadProjectAreaSlugs(ctx, deps, projectSlug)
+			for _, area := range m.AppliesToAreas {
+				if !validRuleAreaScope(area) {
+					push(fmt.Sprintf("artifact_meta.applies_to_areas contains invalid scope %q; use area_slug, *, or wildcard scope like ui/*", area), "META_APPLIES_AREA_INVALID")
+					break
+				}
+				base := strings.TrimSuffix(strings.TrimSpace(area), "/*")
+				if knownAreas != nil && areaErr == nil && base != "" && base != "*" && !knownAreas[base] {
+					push(fmt.Sprintf("artifact_meta.applies_to_areas references %q, which is not an area in this project; rule scoping silently no-ops on an unknown slug", area), "META_APPLIES_AREA_UNKNOWN")
+					break
+				}
 			}
 		}
 		for _, artifactType := range m.AppliesToTypes {
@@ -2897,7 +2941,7 @@ func patchFieldsFor(code string) []string {
 		return []string{"pins"}
 	case "TASK_META_WRONG_TYPE":
 		return []string{"task_meta"}
-	case "META_APPLIES_AREA_INVALID":
+	case "META_APPLIES_AREA_INVALID", "META_APPLIES_AREA_UNKNOWN":
 		return []string{"artifact_meta.applies_to_areas"}
 	case "META_APPLIES_TYPE_INVALID":
 		return []string{"artifact_meta.applies_to_types"}
