@@ -24,7 +24,8 @@ func TestArtifactSetAreaTargetPolicy(t *testing.T) {
 		{name: "fileable domain top-level allowed", area: setAreaInfo{ID: "a", Slug: "characters", Fileable: true}, want: ""},
 		{name: "fileable depth-1 child allowed", area: setAreaInfo{ID: "a", Slug: "heroes", ParentID: "p", ParentSlug: "characters", Fileable: true}, want: ""},
 		{name: "non-fileable sub-area rejected", area: setAreaInfo{ID: "a", Slug: "shelf", ParentID: "p", ParentSlug: "characters", Fileable: false}, want: "AREA_NOT_FILEABLE"},
-		{name: "grandchild rejected", area: setAreaInfo{ID: "a", Slug: "too-deep", ParentID: "p", ParentSlug: "heroes", GrandparentID: "g", Fileable: true}, want: "AREA_DEPTH_VIOLATION"},
+		{name: "depth-2 rejected when root max_depth is 1", area: setAreaInfo{ID: "a", Slug: "too-deep", ParentID: "p", ParentSlug: "heroes", GrandparentID: "g", Fileable: true, RootMaxDepth: 1}, want: "AREA_DEPTH_VIOLATION"},
+		{name: "depth-2 allowed when root max_depth is 2", area: setAreaInfo{ID: "a", Slug: "merchants", ParentID: "p", ParentSlug: "npcs", GrandparentID: "g", Fileable: true, RootMaxDepth: 2}, want: ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

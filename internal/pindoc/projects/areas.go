@@ -37,6 +37,11 @@ type TopLevelAreaSeedRow struct {
 	// fileable. Sub-areas (AreaSeed) are always fileable and seeded via
 	// the areas.fileable column DEFAULT.
 	Fileable bool
+	// MaxDepth caps sub-area nesting under this top-level area
+	// (Decision area-taxonomy-profiled-skeleton T5). 0 or 1 means
+	// depth-1 sub-areas only; 2 allows depth-2 for a high-cardinality
+	// domain. seedAreas treats 0 as 1.
+	MaxDepth int
 }
 
 // TaxonomyProfile is the per-domain area skeleton a project picks at
@@ -276,6 +281,7 @@ var gameNarrativeProfile = TaxonomyProfile{
 			DescriptionEN: "Combat rules, encounter design, enemy behavior, and balance.",
 			DescriptionKO: "전투 규칙, encounter 설계, enemy behavior, balance.",
 			Fileable:      true,
+			MaxDepth:      2,
 		},
 		{
 			Slug:          "characters",
@@ -283,6 +289,7 @@ var gameNarrativeProfile = TaxonomyProfile{
 			DescriptionEN: "Character lore, cast structure, factions, and relationships.",
 			DescriptionKO: "캐릭터 lore, cast 구조, faction·relationship 모델.",
 			Fileable:      true,
+			MaxDepth:      2,
 		},
 		{
 			Slug:          "narrative",
@@ -290,6 +297,7 @@ var gameNarrativeProfile = TaxonomyProfile{
 			DescriptionEN: "Plot, quests, dialogue, branching, canon, and themes.",
 			DescriptionKO: "plot, quest, dialogue, branching, canon, theme.",
 			Fileable:      true,
+			MaxDepth:      2,
 		},
 		{
 			Slug:          "atlas",
@@ -297,6 +305,7 @@ var gameNarrativeProfile = TaxonomyProfile{
 			DescriptionEN: "World map, regions, locations, biomes, and traversal.",
 			DescriptionKO: "지도, 지역, 장소, 생태권, traversal.",
 			Fileable:      true,
+			MaxDepth:      2,
 		},
 		{
 			Slug:          "art",

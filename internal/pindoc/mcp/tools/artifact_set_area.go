@@ -61,6 +61,7 @@ type setAreaInfo struct {
 	ParentSlug    string
 	GrandparentID string
 	Fileable      bool
+	RootMaxDepth  int
 }
 
 type areaArtifact struct {
@@ -342,13 +343,15 @@ func resolveSetAreaExisting(ctx context.Context, q setAreaQuerier, projectID, sl
 		       a.parent_id::text,
 		       parent.slug,
 		       parent.parent_id::text,
-		       a.fileable
+		       a.fileable,
+		       COALESCE(grandparent.max_depth, parent.max_depth, a.max_depth)
 		  FROM areas a
 		  LEFT JOIN areas parent ON parent.id = a.parent_id
+		  LEFT JOIN areas grandparent ON grandparent.id = parent.parent_id
 		 WHERE a.project_id = $1::uuid
 		   AND a.slug = $2
 		 LIMIT 1
-	`, projectID, slug).Scan(&area.ID, &area.Slug, &parentID, &parentSlug, &grandparentID, &area.Fileable)
+	`, projectID, slug).Scan(&area.ID, &area.Slug, &parentID, &parentSlug, &grandparentID, &area.Fileable, &area.RootMaxDepth)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return setAreaInfo{}, "AREA_NOT_FOUND"
 	}
@@ -368,16 +371,16 @@ func resolveSetAreaExisting(ctx context.Context, q setAreaQuerier, projectID, sl
 }
 
 // validateSetAreaTarget rejects a set_area target an artifact must not
-// land in. Decision area-taxonomy-profiled-skeleton T2 replaced the
-// "only misc/_unsorted top-level" exception with the per-area fileable
-// flag: any area — top-level or sub-area — accepts artifacts when it is
-// fileable. The depth-2 grandchild guard is unchanged (T5 revisits depth
-// as a profile-aware policy).
+// land in. Decision area-taxonomy-profiled-skeleton: any area — top-
+// level or sub-area — accepts artifacts when it is fileable (T2). Depth
+// is a per-top-level policy (T5): a depth-2 target is allowed only when
+// its root top-level's max_depth is >= 2. depth-3+ is always rejected
+// because a sub-area root resolves to max_depth 1.
 func validateSetAreaTarget(area setAreaInfo) string {
 	if area.ID == "" {
 		return "AREA_NOT_FOUND"
 	}
-	if area.GrandparentID != "" {
+	if area.GrandparentID != "" && area.RootMaxDepth < 2 {
 		return "AREA_DEPTH_VIOLATION"
 	}
 	if !area.Fileable {

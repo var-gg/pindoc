@@ -88,18 +88,21 @@ Create a project-specific sub-area under an existing top-level area. Implements 
 			defer func() { _ = tx.Rollback(ctx) }()
 
 			var projectID string
-			var parentID, parentParentID *string
+			var parentID, parentParentID, parentGrandparentID *string
+			var rootMaxDepth *int
 			err = tx.QueryRow(ctx, `
-				SELECT p.id::text, a.id::text, a.parent_id::text
+				SELECT p.id::text, a.id::text, a.parent_id::text,
+				       pa.parent_id::text, pa.max_depth
 				  FROM projects p
 				  LEFT JOIN areas a ON a.project_id = p.id AND a.slug = $2
+				  LEFT JOIN areas pa ON pa.id = a.parent_id
 				 WHERE p.slug = $1
 				 LIMIT 1
-			`, scope.ProjectSlug, norm.ParentSlug).Scan(&projectID, &parentID, &parentParentID)
+			`, scope.ProjectSlug, norm.ParentSlug).Scan(&projectID, &parentID, &parentParentID, &parentGrandparentID, &rootMaxDepth)
 			if err != nil {
 				return nil, areaCreateOutput{}, fmt.Errorf("resolve parent area: %w", err)
 			}
-			if code := classifyAreaCreateParent(parentID, parentParentID); code != "" {
+			if code := classifyAreaCreateParent(parentID, parentParentID, parentGrandparentID, rootMaxDepth); code != "" {
 				out := areaCreateNotReady(lang, code, norm.ParentSlug)
 				return nil, out, nil
 			}
@@ -175,14 +178,32 @@ func validateAreaCreateInput(in areaCreateInput, lang string) (normalizedAreaCre
 	}
 }
 
-func classifyAreaCreateParent(parentID, parentParentID *string) string {
-	if parentID == nil || strings.TrimSpace(*parentID) == "" {
+// classifyAreaCreateParent decides whether a sub-area may be created
+// under the resolved parent. Decision area-taxonomy-profiled-skeleton
+// T5: depth is a per-top-level policy, not a hard depth-1 cap. A
+// top-level parent always accepts a depth-1 child. A depth-1 sub-area
+// parent accepts a depth-2 child only when its root top-level's
+// max_depth is >= 2; a depth-2 (or deeper) parent never accepts a child.
+func classifyAreaCreateParent(parentID, parentParentID, parentGrandparentID *string, rootMaxDepth *int) string {
+	notEmpty := func(s *string) bool { return s != nil && strings.TrimSpace(*s) != "" }
+	if !notEmpty(parentID) {
 		return "PARENT_NOT_FOUND"
 	}
-	if parentParentID != nil && strings.TrimSpace(*parentParentID) != "" {
+	if !notEmpty(parentParentID) {
+		// Parent is a top-level area — the child is depth-1.
+		return ""
+	}
+	if notEmpty(parentGrandparentID) {
+		// Parent is itself depth-2 or deeper — the child would be
+		// depth-3, which no profile allows.
 		return "PARENT_NOT_TOP_LEVEL"
 	}
-	return ""
+	// Parent is a depth-1 sub-area — the child is depth-2, allowed only
+	// when the root top-level's max_depth permits it.
+	if rootMaxDepth != nil && *rootMaxDepth >= 2 {
+		return ""
+	}
+	return "PARENT_NOT_TOP_LEVEL"
 }
 
 func isAreaCreateSlugTaken(err error) bool {

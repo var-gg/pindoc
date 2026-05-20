@@ -30,11 +30,31 @@ func TestValidateAreaCreateInputParentMissing(t *testing.T) {
 	assertAreaCreateCode(t, notReady, "PARENT_REQUIRED")
 }
 
-func TestClassifyAreaCreateParentRejectsSubAreaParent(t *testing.T) {
-	parentID := "parent-area-id"
-	parentParentID := "top-level-id"
-	if got := classifyAreaCreateParent(&parentID, &parentParentID); got != "PARENT_NOT_TOP_LEVEL" {
-		t.Fatalf("classifyAreaCreateParent = %q; want PARENT_NOT_TOP_LEVEL", got)
+func TestClassifyAreaCreateParent(t *testing.T) {
+	id := func(s string) *string { return &s }
+	depth := func(n int) *int { return &n }
+
+	tests := []struct {
+		name                string
+		parentID            *string
+		parentParentID      *string
+		parentGrandparentID *string
+		rootMaxDepth        *int
+		want                string
+	}{
+		{"parent not found", nil, nil, nil, nil, "PARENT_NOT_FOUND"},
+		{"top-level parent allows depth-1 child", id("tl"), nil, nil, nil, ""},
+		{"depth-1 parent rejected when root max_depth is 1", id("p"), id("tl"), nil, depth(1), "PARENT_NOT_TOP_LEVEL"},
+		{"depth-1 parent rejected when root max_depth is unknown", id("p"), id("tl"), nil, nil, "PARENT_NOT_TOP_LEVEL"},
+		{"depth-1 parent allowed when root max_depth is 2", id("p"), id("tl"), nil, depth(2), ""},
+		{"depth-2 parent always rejected", id("p"), id("d1"), id("tl"), depth(2), "PARENT_NOT_TOP_LEVEL"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyAreaCreateParent(tc.parentID, tc.parentParentID, tc.parentGrandparentID, tc.rootMaxDepth); got != tc.want {
+				t.Fatalf("classifyAreaCreateParent = %q; want %q", got, tc.want)
+			}
+		})
 	}
 }
 

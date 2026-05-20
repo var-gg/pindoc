@@ -269,11 +269,15 @@ func CreateProject(
 func seedAreas(ctx context.Context, tx pgx.Tx, projectID, lang string, profile TaxonomyProfile) (int, error) {
 	count := 0
 	for _, seed := range profile.TopLevel {
+		maxDepth := seed.MaxDepth
+		if maxDepth < 1 {
+			maxDepth = 1
+		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO areas (project_id, slug, name, description, is_cross_cutting, fileable)
-			VALUES ($1::uuid, $2, $3, $4, $5, $6)
+			INSERT INTO areas (project_id, slug, name, description, is_cross_cutting, fileable, max_depth)
+			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (project_id, slug) DO NOTHING
-		`, projectID, seed.Slug, seed.Name, LocalizedAreaDescription(seed.DescriptionEN, seed.DescriptionKO, lang), seed.IsCrossCutting, seed.Fileable); err != nil {
+		`, projectID, seed.Slug, seed.Name, LocalizedAreaDescription(seed.DescriptionEN, seed.DescriptionKO, lang), seed.IsCrossCutting, seed.Fileable, maxDepth); err != nil {
 			return count, fmt.Errorf("seed area %s: %w", seed.Slug, err)
 		}
 		count++
