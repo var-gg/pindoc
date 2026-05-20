@@ -270,6 +270,38 @@ func TestWorkspaceDetectEmitsRegisterHint(t *testing.T) {
 	if !containsWarning(out.Warnings, "PROJECT_REPOS_EMPTY_FOR_PINDOC_MD_MATCH") {
 		t.Fatalf("warnings = %v, want PROJECT_REPOS_EMPTY_FOR_PINDOC_MD_MATCH", out.Warnings)
 	}
+
+	// Medium-confidence directory_match (workspace dir name == slug, no
+	// frontmatter) resolves the same project but must NOT get a replayable
+	// mutating next_action — only high-confidence pindoc_md does.
+	res2, err := clientSession.CallTool(ctx, &sdk.CallToolParams{
+		Name: "pindoc.workspace.detect",
+		Arguments: map[string]any{
+			"git_remote_url": remote,
+			"workspace_path": "/tmp/" + slug,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool directory_match: %v", err)
+	}
+	if res2.IsError {
+		t.Fatalf("CallTool directory_match error: %s", toolResultText(res2))
+	}
+	var dirOut workspaceDetectOutput
+	if err := decodeStructuredContent(res2.StructuredContent, &dirOut); err != nil {
+		t.Fatalf("decode directory_match content: %v", err)
+	}
+	if dirOut.ProjectSlug != slug || dirOut.Confidence != "medium" || dirOut.Via != "directory_match" {
+		t.Fatalf("directory_match detect = %+v, want medium directory_match for slug=%s", dirOut, slug)
+	}
+	if dirOut.NextAction != nil {
+		t.Fatalf("directory_match detect attached next_action %+v, want nil (medium confidence must not get a mutating hint)", dirOut.NextAction)
+	}
+	for _, w := range dirOut.Warnings {
+		if strings.HasPrefix(w, "PROJECT_REPOS_EMPTY_") {
+			t.Fatalf("directory_match detect emitted %s, want no register warning at medium confidence", w)
+		}
+	}
 }
 
 func containsWarning(warnings []string, code string) bool {

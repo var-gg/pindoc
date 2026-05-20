@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
@@ -110,11 +109,15 @@ and urls merge with the existing row.
 				gotName, gotBranch, gotOriginal string
 				localPaths, urls                []string
 			)
+			// The row was just upserted in this same transaction, so a
+			// no-rows result is a data-integrity violation, not a normal
+			// path — surface it instead of emitting an event + response
+			// built from zero values.
 			if err := tx.QueryRow(ctx, `
 				SELECT name, default_branch, git_remote_url_original, local_paths, urls
 				  FROM project_repos
 				 WHERE id = $1::uuid
-			`, repoID).Scan(&gotName, &gotBranch, &gotOriginal, &localPaths, &urls); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			`, repoID).Scan(&gotName, &gotBranch, &gotOriginal, &localPaths, &urls); err != nil {
 				return nil, projectSetRepoOutput{}, fmt.Errorf("project.set_repo read-back: %w", err)
 			}
 
@@ -137,7 +140,7 @@ and urls merge with the existing row.
 					'actor_id',                $8::text,
 					'origin',                  'mcp_project_set_repo'
 				))
-			`, scope.ProjectID, eventKind, repoID, normalized, strings.TrimSpace(rawRemote), localPaths, actorUserID, actorID); err != nil {
+			`, scope.ProjectID, eventKind, repoID, normalized, gotOriginal, localPaths, actorUserID, actorID); err != nil {
 				return nil, projectSetRepoOutput{}, fmt.Errorf("project.set_repo event: %w", err)
 			}
 			if err := tx.Commit(ctx); err != nil {

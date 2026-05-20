@@ -45,3 +45,21 @@ func TestNormalizeRepoPathSetEmptyReturnsEmptySlice(t *testing.T) {
 		t.Fatalf("normalizeRepoPathSet(nil) = %v, want empty", got)
 	}
 }
+
+func TestScrubRemoteCredentials(t *testing.T) {
+	cases := map[string]string{
+		// HTTPS userinfo (token / user:password) must be stripped.
+		"https://x-access-token:ghp_secret@github.com/var-gg/pindoc.git": "https://github.com/var-gg/pindoc.git",
+		"https://alice:hunter2@gitlab.com/org/repo.git":                  "https://gitlab.com/org/repo.git",
+		"ssh://git@github.com/var-gg/pindoc":                             "ssh://github.com/var-gg/pindoc",
+		// No-credential and scp-style remotes pass through unchanged.
+		"https://github.com/var-gg/pindoc.git": "https://github.com/var-gg/pindoc.git",
+		"git@github.com:var-gg/pindoc.git":     "git@github.com:var-gg/pindoc.git",
+		"":                                     "",
+	}
+	for raw, want := range cases {
+		if got := scrubRemoteCredentials(raw); got != want {
+			t.Fatalf("scrubRemoteCredentials(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}

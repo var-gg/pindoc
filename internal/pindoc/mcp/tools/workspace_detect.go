@@ -71,26 +71,34 @@ func handleWorkspaceDetect(ctx context.Context, deps Deps, p *auth.Principal, in
 		return slug, true
 	}
 	out := detectWorkspaceFromSources(in, visible, lookup)
-	enrichWorkspaceDetectWithRegisterHint(ctx, deps, in, &out)
+	enrichWorkspaceDetectWithRegisterHint(ctx, deps, p, in, &out)
 	return out, nil
 }
 
-// enrichWorkspaceDetectWithRegisterHint attaches a project.set_repo
-// next_action when the resolved project_slug has zero project_repos rows
-// matching the caller's git_remote_url. Closes the dogfood gap where
-// pin.add_pin emits PIN_REPO_NOT_REGISTERED for a workspace that
-// workspace.detect resolved successfully via a non-git_remote path
-// (PINDOC.md frontmatter, fallback_only_one, directory_match).
+// enrichWorkspaceDetectWithRegisterHint surfaces a missing project_repos
+// row for the resolved project: it emits a PROJECT_REPOS_EMPTY_FOR_PINDOC_MD_MATCH
+// warning and, for callers who can actually act on it, a replayable
+// project.set_repo next_action. Closes the dogfood gap where pin.add_pin
+// emits PIN_REPO_NOT_REGISTERED for a workspace that workspace.detect
+// resolved via PINDOC.md frontmatter.
 //
-// Only fires when the caller provided a parseable git_remote_url and the
-// project owns no row for that normalized remote — git_remote-resolved
-// detections already confirm the row exists, so no hint is needed there.
-func enrichWorkspaceDetectWithRegisterHint(ctx context.Context, deps Deps, in workspaceDetectInput, out *workspaceDetectOutput) {
+// Deliberately conservative — only fires when:
+//   - Confidence == "high" (PINDOC.md frontmatter). Medium/low directory or
+//     fallback matches are too ambiguous to risk pointing a mutating
+//     set_repo call at the wrong project.
+//   - the caller provided a parseable git_remote_url, and
+//   - the project owns no row for that normalized remote.
+//
+// The replayable next_action is attached only when the caller holds
+// write.project (set_repo is owner-only); non-owners still get the warning
+// so they know to ask a project owner.
+func enrichWorkspaceDetectWithRegisterHint(ctx context.Context, deps Deps, p *auth.Principal, in workspaceDetectInput, out *workspaceDetectOutput) {
 	if out == nil || out.ProjectSlug == "" {
 		return
 	}
-	if out.Via == "git_remote" {
-		// git_remote path already confirmed the row.
+	// git_remote already confirmed the row; medium/low matches are too
+	// ambiguous to attach a mutating hint to.
+	if out.Confidence != "high" || out.Via == "git_remote" {
 		return
 	}
 	rawRemote := strings.TrimSpace(in.GitRemoteURL)
@@ -114,9 +122,27 @@ func enrichWorkspaceDetectWithRegisterHint(ctx context.Context, deps Deps, in wo
 			   AND pr.git_remote_url = $2
 		)
 	`, out.ProjectSlug, normalized).Scan(&exists); err != nil {
+		// Non-blocking enrichment — never fail the detect call over it,
+		// but leave a trace so a missing hint can be told apart from a
+		// genuinely registered repo.
+		if deps.Logger != nil {
+			deps.Logger.Warn("workspace.detect register-hint lookup failed",
+				"project_slug", out.ProjectSlug, "error", err)
+		}
 		return
 	}
 	if exists {
+		return
+	}
+
+	// The remote is unregistered for this project — surface the gap to
+	// every caller regardless of role.
+	out.Warnings = appendUniqueWarning(out.Warnings, "PROJECT_REPOS_EMPTY_FOR_PINDOC_MD_MATCH")
+
+	// project.set_repo is owner-only; only hand back a replayable
+	// next_action when the caller can run it. Non-owners keep the warning.
+	scope, err := auth.ResolveProject(ctx, deps.DB, p, out.ProjectSlug)
+	if err != nil || !scope.Can("write.project") {
 		return
 	}
 
@@ -133,11 +159,6 @@ func enrichWorkspaceDetectWithRegisterHint(ctx context.Context, deps Deps, in wo
 		Reason: "project_repos has no row mapping " + normalized +
 			" to project_slug " + out.ProjectSlug +
 			". Register the workspace so pin.repo_id auto-mapping and PIN_REPO_NOT_REGISTERED both resolve.",
-	}
-	if out.Via == "pindoc_md" {
-		out.Warnings = appendUniqueWarning(out.Warnings, "PROJECT_REPOS_EMPTY_FOR_PINDOC_MD_MATCH")
-	} else {
-		out.Warnings = appendUniqueWarning(out.Warnings, "PROJECT_REPOS_EMPTY_FOR_DETECTED_PROJECT")
 	}
 }
 

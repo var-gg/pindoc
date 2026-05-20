@@ -99,15 +99,32 @@ func UpsertProjectRepo(ctx context.Context, q repoQueryer, in ProjectRepoInput) 
 	if normalized == "" {
 		return "", false, nil
 	}
+	// name / default_branch are optional on refresh. An omitted (empty)
+	// input must NOT clobber an existing row's value — a caller adding a
+	// local_path should not silently reset a custom remote name or a
+	// non-default branch back to origin/main. nameProvided / branchProvided
+	// drive a conditional ON CONFLICT update; the defaulted value is still
+	// passed so a fresh INSERT gets origin/main.
 	name := strings.TrimSpace(in.Name)
+	nameProvided := name != ""
 	if name == "" {
 		name = "origin"
 	}
 	branch := strings.TrimSpace(in.DefaultBranch)
+	branchProvided := branch != ""
 	if branch == "" {
 		branch = "main"
 	}
-	urls := normalizeRepoStringSet(append([]string{normalized, strings.TrimSpace(in.GitRemoteURL)}, in.URLs...))
+
+	// Persist a credential-scrubbed original so a token embedded in an
+	// HTTPS remote never lands in project_repos, urls, or the events
+	// audit log.
+	scrubbedOriginal := scrubRemoteCredentials(in.GitRemoteURL)
+	extraURLs := make([]string, 0, len(in.URLs))
+	for _, u := range in.URLs {
+		extraURLs = append(extraURLs, scrubRemoteCredentials(u))
+	}
+	urls := normalizeRepoStringSet(append([]string{normalized, scrubbedOriginal}, extraURLs...))
 	localPaths := normalizeRepoPathSet(in.LocalPaths)
 
 	// xmax = 0 on the returned row indicates the row was created by this
@@ -125,19 +142,38 @@ func UpsertProjectRepo(ctx context.Context, q repoQueryer, in ProjectRepoInput) 
 		) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (project_id, git_remote_url) DO UPDATE SET
 			git_remote_url_original = EXCLUDED.git_remote_url_original,
-			name = EXCLUDED.name,
-			default_branch = EXCLUDED.default_branch,
+			name = CASE WHEN $8::bool THEN EXCLUDED.name ELSE project_repos.name END,
+			default_branch = CASE WHEN $9::bool THEN EXCLUDED.default_branch ELSE project_repos.default_branch END,
 			local_paths = (
-				SELECT ARRAY(SELECT DISTINCT v FROM unnest(project_repos.local_paths || EXCLUDED.local_paths) AS v WHERE v <> '')
+				SELECT ARRAY(SELECT DISTINCT v FROM unnest(project_repos.local_paths || EXCLUDED.local_paths) AS v WHERE v <> '' ORDER BY v)
 			),
 			urls = (
-				SELECT ARRAY(SELECT DISTINCT v FROM unnest(project_repos.urls || EXCLUDED.urls) AS v WHERE v <> '')
+				SELECT ARRAY(SELECT DISTINCT v FROM unnest(project_repos.urls || EXCLUDED.urls) AS v WHERE v <> '' ORDER BY v)
 			)
 		RETURNING id::text, (xmax = 0)
-	`, projectID, normalized, strings.TrimSpace(in.GitRemoteURL), name, branch, localPaths, urls).Scan(&id, &inserted); err != nil {
+	`, projectID, normalized, scrubbedOriginal, name, branch, localPaths, urls, nameProvided, branchProvided).Scan(&id, &inserted); err != nil {
 		return "", false, fmt.Errorf("project repo upsert: %w", err)
 	}
 	return id, inserted, nil
+}
+
+// scrubRemoteCredentials removes userinfo (user:password@) from a URL-shaped
+// git remote so a token embedded in an HTTPS remote
+// (https://x-access-token:TOKEN@github.com/owner/repo) is never persisted to
+// project_repos, urls, or the events audit log. scp-style remotes
+// (git@github.com:owner/repo) keep their literal "git" account name — that is
+// the conventional SSH user, not a secret.
+func scrubRemoteCredentials(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" || !strings.Contains(s, "://") {
+		return s
+	}
+	u, err := url.Parse(s)
+	if err != nil || u.User == nil {
+		return s
+	}
+	u.User = nil
+	return u.String()
 }
 
 func EnsureDefaultProjectRepo(ctx context.Context, q repoQueryer, projectSlug, rawRemote string) error {

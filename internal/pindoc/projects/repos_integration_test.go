@@ -154,6 +154,147 @@ func TestUpsertProjectRepoIdempotent(t *testing.T) {
 	assertProjectRepoCount(t, ctx, tx, out.ID, 1)
 }
 
+func TestUpsertProjectRepoPreservesMetadataOnRefresh(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PINDOC_TEST_DATABASE_URL"))
+	if dsn == "" {
+		t.Skip("set PINDOC_TEST_DATABASE_URL to run UpsertProjectRepo metadata-preservation test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	pool, err := db.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer pool.Close()
+	if err := db.Migrate(ctx, pool.Pool); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	out, err := CreateProject(ctx, tx, CreateProjectInput{
+		Slug:            "upsert-preserve-" + suffix,
+		Name:            "Upsert Preserve",
+		PrimaryLanguage: "en",
+	})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	remote := fmt.Sprintf("https://github.com/preserve-it-%s/sample.git", suffix)
+
+	// First call sets a custom remote name and non-default branch.
+	if _, _, err := UpsertProjectRepo(ctx, tx, ProjectRepoInput{
+		ProjectID:     out.ID,
+		GitRemoteURL:  remote,
+		Name:          "upstream",
+		DefaultBranch: "develop",
+		LocalPaths:    []string{"/tmp/preserve-it/checkout"},
+	}); err != nil {
+		t.Fatalf("UpsertProjectRepo first call: %v", err)
+	}
+
+	// Second call omits name/default_branch (the "just add a local_path"
+	// case). The custom values must survive.
+	if _, created, err := UpsertProjectRepo(ctx, tx, ProjectRepoInput{
+		ProjectID:    out.ID,
+		GitRemoteURL: remote,
+		LocalPaths:   []string{"/tmp/preserve-it/another"},
+	}); err != nil {
+		t.Fatalf("UpsertProjectRepo second call: %v", err)
+	} else if created {
+		t.Fatalf("UpsertProjectRepo second call created=true, want false")
+	}
+
+	var gotName, gotBranch string
+	var gotLocalPaths []string
+	if err := tx.QueryRow(ctx, `
+		SELECT name, default_branch, local_paths
+		  FROM project_repos
+		 WHERE project_id = $1::uuid
+	`, out.ID).Scan(&gotName, &gotBranch, &gotLocalPaths); err != nil {
+		t.Fatalf("select project repo: %v", err)
+	}
+	if gotName != "upstream" {
+		t.Fatalf("name = %q after omitted-name refresh, want %q (preserved)", gotName, "upstream")
+	}
+	if gotBranch != "develop" {
+		t.Fatalf("default_branch = %q after omitted-branch refresh, want %q (preserved)", gotBranch, "develop")
+	}
+	if len(gotLocalPaths) != 2 {
+		t.Fatalf("local_paths = %v, want 2 merged entries", gotLocalPaths)
+	}
+}
+
+func TestUpsertProjectRepoScrubsCredentials(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PINDOC_TEST_DATABASE_URL"))
+	if dsn == "" {
+		t.Skip("set PINDOC_TEST_DATABASE_URL to run UpsertProjectRepo credential-scrub test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	pool, err := db.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer pool.Close()
+	if err := db.Migrate(ctx, pool.Pool); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	out, err := CreateProject(ctx, tx, CreateProjectInput{
+		Slug:            "upsert-scrub-" + suffix,
+		Name:            "Upsert Scrub",
+		PrimaryLanguage: "en",
+	})
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	secret := "ghp_should_not_be_persisted"
+	remoteWithToken := fmt.Sprintf("https://x-access-token:%s@github.com/scrub-it-%s/sample.git", secret, suffix)
+	if _, _, err := UpsertProjectRepo(ctx, tx, ProjectRepoInput{
+		ProjectID:    out.ID,
+		GitRemoteURL: remoteWithToken,
+	}); err != nil {
+		t.Fatalf("UpsertProjectRepo with token remote: %v", err)
+	}
+
+	var gotOriginal string
+	var gotURLs []string
+	if err := tx.QueryRow(ctx, `
+		SELECT git_remote_url_original, urls
+		  FROM project_repos
+		 WHERE project_id = $1::uuid
+	`, out.ID).Scan(&gotOriginal, &gotURLs); err != nil {
+		t.Fatalf("select project repo: %v", err)
+	}
+	if strings.Contains(gotOriginal, secret) {
+		t.Fatalf("git_remote_url_original leaked credential: %q", gotOriginal)
+	}
+	for _, u := range gotURLs {
+		if strings.Contains(u, secret) {
+			t.Fatalf("urls leaked credential: %q", u)
+		}
+	}
+}
+
 func assertProjectRepoRow(t *testing.T, ctx context.Context, tx pgx.Tx, projectID, wantRemote, wantOriginal string) {
 	t.Helper()
 	var gotRemote, gotOriginal, gotName, gotBranch string
