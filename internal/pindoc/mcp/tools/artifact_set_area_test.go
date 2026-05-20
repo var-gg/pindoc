@@ -18,11 +18,13 @@ func TestArtifactSetAreaTargetPolicy(t *testing.T) {
 		area setAreaInfo
 		want string
 	}{
-		{name: "misc top-level allowed", area: setAreaInfo{ID: "a", Slug: "misc"}, want: ""},
-		{name: "unsorted top-level allowed", area: setAreaInfo{ID: "a", Slug: "_unsorted"}, want: ""},
-		{name: "fixed top-level protected", area: setAreaInfo{ID: "a", Slug: "content"}, want: "AREA_TOP_LEVEL_PROTECTED"},
-		{name: "depth one child allowed", area: setAreaInfo{ID: "a", Slug: "character-lore", ParentID: "p", ParentSlug: "content"}, want: ""},
-		{name: "grandchild rejected", area: setAreaInfo{ID: "a", Slug: "too-deep", ParentID: "p", ParentSlug: "character-lore", GrandparentID: "g"}, want: "AREA_DEPTH_VIOLATION"},
+		{name: "fileable misc top-level allowed", area: setAreaInfo{ID: "a", Slug: "misc", Fileable: true}, want: ""},
+		{name: "fileable unsorted top-level allowed", area: setAreaInfo{ID: "a", Slug: "_unsorted", Fileable: true}, want: ""},
+		{name: "non-fileable top-level rejected", area: setAreaInfo{ID: "a", Slug: "strategy", Fileable: false}, want: "AREA_NOT_FILEABLE"},
+		{name: "fileable domain top-level allowed", area: setAreaInfo{ID: "a", Slug: "characters", Fileable: true}, want: ""},
+		{name: "fileable depth-1 child allowed", area: setAreaInfo{ID: "a", Slug: "heroes", ParentID: "p", ParentSlug: "characters", Fileable: true}, want: ""},
+		{name: "non-fileable sub-area rejected", area: setAreaInfo{ID: "a", Slug: "shelf", ParentID: "p", ParentSlug: "characters", Fileable: false}, want: "AREA_NOT_FILEABLE"},
+		{name: "grandchild rejected", area: setAreaInfo{ID: "a", Slug: "too-deep", ParentID: "p", ParentSlug: "heroes", GrandparentID: "g", Fileable: true}, want: "AREA_DEPTH_VIOLATION"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -180,14 +182,14 @@ func TestMCPArtifactSetAreaRejectsIntegration(t *testing.T) {
 			want: "AREA_UNCHANGED",
 		},
 		{
-			name: "protected top-level",
+			name: "non-fileable top-level",
 			args: map[string]any{
 				"project_slug": fixture.projectSlug,
 				"slug_or_id":   "vis-public",
-				"area_slug":    "content",
-				"reason":       "reject top-level area",
+				"area_slug":    "strategy",
+				"reason":       "reject non-fileable top-level area",
 			},
-			want: "AREA_TOP_LEVEL_PROTECTED",
+			want: "AREA_NOT_FILEABLE",
 		},
 		{
 			name: "depth violation",

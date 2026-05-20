@@ -30,6 +30,13 @@ type TopLevelAreaSeedRow struct {
 	DescriptionEN  string
 	DescriptionKO  string
 	IsCrossCutting bool
+	// Fileable reports whether artifacts may be assigned directly to
+	// this top-level area. Decision area-taxonomy-profiled-skeleton T2:
+	// a domain profile's first-class areas are fileable, pure
+	// structural shelves are not. misc and _unsorted are always
+	// fileable. Sub-areas (AreaSeed) are always fileable and seeded via
+	// the areas.fileable column DEFAULT.
+	Fileable bool
 }
 
 // TaxonomyProfile is the per-domain area skeleton a project picks at
@@ -92,6 +99,9 @@ func ValidateTaxonomyRegistry() error {
 				return fmt.Errorf("profile %q has duplicate top-level %q", key, t.Slug)
 			}
 			tops[t.Slug] = true
+			if (t.Slug == "misc" || t.Slug == "_unsorted") && !t.Fileable {
+				return fmt.Errorf("profile %q top-level %q must be fileable (overflow/quarantine areas always accept artifacts)", key, t.Slug)
+			}
 		}
 		for _, required := range []string{"misc", "_unsorted"} {
 			if !tops[required] {
@@ -126,36 +136,42 @@ var softwareProductProfile = TaxonomyProfile{
 			Name:          "Strategy",
 			DescriptionEN: "Why this exists: vision, goals, scope, hypotheses, roadmap.",
 			DescriptionKO: "프로젝트가 왜 존재하는지: 비전, 목표, 범위, 가설, 로드맵.",
+			Fileable:      false,
 		},
 		{
 			Slug:          "context",
 			Name:          "Context",
 			DescriptionEN: "External facts: users, competitors, literature, standards, external APIs.",
 			DescriptionKO: "외부 사실: 사용자, 경쟁자, 문헌, 표준, 외부 API.",
+			Fileable:      false,
 		},
 		{
 			Slug:          "experience",
 			Name:          "Experience",
 			DescriptionEN: "What external actors see and do: UI, flows, IA, content, developer experience.",
 			DescriptionKO: "외부 actor가 보고 겪는 것: UI, flow, IA, content, developer experience.",
+			Fileable:      false,
 		},
 		{
 			Slug:          "system",
 			Name:          "System",
 			DescriptionEN: "How it works internally: architecture, data, API, integrations, mechanisms, MCP, embedding.",
 			DescriptionKO: "내부에서 작동하는 방식: architecture, data, API, integrations, mechanisms, MCP, embedding.",
+			Fileable:      false,
 		},
 		{
 			Slug:          "operations",
 			Name:          "Operations",
 			DescriptionEN: "How it ships, runs, and is supported: delivery, release, launch, incidents, editorial ops.",
 			DescriptionKO: "출시·운영·지원 방식: delivery, release, launch, incidents, editorial ops.",
+			Fileable:      false,
 		},
 		{
 			Slug:          "governance",
 			Name:          "Governance",
 			DescriptionEN: "Rules, ownership, compliance, review, and taxonomy policy.",
 			DescriptionKO: "규칙, ownership, compliance, review, taxonomy policy.",
+			Fileable:      false,
 		},
 		{
 			Slug:           "cross-cutting",
@@ -163,18 +179,21 @@ var softwareProductProfile = TaxonomyProfile{
 			DescriptionEN:  "Reusable named concerns spanning multiple areas: security, privacy, accessibility, reliability, observability, localization.",
 			DescriptionKO:  "여러 area에 반복 적용되는 named concern: security, privacy, accessibility, reliability, observability, localization.",
 			IsCrossCutting: true,
+			Fileable:       false,
 		},
 		{
 			Slug:          "misc",
 			Name:          "Misc",
 			DescriptionEN: "Temporary overflow when no better subject area is clear.",
 			DescriptionKO: "더 적절한 subject area가 불명확할 때 쓰는 임시 overflow.",
+			Fileable:      true,
 		},
 		{
 			Slug:          "_unsorted",
 			Name:          "_Unsorted",
 			DescriptionEN: "Quarantine queue for artifacts that need reclassification.",
 			DescriptionKO: "재분류가 필요한 artifact를 잠시 두는 quarantine queue.",
+			Fileable:      true,
 		},
 	},
 	StarterSubAreas: []AreaSeed{
@@ -237,48 +256,56 @@ var gameNarrativeProfile = TaxonomyProfile{
 			Name:          "Project",
 			DescriptionEN: "Project-level meta concern: direction, research, roadmap, production, governance.",
 			DescriptionKO: "게임이 아니라 프로젝트 자체의 meta concern: 방향, 리서치, 로드맵, 제작, 거버넌스.",
+			Fileable:      false,
 		},
 		{
 			Slug:          "gameplay",
 			Name:          "Gameplay",
 			DescriptionEN: "Core play rules outside combat: core loop, progression, economy, survival.",
 			DescriptionKO: "전투 외 플레이 규칙: core loop, progression, economy, survival.",
+			Fileable:      true,
 		},
 		{
 			Slug:          "combat",
 			Name:          "Combat",
 			DescriptionEN: "Combat rules, encounter design, enemy behavior, and balance.",
 			DescriptionKO: "전투 규칙, encounter 설계, enemy behavior, balance.",
+			Fileable:      true,
 		},
 		{
 			Slug:          "characters",
 			Name:          "Characters",
 			DescriptionEN: "Character lore, cast structure, factions, and relationships.",
 			DescriptionKO: "캐릭터 lore, cast 구조, faction·relationship 모델.",
+			Fileable:      true,
 		},
 		{
 			Slug:          "narrative",
 			Name:          "Narrative",
 			DescriptionEN: "Plot, quests, dialogue, branching, canon, and themes.",
 			DescriptionKO: "plot, quest, dialogue, branching, canon, theme.",
+			Fileable:      true,
 		},
 		{
 			Slug:          "atlas",
 			Name:          "Atlas",
 			DescriptionEN: "World map, regions, locations, biomes, and traversal.",
 			DescriptionKO: "지도, 지역, 장소, 생태권, traversal.",
+			Fileable:      true,
 		},
 		{
 			Slug:          "art",
 			Name:          "Art",
 			DescriptionEN: "Visual direction, concept and production art, UI and audio.",
 			DescriptionKO: "visual direction, concept·production art, UI·audio.",
+			Fileable:      true,
 		},
 		{
 			Slug:          "implementation",
 			Name:          "Implementation",
 			DescriptionEN: "Game implementation: engine, tools, data, content pipeline, builds.",
 			DescriptionKO: "게임 구현: engine, tools, data, content pipeline, build.",
+			Fileable:      true,
 		},
 		{
 			Slug:           "cross-cutting",
@@ -286,18 +313,21 @@ var gameNarrativeProfile = TaxonomyProfile{
 			DescriptionEN:  "Reusable named concerns spanning domains: accessibility, localization, performance, content safety.",
 			DescriptionKO:  "여러 도메인에 반복 적용되는 named concern: accessibility, localization, performance, content safety.",
 			IsCrossCutting: true,
+			Fileable:       false,
 		},
 		{
 			Slug:          "misc",
 			Name:          "Misc",
 			DescriptionEN: "Temporary overflow when no better subject area is clear.",
 			DescriptionKO: "더 적절한 subject area가 불명확할 때 쓰는 임시 overflow.",
+			Fileable:      true,
 		},
 		{
 			Slug:          "_unsorted",
 			Name:          "_Unsorted",
 			DescriptionEN: "Quarantine queue for artifacts that need reclassification.",
 			DescriptionKO: "재분류가 필요한 artifact를 잠시 두는 quarantine queue.",
+			Fileable:      true,
 		},
 	},
 	StarterSubAreas: []AreaSeed{

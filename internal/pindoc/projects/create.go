@@ -267,10 +267,10 @@ func seedAreas(ctx context.Context, tx pgx.Tx, projectID, lang string, profile T
 	count := 0
 	for _, seed := range profile.TopLevel {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO areas (project_id, slug, name, description, is_cross_cutting)
-			VALUES ($1::uuid, $2, $3, $4, $5)
+			INSERT INTO areas (project_id, slug, name, description, is_cross_cutting, fileable)
+			VALUES ($1::uuid, $2, $3, $4, $5, $6)
 			ON CONFLICT (project_id, slug) DO NOTHING
-		`, projectID, seed.Slug, seed.Name, LocalizedAreaDescription(seed.DescriptionEN, seed.DescriptionKO, lang), seed.IsCrossCutting); err != nil {
+		`, projectID, seed.Slug, seed.Name, LocalizedAreaDescription(seed.DescriptionEN, seed.DescriptionKO, lang), seed.IsCrossCutting, seed.Fileable); err != nil {
 			return count, fmt.Errorf("seed area %s: %w", seed.Slug, err)
 		}
 		count++

@@ -60,6 +60,7 @@ type setAreaInfo struct {
 	ParentID      string
 	ParentSlug    string
 	GrandparentID string
+	Fileable      bool
 }
 
 type areaArtifact struct {
@@ -331,13 +332,14 @@ func resolveSetAreaExisting(ctx context.Context, q setAreaQuerier, projectID, sl
 		       a.slug,
 		       a.parent_id::text,
 		       parent.slug,
-		       parent.parent_id::text
+		       parent.parent_id::text,
+		       a.fileable
 		  FROM areas a
 		  LEFT JOIN areas parent ON parent.id = a.parent_id
 		 WHERE a.project_id = $1::uuid
 		   AND a.slug = $2
 		 LIMIT 1
-	`, projectID, slug).Scan(&area.ID, &area.Slug, &parentID, &parentSlug, &grandparentID)
+	`, projectID, slug).Scan(&area.ID, &area.Slug, &parentID, &parentSlug, &grandparentID, &area.Fileable)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return setAreaInfo{}, "AREA_NOT_FOUND"
 	}
@@ -356,20 +358,21 @@ func resolveSetAreaExisting(ctx context.Context, q setAreaQuerier, projectID, sl
 	return area, ""
 }
 
+// validateSetAreaTarget rejects a set_area target an artifact must not
+// land in. Decision area-taxonomy-profiled-skeleton T2 replaced the
+// "only misc/_unsorted top-level" exception with the per-area fileable
+// flag: any area — top-level or sub-area — accepts artifacts when it is
+// fileable. The depth-2 grandchild guard is unchanged (T5 revisits depth
+// as a profile-aware policy).
 func validateSetAreaTarget(area setAreaInfo) string {
 	if area.ID == "" {
 		return "AREA_NOT_FOUND"
 	}
-	if area.ParentID == "" {
-		switch area.Slug {
-		case "_unsorted", "misc":
-			return ""
-		default:
-			return "AREA_TOP_LEVEL_PROTECTED"
-		}
-	}
 	if area.GrandparentID != "" {
 		return "AREA_DEPTH_VIOLATION"
+	}
+	if !area.Fileable {
+		return "AREA_NOT_FILEABLE"
 	}
 	return ""
 }
