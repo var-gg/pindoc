@@ -166,6 +166,7 @@ func NewServer(opts Options) (*Server, error) {
 	tools.RegisterWorkspaceDetect(s, deps)
 	tools.RegisterAreaList(s, deps)
 	tools.RegisterAreaCreate(s, deps)
+	tools.RegisterTaxonomyChangePropose(s, deps)
 	tools.RegisterArtifactRead(s, deps)
 	tools.RegisterArtifactTranslate(s, deps)
 

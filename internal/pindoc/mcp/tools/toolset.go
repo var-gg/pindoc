@@ -13,7 +13,7 @@ import (
 // tool name. RegisteredTools catches catalog membership drift; this salt
 // catches same-name surface drift that client-side schema caches otherwise
 // cannot see.
-const ToolsetSchemaVersion = "2026-05-19-project-set-repo"
+const ToolsetSchemaVersion = "2026-05-21-taxonomy-change-propose"
 
 type ToolsetClientAction struct {
 	ID     string         `json:"id"`
@@ -43,6 +43,7 @@ var RegisteredTools = []string{
 	"pindoc.workspace.detect",
 	"pindoc.area.list",
 	"pindoc.area.create",
+	"pindoc.taxonomy.change.propose",
 	"pindoc.artifact.read",
 	"pindoc.artifact.translate",
 	"pindoc.artifact.propose",
