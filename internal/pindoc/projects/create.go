@@ -136,7 +136,7 @@ func supportedLanguageList() string {
 }
 
 // CreateProject inserts a projects row, seeds the chosen taxonomy
-// profile's area skeleton + starter sub-areas, and seeds the _template_*
+// profile's top-level area skeleton, and seeds the _template_*
 // artifacts under the 'misc' area — atomic via the caller-provided
 // transaction. The caller
 // is responsible for tx.Begin / tx.Commit / tx.Rollback. Common entry
@@ -257,12 +257,15 @@ func CreateProject(
 	}, nil
 }
 
-// seedAreas inserts the chosen profile's top-level skeleton and depth-1
-// starter sub-area rows. ON CONFLICT DO NOTHING guards re-runs in the
-// rare case a caller seeds twice (not expected — kept defensive). The
-// returned count reflects the rows the caller asked us to attempt
-// (deterministic per profile) so wrappers can surface the area count
-// without an extra SELECT.
+// seedAreas inserts the chosen profile's top-level skeleton only.
+// Decision area-taxonomy-profiled-skeleton T3: sub-areas are no longer
+// seeded eagerly — a project would otherwise start with dozens of empty
+// starter sub-areas (the dogfood "33 of 48 areas empty" problem). Sub-
+// areas are created on demand via pindoc.area.create as the artifact
+// graph grows; TaxonomyProfile.StarterSubAreas is retained only as a
+// naming catalog. ON CONFLICT DO NOTHING guards the rare double-seed.
+// The returned count is the top-level row count attempted (deterministic
+// per profile) so wrappers can surface it without an extra SELECT.
 func seedAreas(ctx context.Context, tx pgx.Tx, projectID, lang string, profile TaxonomyProfile) (int, error) {
 	count := 0
 	for _, seed := range profile.TopLevel {
@@ -272,18 +275,6 @@ func seedAreas(ctx context.Context, tx pgx.Tx, projectID, lang string, profile T
 			ON CONFLICT (project_id, slug) DO NOTHING
 		`, projectID, seed.Slug, seed.Name, LocalizedAreaDescription(seed.DescriptionEN, seed.DescriptionKO, lang), seed.IsCrossCutting, seed.Fileable); err != nil {
 			return count, fmt.Errorf("seed area %s: %w", seed.Slug, err)
-		}
-		count++
-	}
-	for _, seed := range profile.StarterSubAreas {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO areas (project_id, parent_id, slug, name, description, is_cross_cutting)
-			SELECT $1::uuid, parent.id, $3, $4, $5, $6
-			FROM areas parent
-			WHERE parent.project_id = $1::uuid AND parent.slug = $2
-			ON CONFLICT (project_id, slug) DO NOTHING
-		`, projectID, seed.ParentSlug, seed.Slug, seed.Name, seed.Description, seed.IsCrossCutting); err != nil {
-			return count, fmt.Errorf("seed area %s/%s: %w", seed.ParentSlug, seed.Slug, err)
 		}
 		count++
 	}

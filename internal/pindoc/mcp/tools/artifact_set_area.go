@@ -281,7 +281,10 @@ func setAreaBulk(ctx context.Context, deps Deps, p *auth.Principal, projectID, f
 	}
 	defer rows.Close()
 
-	affected := 0
+	// Drain every row before recordAreaChange runs: pgx serves one query
+	// per connection, and recordAreaChange issues writes on the same tx —
+	// calling it while rows is still open fails with "conn busy".
+	var pending []areaArtifact
 	for rows.Next() {
 		var artifact areaArtifact
 		if err := rows.Scan(
@@ -291,13 +294,19 @@ func setAreaBulk(ctx context.Context, deps Deps, p *auth.Principal, projectID, f
 		); err != nil {
 			return nil, artifactSetAreaOutput{}, fmt.Errorf("bulk set_area scan: %w", err)
 		}
+		pending = append(pending, artifact)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, artifactSetAreaOutput{}, fmt.Errorf("bulk set_area rows: %w", err)
+	}
+	rows.Close()
+
+	affected := 0
+	for _, artifact := range pending {
 		if _, err := recordAreaChange(ctx, tx, p, artifact, targetArea, reason, explicitAuthorID, "mcp_artifact_set_area_bulk"); err != nil {
 			return nil, artifactSetAreaOutput{}, err
 		}
 		affected++
-	}
-	if err := rows.Err(); err != nil {
-		return nil, artifactSetAreaOutput{}, fmt.Errorf("bulk set_area rows: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, artifactSetAreaOutput{}, fmt.Errorf("bulk set_area commit: %w", err)

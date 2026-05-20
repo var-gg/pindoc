@@ -51,9 +51,14 @@ type TopLevelAreaSeedRow struct {
 // a profile without them breaks project.create and the metrics function.
 // ValidateTaxonomyRegistry enforces this; create_test.go runs it.
 type TaxonomyProfile struct {
-	Slug            string
-	Version         string
-	TopLevel        []TopLevelAreaSeedRow
+	Slug     string
+	Version  string
+	TopLevel []TopLevelAreaSeedRow
+	// StarterSubAreas is a naming catalog for sub-areas, NOT a seed
+	// list. Decision area-taxonomy-profiled-skeleton T3 stopped eager
+	// sub-area seeding (every project started with dozens of empty
+	// starter sub-areas). project.create seeds only TopLevel; sub-areas
+	// are created on demand via pindoc.area.create.
 	StarterSubAreas []AreaSeed
 }
 
@@ -244,9 +249,9 @@ var softwareProductProfile = TaxonomyProfile{
 // Analysis game-narrative-profile-draft. TopLevel raises combat /
 // characters / narrative / atlas / art to first-class areas; `project`
 // folds software-style strategy/operations/governance into one
-// structural shelf. StarterSubAreas here is the minimum seed set — the
-// broader lazy catalog is materialized on first use by Task
-// task-profile-aware-area-seed.
+// structural shelf. StarterSubAreas is the naming catalog area.create
+// draws on — project.create seeds only TopLevel (Decision
+// area-taxonomy-profiled-skeleton T3).
 var gameNarrativeProfile = TaxonomyProfile{
 	Slug:    "game-narrative",
 	Version: "draft-v1",

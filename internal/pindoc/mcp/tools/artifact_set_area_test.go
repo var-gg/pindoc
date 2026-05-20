@@ -55,7 +55,7 @@ func TestArtifactSetAreaWarningHelpers(t *testing.T) {
 func TestMCPArtifactSetAreaSingleIntegration(t *testing.T) {
 	ctx, pool, fixture, owner := setupSetAreaIntegration(t)
 
-	insertSetAreaSubArea(t, ctx, pool, fixture.projectID, "content", "character-lore")
+	insertSetAreaSubArea(t, ctx, pool, fixture.projectID, "experience", "character-lore")
 
 	out := callVisibilityTool[artifactSetAreaOutput](t, ctx, pool, nil, owner, "pindoc.artifact.set_area", map[string]any{
 		"project_slug":     fixture.projectSlug,
@@ -113,8 +113,8 @@ func TestMCPArtifactSetAreaSingleIntegration(t *testing.T) {
 func TestMCPArtifactSetAreaBulkIntegration(t *testing.T) {
 	ctx, pool, fixture, owner := setupSetAreaIntegration(t)
 
-	fromAreaID := insertSetAreaSubArea(t, ctx, pool, fixture.projectID, "content", "narrative-script")
-	insertSetAreaSubArea(t, ctx, pool, fixture.projectID, "content", "art-pipeline")
+	fromAreaID := insertSetAreaSubArea(t, ctx, pool, fixture.projectID, "experience", "narrative-script")
+	insertSetAreaSubArea(t, ctx, pool, fixture.projectID, "experience", "art-pipeline")
 	insertMCPVisibilityArtifact(t, ctx, pool, fixture.projectID, fromAreaID, "area-bulk-one", projects.VisibilityOrg, fixture.ownerUserID, "ko")
 	insertMCPVisibilityArtifact(t, ctx, pool, fixture.projectID, fromAreaID, "area-bulk-two", projects.VisibilityOrg, fixture.ownerUserID, "ko")
 	insertMCPVisibilityArtifact(t, ctx, pool, fixture.projectID, fromAreaID, "area-bulk-superseded", projects.VisibilityOrg, fixture.ownerUserID, "ko")
@@ -151,7 +151,7 @@ func TestMCPArtifactSetAreaBulkIntegration(t *testing.T) {
 func TestMCPArtifactSetAreaRejectsIntegration(t *testing.T) {
 	ctx, pool, fixture, owner := setupSetAreaIntegration(t)
 
-	childID := insertSetAreaSubArea(t, ctx, pool, fixture.projectID, "content", "narrative-process")
+	childID := insertSetAreaSubArea(t, ctx, pool, fixture.projectID, "experience", "narrative-process")
 	insertSetAreaGrandchild(t, ctx, pool, fixture.projectID, childID, "too-deep")
 	insertMCPVisibilityArtifact(t, ctx, pool, fixture.projectID, childID, "area-superseded", projects.VisibilityOrg, fixture.ownerUserID, "ko")
 	setArtifactStatus(t, ctx, pool, fixture.projectID, "area-superseded", "superseded")
