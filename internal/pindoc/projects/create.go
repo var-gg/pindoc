@@ -47,13 +47,14 @@ var reservedSlugs = map[string]struct{}{
 // LANG_REQUIRED / LANG_INVALID) without parsing error strings. Wrappers
 // in mcp/tools, httpapi, and pindoc-admin all match these sentinels.
 var (
-	ErrSlugInvalid       = errors.New("SLUG_INVALID")
-	ErrSlugReserved      = errors.New("SLUG_RESERVED")
-	ErrSlugTaken         = errors.New("SLUG_TAKEN")
-	ErrNameRequired      = errors.New("NAME_REQUIRED")
-	ErrLangRequired      = errors.New("LANG_REQUIRED")
-	ErrLangInvalid       = errors.New("LANG_INVALID")
-	ErrVisibilityInvalid = errors.New("VISIBILITY_INVALID")
+	ErrSlugInvalid            = errors.New("SLUG_INVALID")
+	ErrSlugReserved           = errors.New("SLUG_RESERVED")
+	ErrSlugTaken              = errors.New("SLUG_TAKEN")
+	ErrNameRequired           = errors.New("NAME_REQUIRED")
+	ErrLangRequired           = errors.New("LANG_REQUIRED")
+	ErrLangInvalid            = errors.New("LANG_INVALID")
+	ErrVisibilityInvalid      = errors.New("VISIBILITY_INVALID")
+	ErrTaxonomyProfileInvalid = errors.New("TAXONOMY_PROFILE_INVALID")
 )
 
 // CreateProjectInput is the entrypoint-agnostic projection of a "create
@@ -61,15 +62,16 @@ var (
 // from their native input shape; UI hits the REST handler so it's
 // transitively the same.
 type CreateProjectInput struct {
-	Slug            string
-	Name            string
-	Description     string // optional
-	Color           string // optional CSS color
-	PrimaryLanguage string // required, one of SupportedLanguages
-	Visibility      string // optional, defaults to org
-	GitRemoteURL    string // optional; stored in project_repos as name=origin
-	OrganizationID  string // optional organizations.id; defaults to the bootstrap default Org
-	OwnerUserID     string // optional users.id; creates project_members owner row when present
+	Slug                string
+	Name                string
+	Description         string // optional
+	Color               string // optional CSS color
+	PrimaryLanguage     string // required, one of SupportedLanguages
+	Visibility          string // optional, defaults to org
+	GitRemoteURL        string // optional; stored in project_repos as name=origin
+	OrganizationID      string // optional organizations.id; defaults to the bootstrap default Org
+	OwnerUserID         string // optional users.id; creates project_members owner row when present
+	TaxonomyProfileSlug string // optional; one of projects.TaxonomyProfiles, defaults to software-product
 }
 
 // CreateProjectOutput carries the post-create facts every entrypoint
@@ -77,14 +79,16 @@ type CreateProjectInput struct {
 // guidance, agent-facing message) is built by the wrapper from these
 // fields plus its own context.
 type CreateProjectOutput struct {
-	ID               string
-	Slug             string
-	Name             string
-	PrimaryLanguage  string
-	Visibility       string
-	DefaultArea      string // always "misc" today; reserved for future override
-	AreasCreated     int    // top-level + starter sub-area rows actually inserted
-	TemplatesCreated int    // len(TemplateSeeds), 4 in V1
+	ID                     string
+	Slug                   string
+	Name                   string
+	PrimaryLanguage        string
+	Visibility             string
+	DefaultArea            string // always "misc" today; reserved for future override
+	AreasCreated           int    // top-level + starter sub-area rows actually inserted
+	TemplatesCreated       int    // len(TemplateSeeds), 4 in V1
+	TaxonomyProfile        string // taxonomy profile slug seeded for this project
+	TaxonomyProfileVersion string // taxonomy profile version pinned at create time
 }
 
 // ValidateProjectSlug runs the static checks (regex + reserved list) so
@@ -131,9 +135,10 @@ func supportedLanguageList() string {
 	return strings.Join(SupportedLanguages, ", ")
 }
 
-// CreateProject inserts a projects row, seeds the 9-area concern skeleton
-// + starter sub-areas, and seeds the 4 _template_* artifacts under the
-// 'misc' area — atomic via the caller-provided transaction. The caller
+// CreateProject inserts a projects row, seeds the chosen taxonomy
+// profile's area skeleton + starter sub-areas, and seeds the _template_*
+// artifacts under the 'misc' area — atomic via the caller-provided
+// transaction. The caller
 // is responsible for tx.Begin / tx.Commit / tx.Rollback. Common entry
 // points pass tx straight through (MCP tool already in-tx; REST/CLI begin
 // their own).
@@ -196,12 +201,18 @@ func CreateProject(
 		return zero, fmt.Errorf("resolve organization %q: %w", orgID, err)
 	}
 
+	profileSlug := strings.TrimSpace(in.TaxonomyProfileSlug)
+	profile, profileKnown := TaxonomyProfileBySlug(profileSlug)
+	if profileSlug != "" && !profileKnown {
+		return zero, fmt.Errorf("%w: unknown taxonomy_profile %q; pick one of the registered profiles or omit to use %q", ErrTaxonomyProfileInvalid, profileSlug, DefaultTaxonomyProfileSlug)
+	}
+
 	var projectID string
 	err = tx.QueryRow(ctx, `
-		INSERT INTO projects (organization_id, slug, name, description, color, primary_language, visibility)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)
+		INSERT INTO projects (organization_id, slug, name, description, color, primary_language, visibility, taxonomy_profile_slug, taxonomy_profile_version)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id::text
-	`, orgID, slug, name, descPtr, colorPtr, lang, visibility).Scan(&projectID)
+	`, orgID, slug, name, descPtr, colorPtr, lang, visibility, profile.Slug, profile.Version).Scan(&projectID)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -219,7 +230,7 @@ func CreateProject(
 		}
 	}
 
-	areasCreated, err := seedAreas(ctx, tx, projectID, lang)
+	areasCreated, err := seedAreas(ctx, tx, projectID, lang, profile)
 	if err != nil {
 		return zero, fmt.Errorf("seed default areas: %w", err)
 	}
@@ -233,26 +244,28 @@ func CreateProject(
 	}
 
 	return CreateProjectOutput{
-		ID:               projectID,
-		Slug:             slug,
-		Name:             name,
-		PrimaryLanguage:  lang,
-		Visibility:       visibility,
-		DefaultArea:      "misc",
-		AreasCreated:     areasCreated,
-		TemplatesCreated: templatesCreated,
+		ID:                     projectID,
+		Slug:                   slug,
+		Name:                   name,
+		PrimaryLanguage:        lang,
+		Visibility:             visibility,
+		DefaultArea:            "misc",
+		AreasCreated:           areasCreated,
+		TemplatesCreated:       templatesCreated,
+		TaxonomyProfile:        profile.Slug,
+		TaxonomyProfileVersion: profile.Version,
 	}, nil
 }
 
-// seedAreas inserts the fixed 9-row top-level skeleton and the depth-1
+// seedAreas inserts the chosen profile's top-level skeleton and depth-1
 // starter sub-area rows. ON CONFLICT DO NOTHING guards re-runs in the
 // rare case a caller seeds twice (not expected — kept defensive). The
 // returned count reflects the rows the caller asked us to attempt
-// (deterministic per V1) so wrappers can surface "9 areas + N sub-areas"
+// (deterministic per profile) so wrappers can surface the area count
 // without an extra SELECT.
-func seedAreas(ctx context.Context, tx pgx.Tx, projectID, lang string) (int, error) {
+func seedAreas(ctx context.Context, tx pgx.Tx, projectID, lang string, profile TaxonomyProfile) (int, error) {
 	count := 0
-	for _, seed := range TopLevelAreaSeed {
+	for _, seed := range profile.TopLevel {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO areas (project_id, slug, name, description, is_cross_cutting)
 			VALUES ($1::uuid, $2, $3, $4, $5)
@@ -262,7 +275,7 @@ func seedAreas(ctx context.Context, tx pgx.Tx, projectID, lang string) (int, err
 		}
 		count++
 	}
-	for _, seed := range StarterSubAreaSeeds {
+	for _, seed := range profile.StarterSubAreas {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO areas (project_id, parent_id, slug, name, description, is_cross_cutting)
 			SELECT $1::uuid, parent.id, $3, $4, $5, $6

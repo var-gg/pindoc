@@ -6,35 +6,40 @@ import (
 	"testing"
 )
 
-// TestTopLevelAreaSeed_ConcernSkeleton locks the canonical 9-row order +
-// bilingual descriptions. Renaming or reordering rows changes URLs for
-// every dogfood project, so this test is the regression baseline for the
-// taxonomy frozen by Decision area-구조-top-level-고정-골격-depth-2-sub-area
-// 만-프로젝트별-자유.
-func TestTopLevelAreaSeed_ConcernSkeleton(t *testing.T) {
+// TestSoftwareProductProfile_ConcernSkeleton locks the canonical 9-row
+// order + bilingual descriptions of the software-product profile.
+// Renaming or reordering rows changes URLs for every project on this
+// profile, so this test is the regression baseline for the skeleton
+// frozen by Decision area-taxonomy-reform-path-a and retained as the
+// software-product profile by Decision area-taxonomy-profiled-skeleton.
+func TestSoftwareProductProfile_ConcernSkeleton(t *testing.T) {
 	want := []string{
 		"strategy", "context", "experience", "system",
 		"operations", "governance", "cross-cutting",
 		"misc", "_unsorted",
 	}
 
-	if len(TopLevelAreaSeed) != len(want) {
-		t.Fatalf("seed count = %d, want %d", len(TopLevelAreaSeed), len(want))
+	profile, ok := TaxonomyProfileBySlug("software-product")
+	if !ok {
+		t.Fatal("software-product profile not registered")
+	}
+	if len(profile.TopLevel) != len(want) {
+		t.Fatalf("top-level count = %d, want %d", len(profile.TopLevel), len(want))
 	}
 
 	seen := map[string]bool{}
-	for i, seed := range TopLevelAreaSeed {
+	for i, seed := range profile.TopLevel {
 		if seed.Slug != want[i] {
-			t.Fatalf("seed %d slug = %q, want %q", i, seed.Slug, want[i])
+			t.Fatalf("top-level %d slug = %q, want %q", i, seed.Slug, want[i])
 		}
 		if seen[seed.Slug] {
-			t.Fatalf("duplicate seed slug %q", seed.Slug)
+			t.Fatalf("duplicate top-level slug %q", seed.Slug)
 		}
 		if seed.Name == "" {
-			t.Fatalf("seed %q has empty name", seed.Slug)
+			t.Fatalf("top-level %q has empty name", seed.Slug)
 		}
 		if seed.DescriptionEN == "" || seed.DescriptionKO == "" {
-			t.Fatalf("seed %q must carry en/ko descriptions", seed.Slug)
+			t.Fatalf("top-level %q must carry en/ko descriptions", seed.Slug)
 		}
 		seen[seed.Slug] = true
 	}
@@ -45,18 +50,18 @@ func TestTopLevelAreaSeed_ConcernSkeleton(t *testing.T) {
 		}
 	}
 
-	for _, seed := range TopLevelAreaSeed {
+	for _, seed := range profile.TopLevel {
 		if seed.IsCrossCutting != (seed.Slug == "cross-cutting") {
-			t.Fatalf("seed %q is_cross_cutting = %v", seed.Slug, seed.IsCrossCutting)
+			t.Fatalf("top-level %q is_cross_cutting = %v", seed.Slug, seed.IsCrossCutting)
 		}
 	}
 }
 
-// TestStarterSubAreaSeeds locks the per-parent counts + the
-// "every cross-cutting child is_cross_cutting=true" invariant. New
-// sub-areas under existing parents land here so dogfood projects stay
-// in sync with self-host installs.
-func TestStarterSubAreaSeeds(t *testing.T) {
+// TestSoftwareProductProfile_StarterSubAreas locks the per-parent counts
+// + the "every cross-cutting child is_cross_cutting=true" invariant for
+// the software-product profile. New sub-areas under existing parents
+// land here so dogfood projects stay in sync with self-host installs.
+func TestSoftwareProductProfile_StarterSubAreas(t *testing.T) {
 	wantCounts := map[string]int{
 		"context":       6,
 		"experience":    5,
@@ -66,9 +71,10 @@ func TestStarterSubAreaSeeds(t *testing.T) {
 		"cross-cutting": 6,
 	}
 
+	profile, _ := TaxonomyProfileBySlug("software-product")
 	gotCounts := map[string]int{}
 	seen := map[string]bool{}
-	for _, seed := range StarterSubAreaSeeds {
+	for _, seed := range profile.StarterSubAreas {
 		if seed.ParentSlug == "" {
 			t.Fatalf("starter seed %q is missing parent", seed.Slug)
 		}
@@ -86,6 +92,46 @@ func TestStarterSubAreaSeeds(t *testing.T) {
 		if got := gotCounts[parent]; got != want {
 			t.Fatalf("starter count for %q = %d, want %d", parent, got, want)
 		}
+	}
+}
+
+// TestTaxonomyRegistry locks the registry invariants — every registered
+// profile must pass ValidateTaxonomyRegistry (matching key, required
+// misc/_unsorted top-level, known sub-area parents) — plus the
+// registered profile set and the unknown-slug fallback. A profile
+// missing misc/_unsorted would break seedTemplates and
+// area_taxonomy_metrics, so that failure must surface here.
+func TestTaxonomyRegistry(t *testing.T) {
+	if err := ValidateTaxonomyRegistry(); err != nil {
+		t.Fatalf("ValidateTaxonomyRegistry: %v", err)
+	}
+
+	for _, slug := range []string{"software-product", "game-narrative"} {
+		p, ok := TaxonomyProfiles[slug]
+		if !ok {
+			t.Fatalf("profile %q not registered", slug)
+		}
+		tops := map[string]bool{}
+		for _, top := range p.TopLevel {
+			tops[top.Slug] = true
+		}
+		for _, required := range []string{"misc", "_unsorted"} {
+			if !tops[required] {
+				t.Fatalf("profile %q missing required top-level %q", slug, required)
+			}
+		}
+	}
+
+	if got := len(TaxonomyProfiles["game-narrative"].TopLevel); got != 11 {
+		t.Fatalf("game-narrative top-level count = %d, want 11", got)
+	}
+
+	// Unknown or empty slug falls back to the default profile.
+	if p, ok := TaxonomyProfileBySlug("no-such-profile"); ok || p.Slug != DefaultTaxonomyProfileSlug {
+		t.Fatalf("TaxonomyProfileBySlug(unknown) = (%q, %v), want (%q, false)", p.Slug, ok, DefaultTaxonomyProfileSlug)
+	}
+	if p, ok := TaxonomyProfileBySlug(""); !ok && p.Slug != DefaultTaxonomyProfileSlug {
+		t.Fatalf("TaxonomyProfileBySlug(empty) = %q, want default %q", p.Slug, DefaultTaxonomyProfileSlug)
 	}
 }
 
