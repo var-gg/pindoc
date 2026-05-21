@@ -680,15 +680,22 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 
 			// --- Resolve area + project ----------------------------------
 			var projectID, areaID, sensitiveOps, projectVisibility, projectDefaultVisibility string
+			var areaLifecycle, areaParentLifecycle, areaGrandparentLifecycle string
 			err = deps.DB.QueryRow(ctx, `
 				SELECT proj.id::text, area.id::text,
 				       COALESCE(NULLIF(proj.sensitive_ops, ''), 'auto'),
 				       proj.visibility,
-				       proj.default_artifact_visibility
+				       proj.default_artifact_visibility,
+				       area.lifecycle,
+				       COALESCE(parent.lifecycle, 'active'),
+				       COALESCE(grandparent.lifecycle, 'active')
 				FROM projects proj
 				JOIN areas area ON area.project_id = proj.id
+				LEFT JOIN areas parent ON parent.id = area.parent_id
+				LEFT JOIN areas grandparent ON grandparent.id = parent.parent_id
 				WHERE proj.slug = $1 AND area.slug = $2
-			`, scope.ProjectSlug, in.AreaSlug).Scan(&projectID, &areaID, &sensitiveOps, &projectVisibility, &projectDefaultVisibility)
+			`, scope.ProjectSlug, in.AreaSlug).Scan(&projectID, &areaID, &sensitiveOps, &projectVisibility, &projectDefaultVisibility,
+				&areaLifecycle, &areaParentLifecycle, &areaGrandparentLifecycle)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, artifactProposeOutput{
 					Status:    "not_ready",
@@ -720,6 +727,23 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 			// (read/target proves context). Unset receipts store disables
 			// the gate entirely (test fixtures).
 			isCreatePath := strings.TrimSpace(in.UpdateOf) == "" && strings.TrimSpace(in.SupersedeOf) == ""
+			// Decision taxonomy-change-operation T8: a NEW artifact cannot
+			// be filed into a retiring/archived area or under a
+			// retiring/archived ancestor. update_of / supersede_of are
+			// exempt — an existing artifact in a legacy area can still be
+			// revised; only fresh filing is closed.
+			if isCreatePath && (areaLifecycle != "active" || areaParentLifecycle != "active" || areaGrandparentLifecycle != "active") {
+				return nil, artifactProposeOutput{
+					Status:    "not_ready",
+					ErrorCode: "AREA_NOT_ACTIVE",
+					Failed:    []string{"AREA_NOT_ACTIVE"},
+					Checklist: []string{fmt.Sprintf(
+						"area %q is retiring or archived — it holds legacy artifacts but is closed to new filing. Pick an active area from pindoc.area.list.", in.AreaSlug)},
+					SuggestedActions: []string{i18n.T(lang, "suggested.list_areas")},
+					NextTools:        defaultNextTools("AREA_NOT_ACTIVE"),
+					PatchableFields:  patchFieldsFor("AREA_NOT_ACTIVE"),
+				}, nil
+			}
 			var receiptExempted *ReceiptExemptionSignal
 			var receiptSnapshots []receipts.ArtifactRef
 			if isCreatePath && deps.Receipts != nil {
@@ -2641,7 +2665,7 @@ func defaultNextTools(code string) []NextToolHint {
 		return toolHints("pindoc.artifact.revisions", "pindoc.artifact.diff")
 	case "UPDATE_TARGET_NOT_FOUND", "SUPERSEDE_TARGET_NOT_FOUND", "REL_TARGET_NOT_FOUND", "SCOPE_DEFER_TARGET_NOT_FOUND":
 		return toolHints("pindoc.artifact.search", "pindoc.area.list")
-	case "AREA_UNKNOWN", "AREA_NOT_FOUND", "AREA_EMPTY", "DECISION_AREA_DEPRECATED":
+	case "AREA_UNKNOWN", "AREA_NOT_FOUND", "AREA_NOT_ACTIVE", "AREA_EMPTY", "DECISION_AREA_DEPRECATED":
 		return toolHints("pindoc.area.list")
 	case "TASK_NO_ACCEPTANCE", "TASK_CODE_COORDINATE_MISSING", "TLDR_LINE_CAP", "DEC_NO_SECTIONS", "DBG_NO_REPRO", "DBG_NO_RESOLUTION":
 		return toolHints("pindoc.harness.install")
@@ -2921,7 +2945,7 @@ func patchFieldsFor(code string) []string {
 		return []string{"update_of", "supersede_of"}
 	case "UPDATE_TARGET_NOT_FOUND":
 		return []string{"update_of"}
-	case "AREA_UNKNOWN", "AREA_NOT_FOUND", "AREA_EMPTY", "DECISION_AREA_DEPRECATED":
+	case "AREA_UNKNOWN", "AREA_NOT_FOUND", "AREA_NOT_ACTIVE", "AREA_EMPTY", "DECISION_AREA_DEPRECATED":
 		return []string{"area_slug"}
 	case "VISIBILITY_CAPPED_BY_PROJECT":
 		return []string{"visibility"}

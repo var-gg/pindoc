@@ -14,10 +14,15 @@ type areaListInput struct {
 	// level scope, Decision mcp-scope-account-level-industry-standard).
 	// Required — empty surfaces PROJECT_SLUG_REQUIRED.
 	ProjectSlug string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
-	// IncludeArchived is reserved; we only flip the flag once the archive
-	// flow for areas lands. Shipping the field shape early so agents don't
-	// need to relearn a new schema later.
-	IncludeArchived bool `json:"include_archived,omitempty" jsonschema:"reserved; has no effect yet"`
+	// IncludeRetiring adds retiring (legacy) areas to the listing.
+	// Decision taxonomy-change-operation T8: the default listing is active
+	// areas only — the filing-relevant set — so an agent picking an
+	// area_slug for artifact.propose never lands on a legacy area. Pass
+	// true to also see retiring areas (e.g. to relocate their artifacts).
+	IncludeRetiring bool `json:"include_retiring,omitempty" jsonschema:"include retiring (legacy) areas; default false lists only active areas"`
+	// IncludeArchived adds archived (emptied legacy) areas to the listing.
+	// Decision taxonomy-change-operation T8.
+	IncludeArchived bool `json:"include_archived,omitempty" jsonschema:"include archived areas; default false hides them"`
 	// IncludeTemplates controls whether _template_* artifacts are counted
 	// in artifact_count. Default false keeps counts aligned with the
 	// artifact list (which also hides templates by default). Flip true
@@ -27,14 +32,18 @@ type areaListInput struct {
 }
 
 type AreaRef struct {
-	ID             string   `json:"id"`
-	Slug           string   `json:"slug"`
-	Name           string   `json:"name"`
-	Description    string   `json:"description,omitempty"`
-	ParentSlug     string   `json:"parent_slug,omitempty"`
-	IsCrossCutting bool     `json:"is_cross_cutting"`
-	ArtifactCount  int      `json:"artifact_count"`
-	ChildrenSlugs  []string `json:"children_slugs,omitempty"`
+	ID             string `json:"id"`
+	Slug           string `json:"slug"`
+	Name           string `json:"name"`
+	Description    string `json:"description,omitempty"`
+	ParentSlug     string `json:"parent_slug,omitempty"`
+	IsCrossCutting bool   `json:"is_cross_cutting"`
+	// Lifecycle is active | retiring | archived (Decision
+	// taxonomy-change-operation T8). retiring areas are legacy: they hold
+	// existing artifacts but refuse new filing.
+	Lifecycle     string   `json:"lifecycle"`
+	ArtifactCount int      `json:"artifact_count"`
+	ChildrenSlugs []string `json:"children_slugs,omitempty"`
 }
 
 type areaListOutput struct {
@@ -66,6 +75,7 @@ func RegisterAreaList(server *sdk.Server, deps Deps) {
 					a.description,
 					parent.slug,
 					a.is_cross_cutting,
+					a.lifecycle,
 					(SELECT count(*) FROM artifacts x
 					  WHERE x.area_id = a.id
 					    AND x.status <> 'archived'
@@ -78,8 +88,11 @@ func RegisterAreaList(server *sdk.Server, deps Deps) {
 				FROM areas a
 				JOIN p ON a.project_id = p.id
 				LEFT JOIN areas parent ON parent.id = a.parent_id
+				WHERE a.lifecycle = 'active'
+				   OR ($3::bool AND a.lifecycle = 'retiring')
+				   OR ($4::bool AND a.lifecycle = 'archived')
 				ORDER BY a.is_cross_cutting, a.slug
-			`, scope.ProjectSlug, in.IncludeTemplates)
+			`, scope.ProjectSlug, in.IncludeTemplates, in.IncludeRetiring, in.IncludeArchived)
 			if err != nil {
 				return nil, areaListOutput{}, fmt.Errorf("query areas: %w", err)
 			}
@@ -91,7 +104,7 @@ func RegisterAreaList(server *sdk.Server, deps Deps) {
 				var desc, parentSlug *string
 				if err := rows.Scan(
 					&a.ID, &a.Slug, &a.Name,
-					&desc, &parentSlug, &a.IsCrossCutting,
+					&desc, &parentSlug, &a.IsCrossCutting, &a.Lifecycle,
 					&a.ArtifactCount, &a.ChildrenSlugs,
 				); err != nil {
 					return nil, areaListOutput{}, fmt.Errorf("scan: %w", err)

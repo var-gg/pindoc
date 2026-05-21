@@ -62,6 +62,12 @@ type setAreaInfo struct {
 	GrandparentID string
 	Fileable      bool
 	RootMaxDepth  int
+	// Lifecycle is active | retiring | archived (Decision
+	// taxonomy-change-operation T8). AncestorRetired is true when the
+	// parent or grandparent area is not active — a sub-area under a
+	// retiring top-level cannot accept new filing either.
+	Lifecycle       string
+	AncestorRetired bool
 }
 
 type areaArtifact struct {
@@ -337,6 +343,7 @@ func resolveSetAreaExisting(ctx context.Context, q setAreaQuerier, projectID, sl
 	slug = strings.TrimSpace(slug)
 	var area setAreaInfo
 	var parentID, parentSlug, grandparentID *string
+	var parentLifecycle, grandparentLifecycle string
 	err := q.QueryRow(ctx, `
 		SELECT a.id::text,
 		       a.slug,
@@ -344,14 +351,19 @@ func resolveSetAreaExisting(ctx context.Context, q setAreaQuerier, projectID, sl
 		       parent.slug,
 		       parent.parent_id::text,
 		       a.fileable,
-		       COALESCE(grandparent.max_depth, parent.max_depth, a.max_depth)
+		       COALESCE(grandparent.max_depth, parent.max_depth, a.max_depth),
+		       a.lifecycle,
+		       COALESCE(parent.lifecycle, 'active'),
+		       COALESCE(grandparent.lifecycle, 'active')
 		  FROM areas a
 		  LEFT JOIN areas parent ON parent.id = a.parent_id
 		  LEFT JOIN areas grandparent ON grandparent.id = parent.parent_id
 		 WHERE a.project_id = $1::uuid
 		   AND a.slug = $2
 		 LIMIT 1
-	`, projectID, slug).Scan(&area.ID, &area.Slug, &parentID, &parentSlug, &grandparentID, &area.Fileable, &area.RootMaxDepth)
+	`, projectID, slug).Scan(&area.ID, &area.Slug, &parentID, &parentSlug, &grandparentID,
+		&area.Fileable, &area.RootMaxDepth,
+		&area.Lifecycle, &parentLifecycle, &grandparentLifecycle)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return setAreaInfo{}, "AREA_NOT_FOUND"
 	}
@@ -367,6 +379,7 @@ func resolveSetAreaExisting(ctx context.Context, q setAreaQuerier, projectID, sl
 	if grandparentID != nil {
 		area.GrandparentID = *grandparentID
 	}
+	area.AncestorRetired = parentLifecycle != "active" || grandparentLifecycle != "active"
 	return area, ""
 }
 
@@ -379,6 +392,16 @@ func resolveSetAreaExisting(ctx context.Context, q setAreaQuerier, projectID, sl
 func validateSetAreaTarget(area setAreaInfo) string {
 	if area.ID == "" {
 		return "AREA_NOT_FOUND"
+	}
+	// Decision taxonomy-change-operation T8: a retiring/archived area, or
+	// any area under a retiring/archived ancestor, holds legacy artifacts
+	// but is closed to new filing. An empty Lifecycle (hand-built test
+	// struct) is treated as active.
+	if area.Lifecycle != "" && area.Lifecycle != "active" {
+		return "AREA_NOT_ACTIVE"
+	}
+	if area.AncestorRetired {
+		return "AREA_NOT_ACTIVE"
 	}
 	if area.GrandparentID != "" && area.RootMaxDepth < 2 {
 		return "AREA_DEPTH_VIOLATION"

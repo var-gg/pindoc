@@ -110,7 +110,7 @@ Propose a new project-specific top-level area. This tool never creates an area: 
 			}
 
 			rows, err := deps.DB.Query(ctx, `
-				SELECT a.slug
+				SELECT a.slug, a.lifecycle
 				  FROM areas a
 				  JOIN projects p ON p.id = a.project_id
 				 WHERE p.slug = $1 AND a.parent_id IS NULL
@@ -118,29 +118,40 @@ Propose a new project-specific top-level area. This tool never creates an area: 
 			if err != nil {
 				return nil, taxonomyChangeProposeOutput{}, fmt.Errorf("load top-level areas: %w", err)
 			}
-			topLevel := []string{}
+			type topLevelAreaRow struct{ slug, lifecycle string }
+			topLevel := []topLevelAreaRow{}
 			for rows.Next() {
-				var s string
-				if err := rows.Scan(&s); err != nil {
+				var r topLevelAreaRow
+				if err := rows.Scan(&r.slug, &r.lifecycle); err != nil {
 					rows.Close()
 					return nil, taxonomyChangeProposeOutput{}, fmt.Errorf("scan top-level area: %w", err)
 				}
-				topLevel = append(topLevel, s)
+				topLevel = append(topLevel, r)
 			}
 			rows.Close()
 			if err := rows.Err(); err != nil {
 				return nil, taxonomyChangeProposeOutput{}, fmt.Errorf("top-level area rows: %w", err)
 			}
 
-			for _, s := range topLevel {
-				if s == norm.CandidateSlug {
+			// A candidate colliding with ANY existing top-level slug —
+			// active, retiring, or archived — is rejected; reusing a slug
+			// is ambiguous. The cap (Decision taxonomy-change-operation T8)
+			// counts only active top-levels, so a profile.adopt that leaves
+			// old areas retiring does not exhaust the budget for the new
+			// skeleton.
+			activeTopLevel := 0
+			for _, r := range topLevel {
+				if r.slug == norm.CandidateSlug {
 					return nil, taxonomyChangeNotReady("CANDIDATE_SLUG_EXISTS",
 						fmt.Sprintf("Top-level area %q already exists in this project.", norm.CandidateSlug)), nil
 				}
+				if r.lifecycle == "active" {
+					activeTopLevel++
+				}
 			}
-			if len(topLevel)+1 > taxonomyTopLevelCap {
+			if activeTopLevel+1 > taxonomyTopLevelCap {
 				return nil, taxonomyChangeNotReady("TOP_LEVEL_CAP_EXCEEDED",
-					fmt.Sprintf("Project already has %d top-level areas; the cap is %d. Rehome or merge existing areas before proposing another.", len(topLevel), taxonomyTopLevelCap)), nil
+					fmt.Sprintf("Project already has %d active top-level areas; the cap is %d. Retire or rehome existing areas before proposing another.", activeTopLevel, taxonomyTopLevelCap)), nil
 			}
 
 			actorID := strings.TrimSpace(p.AgentID)
