@@ -207,6 +207,8 @@ Apply an owner-approved taxonomy change-set. An agent may call this — the appr
 				return applyTopLevelAdd(ctx, deps, p, scope.ProjectID, change)
 			case taxonomyChangeKindAreaRetire:
 				return applyAreaRetireEmpty(ctx, deps, p, scope.ProjectID, change)
+			case taxonomyChangeKindProfileAdopt:
+				return applyProfileAdopt(ctx, deps, p, scope.ProjectID, change)
 			default:
 				out := taxonomyChangeApplyNotReady("KIND_NOT_SUPPORTED", changeID)
 				out.Kind = change.Kind

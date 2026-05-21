@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -306,4 +307,133 @@ func topLevelSpecSlugs(specs []profileAdoptTopLevelSpec) []string {
 		out = append(out, s.Slug)
 	}
 	return out
+}
+
+// applyProfileAdopt executes an approved profile.adopt change-set in one
+// transaction (Decision taxonomy-change-operation T14). Order matters:
+// legacy top-levels retire FIRST so the active top-level cap is not
+// exhausted when the new ones are created. The project profile pin is
+// updated LAST, recording the adoption as structurally complete.
+func applyProfileAdopt(ctx context.Context, deps Deps, p *auth.Principal, projectID string, change taxonomyChange) (*sdk.CallToolResult, taxonomyChangeApplyOutput, error) {
+	var plan profileAdoptPlan
+	if err := json.Unmarshal(change.PlanJSON, &plan); err != nil {
+		return nil, taxonomyChangeApplyOutput{}, fmt.Errorf("parse profile.adopt plan: %w", err)
+	}
+
+	tx, err := deps.DB.Begin(ctx)
+	if err != nil {
+		return nil, taxonomyChangeApplyOutput{}, fmt.Errorf("begin profile.adopt apply tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Project-scoped advisory lock: a profile.adopt apply must not
+	// interleave with another taxonomy change-set on the same project.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "taxonomy:"+projectID); err != nil {
+		return nil, taxonomyChangeApplyOutput{}, fmt.Errorf("acquire project lock: %w", err)
+	}
+
+	// Step 1: retire the legacy top-levels first — freeing active
+	// top-level budget before the new ones are created.
+	retiredAreaIDs := []string{}
+	if len(plan.TopLevelToRetire) > 0 {
+		rows, err := tx.Query(ctx, `
+			UPDATE areas
+			   SET lifecycle = 'retiring',
+			       retired_by_change_id = $2::uuid
+			 WHERE project_id = $1::uuid
+			   AND parent_id IS NULL
+			   AND lifecycle = 'active'
+			   AND slug = ANY($3)
+			RETURNING id::text
+		`, projectID, change.ID, plan.TopLevelToRetire)
+		if err != nil {
+			return nil, taxonomyChangeApplyOutput{}, fmt.Errorf("retire legacy top-levels: %w", err)
+		}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, taxonomyChangeApplyOutput{}, fmt.Errorf("scan retired area: %w", err)
+			}
+			retiredAreaIDs = append(retiredAreaIDs, id)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, taxonomyChangeApplyOutput{}, fmt.Errorf("retired area rows: %w", err)
+		}
+	}
+
+	// Step 2: create the missing target top-levels. A slug collision or
+	// cap overflow here means the world drifted since approval.
+	createdCount := 0
+	for _, spec := range plan.TopLevelToCreate {
+		if _, createErr := projects.CreateTopLevelArea(ctx, tx, projectID, projects.TopLevelAreaSpec{
+			Slug:           spec.Slug,
+			Name:           spec.Name,
+			Description:    spec.Description,
+			IsCrossCutting: spec.IsCrossCutting,
+			Fileable:       spec.Fileable,
+			MaxDepth:       spec.MaxDepth,
+		}, plan.TargetProfileSlug, change.ID); createErr != nil {
+			if errors.Is(createErr, projects.ErrTopLevelAreaSlugTaken) || errors.Is(createErr, projects.ErrTopLevelAreaCapExceeded) {
+				return nil, taxonomyChangeApplyStale(deps, ctx, change, createErr.Error()), nil
+			}
+			return nil, taxonomyChangeApplyOutput{}, fmt.Errorf("create target top-level %q: %w", spec.Slug, createErr)
+		}
+		createdCount++
+	}
+
+	// Step 3: apply the approved relocation map. A failed move is drift.
+	relocated, relErr := executeArtifactRelocation(ctx, tx, p, projectID, change.ID,
+		"profile.adopt: "+plan.SourceProfileSlug+" -> "+plan.TargetProfileSlug, plan.Relocations)
+	if relErr != nil {
+		return nil, taxonomyChangeApplyStale(deps, ctx, change, relErr.Error()), nil
+	}
+
+	// Step 4: archive any retiring legacy top-level the relocations
+	// emptied. Non-empty ones stay retiring as legacy inventory.
+	archived, _, archErr := archiveEmptyAreas(ctx, tx, projectID, retiredAreaIDs, change.ID)
+	if archErr != nil {
+		return nil, taxonomyChangeApplyOutput{}, fmt.Errorf("archive emptied legacy areas: %w", archErr)
+	}
+
+	// Step 5: update the project profile pin — the last structural step.
+	if _, err := tx.Exec(ctx, `
+		UPDATE projects SET taxonomy_profile_slug = $2 WHERE id = $1::uuid
+	`, projectID, plan.TargetProfileSlug); err != nil {
+		return nil, taxonomyChangeApplyOutput{}, fmt.Errorf("update project profile pin: %w", err)
+	}
+
+	actor := taxonomyChangeActor(p)
+	if err := markTaxonomyChangeApplied(ctx, tx, change.ID, actor); err != nil {
+		return nil, taxonomyChangeApplyOutput{}, fmt.Errorf("mark applied: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO events (project_id, kind, payload)
+		VALUES ($1::uuid, 'taxonomy.change_applied', jsonb_build_object(
+			'change_id', $2::text, 'plan_hash', $3::text, 'kind', $4::text,
+			'applied_by', $5::text,
+			'source_profile_slug', $6::text, 'target_profile_slug', $7::text,
+			'top_level_created', $8::int, 'top_level_retired', $9::int,
+			'artifacts_relocated', $10::int, 'areas_archived', $11::int
+		))
+	`, projectID, change.ID, change.PlanHash, change.Kind, actor,
+		plan.SourceProfileSlug, plan.TargetProfileSlug,
+		createdCount, len(retiredAreaIDs), relocated, len(archived)); err != nil {
+		return nil, taxonomyChangeApplyOutput{}, fmt.Errorf("record change_applied event: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, taxonomyChangeApplyOutput{}, fmt.Errorf("commit profile.adopt apply: %w", err)
+	}
+	return nil, taxonomyChangeApplyOutput{
+		Status:        "applied",
+		ChangeID:      change.ID,
+		ChangeStatus:  taxonomyChangeStatusApplied,
+		Kind:          change.Kind,
+		ArchivedCount: len(archived),
+		Message: fmt.Sprintf(
+			"Applied change-set %s (profile.adopt %s -> %s): %d top-level created, %d retired, %d artifact(s) relocated, %d legacy area(s) archived.",
+			change.ID, plan.SourceProfileSlug, plan.TargetProfileSlug,
+			createdCount, len(retiredAreaIDs), relocated, len(archived)),
+	}, nil
 }
