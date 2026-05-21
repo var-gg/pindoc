@@ -69,6 +69,10 @@ type profileAdoptDiff struct {
 	TopLevelToRetire    []profileAdoptRetireInfo `json:"top_level_to_retire"`
 	RelocationMoves     int                      `json:"relocation_moves"`
 	RelocationArtifacts int                      `json:"relocation_artifacts"`
+	// StructuralConflicts blocks apply; SemanticConflictCandidates is
+	// advisory (Decision taxonomy-change-operation T15).
+	StructuralConflicts        []string `json:"structural_conflicts,omitempty"`
+	SemanticConflictCandidates []string `json:"semantic_conflict_candidates,omitempty"`
 }
 
 type currentTopLevel struct {
@@ -164,14 +168,20 @@ func proposeProfileAdopt(ctx context.Context, deps Deps, p *auth.Principal, proj
 		TopLevelToRetire:  toRetire,
 		Relocations:       relocations,
 	}
+	structuralConflicts, semanticCandidates, err := detectProfileAdoptConflicts(ctx, deps, projectID, plan)
+	if err != nil {
+		return nil, taxonomyChangeProposeOutput{}, err
+	}
 	diff := profileAdoptDiff{
-		SourceProfileSlug:   sourceProfileSlug,
-		TargetProfileSlug:   targetProfile.Slug,
-		TopLevelToCreate:    topLevelSpecSlugs(toCreate),
-		TopLevelReused:      reused,
-		TopLevelToRetire:    retireInfo,
-		RelocationMoves:     len(relocations),
-		RelocationArtifacts: relocArtifacts,
+		SourceProfileSlug:          sourceProfileSlug,
+		TargetProfileSlug:          targetProfile.Slug,
+		TopLevelToCreate:           topLevelSpecSlugs(toCreate),
+		TopLevelReused:             reused,
+		TopLevelToRetire:           retireInfo,
+		RelocationMoves:            len(relocations),
+		RelocationArtifacts:        relocArtifacts,
+		StructuralConflicts:        structuralConflicts,
+		SemanticConflictCandidates: semanticCandidates,
 	}
 	planJSON, err := json.Marshal(plan)
 	if err != nil {
@@ -318,6 +328,18 @@ func applyProfileAdopt(ctx context.Context, deps Deps, p *auth.Principal, projec
 	var plan profileAdoptPlan
 	if err := json.Unmarshal(change.PlanJSON, &plan); err != nil {
 		return nil, taxonomyChangeApplyOutput{}, fmt.Errorf("parse profile.adopt plan: %w", err)
+	}
+
+	// Decision taxonomy-change-operation T15: re-run the structural
+	// conflict detector at apply. A conflict that surfaced since approval
+	// (a colliding area appeared, the cap filled) makes the plan unsafe —
+	// refuse before mutating anything.
+	structuralConflicts, _, err := detectProfileAdoptConflicts(ctx, deps, projectID, plan)
+	if err != nil {
+		return nil, taxonomyChangeApplyOutput{}, err
+	}
+	if len(structuralConflicts) > 0 {
+		return nil, taxonomyChangeApplyStale(deps, ctx, change, "structural conflict — "+structuralConflicts[0]), nil
 	}
 
 	tx, err := deps.DB.Begin(ctx)
