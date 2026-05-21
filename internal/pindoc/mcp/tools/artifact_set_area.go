@@ -178,7 +178,7 @@ func setAreaSingle(ctx context.Context, deps Deps, p *auth.Principal, projectID,
 		}, nil
 	}
 
-	newRev, err := recordAreaChange(ctx, tx, p, artifact, targetArea, reason, explicitAuthorID, "mcp_artifact_set_area")
+	newRev, err := recordAreaChange(ctx, tx, p, artifact, targetArea, reason, explicitAuthorID, "mcp_artifact_set_area", "")
 	if err != nil {
 		return nil, artifactSetAreaOutput{}, err
 	}
@@ -310,7 +310,7 @@ func setAreaBulk(ctx context.Context, deps Deps, p *auth.Principal, projectID, f
 
 	affected := 0
 	for _, artifact := range pending {
-		if _, err := recordAreaChange(ctx, tx, p, artifact, targetArea, reason, explicitAuthorID, "mcp_artifact_set_area_bulk"); err != nil {
+		if _, err := recordAreaChange(ctx, tx, p, artifact, targetArea, reason, explicitAuthorID, "mcp_artifact_set_area_bulk", ""); err != nil {
 			return nil, artifactSetAreaOutput{}, err
 		}
 		affected++
@@ -440,7 +440,7 @@ func lockAreaArtifact(ctx context.Context, tx pgx.Tx, projectID, target string) 
 	return artifact, err
 }
 
-func recordAreaChange(ctx context.Context, tx pgx.Tx, p *auth.Principal, artifact areaArtifact, targetArea setAreaInfo, reason, explicitAuthorID, origin string) (int, error) {
+func recordAreaChange(ctx context.Context, tx pgx.Tx, p *auth.Principal, artifact areaArtifact, targetArea setAreaInfo, reason, explicitAuthorID, origin, taxonomyChangeID string) (int, error) {
 	newRev := artifact.LastRev + 1
 	shapePayload, err := json.Marshal(map[string]any{
 		"kind": "area_change",
@@ -486,17 +486,18 @@ func recordAreaChange(ctx context.Context, tx pgx.Tx, p *auth.Principal, artifac
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO events (project_id, kind, subject_id, payload)
 		VALUES ($1, 'artifact.area_changed', $2, jsonb_build_object(
-			'revision_number', $3::int,
-			'slug',            $4::text,
-			'author_id',       $5::text,
-			'author_user_id',  NULLIF($6, '')::uuid,
-			'from_area_slug',  $7::text,
-			'to_area_slug',    $8::text,
-			'origin',          $9::text,
-			'reason',          $10::text
+			'revision_number',    $3::int,
+			'slug',               $4::text,
+			'author_id',          $5::text,
+			'author_user_id',     NULLIF($6, '')::uuid,
+			'from_area_slug',     $7::text,
+			'to_area_slug',       $8::text,
+			'origin',             $9::text,
+			'reason',             $10::text,
+			'taxonomy_change_id', NULLIF($11, '')::uuid
 		))
 	`, artifact.ProjectID, artifact.ID, newRev, artifact.Slug, authorID, authorUserID,
-		artifact.AreaSlug, targetArea.Slug, origin, reason); err != nil {
+		artifact.AreaSlug, targetArea.Slug, origin, reason, taxonomyChangeID); err != nil {
 		return 0, fmt.Errorf("insert area event: %w", err)
 	}
 	return newRev, nil
