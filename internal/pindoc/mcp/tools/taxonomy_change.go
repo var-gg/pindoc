@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -58,6 +59,13 @@ type taxonomyChangeProposeInput struct {
 	Includes      string `json:"includes,omitempty" jsonschema:"what artifacts belong in this area"`
 	Excludes      string `json:"excludes,omitempty" jsonschema:"what does NOT belong here and which area takes it instead"`
 	Evidence      string `json:"evidence" jsonschema:"why a new top-level is needed: recurring tags, artifact counts, the generic areas it is currently mis-filed under"`
+
+	// Fileable / MaxDepth / IsCrossCutting are the area spec the change-set
+	// applies. Decision taxonomy-change-operation: a custom top-level must
+	// declare fileable and max_depth explicitly — no implicit default.
+	Fileable       bool `json:"fileable,omitempty" jsonschema:"true if artifacts may be filed directly into this top-level area; false for a pure structural shelf"`
+	MaxDepth       int  `json:"max_depth,omitempty" jsonschema:"sub-area nesting cap under this top-level: 1 (depth-1 only) or 2; 0 is treated as 1"`
+	IsCrossCutting bool `json:"is_cross_cutting,omitempty" jsonschema:"true if this top-level holds reusable concerns spanning other areas"`
 }
 
 type taxonomyChangeProposeOutput struct {
@@ -68,17 +76,22 @@ type taxonomyChangeProposeOutput struct {
 
 	ProjectSlug    string `json:"project_slug,omitempty"`
 	CandidateSlug  string `json:"candidate_slug,omitempty"`
+	ChangeID       string `json:"change_id,omitempty"`
+	PlanHash       string `json:"plan_hash,omitempty"`
 	Message        string `json:"message,omitempty"`
 	ToolsetVersion string `json:"toolset_version,omitempty"`
 }
 
 type normalizedTaxonomyChangePropose struct {
-	CandidateSlug string
-	Name          string
-	Description   string
-	Includes      string
-	Excludes      string
-	Evidence      string
+	CandidateSlug  string
+	Name           string
+	Description    string
+	Includes       string
+	Excludes       string
+	Evidence       string
+	Fileable       bool
+	MaxDepth       int
+	IsCrossCutting bool
 }
 
 // RegisterTaxonomyChangePropose wires pindoc.taxonomy.change.propose.
@@ -158,29 +171,82 @@ Propose a new project-specific top-level area. This tool never creates an area: 
 			if actorID == "" {
 				actorID = "unassigned"
 			}
-			if _, err := deps.DB.Exec(ctx, `
+
+			// Decision taxonomy-change-operation T10: a proposal is now a
+			// persisted change-set (taxonomy_changes row), not just an
+			// event. propose/approve/apply all act on that row; the event
+			// is an audit copy carrying change_id and plan_hash.
+			plan := topLevelAddPlan{
+				Kind:           taxonomyChangeKindTopLevelAdd,
+				ProjectID:      scope.ProjectID,
+				Slug:           norm.CandidateSlug,
+				Name:           norm.Name,
+				Description:    norm.Description,
+				IsCrossCutting: norm.IsCrossCutting,
+				Fileable:       norm.Fileable,
+				MaxDepth:       norm.MaxDepth,
+			}
+			planJSON, err := json.Marshal(plan)
+			if err != nil {
+				return nil, taxonomyChangeProposeOutput{}, fmt.Errorf("marshal top_level.add plan: %w", err)
+			}
+			planHash, err := computeTaxonomyPlanHash(plan)
+			if err != nil {
+				return nil, taxonomyChangeProposeOutput{}, fmt.Errorf("hash top_level.add plan: %w", err)
+			}
+			diffJSON, err := json.Marshal(map[string]any{"to_create": []string{norm.CandidateSlug}})
+			if err != nil {
+				return nil, taxonomyChangeProposeOutput{}, fmt.Errorf("marshal top_level.add diff: %w", err)
+			}
+
+			tx, err := deps.DB.Begin(ctx)
+			if err != nil {
+				return nil, taxonomyChangeProposeOutput{}, fmt.Errorf("begin propose tx: %w", err)
+			}
+			defer func() { _ = tx.Rollback(ctx) }()
+
+			changeID, err := insertTaxonomyChange(ctx, tx, taxonomyChange{
+				ProjectID: scope.ProjectID,
+				Kind:      taxonomyChangeKindTopLevelAdd,
+				PlanJSON:  planJSON,
+				DiffJSON:  diffJSON,
+				PlanHash:  planHash,
+				CreatedBy: actorID,
+			})
+			if err != nil {
+				return nil, taxonomyChangeProposeOutput{}, fmt.Errorf("record taxonomy change: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `
 				INSERT INTO events (project_id, kind, payload)
-				SELECT p.id, 'taxonomy.top_level_proposed', jsonb_build_object(
-					'candidate_slug', $2::text,
-					'name',           $3::text,
-					'description',    $4::text,
-					'includes',       $5::text,
-					'excludes',       $6::text,
-					'evidence',       $7::text,
-					'proposed_by',    $8::text
-				)
-				FROM projects p WHERE p.slug = $1
-			`, scope.ProjectSlug, norm.CandidateSlug, norm.Name, norm.Description, norm.Includes, norm.Excludes, norm.Evidence, actorID); err != nil {
+				VALUES ($1::uuid, 'taxonomy.top_level_proposed', jsonb_build_object(
+					'change_id',      $2::text,
+					'plan_hash',      $3::text,
+					'kind',           $4::text,
+					'candidate_slug', $5::text,
+					'name',           $6::text,
+					'description',    $7::text,
+					'includes',       $8::text,
+					'excludes',       $9::text,
+					'evidence',       $10::text,
+					'proposed_by',    $11::text
+				))
+			`, scope.ProjectID, changeID, planHash, taxonomyChangeKindTopLevelAdd,
+				norm.CandidateSlug, norm.Name, norm.Description, norm.Includes, norm.Excludes, norm.Evidence, actorID); err != nil {
 				return nil, taxonomyChangeProposeOutput{}, fmt.Errorf("record proposal event: %w", err)
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return nil, taxonomyChangeProposeOutput{}, fmt.Errorf("commit propose: %w", err)
 			}
 
 			return nil, taxonomyChangeProposeOutput{
 				Status:        "proposed",
 				ProjectSlug:   scope.ProjectSlug,
 				CandidateSlug: norm.CandidateSlug,
+				ChangeID:      changeID,
+				PlanHash:      planHash,
 				Message: fmt.Sprintf(
-					"Recorded a top-level area proposal for %q. NOT applied — no area was created. Surface this proposal to the project owner; an approved top-level area is added by the owner through a taxonomy profile or migration update, not by this tool.",
-					norm.CandidateSlug),
+					"Recorded change-set %s (top_level.add %q). NOT applied — surface it to the project owner: pindoc.taxonomy.change.approve, then pindoc.taxonomy.change.apply.",
+					changeID, norm.CandidateSlug),
 			}, nil
 		},
 	)
@@ -192,12 +258,15 @@ Propose a new project-specific top-level area. This tool never creates an area: 
 // row and run in the handler.
 func validateTaxonomyChangePropose(in taxonomyChangeProposeInput) (normalizedTaxonomyChangePropose, *taxonomyChangeProposeOutput) {
 	norm := normalizedTaxonomyChangePropose{
-		CandidateSlug: strings.ToLower(strings.TrimSpace(in.CandidateSlug)),
-		Name:          strings.TrimSpace(in.Name),
-		Description:   strings.TrimSpace(in.Description),
-		Includes:      strings.TrimSpace(in.Includes),
-		Excludes:      strings.TrimSpace(in.Excludes),
-		Evidence:      strings.TrimSpace(in.Evidence),
+		CandidateSlug:  strings.ToLower(strings.TrimSpace(in.CandidateSlug)),
+		Name:           strings.TrimSpace(in.Name),
+		Description:    strings.TrimSpace(in.Description),
+		Includes:       strings.TrimSpace(in.Includes),
+		Excludes:       strings.TrimSpace(in.Excludes),
+		Evidence:       strings.TrimSpace(in.Evidence),
+		Fileable:       in.Fileable,
+		MaxDepth:       in.MaxDepth,
+		IsCrossCutting: in.IsCrossCutting,
 	}
 	switch {
 	case !areaSlugRe.MatchString(norm.CandidateSlug):

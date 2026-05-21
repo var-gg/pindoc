@@ -548,6 +548,8 @@ func callVisibilityToolRaw(t *testing.T, ctx context.Context, pool *db.Pool, pro
 	RegisterArtifactSetVisibility(server, deps)
 	RegisterArtifactSetArea(server, deps)
 	RegisterTaxonomyChangePropose(server, deps)
+	RegisterTaxonomyChangeApprove(server, deps)
+	RegisterTaxonomyChangeApply(server, deps)
 
 	clientTransport, serverTransport := sdk.NewInMemoryTransports()
 	serverSession, err := server.Connect(ctx, serverTransport, nil)
