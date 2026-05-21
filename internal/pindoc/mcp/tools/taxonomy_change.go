@@ -53,12 +53,12 @@ var taxonomyOneOffSlugRe = regexp.MustCompile(`(^phase-?\d|^mvp|-patch$|-fix$|-h
 
 type taxonomyChangeProposeInput struct {
 	ProjectSlug   string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
-	CandidateSlug string `json:"candidate_slug" jsonschema:"proposed top-level area slug, lowercase kebab-case, 2-40 chars"`
-	Name          string `json:"name" jsonschema:"display name, 2-60 chars"`
-	Description   string `json:"description" jsonschema:"the concern this top-level area holds"`
+	CandidateSlug string `json:"candidate_slug,omitempty" jsonschema:"required for kind=top_level.add: proposed top-level area slug, lowercase kebab-case, 2-40 chars"`
+	Name          string `json:"name,omitempty" jsonschema:"required for kind=top_level.add: display name, 2-60 chars"`
+	Description   string `json:"description,omitempty" jsonschema:"required for kind=top_level.add: the concern this top-level area holds"`
 	Includes      string `json:"includes,omitempty" jsonschema:"what artifacts belong in this area"`
 	Excludes      string `json:"excludes,omitempty" jsonschema:"what does NOT belong here and which area takes it instead"`
-	Evidence      string `json:"evidence" jsonschema:"why a new top-level is needed: recurring tags, artifact counts, the generic areas it is currently mis-filed under"`
+	Evidence      string `json:"evidence,omitempty" jsonschema:"required for kind=top_level.add: why a new top-level is needed: recurring tags, artifact counts, the generic areas it is currently mis-filed under"`
 
 	// Fileable / MaxDepth / IsCrossCutting are the area spec the change-set
 	// applies. Decision taxonomy-change-operation: a custom top-level must
@@ -66,6 +66,11 @@ type taxonomyChangeProposeInput struct {
 	Fileable       bool `json:"fileable,omitempty" jsonschema:"true if artifacts may be filed directly into this top-level area; false for a pure structural shelf"`
 	MaxDepth       int  `json:"max_depth,omitempty" jsonschema:"sub-area nesting cap under this top-level: 1 (depth-1 only) or 2; 0 is treated as 1"`
 	IsCrossCutting bool `json:"is_cross_cutting,omitempty" jsonschema:"true if this top-level holds reusable concerns spanning other areas"`
+
+	// Kind selects the change-set kind; empty defaults to top_level.add.
+	// kind=area.retire_empty uses AreaSlugs instead of the candidate fields.
+	Kind      string   `json:"kind,omitempty" jsonschema:"change-set kind: top_level.add (default) or area.retire_empty"`
+	AreaSlugs []string `json:"area_slugs,omitempty" jsonschema:"for kind=area.retire_empty: existing area slugs to archive once empty"`
 }
 
 type taxonomyChangeProposeOutput struct {
@@ -74,12 +79,13 @@ type taxonomyChangeProposeOutput struct {
 	Failed    []string `json:"failed,omitempty"`
 	Checklist []string `json:"checklist,omitempty"`
 
-	ProjectSlug    string `json:"project_slug,omitempty"`
-	CandidateSlug  string `json:"candidate_slug,omitempty"`
-	ChangeID       string `json:"change_id,omitempty"`
-	PlanHash       string `json:"plan_hash,omitempty"`
-	Message        string `json:"message,omitempty"`
-	ToolsetVersion string `json:"toolset_version,omitempty"`
+	ProjectSlug    string   `json:"project_slug,omitempty"`
+	CandidateSlug  string   `json:"candidate_slug,omitempty"`
+	AreaSlugs      []string `json:"area_slugs,omitempty"`
+	ChangeID       string   `json:"change_id,omitempty"`
+	PlanHash       string   `json:"plan_hash,omitempty"`
+	Message        string   `json:"message,omitempty"`
+	ToolsetVersion string   `json:"toolset_version,omitempty"`
 }
 
 type normalizedTaxonomyChangePropose struct {
@@ -115,6 +121,13 @@ Propose a new project-specific top-level area. This tool never creates an area: 
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
 			if err != nil {
 				return nil, taxonomyChangeProposeOutput{}, fmt.Errorf("taxonomy.change.propose: %w", err)
+			}
+
+			// Decision taxonomy-change-operation T11: area.retire_empty is
+			// a distinct change-set kind with its own input shape, so it
+			// dispatches before the top_level.add validation below.
+			if strings.TrimSpace(in.Kind) == taxonomyChangeKindAreaRetire {
+				return proposeAreaRetireEmpty(ctx, deps, p, scope.ProjectID, scope.ProjectSlug, in)
 			}
 
 			norm, notReady := validateTaxonomyChangePropose(in)

@@ -159,6 +159,8 @@ type taxonomyChangeApplyOutput struct {
 	Kind           string   `json:"kind,omitempty"`
 	AreaSlug       string   `json:"area_slug,omitempty"`
 	AreaID         string   `json:"area_id,omitempty"`
+	ArchivedCount  int      `json:"archived_count,omitempty"`
+	BlockedCount   int      `json:"blocked_count,omitempty"`
 	Message        string   `json:"message,omitempty"`
 	ToolsetVersion string   `json:"toolset_version,omitempty"`
 }
@@ -203,6 +205,8 @@ Apply an owner-approved taxonomy change-set. An agent may call this — the appr
 			switch change.Kind {
 			case taxonomyChangeKindTopLevelAdd:
 				return applyTopLevelAdd(ctx, deps, p, scope.ProjectID, change)
+			case taxonomyChangeKindAreaRetire:
+				return applyAreaRetireEmpty(ctx, deps, p, scope.ProjectID, change)
 			default:
 				out := taxonomyChangeApplyNotReady("KIND_NOT_SUPPORTED", changeID)
 				out.Kind = change.Kind
