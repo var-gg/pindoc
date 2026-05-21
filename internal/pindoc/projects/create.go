@@ -266,18 +266,22 @@ func CreateProject(
 // naming catalog. ON CONFLICT DO NOTHING guards the rare double-seed.
 // The returned count is the top-level row count attempted (deterministic
 // per profile) so wrappers can surface it without an extra SELECT.
+// seedAreas inserts a profile's top-level skeleton at project-create
+// time. Decision taxonomy-change-operation T9: it routes every row
+// through CreateTopLevelArea so project-create seeding and the runtime
+// taxonomy-change apply path share one creation primitive. seed rows
+// carry origin_profile_slug = profile.Slug and no origin_change_id.
 func seedAreas(ctx context.Context, tx pgx.Tx, projectID, lang string, profile TaxonomyProfile) (int, error) {
 	count := 0
 	for _, seed := range profile.TopLevel {
-		maxDepth := seed.MaxDepth
-		if maxDepth < 1 {
-			maxDepth = 1
-		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO areas (project_id, slug, name, description, is_cross_cutting, fileable, max_depth)
-			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)
-			ON CONFLICT (project_id, slug) DO NOTHING
-		`, projectID, seed.Slug, seed.Name, LocalizedAreaDescription(seed.DescriptionEN, seed.DescriptionKO, lang), seed.IsCrossCutting, seed.Fileable, maxDepth); err != nil {
+		if _, err := CreateTopLevelArea(ctx, tx, projectID, TopLevelAreaSpec{
+			Slug:           seed.Slug,
+			Name:           seed.Name,
+			Description:    LocalizedAreaDescription(seed.DescriptionEN, seed.DescriptionKO, lang),
+			IsCrossCutting: seed.IsCrossCutting,
+			Fileable:       seed.Fileable,
+			MaxDepth:       seed.MaxDepth,
+		}, profile.Slug, ""); err != nil {
 			return count, fmt.Errorf("seed area %s: %w", seed.Slug, err)
 		}
 		count++
