@@ -69,8 +69,13 @@ type taxonomyChangeProposeInput struct {
 
 	// Kind selects the change-set kind; empty defaults to top_level.add.
 	// kind=area.retire_empty uses AreaSlugs instead of the candidate fields.
-	Kind      string   `json:"kind,omitempty" jsonschema:"change-set kind: top_level.add (default) or area.retire_empty"`
+	Kind      string   `json:"kind,omitempty" jsonschema:"change-set kind: top_level.add (default), area.retire_empty, or profile.adopt"`
 	AreaSlugs []string `json:"area_slugs,omitempty" jsonschema:"for kind=area.retire_empty: existing area slugs to archive once empty"`
+
+	// profile.adopt: the target taxonomy profile and an optional agent
+	// relocation map (Decision taxonomy-change-operation T13).
+	TargetProfileSlug string                `json:"target_profile_slug,omitempty" jsonschema:"for kind=profile.adopt: the taxonomy profile to adopt"`
+	RelocationMap     []relocationMoveInput `json:"relocation_map,omitempty" jsonschema:"for kind=profile.adopt: optional artifact relocation map applied during adoption"`
 }
 
 type taxonomyChangeProposeOutput struct {
@@ -79,13 +84,14 @@ type taxonomyChangeProposeOutput struct {
 	Failed    []string `json:"failed,omitempty"`
 	Checklist []string `json:"checklist,omitempty"`
 
-	ProjectSlug    string   `json:"project_slug,omitempty"`
-	CandidateSlug  string   `json:"candidate_slug,omitempty"`
-	AreaSlugs      []string `json:"area_slugs,omitempty"`
-	ChangeID       string   `json:"change_id,omitempty"`
-	PlanHash       string   `json:"plan_hash,omitempty"`
-	Message        string   `json:"message,omitempty"`
-	ToolsetVersion string   `json:"toolset_version,omitempty"`
+	ProjectSlug    string            `json:"project_slug,omitempty"`
+	CandidateSlug  string            `json:"candidate_slug,omitempty"`
+	AreaSlugs      []string          `json:"area_slugs,omitempty"`
+	ChangeID       string            `json:"change_id,omitempty"`
+	PlanHash       string            `json:"plan_hash,omitempty"`
+	Diff           *profileAdoptDiff `json:"diff,omitempty"`
+	Message        string            `json:"message,omitempty"`
+	ToolsetVersion string            `json:"toolset_version,omitempty"`
 }
 
 type normalizedTaxonomyChangePropose struct {
@@ -128,6 +134,9 @@ Propose a new project-specific top-level area. This tool never creates an area: 
 			// dispatches before the top_level.add validation below.
 			if strings.TrimSpace(in.Kind) == taxonomyChangeKindAreaRetire {
 				return proposeAreaRetireEmpty(ctx, deps, p, scope.ProjectID, scope.ProjectSlug, in)
+			}
+			if strings.TrimSpace(in.Kind) == taxonomyChangeKindProfileAdopt {
+				return proposeProfileAdopt(ctx, deps, p, scope.ProjectID, scope.ProjectSlug, in)
 			}
 
 			norm, notReady := validateTaxonomyChangePropose(in)
