@@ -95,6 +95,12 @@ type TaskAttention struct {
 	Message   string         `json:"message"`
 	NextTools []NextToolHint `json:"next_tools,omitempty"`
 	Level     string         `json:"level"`
+
+	// LinkedSettledDecisions lists settled Decision artifacts this open Task
+	// implements (or relates_to). When present the Task likely needs only an
+	// owner ruling / acceptance sync rather than fresh design work — a
+	// lifecycle hint, never a gate. Empty/omitted when none are linked.
+	LinkedSettledDecisions []EdgeRef `json:"linked_settled_decisions,omitempty"`
 }
 
 // PinRef mirrors artifact_pins rows. Empty repo defaults to "origin" in
@@ -277,6 +283,25 @@ func RegisterArtifactRead(server *sdk.Server, deps Deps) {
 				out.ProjectSlug,
 				out.Slug,
 			)
+
+			// Lifecycle hint: when an open owned Task already implements (or
+			// relates_to) a settled Decision, it likely needs only owner
+			// ruling / acceptance sync. Query only after the base attention
+			// gates pass (out.TaskAttention != nil), so non-owner/brief/
+			// terminal reads never pay for it. Advisory only — no gate.
+			if out.TaskAttention != nil {
+				decisions, err := loadLinkedSettledDecisions(ctx, deps, readScope, out.ID)
+				if err != nil {
+					deps.Logger.Warn("linked settled decision lookup failed", "artifact_id", out.ID, "err", err)
+				} else if len(decisions) > 0 {
+					out.TaskAttention.LinkedSettledDecisions = decisions
+					out.TaskAttention.Message += " " + linkedSettledDecisionClause(out.BodyLocale, decisions[0])
+					out.TaskAttention.NextTools = append(
+						linkedSettledDecisionNextTools(out.ProjectSlug, decisions[0]),
+						out.TaskAttention.NextTools...,
+					)
+				}
+			}
 
 			// view=brief / continuation: drop the heavy body, add summary.
 			if view == "brief" || view == "continuation" {
@@ -557,6 +582,73 @@ func loadRecentRevisions(ctx context.Context, deps Deps, artifactID string, limi
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// loadLinkedSettledDecisions returns settled Decision artifacts linked to
+// the given Task. An `implements` edge is directional (Task as source →
+// Decision) to match the documented convention; `relates_to` is treated as
+// undirected. "settled" is the artifacts.completeness terminal maturity
+// (migration 0001: completeness IN ('draft','partial','settled')), not
+// task_meta.status. Archived/superseded Decisions are excluded; visibility
+// is enforced via the same predicate loadEdges uses, so a Decision the
+// caller cannot see is never surfaced. Read-side display filter only.
+func loadLinkedSettledDecisions(ctx context.Context, deps Deps, readScope *mcpReadProjectScope, artifactID string) ([]EdgeRef, error) {
+	scope := readScope.ProjectScope
+	args := []any{artifactID}
+	visibilityWhere, visibilityArgs := mcpReadArtifactVisibilityWhere(readScope, "a", len(args)+1)
+	args = append(args, visibilityArgs...)
+	rows, err := deps.DB.Query(ctx, fmt.Sprintf(`
+		SELECT a.id::text, a.slug, a.type, a.title, e.relation
+		FROM artifact_edges e
+		JOIN artifacts a ON a.id = CASE WHEN e.source_id = $1 THEN e.target_id ELSE e.source_id END
+		WHERE a.type = 'Decision'
+		  AND a.completeness = 'settled'
+		  AND a.status NOT IN ('archived', 'superseded')
+		  AND (
+		        (e.relation = 'implements' AND e.source_id = $1)
+		     OR (e.relation = 'relates_to' AND (e.source_id = $1 OR e.target_id = $1))
+		      )
+		  AND %s
+		ORDER BY e.created_at
+	`, visibilityWhere), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []EdgeRef
+	for rows.Next() {
+		var e EdgeRef
+		if err := rows.Scan(&e.ArtifactID, &e.Slug, &e.Type, &e.Title, &e.Relation); err != nil {
+			return nil, err
+		}
+		e.AgentRef = "pindoc://" + e.Slug
+		e.HumanURL = HumanURL(scope.ProjectSlug, scope.ProjectLocale, e.Slug)
+		e.HumanURLAbs = AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, e.Slug)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// linkedSettledDecisionClause is the one-sentence lifecycle hint appended to
+// the task_attention message. It references only the closest Decision; the
+// full set is carried in TaskAttention.LinkedSettledDecisions.
+func linkedSettledDecisionClause(locale string, d EdgeRef) string {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "ko") {
+		return fmt.Sprintf("이미 settled Decision이 연결돼 있습니다(relation=%s, %s) — 이 Task는 새 설계가 아니라 owner ruling/acceptance sync만 남았을 수 있습니다.", d.Relation, d.Slug)
+	}
+	return fmt.Sprintf("A settled Decision is linked (relation=%s, %s) — this Task may only need owner ruling / acceptance sync rather than fresh design work.", d.Relation, d.Slug)
+}
+
+func linkedSettledDecisionNextTools(projectSlug string, d EdgeRef) []NextToolHint {
+	return []NextToolHint{{
+		Tool: "pindoc.artifact.read",
+		Args: map[string]any{
+			"project_slug": projectSlug,
+			"id_or_slug":   "pindoc://" + d.Slug,
+			"view":         "continuation",
+		},
+		Reason: "review the linked settled Decision before closing — the Task may only need owner ruling / acceptance sync",
+	}}
 }
 
 func loadEdges(ctx context.Context, deps Deps, readScope *mcpReadProjectScope, artifactID string) ([]EdgeRef, []EdgeRef, error) {

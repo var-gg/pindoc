@@ -72,6 +72,7 @@ var warningSeverityCatalog = map[string]string{
 	"RECOMMEND_READ_BEFORE_CREATE": SeverityInfo,
 	"WORDING_FIX_APPLIED":          SeverityInfo,
 	"ADD_PIN_APPLIED":              SeverityInfo,
+	"OUTCOME_SECTION_DUPLICATE":    SeverityInfo,
 }
 
 // warningSeverity resolves the severity for one warning code. Handles

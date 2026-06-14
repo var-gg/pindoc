@@ -99,6 +99,25 @@ func TestBuildTaskDoneCheckOutputMatrix(t *testing.T) {
 			if !strings.Contains(got.Summary, "open queue") || !strings.Contains(got.Summary, "historical claimed_done acceptance debt") {
 				t.Fatalf("summary does not separate current queue and historical debt: %q", got.Summary)
 			}
+			// Headline must alias the selected-mode verdict, not recompute it.
+			if got.Headline.Passed != got.ModeIsDone {
+				t.Fatalf("headline.passed = %v, want == mode_is_done %v", got.Headline.Passed, got.ModeIsDone)
+			}
+			if got.Headline.Mode != got.Mode {
+				t.Fatalf("headline.mode = %q, want %q", got.Headline.Mode, got.Mode)
+			}
+			wantStatus := "not_done"
+			if tc.wantDone {
+				wantStatus = "clear"
+			}
+			if got.Headline.Status != wantStatus {
+				t.Fatalf("headline.status = %q, want %q", got.Headline.Status, wantStatus)
+			}
+			// historical_debt section must alias the flat debt fields.
+			if got.HistoricalDebt.Clear != got.HistoricalAcceptanceDebtClear ||
+				got.HistoricalDebt.UnresolvedTaskCount != got.UnresolvedAcceptanceTaskCount {
+				t.Fatalf("historical_debt section diverges from flat fields: %+v", got.HistoricalDebt)
+			}
 		})
 	}
 }
@@ -124,6 +143,22 @@ func TestBuildTaskDoneCheckOutputModes(t *testing.T) {
 		if !strings.Contains(currentOnly.Summary, want) {
 			t.Fatalf("current_open_only summary %q missing %q", currentOnly.Summary, want)
 		}
+	}
+	// The exact reported confusion, now structured: headline answers the
+	// selected mode (passed=true) while strict is_done stays false and debt
+	// is demoted into historical_debt.
+	if !currentOnly.Headline.Passed || currentOnly.Headline.Status != "clear" {
+		t.Fatalf("current_open_only headline = %+v, want passed/clear", currentOnly.Headline)
+	}
+	if currentOnly.IsDone {
+		t.Fatalf("strict is_done should remain false alongside a clear headline")
+	}
+	if currentOnly.HistoricalDebt.Clear || currentOnly.HistoricalDebt.UnresolvedTaskCount != 1 {
+		t.Fatalf("historical_debt = %+v, want clear=false count=1", currentOnly.HistoricalDebt)
+	}
+	// headline.detail is mode-only — it must NOT embed the legacy suffix.
+	if strings.Contains(currentOnly.Headline.Detail, "legacy is_done") {
+		t.Fatalf("headline.detail should be legacy-free, got %q", currentOnly.Headline.Detail)
 	}
 
 	historicalDebt := buildTaskDoneCheckOutputForMode(scope, Deps{}, "agent:codex", records, taskDoneCheckModeHistoricalDebt)

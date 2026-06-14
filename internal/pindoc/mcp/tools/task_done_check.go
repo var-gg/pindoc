@@ -13,7 +13,7 @@ import (
 type taskDoneCheckInput struct {
 	ProjectSlug string `json:"project_slug,omitempty" jsonschema:"optional projects.slug to scope this call to; omitted uses explicit session/default resolver"`
 	Assignee    string `json:"assignee,omitempty" jsonschema:"optional exact task_meta.assignee; defaults to the calling agent id, e.g. agent:codex"`
-	Mode        string `json:"mode,omitempty" jsonschema:"optional strict | current_open_only | historical_debt; default strict. is_done keeps strict legacy semantics; mode_is_done reflects the selected closeout lens"`
+	Mode        string `json:"mode,omitempty" jsonschema:"optional strict | current_open_only | historical_debt; default strict. Read headline.passed for the selected-mode verdict; top-level is_done keeps strict legacy semantics and historical claimed_done debt is reported in the historical_debt section"`
 }
 
 type taskDoneCheckTaskRef struct {
@@ -35,13 +35,26 @@ type taskDoneCheckTaskRef struct {
 }
 
 type taskDoneCheckOutput struct {
+	// Headline is the single answer keyed to the SELECTED mode. It is the
+	// first field so it reads first; headline.passed is the selected-mode
+	// verdict (== ModeIsDone). The legacy strict verdict lives in the
+	// top-level IsDone field and the historical_debt section, demoted so a
+	// closeout worker is not confused by two equal-weight "*is_done" flags.
+	Headline taskDoneCheckHeadline `json:"headline"`
+
 	ProjectSlug string `json:"project_slug"`
 	Assignee    string `json:"assignee"`
 	Mode        string `json:"mode"`
 
+	// HistoricalDebt groups the claimed_done acceptance-debt axis into one
+	// clearly-labeled block, separate from the selected-mode headline.
+	HistoricalDebt taskDoneCheckHistoricalDebt `json:"historical_debt"`
+
 	// IsDone intentionally keeps the original strict meaning: both the
 	// current open queue and historical claimed_done acceptance debt must
-	// be clear. ModeIsDone reflects the caller-selected lens.
+	// be clear. ModeIsDone reflects the caller-selected lens. The fields
+	// below are retained for backward compatibility; prefer headline +
+	// historical_debt.
 	IsDone                        bool   `json:"is_done"`
 	ModeIsDone                    bool   `json:"mode_is_done"`
 	CurrentOpenWorkDone           bool   `json:"current_open_work_done"`
@@ -55,6 +68,27 @@ type taskDoneCheckOutput struct {
 	UnresolvedAcceptanceTaskCount int                    `json:"unresolved_acceptance_task_count"`
 
 	ToolsetVersion string `json:"toolset_version,omitempty"`
+}
+
+// taskDoneCheckHeadline is the top-of-response verdict for the selected
+// mode. The verdict field is named `passed` (not `is_done`) so it never
+// collides with the top-level strict IsDone and the answer is unambiguous
+// regardless of JSON field ordering.
+type taskDoneCheckHeadline struct {
+	Mode   string `json:"mode"`
+	Passed bool   `json:"passed"`
+	Status string `json:"status"` // "clear" | "not_done"
+	Detail string `json:"detail"` // mode-only sentence, no legacy suffix
+}
+
+// taskDoneCheckHistoricalDebt demotes the legacy/historical acceptance-debt
+// axis into one labeled block. Its fields alias the existing flat
+// HistoricalAcceptanceDebtClear / UnresolvedAcceptanceTasks(Count) values.
+type taskDoneCheckHistoricalDebt struct {
+	Clear               bool                   `json:"clear"`
+	UnresolvedTaskCount int                    `json:"unresolved_task_count"`
+	UnresolvedTasks     []taskDoneCheckTaskRef `json:"unresolved_tasks"`
+	Note                string                 `json:"note,omitempty"`
 }
 
 const (
@@ -77,7 +111,7 @@ func RegisterTaskDoneCheck(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.task.done_check",
-			Description: "Single-call finishing check for an assignee. Call before final handoff or after claim_done: returns is_done=false when assigned Tasks are still open/missing_status or when claimed_done Tasks still have unresolved [ ]/[~] acceptance labels. Read-only operational metadata lane; no search_receipt required.",
+			Description: "Single-call finishing check for an assignee. Call before final handoff or after claim_done. Read the top-level headline for the answer keyed to your selected mode (headline.passed); historical claimed_done acceptance debt is reported separately in the historical_debt section, and the legacy strict verdict stays in is_done. headline.passed is false when assigned Tasks are still open/missing_status (or, under strict/historical modes, when claimed_done Tasks still have unresolved [ ]/[~] acceptance labels). Read-only operational metadata lane; no search_receipt required.",
 		},
 		func(ctx context.Context, p *auth.Principal, in taskDoneCheckInput) (*sdk.CallToolResult, taskDoneCheckOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -170,6 +204,18 @@ func buildTaskDoneCheckOutputForMode(scope *auth.ProjectScope, deps Deps, assign
 	out.IsDone = out.CurrentOpenWorkDone && out.HistoricalAcceptanceDebtClear
 	out.ModeIsDone = taskDoneCheckModeIsDone(mode, out.CurrentOpenWorkDone, out.HistoricalAcceptanceDebtClear)
 	out.Summary = taskDoneCheckSummary(assignee, mode, out.OpenTaskCount, out.UnresolvedAcceptanceTaskCount, out.IsDone, out.ModeIsDone)
+	out.Headline = taskDoneCheckHeadline{
+		Mode:   mode,
+		Passed: out.ModeIsDone,
+		Status: taskDoneCheckStatusWord(out.ModeIsDone),
+		Detail: taskDoneCheckHeadlineDetail(assignee, mode, out.OpenTaskCount, out.UnresolvedAcceptanceTaskCount, out.ModeIsDone),
+	}
+	out.HistoricalDebt = taskDoneCheckHistoricalDebt{
+		Clear:               out.HistoricalAcceptanceDebtClear,
+		UnresolvedTaskCount: out.UnresolvedAcceptanceTaskCount,
+		UnresolvedTasks:     out.UnresolvedAcceptanceTasks,
+		Note:                "Reported separately from the selected-mode headline; historical claimed_done acceptance debt blocks strict is_done only.",
+	}
 	return out
 }
 
@@ -217,7 +263,18 @@ func taskDoneCheckModeIsDone(mode string, currentOpenDone, historicalDebtClear b
 	}
 }
 
-func taskDoneCheckSummary(assignee, mode string, openCount, unresolvedCount int, strictDone, modeDone bool) string {
+func taskDoneCheckStatusWord(done bool) string {
+	if done {
+		return "clear"
+	}
+	return "not_done"
+}
+
+// taskDoneCheckHeadlineDetail is the mode-only verdict sentence. It carries
+// NO legacy strict suffix — the headline is meant to demote the legacy
+// verdict, so the cross-mode "legacy is_done=X" note lives only on the
+// top-level Summary (and historical_debt.note), never here.
+func taskDoneCheckHeadlineDetail(assignee, mode string, openCount, unresolvedCount int, modeDone bool) string {
 	openPhrase := "open queue clear"
 	if openCount > 0 {
 		openPhrase = fmt.Sprintf("open queue has %d open/missing_status Task(s)", openCount)
@@ -230,9 +287,13 @@ func taskDoneCheckSummary(assignee, mode string, openCount, unresolvedCount int,
 	if modeDone {
 		status = "clear"
 	}
-	suffix := ""
+	return fmt.Sprintf("Mode %s %s for %s: %s; %s.", mode, status, assignee, openPhrase, debtPhrase)
+}
+
+func taskDoneCheckSummary(assignee, mode string, openCount, unresolvedCount int, strictDone, modeDone bool) string {
+	base := taskDoneCheckHeadlineDetail(assignee, mode, openCount, unresolvedCount, modeDone)
 	if mode != taskDoneCheckModeStrict && strictDone != modeDone {
-		suffix = fmt.Sprintf(" legacy is_done=%t under strict semantics.", strictDone)
+		return base + fmt.Sprintf(" legacy is_done=%t under strict semantics.", strictDone)
 	}
-	return fmt.Sprintf("Mode %s %s for %s: %s; %s.%s", mode, status, assignee, openPhrase, debtPhrase, suffix)
+	return base
 }

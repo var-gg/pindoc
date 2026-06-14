@@ -336,6 +336,26 @@ func TestClaimDoneOutcomePreflight(t *testing.T) {
 	if out == nil || !containsString(out.Failed, "OUTCOME_COMMIT_MISSING") || !containsString(out.Failed, "OUTCOME_REGRESSION_MISSING") {
 		t.Fatalf("partial Outcome should fail commit/regression checks, got %+v", out)
 	}
+
+	// A stale "## Outcome (결과)" preceding a compliant "## Outcome" must
+	// pass (no longer order-dependent). The not_ready diagnostic field is
+	// exercised below.
+	staleFirst := "## Outcome (결과)\n\n- 시작 메모.\n\n" +
+		"## Outcome\n\n" +
+		"- 핵심 결과: outcome gate가 구현됨.\n" +
+		"- 코드 변경: commit `36f85c5bc5f4269e4e6e20102befd711b1692779`.\n" +
+		"- 회귀 진술: 기존 tests regression 없음.\n"
+	if out := claimDoneOutcomePreflightOutput(staleFirst, nil, nil); out != nil {
+		t.Fatalf("stale-first compliant Outcome should pass, got %+v", out)
+	}
+
+	// On the not_ready path the inspected headings are surfaced verbatim so
+	// the worker can see which Outcome-like sections were read.
+	dupFail := "## Outcome (결과)\n\n- placeholder.\n\n## Outcome\n\n- 핵심 결과: 메모.\n"
+	out = claimDoneOutcomePreflightOutput(dupFail, nil, nil)
+	if out == nil || len(out.OutcomeInspectedHeadings) != 2 {
+		t.Fatalf("expected 2 inspected headings on not_ready, got %+v", out)
+	}
 }
 
 func TestClaimDoneOutcomeCommitExemption(t *testing.T) {

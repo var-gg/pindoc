@@ -3954,7 +3954,7 @@ func shortDiagnosticToken(raw string) string {
 }
 
 func pinDiagnosticSuggestedActions(warnings []string) []string {
-	if !hasWarningPrefix(warnings, "PIN_REPO_") && !hasWarningPrefix(warnings, "PIN_PATH_") && !hasWarningPrefix(warnings, "RECOMMEND_REPO_REGISTRATION") {
+	if !hasWarningPrefix(warnings, "PIN_REPO_") && !hasWarningPrefix(warnings, "PIN_PATH_") && !hasWarningPrefix(warnings, "RECOMMEND_REPO_REGISTRATION") && !hasWarningPrefix(warnings, "PINS_AUTOPIN_") {
 		return nil
 	}
 	var out []string
@@ -3964,11 +3964,14 @@ func pinDiagnosticSuggestedActions(warnings []string) []string {
 	if hasWarningPrefix(warnings, "PIN_PATH_") {
 		out = append(out, "Pin path diagnostics: use repo-relative paths from the registered repo root; PIN_PATH_UNOBSERVABLE means every checked path was missing from this server checkout, so verify project_repos.local_paths or pass repo_id with a path relative to that repo.")
 	}
+	if hasWarningPrefix(warnings, "PINS_AUTOPIN_") {
+		out = append(out, "Auto-pin from the commit diff was unavailable (no local checkout for this project's repo, or the commit is not in the server's checkout), so no evidence pins were stored from the diff. To attach evidence anyway: (1) pass pin_strategy=allowlist with changed_paths_allowlist=[\"path/one\", \"path/two\"] to pin the named changed paths against commit_sha, (2) pass explicit pins[] e.g. [{\"kind\":\"code\",\"path\":\"internal/x.go\",\"commit_sha\":\"<sha>\"}], or (3) register this repo's local_paths via pindoc.workspace.detect / pindoc.project.set_repo so commit-diff auto-pin can run.")
+	}
 	return out
 }
 
 func pinDiagnosticNextTools(warnings []string) []NextToolHint {
-	if !hasWarningPrefix(warnings, "PIN_REPO_") && !hasWarningPrefix(warnings, "RECOMMEND_REPO_REGISTRATION") {
+	if !hasWarningPrefix(warnings, "PIN_REPO_") && !hasWarningPrefix(warnings, "RECOMMEND_REPO_REGISTRATION") && !hasWarningPrefix(warnings, "PINS_AUTOPIN_") {
 		return nil
 	}
 	return []NextToolHint{{

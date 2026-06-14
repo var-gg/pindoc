@@ -67,3 +67,17 @@ func TestPinDiagnosticHintsPointAtWorkspaceDetect(t *testing.T) {
 		t.Fatalf("pin diagnostic next_tools = %+v", tools)
 	}
 }
+
+func TestPinDiagnosticHintsCoverAutopinUnavailable(t *testing.T) {
+	warnings := []string{"PINS_AUTOPIN_UNAVAILABLE:no_local_repo"}
+	actions := strings.Join(pinDiagnosticSuggestedActions(warnings), "\n")
+	for _, want := range []string{"pin_strategy=allowlist", "changed_paths_allowlist", "pins[]", "commit_sha", "pindoc.workspace.detect"} {
+		if !strings.Contains(actions, want) {
+			t.Fatalf("autopin diagnostic actions %q missing %q", actions, want)
+		}
+	}
+	tools := pinDiagnosticNextTools(warnings)
+	if len(tools) != 1 || tools[0].Tool != "pindoc.workspace.detect" {
+		t.Fatalf("autopin diagnostic next_tools = %+v", tools)
+	}
+}

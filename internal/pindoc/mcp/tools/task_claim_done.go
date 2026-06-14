@@ -84,7 +84,7 @@ type taskClaimDoneInput struct {
 	// without any extra hop. Duplicates against existing pins are
 	// silently skipped (warnings carry PIN_DUPLICATE_SKIPPED:<path>) so
 	// claim_done stays idempotent on retry.
-	Pins []ArtifactPinInput `json:"pins,omitempty" jsonschema:"optional implementation evidence; same shape as artifact.propose pins[] — duplicates are skipped silently"`
+	Pins []ArtifactPinInput `json:"pins,omitempty" jsonschema:"optional implementation evidence; same shape as artifact.propose pins[], e.g. [{\"kind\":\"code\",\"path\":\"internal/x.go\",\"commit_sha\":\"<sha>\"}]. Use this (or pin_strategy=allowlist) when the server has no local checkout and commit-diff auto-pin is unavailable. Duplicates are skipped silently."`
 
 	// EvidenceArtifacts attaches non-code deliverables such as Decision
 	// or Analysis artifacts as relates_to=evidence edges on the Task.
@@ -118,6 +118,13 @@ type taskClaimDoneOutput struct {
 	Failed           []string `json:"failed,omitempty"`
 	Checklist        []string `json:"checklist,omitempty"`
 	SuggestedActions []string `json:"suggested_actions,omitempty"`
+
+	// OutcomeInspectedHeadings echoes, in document order, the raw heading
+	// text of every Outcome-like H2 section the preflight evaluated. It is
+	// populated on the not_ready Outcome path so a closeout worker can see
+	// which heading(s) were actually checked (e.g. a stale "Outcome (결과)"
+	// shadowing a fresh "Outcome") instead of guessing.
+	OutcomeInspectedHeadings []string `json:"outcome_inspected_headings,omitempty"`
 
 	// Populated on accepted paths.
 	ArtifactID                     string                  `json:"artifact_id,omitempty"`
@@ -342,7 +349,8 @@ func claimOneTaskDone(
 			PrevStatus: prevStatus,
 		}, nil
 	}
-	if out := claimDoneOutcomePreflightOutput(currentBody, currentTaskMeta, currentArtifactMetaJSON); out != nil {
+	outcomeResult := claimDoneOutcomeResult(currentBody, currentTaskMeta, currentArtifactMetaJSON)
+	if out := claimDoneOutcomeNotReady(outcomeResult); out != nil {
 		out.ArtifactID = artifactID
 		out.Slug = currentSlug
 		out.PrevStatus = prevStatus
@@ -405,6 +413,13 @@ func claimOneTaskDone(
 
 	autoPins, autoWarnings := buildClaimDoneAutoPins(ctx, deps, projectID, commitSHA, claimDoneAutopinDefaultLimit, pinStrategy, changedPathsAllowlist)
 	pinWarnings := append([]string{}, autoWarnings...)
+	// The Outcome gate passed, but if more than one Outcome-like H2 section
+	// exists one of them satisfied the bar by accident of ordering. Nudge
+	// the author to consolidate so a future stale-first section can't shadow
+	// the real one. Advisory only (info severity) — never blocks claim_done.
+	if outcomeResult.DuplicateOutcomeSections {
+		pinWarnings = append(pinWarnings, fmt.Sprintf("OUTCOME_SECTION_DUPLICATE:%d", len(outcomeResult.InspectedHeadings)))
+	}
 	pinSources := make([]claimDonePinWithSource, 0, len(pinsValidated)+len(autoPins))
 	for _, pin := range pinsValidated {
 		pinSources = append(pinSources, claimDonePinWithSource{Pin: pin, Source: claimDonePinSourceExplicit})
@@ -642,27 +657,46 @@ func claimOneTaskDone(
 		VerificationNotes:              verificationNotes,
 		VerificationReceipts:           verificationReceipts,
 		VerificationReceiptEdgesStored: verificationReceiptEdgesStored,
-		NextTools:                      claimDoneCloseoutNextTools(scope.ProjectSlug, currentSlug, claimDoneCloseoutAssignee(currentTaskMeta, p)),
+		NextTools:                      append(claimDoneCloseoutNextTools(scope.ProjectSlug, currentSlug, claimDoneCloseoutAssignee(currentTaskMeta, p)), pinDiagnosticNextTools(pinWarnings)...),
+		SuggestedActions:               pinDiagnosticSuggestedActions(pinWarnings),
 		Notice:                         "Task claimed_done recorded. Run pindoc.task.done_check with mode=current_open_only for the assignee before telling the user the current assigned Task queue is complete; read historical debt fields separately.",
 		Warnings:                       outWarnings,
 	}, nil
 }
 
-func claimDoneOutcomePreflightOutput(body string, taskMeta map[string]any, artifactMetaRaw []byte) *taskClaimDoneOutput {
+// claimDoneOutcomeResult runs the Outcome preflight with CommitRequired
+// resolved from the exemption flags. Callers that need both the verdict and
+// the diagnostic fields (inspected headings / duplicate flag) use this and
+// pass the result to claimDoneOutcomeNotReady.
+func claimDoneOutcomeResult(body string, taskMeta map[string]any, artifactMetaRaw []byte) artifactpreflight.OutcomeCheckResult {
 	commitRequired := !claimDoneOutcomeCommitExempt(taskMeta, artifactMetaRaw)
-	result := artifactpreflight.CheckOutcomeSection(body, artifactpreflight.OutcomeCheckOptions{
+	return artifactpreflight.CheckOutcomeSection(body, artifactpreflight.OutcomeCheckOptions{
 		CommitRequired: commitRequired,
 	})
+}
+
+// claimDoneOutcomeNotReady projects a failed Outcome result onto a not_ready
+// output. Returns nil when the result passed. Diagnostics (inspected
+// headings) go in a dedicated field, never appended to Checklist — the error
+// contract pairs Checklist[i] with Failed[i] positionally.
+func claimDoneOutcomeNotReady(result artifactpreflight.OutcomeCheckResult) *taskClaimDoneOutput {
 	if result.OK() {
 		return nil
 	}
 	return &taskClaimDoneOutput{
-		Status:           "not_ready",
-		ErrorCode:        result.Codes[0],
-		Failed:           result.Codes,
-		Checklist:        result.Checklist,
-		SuggestedActions: artifactpreflight.OutcomeTemplateSuggestedActions(),
+		Status:                   "not_ready",
+		ErrorCode:                result.Codes[0],
+		Failed:                   result.Codes,
+		Checklist:                result.Checklist,
+		SuggestedActions:         artifactpreflight.OutcomeTemplateSuggestedActions(),
+		OutcomeInspectedHeadings: result.InspectedHeadings,
 	}
+}
+
+// claimDoneOutcomePreflightOutput is the test-facing convenience wrapper that
+// composes claimDoneOutcomeResult + claimDoneOutcomeNotReady in one call.
+func claimDoneOutcomePreflightOutput(body string, taskMeta map[string]any, artifactMetaRaw []byte) *taskClaimDoneOutput {
+	return claimDoneOutcomeNotReady(claimDoneOutcomeResult(body, taskMeta, artifactMetaRaw))
 }
 
 func claimDoneOutcomeCommitExempt(taskMeta map[string]any, artifactMetaRaw []byte) bool {
