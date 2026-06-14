@@ -42,37 +42,40 @@ var warningSeverityCatalog = map[string]string{
 	"PATCH_NOOP":                         SeverityError,
 
 	// WARN — changes reader interpretation but write stands.
-	"CONSENT_REQUIRED_FOR_USER_CHAT":     SeverityWarn,
-	"SOURCE_TYPE_UNCLASSIFIED":           SeverityWarn,
-	"DECISION_AREA_MUST_BE_SUBJECT":      SeverityWarn,
-	"MISSING_H2":                         SeverityWarn,
-	"BODY_HAS_H1_REDUNDANT":              SeverityWarn,
-	"TITLE_TOO_SHORT":                    SeverityWarn,
-	"TITLE_TOO_LONG":                     SeverityWarn,
-	"TITLE_GENERIC_TOKENS":               SeverityWarn,
-	"TITLE_LOCALE_MISMATCH":              SeverityWarn,
-	"SLUG_VERBOSE":                       SeverityWarn,
-	"PIN_PATH_NONEXISTENT":               SeverityWarn,
-	"PIN_PATH_OUTSIDE_REPO":              SeverityWarn,
-	"PIN_PATH_NOT_FOUND":                 SeverityWarn,
-	"PIN_PATH_UNOBSERVABLE":              SeverityWarn,
-	"PIN_PATH_REJECTED":                  SeverityWarn,
-	"PIN_REPO_ID_NOT_FOUND":              SeverityWarn,
-	"PIN_REPO_LOCAL_PATHS_MISSING":       SeverityWarn,
-	"PIN_REPO_MAPPING_DIAGNOSTIC_FAILED": SeverityWarn,
-	"PIN_REPO_MAPPING_UNRESOLVED":        SeverityWarn,
-	"PIN_REPO_NOT_REGISTERED":            SeverityWarn,
-	"RECOMMEND_REPO_REGISTRATION":        SeverityWarn,
-	"SECTION_DUPLICATES_EDGES":           SeverityWarn,
-	"MISSING_COMMIT_MSG_ON_CREATE":       SeverityWarn,
-	"AREA_SLUG_IGNORED":                  SeverityWarn,
-	"acceptance_unchecked":               SeverityWarn,
+	"CONSENT_REQUIRED_FOR_USER_CHAT":       SeverityWarn,
+	"SOURCE_TYPE_UNCLASSIFIED":             SeverityWarn,
+	"DECISION_AREA_MUST_BE_SUBJECT":        SeverityWarn,
+	"MISSING_H2":                           SeverityWarn,
+	"BODY_HAS_H1_REDUNDANT":                SeverityWarn,
+	"TITLE_TOO_SHORT":                      SeverityWarn,
+	"TITLE_TOO_LONG":                       SeverityWarn,
+	"TITLE_GENERIC_TOKENS":                 SeverityWarn,
+	"TITLE_LOCALE_MISMATCH":                SeverityWarn,
+	"SLUG_VERBOSE":                         SeverityWarn,
+	"PIN_PATH_NONEXISTENT":                 SeverityWarn,
+	"PIN_PATH_OUTSIDE_REPO":                SeverityWarn,
+	"PIN_PATH_NOT_FOUND":                   SeverityWarn,
+	"PIN_PATH_UNOBSERVABLE":                SeverityWarn,
+	"PIN_PATH_REJECTED":                    SeverityWarn,
+	"PIN_REPO_ID_NOT_FOUND":                SeverityWarn,
+	"PIN_REPO_LOCAL_PATHS_MISSING":         SeverityWarn,
+	"PIN_REPO_MAPPING_DIAGNOSTIC_FAILED":   SeverityWarn,
+	"PIN_REPO_MAPPING_UNRESOLVED":          SeverityWarn,
+	"PIN_REPO_NOT_REGISTERED":              SeverityWarn,
+	"RECOMMEND_REPO_REGISTRATION":          SeverityWarn,
+	"PINS_AUTOPIN_UNAVAILABLE":             SeverityWarn,
+	"PINS_AUTOPIN_FALLBACK_REPO_AMBIGUOUS": SeverityWarn,
+	"SECTION_DUPLICATES_EDGES":             SeverityWarn,
+	"MISSING_COMMIT_MSG_ON_CREATE":         SeverityWarn,
+	"AREA_SLUG_IGNORED":                    SeverityWarn,
+	"acceptance_unchecked":                 SeverityWarn,
 
 	// INFO — pointer / reminder.
-	"RECOMMEND_READ_BEFORE_CREATE": SeverityInfo,
-	"WORDING_FIX_APPLIED":          SeverityInfo,
-	"ADD_PIN_APPLIED":              SeverityInfo,
-	"OUTCOME_SECTION_DUPLICATE":    SeverityInfo,
+	"RECOMMEND_READ_BEFORE_CREATE":    SeverityInfo,
+	"WORDING_FIX_APPLIED":             SeverityInfo,
+	"ADD_PIN_APPLIED":                 SeverityInfo,
+	"OUTCOME_SECTION_DUPLICATE":       SeverityInfo,
+	"PINS_AUTOPIN_FALLBACK_ALLOWLIST": SeverityInfo,
 }
 
 // warningSeverity resolves the severity for one warning code. Handles
@@ -110,13 +113,22 @@ func severityRank(s string) int {
 // the emit order is preserved for equal-weight warnings. Nil input
 // returns nil.
 func sortWarningsBySeverity(warnings []string) []string {
+	return sortWarningsBySeverityFunc(warnings, warningSeverity)
+}
+
+// sortWarningsBySeverityFunc is sortWarningsBySeverity with a caller-supplied
+// severity resolver. Use it when severity is context-dependent (e.g. closeout
+// MISSING_H2 demoted to info on a declared draft append) so the sort order
+// matches the severity the warning will actually be reported at. Nil input
+// returns nil.
+func sortWarningsBySeverityFunc(warnings []string, sev func(string) string) []string {
 	if len(warnings) == 0 {
 		return warnings
 	}
 	out := make([]string, len(warnings))
 	copy(out, warnings)
 	sort.SliceStable(out, func(i, j int) bool {
-		return severityRank(warningSeverity(out[i])) > severityRank(warningSeverity(out[j]))
+		return severityRank(sev(out[i])) > severityRank(sev(out[j]))
 	})
 	return out
 }

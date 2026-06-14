@@ -313,6 +313,75 @@ func TestValidateClaimDonePins(t *testing.T) {
 	})
 }
 
+func TestClaimDoneAllowlistFallbackPins(t *testing.T) {
+	repo := pgit.Repo{ID: "11111111-1111-1111-1111-111111111111", Name: "origin"}
+	allow := []string{"internal/x.go", "docs/y.md"}
+
+	t.Run("no_local_repo synthesizes pins from allowlist", func(t *testing.T) {
+		pins, warnings, ok := claimDoneAllowlistFallbackPins("PINS_AUTOPIN_UNAVAILABLE:no_local_repo", claimDonePinStrategyAllowlist, allow, "abc1234", repo, 20)
+		if !ok || len(pins) != 2 {
+			t.Fatalf("expected 2 fallback pins, got ok=%v pins=%+v", ok, pins)
+		}
+		for _, p := range pins {
+			if p.CommitSHA != "abc1234" {
+				t.Fatalf("fallback pin missing commit coordinate: %+v", p)
+			}
+			if !claimDonePinHasEvidenceCoordinate(p) {
+				t.Fatalf("fallback pin must satisfy the evidence-coordinate bar: %+v", p)
+			}
+		}
+		if !containsString(warnings, "PINS_AUTOPIN_FALLBACK_ALLOWLIST:2") {
+			t.Fatalf("expected fallback provenance warning, got %v", warnings)
+		}
+		if containsString(warnings, "PINS_AUTOPIN_FALLBACK_REPO_AMBIGUOUS") {
+			t.Fatalf("resolved repo should not be flagged ambiguous: %v", warnings)
+		}
+	})
+
+	t.Run("commit_not_found is not eligible", func(t *testing.T) {
+		if _, _, ok := claimDoneAllowlistFallbackPins("PINS_AUTOPIN_UNAVAILABLE:commit_not_found", claimDonePinStrategyAllowlist, allow, "abc1234", repo, 20); ok {
+			t.Fatal("commit_not_found must not trigger the allowlist fallback")
+		}
+	})
+
+	t.Run("auto strategy is not eligible", func(t *testing.T) {
+		if _, _, ok := claimDoneAllowlistFallbackPins("PINS_AUTOPIN_UNAVAILABLE:no_local_repo", claimDonePinStrategyAuto, allow, "abc1234", repo, 20); ok {
+			t.Fatal("auto strategy must not synthesize allowlist pins")
+		}
+	})
+
+	t.Run("empty commit is not eligible", func(t *testing.T) {
+		if _, _, ok := claimDoneAllowlistFallbackPins("PINS_AUTOPIN_UNAVAILABLE:no_local_repo", claimDonePinStrategyAllowlist, allow, "", repo, 20); ok {
+			t.Fatal("empty commit_sha must not synthesize pins")
+		}
+	})
+
+	t.Run("unresolved repo is flagged ambiguous", func(t *testing.T) {
+		_, warnings, ok := claimDoneAllowlistFallbackPins("PINS_AUTOPIN_UNAVAILABLE:no_repo_registered", claimDonePinStrategyAllowlist, allow, "abc1234", pgit.Repo{}, 20)
+		if !ok || !containsString(warnings, "PINS_AUTOPIN_FALLBACK_REPO_AMBIGUOUS") {
+			t.Fatalf("expected ambiguous-repo warning for unresolved repo, got ok=%v warnings=%v", ok, warnings)
+		}
+	})
+}
+
+func TestChooseClaimDoneFallbackRepo(t *testing.T) {
+	single := pgit.Repo{ID: "a", Name: "solo"}
+	if got := chooseClaimDoneFallbackRepo([]pgit.Repo{single}, ""); got.Name != "solo" {
+		t.Fatalf("single repo should be chosen, got %+v", got)
+	}
+	multi := []pgit.Repo{{Name: "fork"}, {Name: "origin"}}
+	if got := chooseClaimDoneFallbackRepo(multi, ""); got.Name != "origin" {
+		t.Fatalf("origin should win among multiple repos, got %+v", got)
+	}
+	noOrigin := []pgit.Repo{{Name: "fork"}, {Name: "mirror"}}
+	if got := chooseClaimDoneFallbackRepo(noOrigin, "/repo/root"); got.Name != "origin" {
+		t.Fatalf("RepoRoot should yield an origin placeholder, got %+v", got)
+	}
+	if got := chooseClaimDoneFallbackRepo(noOrigin, ""); got.Name != "fork" {
+		t.Fatalf("first repo should be the last-resort choice, got %+v", got)
+	}
+}
+
 func TestClaimDoneOutcomePreflight(t *testing.T) {
 	valid := "## Outcome\n\n" +
 		"- 핵심 결과: outcome gate가 구현됨.\n" +

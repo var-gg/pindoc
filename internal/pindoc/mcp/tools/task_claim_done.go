@@ -924,6 +924,12 @@ func claimDoneCloseoutAssignee(taskMeta map[string]any, p *auth.Principal) strin
 
 func buildClaimDoneAutoPins(ctx context.Context, deps Deps, projectID, commitSHA string, limit int, pinStrategy string, changedPathsAllowlist []string) ([]ArtifactPinInput, []string) {
 	if strings.TrimSpace(commitSHA) == "" {
+		// An allowlist without a commit_sha has no evidence coordinate to
+		// pin against — surface why nothing was stored instead of silently
+		// returning zero pins.
+		if pinStrategy == claimDonePinStrategyAllowlist && len(changedPathsAllowlist) > 0 {
+			return nil, []string{"PINS_AUTOPIN_UNAVAILABLE:no_commit_sha"}
+		}
 		return nil, nil
 	}
 	if pinStrategy == claimDonePinStrategyExplicit {
@@ -940,7 +946,7 @@ func buildClaimDoneAutoPins(ctx context.Context, deps Deps, projectID, commitSHA
 		repos = []pgit.Repo{{Name: "origin", LocalPaths: []string{deps.RepoRoot}}}
 	}
 	if len(repos) == 0 {
-		return nil, []string{"PINS_AUTOPIN_UNAVAILABLE:no_repo_registered"}
+		return claimDoneAutoPinUnavailable("PINS_AUTOPIN_UNAVAILABLE:no_repo_registered", pinStrategy, changedPathsAllowlist, commitSHA, pgit.Repo{}, limit)
 	}
 
 	provider := pgit.LocalGitProvider{}
@@ -965,7 +971,102 @@ func buildClaimDoneAutoPins(ctx context.Context, deps Deps, projectID, commitSHA
 	if lastWarning == "" {
 		lastWarning = "PINS_AUTOPIN_UNAVAILABLE:git_diff_failed"
 	}
-	return nil, []string{lastWarning}
+	return claimDoneAutoPinUnavailable(lastWarning, pinStrategy, changedPathsAllowlist, commitSHA, chooseClaimDoneFallbackRepo(repos, deps.RepoRoot), limit)
+}
+
+// claimDoneAutoPinUnavailable is the terminal path when commit-diff auto-pin
+// could not run. It attempts the allowlist fallback (synthesize evidence pins
+// from the caller-named changed paths) when eligible, otherwise returns the
+// diagnostic warning unchanged.
+func claimDoneAutoPinUnavailable(reason, pinStrategy string, changedPathsAllowlist []string, commitSHA string, repo pgit.Repo, limit int) ([]ArtifactPinInput, []string) {
+	if pins, warnings, ok := claimDoneAllowlistFallbackPins(reason, pinStrategy, changedPathsAllowlist, commitSHA, repo, limit); ok {
+		return pins, warnings
+	}
+	return nil, []string{reason}
+}
+
+// claimDoneAllowlistFallbackPins synthesizes evidence pins straight from the
+// caller-supplied changed_paths_allowlist when commit-diff auto-pin was
+// unavailable. git diff is only needed to DISCOVER which paths changed; under
+// pin_strategy=allowlist the caller has already named them, so the same
+// {kind, repo, commit_sha, path} coordinate the diff path stores can be built
+// without a checkout. Policy-neutral: every synthesized pin carries commit_sha
+// (this is unreachable when commit_sha is empty), so it meets the same
+// evidence bar; a PINS_AUTOPIN_FALLBACK_ALLOWLIST marker records provenance.
+//
+// Scoped to "missing checkout" reasons only. commit_not_found (a checkout
+// exists but the commit is absent) and transient git_diff_failed are NOT
+// eligible — fabricating a pin there could mask a wrong-SHA paste.
+func claimDoneAllowlistFallbackPins(reason, pinStrategy string, changedPathsAllowlist []string, commitSHA string, repo pgit.Repo, limit int) ([]ArtifactPinInput, []string, bool) {
+	if pinStrategy != claimDonePinStrategyAllowlist || len(changedPathsAllowlist) == 0 {
+		return nil, nil, false
+	}
+	switch reason {
+	case "PINS_AUTOPIN_UNAVAILABLE:no_local_repo", "PINS_AUTOPIN_UNAVAILABLE:no_repo_registered":
+		// eligible
+	default:
+		return nil, nil, false
+	}
+	if strings.TrimSpace(commitSHA) == "" {
+		return nil, nil, false
+	}
+	if limit <= 0 {
+		limit = claimDoneAutopinDefaultLimit
+	}
+	pins := make([]ArtifactPinInput, 0, min(len(changedPathsAllowlist), limit))
+	truncated := 0
+	for _, raw := range changedPathsAllowlist {
+		path := normalizeClaimDoneChangedPath(raw)
+		if path == "" {
+			continue
+		}
+		if len(pins) >= limit {
+			truncated++
+			continue
+		}
+		pins = append(pins, ArtifactPinInput{
+			Kind:      pinmodel.NormalizeKind("", path),
+			RepoID:    strings.TrimSpace(repo.ID),
+			Repo:      strings.TrimSpace(repo.Name),
+			CommitSHA: commitSHA,
+			Path:      path,
+		})
+	}
+	if len(pins) == 0 {
+		return nil, nil, false
+	}
+	warnings := []string{reason, fmt.Sprintf("PINS_AUTOPIN_FALLBACK_ALLOWLIST:%d", len(pins))}
+	if truncated > 0 {
+		warnings = append(warnings, fmt.Sprintf("PINS_AUTOPIN_TRUNCATED:%d", truncated))
+	}
+	// insertPins only emits a repo-mapping warning for kind=code, so a
+	// fallback that lands on an unresolved repo would otherwise store
+	// doc/config/asset pins with no provenance signal. Flag it explicitly.
+	if strings.TrimSpace(repo.ID) == "" {
+		warnings = append(warnings, "PINS_AUTOPIN_FALLBACK_REPO_AMBIGUOUS")
+	}
+	return pins, warnings, true
+}
+
+// chooseClaimDoneFallbackRepo picks the repo coordinate for synthesized
+// fallback pins: the sole registered repo, else the one named "origin", else
+// an origin placeholder when a RepoRoot is configured, else the first repo.
+func chooseClaimDoneFallbackRepo(repos []pgit.Repo, repoRoot string) pgit.Repo {
+	if len(repos) == 1 {
+		return repos[0]
+	}
+	for _, r := range repos {
+		if strings.EqualFold(strings.TrimSpace(r.Name), "origin") {
+			return r
+		}
+	}
+	if strings.TrimSpace(repoRoot) != "" {
+		return pgit.Repo{Name: "origin"}
+	}
+	if len(repos) > 0 {
+		return repos[0]
+	}
+	return pgit.Repo{}
 }
 
 func claimDoneAutoPinsFromChangedFiles(files []pgit.ChangedFile, commitSHA string, repo pgit.Repo, limit int, changedPathsAllowlist []string) ([]ArtifactPinInput, []string) {

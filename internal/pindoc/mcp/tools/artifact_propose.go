@@ -1822,10 +1822,22 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		recordWarningEvent(ctx, deps, projectID, artifactID, newRev, warnings, in.AuthorID, canonicalRewriteFlag)
 	}
 
-	sortedWarnings := sortWarningsBySeverity(warnings)
+	// On a declared draft append, demote closeout MISSING_H2 advisories to
+	// info so the worker is not nagged to write code coordinates / TC /
+	// Outcome on a note they explicitly stashed as a draft. The warning code
+	// stays MISSING_H2 (so recordWarningEvent above and the Outcome template
+	// hint are unchanged); only the reported/sorted severity drops.
+	demoteCloseoutH2 := isDraftAppendUpdate(shape, in, autoClaimedDone)
+	severityOf := func(code string) string {
+		if demoteCloseoutH2 && isCloseoutMissingH2(code) {
+			return SeverityInfo
+		}
+		return warningSeverity(code)
+	}
+	sortedWarnings := sortWarningsBySeverityFunc(warnings, severityOf)
 	severities := make([]string, len(sortedWarnings))
 	for i, w := range sortedWarnings {
-		severities[i] = warningSeverity(w)
+		severities[i] = severityOf(w)
 	}
 	out := artifactProposeOutput{
 		Status:                          "accepted",
@@ -4436,6 +4448,53 @@ func requiredH2WarningsForSlots(body string, slots []requiredH2Slot) []string {
 
 func softRequiredH2Slot(artifactType string, slot requiredH2Slot) bool {
 	return artifactType == "Task" && requiredH2SlotsOverlap(slot, taskOutcomeRequiredH2Slot())
+}
+
+// taskCloseoutRequiredH2Slots returns the Task H2 slots that only become
+// answerable at closeout — code coordinates, TC/DoD, and Outcome. Built from
+// the canonical defaultRequiredH2Slots definitions (single source of truth)
+// so it stays in sync if a template adds aliases.
+func taskCloseoutRequiredH2Slots() []requiredH2Slot {
+	return []requiredH2Slot{
+		requiredH2SlotForLabel("Task", "코드 좌표"),
+		requiredH2SlotForLabel("Task", "TC / DoD"),
+		taskOutcomeRequiredH2Slot(),
+	}
+}
+
+// isCloseoutMissingH2 reports whether a "MISSING_H2:<label>" warning refers to
+// a Task closeout slot. Used to demote these advisories to info severity on a
+// declared draft append (see isDraftAppendUpdate) — the code string is left as
+// MISSING_H2 so audit aggregation and the Outcome template hint are unchanged.
+func isCloseoutMissingH2(code string) bool {
+	label, ok := strings.CutPrefix(code, "MISSING_H2:")
+	if !ok {
+		return false
+	}
+	probe := requiredH2SlotForLabel("Task", strings.TrimSpace(label))
+	for _, slot := range taskCloseoutRequiredH2Slots() {
+		if requiredH2SlotsOverlap(probe, slot) {
+			return true
+		}
+	}
+	return false
+}
+
+// isDraftAppendUpdate reports whether this update is an agent-declared draft
+// note appended to a Task — body_patch append + completeness=draft — and is
+// NOT auto-claiming the Task done. On this path closeout MISSING_H2 advisories
+// are demoted to info: the author has explicitly said "this is a draft", so
+// nagging them to write code coordinates / TC / Outcome is noise. The
+// completeness=draft requirement keeps demotion off real closeout appends
+// (which set completeness partial/settled or resolve all checkboxes), and the
+// !autoClaimedDone guard preserves the only Outcome warning on the path where
+// a body_patch silently flips the Task to claimed_done.
+func isDraftAppendUpdate(shape RevisionShape, in artifactProposeInput, autoClaimedDone bool) bool {
+	return shape == ShapeBodyPatch &&
+		in.BodyPatch != nil &&
+		strings.EqualFold(strings.TrimSpace(in.BodyPatch.Mode), "append") &&
+		strings.EqualFold(strings.TrimSpace(in.Completeness), "draft") &&
+		!autoClaimedDone
 }
 
 func requiredH2SlotsFor(ctx context.Context, deps Deps, projectSlug, artifactType string) []requiredH2Slot {
