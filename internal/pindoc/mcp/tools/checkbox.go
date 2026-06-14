@@ -220,6 +220,43 @@ func normalizeAcceptanceLabelText(s string) string {
 	return strings.TrimSpace(b.String())
 }
 
+// resolveAcceptanceLabelMatchesAll is the match_all counterpart of
+// resolveAcceptanceLabelMatch: instead of requiring exactly one match it
+// returns the indices of EVERY unresolved ([ ]/[~]) checkbox whose label
+// matches, so a single acceptance.transition call can resolve them all.
+// Returns ACCEPTANCE_LABEL_NOT_FOUND only when nothing matched. Selection is
+// constrained to the same unresolved set the single-match path uses, so it
+// never reaches already-resolved [x]/[-] markers.
+func resolveAcceptanceLabelMatchesAll(body string, label string) ([]int, []AcceptanceLabelRef, []AcceptanceLabelRef, string) {
+	unresolved := unresolvedAcceptanceLabels(body)
+	matches := make([]AcceptanceLabelRef, 0, len(unresolved))
+	indices := make([]int, 0, len(unresolved))
+	for _, candidate := range unresolved {
+		if acceptanceLabelMatches(label, candidate.Label) {
+			matches = append(matches, candidate)
+			indices = append(indices, candidate.Index)
+		}
+	}
+	if len(matches) == 0 {
+		return nil, matches, unresolved, "ACCEPTANCE_LABEL_NOT_FOUND"
+	}
+	return indices, matches, unresolved, ""
+}
+
+// partialAcceptanceLabels returns only the [~] (partial) acceptance items in
+// the body. claim_done preserves [~] markers, so surfacing them post-toggle
+// lets a worker resolve them via acceptance.transition without a prior
+// artifact.read to discover indices.
+func partialAcceptanceLabels(body string) []AcceptanceLabelRef {
+	var out []AcceptanceLabelRef
+	for _, label := range unresolvedAcceptanceLabels(body) {
+		if label.State == "[~]" {
+			out = append(out, label)
+		}
+	}
+	return out
+}
+
 func resolveAcceptanceLabelMatch(body string, label string) (int, []AcceptanceLabelRef, []AcceptanceLabelRef, string) {
 	unresolved := unresolvedAcceptanceLabels(body)
 	matches := make([]AcceptanceLabelRef, 0, len(unresolved))

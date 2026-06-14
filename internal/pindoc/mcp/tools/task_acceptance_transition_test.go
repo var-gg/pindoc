@@ -23,6 +23,48 @@ func TestNormalizeTransitionIndices(t *testing.T) {
 	}
 }
 
+func TestResolveAcceptanceLabelMatchesAll(t *testing.T) {
+	body := "- [~] QA smoke pass\n- [~] QA regression pass\n- [ ] deploy verified\n- [x] code merged\n"
+
+	indices, matches, _, code := resolveAcceptanceLabelMatchesAll(body, "QA")
+	if code != "" {
+		t.Fatalf("match_all QA should resolve, got code %q", code)
+	}
+	if len(indices) != 2 || len(matches) != 2 {
+		t.Fatalf("expected 2 QA matches, got indices=%v matches=%d", indices, len(matches))
+	}
+	// Only unresolved ([ ]/[~]) checkboxes are eligible — the [x] item
+	// (index 3) is never selected.
+	for _, idx := range indices {
+		if idx == 3 {
+			t.Fatal("resolved [x] checkbox must not be selected")
+		}
+	}
+
+	if _, _, _, code := resolveAcceptanceLabelMatchesAll(body, "nonexistent label"); code != "ACCEPTANCE_LABEL_NOT_FOUND" {
+		t.Fatalf("no match should yield ACCEPTANCE_LABEL_NOT_FOUND, got %q", code)
+	}
+
+	// The single-match path still enforces exactly-one (ambiguous on >1),
+	// so match_all is the opt-in for multi-resolution.
+	if _, _, _, code := resolveAcceptanceLabelMatch(body, "QA"); code != "ACCEPTANCE_LABEL_AMBIGUOUS" {
+		t.Fatalf("single-match QA should stay ambiguous, got %q", code)
+	}
+}
+
+func TestPartialAcceptanceLabels(t *testing.T) {
+	body := "- [x] done\n- [~] manual QA partial\n- [ ] still open\n- [-] deferred\n- [~] perf check\n"
+	got := partialAcceptanceLabels(body)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 partial [~] items, got %d (%+v)", len(got), got)
+	}
+	for _, l := range got {
+		if l.State != "[~]" {
+			t.Fatalf("partialAcceptanceLabels returned non-partial state %q", l.State)
+		}
+	}
+}
+
 func TestApplyAcceptanceTransitionsBulkSingleRevisionMaterial(t *testing.T) {
 	body := strings.Join([]string{
 		"## Acceptance",

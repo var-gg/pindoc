@@ -127,13 +127,18 @@ type taskClaimDoneOutput struct {
 	OutcomeInspectedHeadings []string `json:"outcome_inspected_headings,omitempty"`
 
 	// Populated on accepted paths.
-	ArtifactID                     string                  `json:"artifact_id,omitempty"`
-	Slug                           string                  `json:"slug,omitempty"`
-	AgentRef                       string                  `json:"agent_ref,omitempty"`
-	RevisionNumber                 int                     `json:"revision_number,omitempty"`
-	HumanURL                       string                  `json:"human_url,omitempty"`
-	HumanURLAbs                    string                  `json:"human_url_abs,omitempty"`
-	ChangedAcceptanceCount         int                     `json:"changed_acceptance_count"`
+	ArtifactID             string `json:"artifact_id,omitempty"`
+	Slug                   string `json:"slug,omitempty"`
+	AgentRef               string `json:"agent_ref,omitempty"`
+	RevisionNumber         int    `json:"revision_number,omitempty"`
+	HumanURL               string `json:"human_url,omitempty"`
+	HumanURLAbs            string `json:"human_url_abs,omitempty"`
+	ChangedAcceptanceCount int    `json:"changed_acceptance_count"`
+	// RemainingPartialAcceptance lists the [~] (partial) acceptance items
+	// claim_done deliberately left untouched, with their indices, so the
+	// caller can resolve them via pindoc.task.acceptance.transition without
+	// a separate artifact.read to discover indices.
+	RemainingPartialAcceptance     []AcceptanceLabelRef    `json:"remaining_partial_acceptance,omitempty"`
 	PrevStatus                     string                  `json:"prev_status,omitempty"`
 	NewStatus                      string                  `json:"new_status,omitempty"`
 	CommitSHA                      string                  `json:"commit_sha,omitempty"`
@@ -636,6 +641,14 @@ func claimOneTaskDone(
 	if len(pinWarnings) > 0 {
 		outWarnings = pinWarnings
 	}
+	// claim_done preserves [~] partials; surface the remaining ones (with
+	// indices) so the worker can resolve them via acceptance.transition
+	// without a separate artifact.read.
+	remainingPartials := partialAcceptanceLabels(revBody)
+	nextTools := append(claimDoneCloseoutNextTools(scope.ProjectSlug, currentSlug, claimDoneCloseoutAssignee(currentTaskMeta, p)), pinDiagnosticNextTools(pinWarnings)...)
+	if len(remainingPartials) > 0 {
+		nextTools = append(nextTools, claimDonePartialAcceptanceNextTool(scope.ProjectSlug, currentSlug, len(remainingPartials)))
+	}
 	return taskClaimDoneOutput{
 		Status:                         "accepted",
 		ArtifactID:                     artifactID,
@@ -645,6 +658,7 @@ func claimOneTaskDone(
 		HumanURL:                       HumanURL(scope.ProjectSlug, scope.ProjectLocale, currentSlug),
 		HumanURLAbs:                    AbsHumanURL(deps.Settings, scope.ProjectSlug, scope.ProjectLocale, currentSlug),
 		ChangedAcceptanceCount:         changedCount,
+		RemainingPartialAcceptance:     remainingPartials,
 		PrevStatus:                     prevStatus,
 		NewStatus:                      "claimed_done",
 		CommitSHA:                      commitSHA,
@@ -657,7 +671,7 @@ func claimOneTaskDone(
 		VerificationNotes:              verificationNotes,
 		VerificationReceipts:           verificationReceipts,
 		VerificationReceiptEdgesStored: verificationReceiptEdgesStored,
-		NextTools:                      append(claimDoneCloseoutNextTools(scope.ProjectSlug, currentSlug, claimDoneCloseoutAssignee(currentTaskMeta, p)), pinDiagnosticNextTools(pinWarnings)...),
+		NextTools:                      nextTools,
 		SuggestedActions:               pinDiagnosticSuggestedActions(pinWarnings),
 		Notice:                         "Task claimed_done recorded. Run pindoc.task.done_check with mode=current_open_only for the assignee before telling the user the current assigned Task queue is complete; read historical debt fields separately.",
 		Warnings:                       outWarnings,
@@ -907,6 +921,17 @@ func claimDoneCloseoutNextTools(projectSlug, taskSlug, assignee string) []NextTo
 			},
 			Reason: "inspect stored evidence, verification notes, receipt artifacts, and closeout revision if needed",
 		},
+	}
+}
+
+func claimDonePartialAcceptanceNextTool(projectSlug, slug string, n int) NextToolHint {
+	return NextToolHint{
+		Tool: "pindoc.task.acceptance.transition",
+		Args: map[string]any{
+			"project_slug":    projectSlug,
+			"task_id_or_slug": "pindoc://" + slug,
+		},
+		Reason: fmt.Sprintf("%d partial [~] acceptance item(s) remain (indices in remaining_partial_acceptance) — resolve with checkbox_indices, or checkbox_label_match + match_all, once confirmed done", n),
 	}
 }
 

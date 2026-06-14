@@ -21,6 +21,7 @@ type taskAcceptanceTransitionInput struct {
 	CheckboxIndex      *int   `json:"checkbox_index,omitempty" jsonschema:"single checkbox index; optional shorthand for checkbox_indices=[N]"`
 	CheckboxIndices    []int  `json:"checkbox_indices,omitempty" jsonschema:"0-based checkbox indices across all 4-state acceptance checkboxes"`
 	CheckboxLabelMatch string `json:"checkbox_label_match,omitempty" jsonschema:"fuzzy unresolved checkbox label selector; index fields take precedence when present"`
+	MatchAll           bool   `json:"match_all,omitempty" jsonschema:"with checkbox_label_match, resolve EVERY matching unresolved ([ ]/[~]) checkbox in one call instead of requiring exactly one match; new_state is applied to all matches. Default false keeps the exactly-one contract"`
 	NewState           string `json:"new_state" jsonschema:"one of '[ ]' | '[x]' | '[~]' | '[-]'"`
 	Reason             string `json:"reason,omitempty" jsonschema:"required for [~] and [-]; stored in revision shape_payload"`
 
@@ -73,7 +74,7 @@ func RegisterTaskAcceptanceTransition(server *sdk.Server, deps Deps) {
 	AddInstrumentedTool(server, deps,
 		&sdk.Tool{
 			Name:        "pindoc.task.acceptance.transition",
-			Description: "Transition one or more Task acceptance checkboxes in a single revision. Pass checkbox_indices plus new_state, or checkbox_label_match for fuzzy unresolved-label selection; use checkbox_index when exactness matters. expected_version is required. When the final unchecked item is resolved, task_meta.status automatically becomes claimed_done.",
+			Description: "Transition one or more Task acceptance checkboxes in a single revision. Pass checkbox_indices plus new_state (already supports batch, e.g. flip several [~] to [x] at once), or checkbox_label_match for fuzzy unresolved-label selection; use checkbox_index when exactness matters. checkbox_label_match resolves exactly one match by default — set match_all=true to apply new_state to EVERY matching unresolved checkbox in one call without first reading indices. expected_version is required. When the final unchecked item is resolved, task_meta.status automatically becomes claimed_done.",
 		},
 		func(ctx context.Context, p *auth.Principal, in taskAcceptanceTransitionInput) (*sdk.CallToolResult, taskAcceptanceTransitionOutput, error) {
 			scope, err := auth.ResolveProject(ctx, deps.DB, p, in.ProjectSlug)
@@ -170,7 +171,17 @@ func RegisterTaskAcceptanceTransition(server *sdk.Server, deps Deps) {
 			var unresolvedAcceptanceLabels []AcceptanceLabelRef
 			var warnings []string
 			if len(indices) == 0 && checkboxLabel != "" {
-				idx, matches, unresolved, code := resolveAcceptanceLabelMatch(currentBody, checkboxLabel)
+				var matches, unresolved []AcceptanceLabelRef
+				var code string
+				if in.MatchAll {
+					indices, matches, unresolved, code = resolveAcceptanceLabelMatchesAll(currentBody, checkboxLabel)
+				} else {
+					var idx int
+					idx, matches, unresolved, code = resolveAcceptanceLabelMatch(currentBody, checkboxLabel)
+					if code == "" {
+						indices = []int{idx}
+					}
+				}
 				acceptanceLabelMatches = matches
 				unresolvedAcceptanceLabels = unresolved
 				if code != "" {
@@ -179,14 +190,13 @@ func RegisterTaskAcceptanceTransition(server *sdk.Server, deps Deps) {
 						ErrorCode:                  code,
 						Failed:                     []string{code},
 						Checklist:                  []string{acceptanceTransitionChecklist(deps.UserLanguage, code)},
-						PatchableFields:            []string{"checkbox_label_match", "checkbox_index", "checkbox_indices"},
+						PatchableFields:            []string{"checkbox_label_match", "checkbox_index", "checkbox_indices", "match_all"},
 						ArtifactID:                 artifactID,
 						Slug:                       currentSlug,
 						AcceptanceLabelMatches:     matches,
 						UnresolvedAcceptanceLabels: unresolved,
 					}, nil
 				}
-				indices = []int{idx}
 			} else if checkboxLabel != "" {
 				for _, idx := range indices {
 					if !labelMatchesCheckboxIndex(currentBody, idx, checkboxLabel) {
