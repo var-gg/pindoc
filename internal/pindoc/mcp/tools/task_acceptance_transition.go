@@ -12,6 +12,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
+	"github.com/var-gg/pindoc/internal/pindoc/indexstate"
 )
 
 type taskAcceptanceTransitionInput struct {
@@ -53,6 +54,7 @@ type taskAcceptanceTransitionOutput struct {
 	TotalCount                 int                  `json:"total_count,omitempty"`
 	TransitionCount            int                  `json:"transition_count,omitempty"`
 	Warnings                   []string             `json:"warnings,omitempty"`
+	IndexState                 *indexstate.State    `json:"index_state,omitempty"`
 	AcceptanceLabelMatches     []AcceptanceLabelRef `json:"acceptance_label_matches,omitempty"`
 	UnresolvedAcceptanceLabels []AcceptanceLabelRef `json:"unresolved_acceptance_labels,omitempty"`
 	ToolsetVersion             string               `json:"toolset_version,omitempty"`
@@ -282,14 +284,9 @@ func RegisterTaskAcceptanceTransition(server *sdk.Server, deps Deps) {
 				return nil, taskAcceptanceTransitionOutput{}, fmt.Errorf("update task: %w", err)
 			}
 
-			if _, err := tx.Exec(ctx, `DELETE FROM artifact_chunks WHERE artifact_id = $1`, artifactID); err != nil {
-				return nil, taskAcceptanceTransitionOutput{}, fmt.Errorf("purge chunks: %w", err)
-			}
-			if deps.Embedder != nil {
-				if err := embedAndStoreChunks(ctx, tx, deps.Embedder, artifactID, currentTitle, newBody); err != nil {
-					deps.Logger.Warn("re-embed failed after acceptance transition",
-						"artifact_id", artifactID, "err", err)
-				}
+			indexState, err := refreshArtifactIndex(ctx, tx, deps, artifactID, newRev, currentTitle, newBody)
+			if err != nil {
+				return nil, taskAcceptanceTransitionOutput{}, err
 			}
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO events (project_id, kind, subject_id, payload)
@@ -324,6 +321,7 @@ func RegisterTaskAcceptanceTransition(server *sdk.Server, deps Deps) {
 				TotalCount:                 total,
 				TransitionCount:            len(applied),
 				Warnings:                   warnings,
+				IndexState:                 indexState,
 				AcceptanceLabelMatches:     acceptanceLabelMatches,
 				UnresolvedAcceptanceLabels: unresolvedAcceptanceLabels,
 			}, nil

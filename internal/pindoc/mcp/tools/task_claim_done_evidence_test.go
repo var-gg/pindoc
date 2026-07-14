@@ -14,6 +14,7 @@ import (
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
+	"github.com/var-gg/pindoc/internal/pindoc/indexstate"
 )
 
 func TestTaskClaimDoneEvidenceArtifactsIntegration(t *testing.T) {
@@ -45,6 +46,7 @@ func TestTaskClaimDoneEvidenceArtifactsIntegration(t *testing.T) {
 
 	taskSlug := fmt.Sprintf("task-evidence-%d", suffix)
 	taskID := insertContextReceiptTask(t, ctx, pool, projectID, areaID, taskSlug)
+	prepareEvidenceTaskForClaim(t, ctx, pool, taskID)
 	evidenceSlugA := fmt.Sprintf("evidence-a-%d", suffix)
 	evidenceSlugB := fmt.Sprintf("evidence-b-%d", suffix)
 	receiptSlug := fmt.Sprintf("verification-receipt-%d", suffix)
@@ -64,7 +66,7 @@ func TestTaskClaimDoneEvidenceArtifactsIntegration(t *testing.T) {
 		SlugOrID:             taskSlug,
 		Reason:               "claim with decision evidence",
 		PinStrategy:          claimDonePinStrategyExplicit,
-		Pins:                 []ArtifactPinInput{{Kind: "url", Path: "https://example.invalid/evidence"}},
+		Pins:                 []ArtifactPinInput{{Kind: "url", Path: "https://github.com/var-gg/pindoc/pull/1"}},
 		EvidenceArtifacts:    []string{evidenceSlugA, "pindoc://" + evidenceSlugB, evidenceSlugA, ""},
 		VerificationNotes:    []VerificationNoteInput{{Kind: "test", Status: "passed", Command: "go test ./...", Summary: "integration tests passed"}},
 		VerificationReceipts: []string{receiptSlug},
@@ -73,7 +75,12 @@ func TestTaskClaimDoneEvidenceArtifactsIntegration(t *testing.T) {
 		t.Fatalf("claimOneTaskDone: %v", err)
 	}
 	if out.Status != "accepted" || out.EvidenceEdgesStored != 2 || out.VerificationReceiptEdgesStored != 1 || out.PinsStored != 1 || out.PinsExplicitCount != 1 {
-		t.Fatalf("claim_done output = status=%q evidence=%d receipt_edges=%d pins=%d explicit=%d", out.Status, out.EvidenceEdgesStored, out.VerificationReceiptEdgesStored, out.PinsStored, out.PinsExplicitCount)
+		t.Fatalf("claim_done output = status=%q code=%q evidence=%d receipt_edges=%d pins=%d explicit=%d checklist=%v warnings=%v",
+			out.Status, out.ErrorCode, out.EvidenceEdgesStored, out.VerificationReceiptEdgesStored,
+			out.PinsStored, out.PinsExplicitCount, out.Checklist, out.Warnings)
+	}
+	if out.IndexState == nil || out.IndexState.Status != indexstate.StatusUnknown {
+		t.Fatalf("claim_done index state = %+v, want unknown without an embedder", out.IndexState)
 	}
 	if len(out.VerificationNotes) != 1 || out.VerificationNotes[0].Kind != "test" || out.VerificationNotes[0].Status != "passed" {
 		t.Fatalf("verification notes output = %+v", out.VerificationNotes)
@@ -98,7 +105,8 @@ func TestTaskClaimDoneEvidenceArtifactsIntegration(t *testing.T) {
 	}
 
 	badTaskSlug := fmt.Sprintf("task-bad-evidence-%d", suffix)
-	insertContextReceiptTask(t, ctx, pool, projectID, areaID, badTaskSlug)
+	badTaskID := insertContextReceiptTask(t, ctx, pool, projectID, areaID, badTaskSlug)
+	prepareEvidenceTaskForClaim(t, ctx, pool, badTaskID)
 	bad, err := claimOneTaskDone(ctx, Deps{DB: pool}, principal, scope, taskClaimDoneInput{
 		ProjectSlug:       projectSlug,
 		SlugOrID:          badTaskSlug,
@@ -110,6 +118,26 @@ func TestTaskClaimDoneEvidenceArtifactsIntegration(t *testing.T) {
 	}
 	if bad.Status != "not_ready" || bad.ErrorCode != "EVIDENCE_TARGET_NOT_FOUND" {
 		t.Fatalf("missing evidence output = status=%q code=%q, want not_ready EVIDENCE_TARGET_NOT_FOUND", bad.Status, bad.ErrorCode)
+	}
+}
+
+func prepareEvidenceTaskForClaim(t *testing.T, ctx context.Context, pool *db.Pool, taskID string) {
+	t.Helper()
+	body := "## TODO\n\n- [ ] persist evidence edges and verification receipts\n\n" +
+		"## Outcome\n\n" +
+		"- 핵심 결과: evidence artifacts and verification receipts are persisted together.\n" +
+		"- 코드 변경: commit `36f85c5bc5f4269e4e6e20102befd711b1692779`.\n" +
+		"- 회귀 진술: existing claim_done evidence and pin behavior has no regression.\n"
+	if _, err := pool.Exec(ctx, `UPDATE artifacts SET body_markdown = $2 WHERE id = $1::uuid`, taskID, body); err != nil {
+		t.Fatalf("prepare claimable task head: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE artifact_revisions
+		   SET body_markdown = $2,
+		       body_hash = encode(sha256(convert_to($2, 'UTF8')), 'hex')
+		 WHERE artifact_id = $1::uuid AND revision_number = 1
+	`, taskID, body); err != nil {
+		t.Fatalf("prepare claimable task revision: %v", err)
 	}
 }
 

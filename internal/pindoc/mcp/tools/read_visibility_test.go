@@ -359,6 +359,7 @@ func seedMCPVisibilityFixture(t *testing.T, ctx context.Context, pool *db.Pool) 
 		Name:            "Visibility MCP",
 		PrimaryLanguage: "ko",
 		OwnerUserID:     ownerID,
+		ReaderHidden:    true,
 	})
 	if err != nil {
 		t.Fatalf("create project: %v", err)

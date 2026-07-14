@@ -173,8 +173,8 @@ func insertReadStateProject(t *testing.T, ctx context.Context, pool *db.Pool, sl
 	t.Helper()
 	var id string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO projects (slug, name, primary_language)
-		VALUES ($1, $2, 'en')
+		INSERT INTO projects (slug, name, primary_language, organization_id, reader_hidden)
+		VALUES ($1, $2, 'en', (SELECT id FROM organizations WHERE slug = 'default' LIMIT 1), TRUE)
 		RETURNING id::text
 	`, slug, "test "+slug).Scan(&id); err != nil {
 		t.Fatalf("insert project: %v", err)

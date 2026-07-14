@@ -1,17 +1,14 @@
-// pindoc-reembed walks every active artifact in the configured project,
-// drops its existing artifact_chunks rows, and re-computes title + body
-// chunks against whatever embedding provider the config points at. Used
-// when switching providers (e.g. stub → http / TEI) or when the chunking
-// algorithm changes.
-//
-// Safe to re-run: each artifact is handled in its own transaction, so a
-// partial failure leaves the rest of the corpus unchanged.
+// pindoc-reembed refreshes artifact search chunks with the configured
+// embedding provider. Every artifact runs in its own transaction. Provider
+// failures preserve the last known-good chunks and commit a retryable failed
+// state; successful attempts replace chunks and provenance atomically.
 //
 // Usage:
 //
 //	go run ./cmd/pindoc-reembed
-//	go run ./cmd/pindoc-reembed -dry-run
-//	go run ./cmd/pindoc-reembed -only slug1,slug2
+//	go run ./cmd/pindoc-reembed -dry-run -state needs-refresh
+//	go run ./cmd/pindoc-reembed -state failed
+//	go run ./cmd/pindoc-reembed -state stale -only slug1,slug2
 package main
 
 import (
@@ -20,25 +17,46 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 
 	"github.com/var-gg/pindoc/internal/pindoc/config"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
+	"github.com/var-gg/pindoc/internal/pindoc/indexstate"
 )
+
+const (
+	stateAll          = "all"
+	stateNeedsRefresh = "needs-refresh"
+)
+
+type artifactPlan struct {
+	ID             string
+	Slug           string
+	Title          string
+	Body           string
+	RevisionNumber int
+	StoredState    *indexstate.State
+	EffectiveState string
+}
 
 func main() {
 	var (
-		dryRun = flag.Bool("dry-run", false, "list artifacts that would be re-embedded, don't touch chunks")
-		only   = flag.String("only", "", "comma-separated slugs to limit the run (empty = all)")
+		dryRun    = flag.Bool("dry-run", false, "list artifacts that would be re-embedded without writing")
+		only      = flag.String("only", "", "comma-separated slugs to limit the run (empty = all)")
+		stateMode = flag.String("state", stateAll, "select all|needs-refresh|failed|stale|unknown|indexed")
 	)
 	flag.Parse()
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	mode := strings.ToLower(strings.TrimSpace(*stateMode))
+	if !validStateMode(mode) {
+		fmt.Fprintf(os.Stderr, "invalid -state %q (want all|needs-refresh|failed|stale|unknown|indexed)\n", *stateMode)
+		os.Exit(2)
+	}
 
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	cfg, err := config.Load()
 	if err != nil {
 		logger.Error("config load", "err", err)
@@ -54,6 +72,10 @@ func main() {
 		os.Exit(1)
 	}
 	defer pool.Close()
+	if err := db.Migrate(ctx, pool.Pool); err != nil {
+		logger.Error("db migrate", "err", err)
+		os.Exit(1)
+	}
 
 	provider, err := embed.Build(cfg.Embed)
 	if err != nil {
@@ -63,60 +85,47 @@ func main() {
 	info := provider.Info()
 	logger.Info("provider ready", "name", info.Name, "model", info.ModelID, "dim", info.Dimension)
 	if info.Name == "stub" {
-		logger.Warn("embed provider is 'stub' — re-embedding with a hash encoder is a no-op for retrieval quality. Set PINDOC_EMBED_PROVIDER=http to use the sidecar.")
+		logger.Warn("embed provider is 'stub'; the run repairs state transitions but does not improve semantic retrieval quality")
 	}
 
-	onlySet := map[string]struct{}{}
-	for _, s := range strings.Split(*only, ",") {
-		s = strings.TrimSpace(s)
-		if s != "" {
-			onlySet[s] = struct{}{}
-		}
-	}
-
-	rows, err := pool.Query(ctx, `
-		SELECT a.id::text, a.slug, a.title, a.body_markdown
-		FROM artifacts a
-		JOIN projects p ON p.id = a.project_id
-		WHERE p.slug = $1 AND a.status <> 'archived'
-		ORDER BY a.updated_at
-	`, cfg.ProjectSlug)
+	onlySet := parseOnly(*only)
+	plans, err := loadPlans(ctx, pool, cfg.ProjectSlug, info, onlySet, mode)
 	if err != nil {
-		logger.Error("load artifacts", "err", err)
+		logger.Error("load re-embed plan", "err", err)
 		os.Exit(1)
 	}
 
-	type art struct{ id, slug, title, body string }
-	var all []art
-	for rows.Next() {
-		var a art
-		if err := rows.Scan(&a.id, &a.slug, &a.title, &a.body); err != nil {
-			logger.Error("scan artifact", "err", err)
-			os.Exit(1)
-		}
-		if len(onlySet) > 0 {
-			if _, ok := onlySet[a.slug]; !ok {
-				continue
-			}
-		}
-		all = append(all, a)
+	counts := map[string]int{}
+	for _, plan := range plans {
+		counts[plan.EffectiveState]++
 	}
-	rows.Close()
-
-	logger.Info("plan", "project", cfg.ProjectSlug, "artifacts", len(all), "dry_run", *dryRun)
+	logger.Info("plan",
+		"project", cfg.ProjectSlug,
+		"artifacts", len(plans),
+		"state_filter", mode,
+		"state_counts", stableCounts(counts),
+		"dry_run", *dryRun,
+	)
 
 	ok, fail := 0, 0
-	for _, a := range all {
+	for _, plan := range plans {
 		if *dryRun {
-			logger.Info("would re-embed", "slug", a.slug)
+			logger.Info("would re-embed", "slug", plan.Slug, "effective_state", plan.EffectiveState, "revision_number", plan.RevisionNumber)
 			continue
 		}
-		if err := reembedOne(ctx, pool, provider, a.id, a.title, a.body); err != nil {
-			logger.Error("re-embed failed", "slug", a.slug, "err", err)
+		state, err := reembedOne(ctx, pool, provider, plan)
+		if err != nil {
+			logger.Error("re-embed failed",
+				"slug", plan.Slug,
+				"status", state.Status,
+				"attempt_count", state.AttemptCount,
+				"retryable", indexstate.IsRetryable(err),
+				"err", err,
+			)
 			fail++
 			continue
 		}
-		logger.Info("re-embedded", "slug", a.slug)
+		logger.Info("re-embedded", "slug", plan.Slug, "revision_number", state.RevisionNumber, "attempt_count", state.AttemptCount)
 		ok++
 	}
 
@@ -126,100 +135,158 @@ func main() {
 	}
 }
 
-// reembedOne is the per-artifact transaction: drop existing chunks, then
-// insert fresh title + body chunks produced by the current provider. Mirrors
-// the logic in internal/pindoc/mcp/tools/artifact_propose.go::embedAndStoreChunks
-// but lives here because the tools package doesn't export it and we don't
-// want a dependency edge tools → cmd.
-func reembedOne(ctx context.Context, pool *db.Pool, provider embed.Provider, artifactID, title, body string) error {
+func loadPlans(
+	ctx context.Context,
+	pool *db.Pool,
+	projectSlug string,
+	provider embed.Info,
+	onlySet map[string]struct{},
+	mode string,
+) ([]artifactPlan, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT
+			a.id::text,
+			a.slug,
+			a.title,
+			a.body_markdown,
+			COALESCE(r.revision_number, 0),
+			s.artifact_id IS NOT NULL,
+			COALESCE(s.revision_number, 0),
+			COALESCE(s.body_hash, ''),
+			COALESCE(s.title_hash, ''),
+			COALESCE(s.model_name, ''),
+			COALESCE(s.model_id, ''),
+			COALESCE(s.model_dim, 0),
+			COALESCE(s.status, 'unknown'),
+			COALESCE(s.attempt_count, 0),
+			COALESCE(s.last_error, '')
+		FROM artifacts a
+		JOIN projects p ON p.id = a.project_id
+		LEFT JOIN LATERAL (
+			SELECT revision_number
+			FROM artifact_revisions
+			WHERE artifact_id = a.id
+			ORDER BY revision_number DESC
+			LIMIT 1
+		) r ON TRUE
+		LEFT JOIN artifact_index_state s ON s.artifact_id = a.id
+		WHERE p.slug = $1 AND a.status <> 'archived'
+		ORDER BY a.updated_at, a.slug
+	`, projectSlug)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var plans []artifactPlan
+	for rows.Next() {
+		var (
+			plan     artifactPlan
+			hasState bool
+			stored   indexstate.State
+		)
+		if err := rows.Scan(
+			&plan.ID,
+			&plan.Slug,
+			&plan.Title,
+			&plan.Body,
+			&plan.RevisionNumber,
+			&hasState,
+			&stored.RevisionNumber,
+			&stored.BodyHash,
+			&stored.TitleHash,
+			&stored.ModelName,
+			&stored.ModelID,
+			&stored.ModelDim,
+			&stored.Status,
+			&stored.AttemptCount,
+			&stored.LastError,
+		); err != nil {
+			return nil, err
+		}
+		if len(onlySet) > 0 {
+			if _, ok := onlySet[plan.Slug]; !ok {
+				continue
+			}
+		}
+		if hasState {
+			plan.StoredState = &stored
+		}
+		plan.EffectiveState = indexstate.Classify(plan.Title, plan.Body, plan.StoredState, provider)
+		if matchesStateMode(mode, plan.EffectiveState) {
+			plans = append(plans, plan)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return plans, nil
+}
+
+// reembedOne commits a provider failure so the retryable failed state is
+// observable. Storage/database failures still roll the transaction back.
+func reembedOne(ctx context.Context, pool *db.Pool, provider embed.Provider, plan artifactPlan) (indexstate.State, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin: %w", err)
+		return indexstate.State{}, fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if _, err := tx.Exec(ctx, `DELETE FROM artifact_chunks WHERE artifact_id = $1`, artifactID); err != nil {
-		return fmt.Errorf("purge: %w", err)
-	}
-	if err := embedAndStoreChunks(ctx, tx, provider, artifactID, title, body); err != nil {
-		return fmt.Errorf("embed: %w", err)
+	state, refreshErr := indexstate.Refresh(ctx, tx, provider, indexstate.RefreshInput{
+		ArtifactID:     plan.ID,
+		RevisionNumber: plan.RevisionNumber,
+		Title:          plan.Title,
+		Body:           plan.Body,
+	})
+	if refreshErr != nil && !indexstate.IsRetryable(refreshErr) {
+		return indexstate.State{}, refreshErr
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit: %w", err)
+		return indexstate.State{}, fmt.Errorf("commit: %w", err)
 	}
-	return nil
+	return state, refreshErr
 }
 
-func embedAndStoreChunks(ctx context.Context, tx pgx.Tx, provider embed.Provider, artifactID, title, body string) error {
-	info := provider.Info()
+func validStateMode(mode string) bool {
+	switch mode {
+	case stateAll, stateNeedsRefresh, indexstate.StatusFailed, indexstate.StatusStale, indexstate.StatusUnknown, indexstate.StatusIndexed:
+		return true
+	default:
+		return false
+	}
+}
 
-	titleRes, err := provider.Embed(ctx, embed.Request{Texts: []string{title}, Kind: embed.KindDocument})
-	if err != nil {
-		return fmt.Errorf("embed title: %w", err)
+func matchesStateMode(mode, effective string) bool {
+	switch mode {
+	case stateAll:
+		return true
+	case stateNeedsRefresh:
+		return effective != indexstate.StatusIndexed
+	default:
+		return effective == mode
 	}
-	if len(titleRes.Vectors) != 1 {
-		return fmt.Errorf("embed title: got %d vectors", len(titleRes.Vectors))
-	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO artifact_chunks (
-			artifact_id, kind, chunk_index, heading, span_start, span_end,
-			text, embedding, model_name, model_dim
-		) VALUES ($1, 'title', 0, NULL, 0, 0, $2, $3::vector, $4, $5)
-	`, artifactID, title,
-		embed.VectorString(embed.PadTo768(titleRes.Vectors[0])),
-		info.Name+":"+info.ModelID, info.Dimension,
-	); err != nil {
-		return fmt.Errorf("store title chunk: %w", err)
-	}
+}
 
-	chunks := embed.ChunkBody(title, body, 600)
-	if len(chunks) == 0 {
-		return nil
-	}
-	// Batch requests at TEI's hard max (32 items per HTTP call). Large
-	// artifacts can produce 40+ chunks and TEI rejects the whole batch with
-	// a 413 if we over-shoot. Keep the batch size conservative so swapping
-	// providers later doesn't force re-tuning.
-	const batchSize = 32
-	allVecs := make([][]float32, 0, len(chunks))
-	for start := 0; start < len(chunks); start += batchSize {
-		end := start + batchSize
-		if end > len(chunks) {
-			end = len(chunks)
-		}
-		batchTexts := make([]string, 0, end-start)
-		for _, c := range chunks[start:end] {
-			batchTexts = append(batchTexts, c.Text)
-		}
-		res, err := provider.Embed(ctx, embed.Request{Texts: batchTexts, Kind: embed.KindDocument})
-		if err != nil {
-			return fmt.Errorf("embed body batch [%d:%d]: %w", start, end, err)
-		}
-		if len(res.Vectors) != end-start {
-			return fmt.Errorf("embed body batch [%d:%d]: got %d want %d", start, end, len(res.Vectors), end-start)
-		}
-		allVecs = append(allVecs, res.Vectors...)
-	}
-	bodyRes := &embed.Response{Vectors: allVecs}
-	if len(bodyRes.Vectors) != len(chunks) {
-		return fmt.Errorf("embed body: got %d want %d", len(bodyRes.Vectors), len(chunks))
-	}
-	for i, c := range chunks {
-		var heading any
-		if c.Heading != "" {
-			heading = c.Heading
-		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO artifact_chunks (
-				artifact_id, kind, chunk_index, heading, span_start, span_end,
-				text, embedding, model_name, model_dim
-			) VALUES ($1, 'body', $2, $3, $4, $5, $6, $7::vector, $8, $9)
-		`, artifactID, c.Index, heading, c.SpanStart, c.SpanEnd, c.Text,
-			embed.VectorString(embed.PadTo768(bodyRes.Vectors[i])),
-			info.Name+":"+info.ModelID, info.Dimension,
-		); err != nil {
-			return fmt.Errorf("store body chunk %d: %w", c.Index, err)
+func parseOnly(raw string) map[string]struct{} {
+	result := map[string]struct{}{}
+	for _, value := range strings.Split(raw, ",") {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			result[value] = struct{}{}
 		}
 	}
-	return nil
+	return result
+}
+
+func stableCounts(counts map[string]int) string {
+	keys := make([]string, 0, len(counts))
+	for key := range counts {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%d", key, counts[key]))
+	}
+	return strings.Join(parts, ",")
 }

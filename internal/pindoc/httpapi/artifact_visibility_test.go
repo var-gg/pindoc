@@ -91,6 +91,7 @@ func TestArtifactVisibilityPatchIntegration(t *testing.T) {
 		Name:            "Visibility HTTP " + suffix,
 		PrimaryLanguage: "en",
 		OwnerUserID:     ownerID,
+		ReaderHidden:    true,
 	})
 	if err != nil {
 		_ = tx.Rollback(ctx)
@@ -284,6 +285,7 @@ func TestLegacyArtifactRoutesApplyVisibilityIntegration(t *testing.T) {
 		Name:            "Legacy Visibility " + suffix,
 		PrimaryLanguage: "en",
 		OwnerUserID:     ownerID,
+		ReaderHidden:    true,
 	})
 	if err != nil {
 		_ = tx.Rollback(ctx)

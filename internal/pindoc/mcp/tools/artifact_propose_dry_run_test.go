@@ -14,6 +14,7 @@ import (
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/db"
+	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	"github.com/var-gg/pindoc/internal/pindoc/projects"
 	"github.com/var-gg/pindoc/internal/pindoc/receipts"
 	"github.com/var-gg/pindoc/internal/pindoc/settings"
@@ -292,6 +293,10 @@ func TestArtifactProposeVisibilityCapIntegration(t *testing.T) {
 }
 
 func newArtifactProposeTestCaller(t *testing.T, ctx context.Context, pool *db.Pool, receiptStore *receipts.Store) func(context.Context, map[string]any) artifactProposeOutput {
+	return newArtifactProposeTestCallerWithEmbedder(t, ctx, pool, receiptStore, nil)
+}
+
+func newArtifactProposeTestCallerWithEmbedder(t *testing.T, ctx context.Context, pool *db.Pool, receiptStore *receipts.Store, provider embed.Provider) func(context.Context, map[string]any) artifactProposeOutput {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	settingsStore, err := settings.New(ctx, pool)
@@ -305,6 +310,7 @@ func newArtifactProposeTestCaller(t *testing.T, ctx context.Context, pool *db.Po
 		AuthChain: auth.NewChain(auth.NewTrustedLocalResolver("", "agent:dry-run-test")),
 		Receipts:  receiptStore,
 		Settings:  settingsStore,
+		Embedder:  provider,
 	})
 	clientTransport, serverTransport := sdk.NewInMemoryTransports()
 	serverSession, err := server.Connect(ctx, serverTransport, nil)

@@ -29,9 +29,10 @@ import (
 // in every tool's signature and becomes an implicit dependency you
 // cannot avoid paying for.
 type Deps struct {
-	DB      *db.Pool
-	Logger  *slog.Logger
-	Version string
+	DB          *db.Pool
+	Logger      *slog.Logger
+	Version     string
+	BuildCommit string
 
 	// AuthChain resolves the calling Principal for each tool invocation.
 	// V1 wires a single TrustedLocalResolver; V1.5+ prepends

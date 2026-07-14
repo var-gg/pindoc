@@ -100,6 +100,7 @@ func TestArtifactListPaginationIntegration(t *testing.T) {
 		Name:            "Artifact List " + suffix,
 		PrimaryLanguage: "en",
 		OwnerUserID:     ownerID,
+		ReaderHidden:    true,
 	})
 	if err != nil {
 		_ = tx.Rollback(ctx)

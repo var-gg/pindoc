@@ -4,7 +4,7 @@
 # GnuWin32.Make` or similar). Users without make can run the commands
 # verbatim — this file is short on purpose.
 
-.PHONY: help compose-up compose-up-sidecar compose-logs db-up db-down db-logs embed-up embed-down embed-logs server-build api-build reembed-build server-run server-dev server-run-http server-run-daemon api-run-http web-dev fmt test web-test docker-build ci-smoke tidy
+.PHONY: help compose-up compose-up-sidecar compose-logs db-up db-down db-logs embed-up embed-down embed-logs server-build api-build admin-build reembed-build server-run server-dev server-run-http server-run-daemon api-run-http web-dev fmt test web-test docker-build ci-smoke tidy
 
 # Embedding env used by the http provider (Phase 10). Keep the model hint,
 # dimension, and E5-style prefixes together so a single `make server-run-http`
@@ -17,6 +17,9 @@ EMBED_ENV := \
   PINDOC_EMBED_MAX_TOKENS=512 \
   PINDOC_EMBED_PREFIX_QUERY="query: " \
   PINDOC_EMBED_PREFIX_DOCUMENT="passage: "
+
+BUILD_VERSION ?= 0.0.1-dev
+BUILD_COMMIT := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 
 help:
 	@echo "Pindoc dev targets (M1):"
@@ -31,6 +34,7 @@ help:
 	@echo "  embed-logs       — follow TEI logs"
 	@echo "  server-build     — compile the MCP server binary"
 	@echo "  api-build        — compile the HTTP API binary"
+	@echo "  admin-build      — compile the operator CLI (including schema doctor)"
 	@echo "  reembed-build    — compile the pindoc-reembed CLI"
 	@echo "  server-run       — run the MCP server with default Gemma embedder (stdio)"
 	@echo "  server-run-http  — run the MCP server with TEI http embedder (stdio)"
@@ -45,10 +49,10 @@ help:
 	@echo "  tidy             — go mod tidy"
 
 compose-up:
-	docker compose up -d --build
+	PINDOC_BUILD_VERSION=$(BUILD_VERSION) PINDOC_BUILD_COMMIT=$(BUILD_COMMIT) docker compose up -d --build
 
 compose-up-sidecar:
-	PINDOC_DAEMON_PORT=5832 docker compose up -d --build pindoc-server-daemon
+	PINDOC_BUILD_VERSION=$(BUILD_VERSION) PINDOC_BUILD_COMMIT=$(BUILD_COMMIT) PINDOC_DAEMON_PORT=5832 docker compose up -d --build pindoc-server-daemon
 
 compose-logs:
 	docker compose logs -f pindoc-server-daemon
@@ -76,6 +80,9 @@ server-build:
 
 api-build:
 	go build -o bin/pindoc-api$(shell go env GOEXE) ./cmd/pindoc-api
+
+admin-build:
+	go build -o bin/pindoc-admin$(shell go env GOEXE) ./cmd/pindoc-admin
 
 reembed-build:
 	go build -o bin/pindoc-reembed$(shell go env GOEXE) ./cmd/pindoc-reembed
@@ -109,7 +116,7 @@ web-test:
 	cd web && pnpm typecheck && pnpm test:unit && pnpm build
 
 docker-build:
-	docker build -t pindoc-server:local .
+	docker build --build-arg VERSION=$(BUILD_VERSION) --build-arg COMMIT=$(BUILD_COMMIT) -t pindoc-server:local .
 
 ci-smoke: test web-test docker-build
 

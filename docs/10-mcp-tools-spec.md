@@ -25,7 +25,7 @@ Pindoc V1 MCP Tool 전체 스펙. Input/Output 스키마 + 예시 + 에러 케�
 | `pindoc.area.propose` | 📋 planned | M1 영역 아님. `misc` fallback + agent 수동 area 생성으로 버티는 중. |
 | `pindoc.artifact.read` | 🟡 partial | 현재는 단일 artifact 본문 반환. **스펙의 `include=neighbors\|recent_changes\|…`는 미구현**. Phase 12에서 `view=brief\|full\|continuation` 도입 예정. Phase 9부터 응답에 `agent_ref` (`pindoc://<slug>`) + `human_url` (`/p/:project/wiki/<slug>`) 두 URL을 분리 반환. |
 | `pindoc.artifact.translate` | ✅ implemented | Agent-driven on-demand translation helper. 서버는 LLM 번역을 하지 않고 source markdown + source/target locale + `translation_of` 캐시 후보를 반환한다. 캐시는 translated artifact가 `body_locale`와 `translation_of` edge를 갖는 ordinary artifact 방식. |
-| `pindoc.artifact.propose` | ✅ implemented | Phase 11에서 create/update/supersede 분기 + `basis.search_receipt` hard enforce + `pins[]` + `supersede_of` + `relates_to[]` + semantic conflict block 완료. Empty/same-author area의 첫 N건은 receipt 미제시 create도 `receipt_exempted` 신호와 함께 accepted(default N=5, `PINDOC_RECEIPT_EXEMPTION_LIMIT`). Phase 12에서 `failed[]` stable code + structured `next_tools[]` + `related[]` 추가. Phase 14b에서 `expected_version` **update 경로 필수화** (미제공 → `NEED_VER`), 모든 not_ready에 `patchable_fields[]`, accepted path에 `warnings[]`/`warning_severities[]` (`RECOMMEND_READ_BEFORE_CREATE`, `SLUG_VERBOSE`, `SECTION_DUPLICATES_EDGES`, `MISSING_COMMIT_MSG_ON_CREATE`, `TITLE_LOCALE_MISMATCH` 등)와 일부 `suggested_actions[]`, `human_url_abs` 응답 포함 (public_base_url 설정 시). H2/structure not_ready는 `expected.required_h2[]`와 `_template_<type>` read hint를 `next_tools[0]`에 싣는다. Create path에서 `commit_msg` 누락은 warning + `[fallback_missing_commit_msg] ...` revision message로 soft-required 처리한다. 공통 envelope은 여전히 `accepted\|not_ready`. |
+| `pindoc.artifact.propose` | ✅ implemented | Phase 11에서 create/update/supersede 분기 + `basis.search_receipt` hard enforce + `pins[]` + `supersede_of` + `relates_to[]` + semantic conflict block 완료. Empty/same-author area의 첫 N건은 receipt 미제시 create도 `receipt_exempted` 신호와 함께 accepted(default N=5, `PINDOC_RECEIPT_EXEMPTION_LIMIT`). Phase 12에서 `failed[]` stable code + structured `next_tools[]` + `related[]` 추가. Phase 14b에서 `expected_version` **update 경로 필수화** (미제공 → `NEED_VER`), 모든 not_ready에 `patchable_fields[]`, accepted path에 `warnings[]`/`warning_severities[]` (`RECOMMEND_READ_BEFORE_CREATE`, `SLUG_VERBOSE`, `SECTION_DUPLICATES_EDGES`, `MISSING_COMMIT_MSG_ON_CREATE`, `TITLE_LOCALE_MISMATCH` 등)와 일부 `suggested_actions[]`, `human_url_abs` 응답 포함 (public_base_url 설정 시). H2/structure not_ready는 `expected.required_h2[]`와 `_template_<type>` read hint를 `next_tools[0]`에 싣는다. Create path에서 `commit_msg` 누락은 warning + `[fallback_missing_commit_msg] ...` revision message로 soft-required 처리한다. Accepted write는 `index_state`로 revision/hash/model/attempt 상태를 반환하고 provider 실패 시 기존 chunk를 보존한 `failed + retryable` 상태를 기록한다. 공통 envelope은 여전히 `accepted\|not_ready`. |
 | `pindoc.artifact.audit` | ✅ implemented | Project-scoped read-only audit 후보 조회. area/type/status/kind/limit/include_superseded 필터를 받고, 현재 title locale detector 재실행, latest revision의 `artifact.warning_raised` event, Task lifecycle mismatch, age-based stale advisory, superseded visibility 후보를 `recommended_action`과 함께 반환한다. artifact를 수정하거나 완료 Task를 reopen 권고하지 않는다. |
 | `pindoc.artifact.search` | ✅ implemented | Phase 10에서 real embedder (TEI + multilingual-e5-base) 전환. 응답에 `agent_ref` + `human_url` + (Phase 14b부터) `human_url_abs`. **`search_receipt`** (opaque token, TTL **30분** — Phase 14a에서 10→30분 연장) 포함. 같은 세션 내 이후 propose 호출에서 `basis.search_receipt`로 제시해야 create 경로 gate 통과. |
 | `pindoc.artifact.revisions` | ✅ implemented | Phase 7 신규. artifact의 모든 revision 메타 + 최신 순. |
@@ -39,8 +39,8 @@ Pindoc V1 MCP Tool 전체 스펙. Input/Output 스키마 + 예시 + 에러 케�
 | `pindoc.task.next` | ✅ implemented | 특정 actor의 ready Task 후보를 derived ordering으로 반환한다. 선택 이유, blocker 제외 요약, read-only claim policy를 포함하며 자동 lease는 만들지 않는다. unassigned 후보는 `pindoc.task.assign` next-tool hint로 명시 claim한다. |
 | `pindoc.task.assign` | ✅ implemented | Task assignee 단건 변경 전용 semantic shortcut. 내부적으로 `artifact.propose(shape="meta_patch", task_meta={assignee})` 경로로 수렴하며 search_receipt gate를 우회한다. `assignee=""`는 clear, 누락은 assign input에서 불가. |
 | `pindoc.task.bulk_assign` | ✅ implemented | 여러 Task assignee를 한 번에 변경. `reason` 필수(2-200 runes), 부분 성공 허용, 성공 revision은 shared `bulk_op_id`로 묶는다. 기본값은 이미 assignee가 있는 Task를 덮어쓰지 않으며, 의도적 재배치만 `allow_reassign=true`를 사용한다. |
-| `pindoc.task.claim_done` | ✅ implemented | Task 구현 완료 선언. 본문의 모든 `- [ ]` acceptance를 `[x]`로 토글 + `task_meta.status="claimed_done"` 한 revision에 atomic 처리. `[~]`/`[-]`는 보존. search_receipt gate 우회. |
-| `pindoc.runtime.status` | ✅ implemented | Read-only 진단 스냅샷. server version / git commit / toolset_version + tool_count / 5830·5832 포트 + override / container_id / image_tag / hostname / `source` (calling Principal.Source — `loopback`\|`oauth`) / `providers[]` / `bind_addr` / transport / Go version / DB ping을 한 번에 반환. `client_toolset_hash` 입력 시 stale schema 여부와 `client_actions`를 같이 반환한다. |
+| `pindoc.task.claim_done` | ✅ implemented | Task 구현 완료 선언. 본문의 모든 `- [ ]` acceptance를 `[x]`로 토글 + `task_meta.status="claimed_done"` 한 revision에 atomic 처리. `[~]`/`[-]`는 보존. search_receipt gate 우회. Body/index refresh도 같은 transaction에서 처리하며 `index_state`를 반환한다. |
+| `pindoc.runtime.status` | ✅ implemented | Read-only 진단 스냅샷. server version / injected git commit + source / toolset_version + tool_count / 5830·5832 포트 + override / container_id / image_tag / hostname / `source` (calling Principal.Source — `loopback`\|`oauth`) / `providers[]` / `bind_addr` / transport / Go version / DB ping / embedded migration manifest 대비 schema health를 한 번에 반환. `client_toolset_hash` 입력 시 stale tool schema 여부와 `client_actions`를 같이 반환한다. |
 | `pindoc.context.for_task` | ✅ implemented | top landings + rationale + `search_receipt` + `candidate_updates[]` + stale age hint + `suggested_areas[]` + `recent_change_groups[]` + `applicable_rules[]`. Change Groups는 body 없이 `{group_id, kind, commit_summary, time, artifact_count, areas, importance}`만 반환하며 `include_change_groups` default true, cap default 5/max 20. |
 | `pindoc.user.current` | ✅ implemented | 현재 MCP session에 bind된 user row를 반환한다. `PINDOC_USER_NAME` 미설정은 blocking이 아니라 `status="informational"`, `code="USER_NOT_SET"`, `hints[]`로 반환한다. agent identity 자체가 없을 때만 `not_ready`. |
 | `pindoc.user.update` | ✅ implemented | bind된 user row의 display_name/email/github_handle을 수정한다. user row가 없으면 실제 mutation target이 없으므로 `USER_NOT_SET` not_ready 유지. |
@@ -625,7 +625,8 @@ supersede 흐름으로 다룬다.
     reason: "empty_area_first_proposes",
     n_remaining: number,
     limit: number
-  }
+  },
+  index_state?: ArtifactIndexState   // docs/27-data-integrity-operations.md
 }
 ```
 
@@ -636,6 +637,10 @@ receipt가 없더라도 대상 area의 non-template artifact가 모두 같은 `a
 `receipt_exempted`를 채워 agent가 gate 면제 사실과 남은 N을 기록할 수 있게
 한다. 면제는 search-before-write gate만 풀며, accepted 후 near-duplicate
 warning scan은 그대로 실행된다.
+
+`index_state`의 상태 전이, provider 실패 시 chunk 보존 계약, 복구 명령은
+[Data Integrity Operations](27-data-integrity-operations.md#artifact-index-state)을
+따른다.
 
 `body_locale`은 Pindoc의 BCP 47 safe subset(`ko`, `en`, `ja`, `ko-KR`,
 `en-US`, `en-GB`, `ja-JP`)만 허용한다. 생략하면 project
@@ -1541,6 +1546,7 @@ lease/TTL 모델은 별도 Task로 확장한다.
   changed_acceptance_count: number,
   prev_status?: string,
   new_status?: string,         // "claimed_done" on accepted
+  index_state?: ArtifactIndexState,  // docs/27-data-integrity-operations.md
   error_code?: "CLAIM_DONE_MISSING_REF" | "CLAIM_DONE_TARGET_NOT_FOUND" |
                "CLAIM_DONE_NOT_A_TASK" | "CLAIM_DONE_ALREADY_DONE" |
                "CLAIM_DONE_ALREADY_VERIFIED" | "CLAIM_DONE_TASK_CANCELLED" |
@@ -1587,7 +1593,8 @@ lease/TTL 모델은 별도 Task로 확장한다.
 ```typescript
 {
   version: string,                    // deps.Version (build version)
-  server_commit?: string,             // vcs.revision from runtime/debug.ReadBuildInfo
+  server_commit?: string,             // injected ldflag commit, else Go vcs.revision
+  server_commit_source: "ldflags" | "go_build_info" | "unavailable",
   build_modified?: boolean,           // vcs.modified — dirty working tree at build time
   toolset_version: string,            // catalog hash; same value pindoc.ping returns
   tool_count: number,                 // len(RegisteredTools)
@@ -1615,6 +1622,8 @@ lease/TTL 모델은 별도 Task로 확장한다.
   transport?: "stdio" | "streamable_http",
   go_version?: string,                // runtime.Version()
   db_healthy: boolean,                // single deps.DB.Ping with the request ctx
+  schema_health?: MigrationHealth,    // docs/27-data-integrity-operations.md
+  schema_health_error?: string,
   notice?: string                     // hint about toolset_version mismatch handling
 }
 ```
@@ -1623,7 +1632,8 @@ lease/TTL 모델은 별도 Task로 확장한다.
 
 - receipt gate 면제(read-only). `client_toolset_hash`는 선택 입력이며, 비워두면 단순 snapshot만 반환한다.
 - `client_toolset_hash`가 현재 `toolset_version`과 다르면 `requires_resync=true`와 `client_actions`를 반환한다. Agent는 runtime.status 확인 → ToolSearch refresh → MCP session restart 순서로 처리한다.
-- `server_commit` / `build_modified`은 Go 1.18+ vcs stamping이 켜진 상태에서만 채워진다 (`go run ./...` 빌드는 비어 있다).
+- `server_commit`은 release/Docker build의 `-X main.commit=...` 값을 우선하고, 없으면 Go 1.18+ vcs stamping을 사용한다. `server_commit_source`가 출처를 명시한다.
+- `schema_health`는 binary에 embed된 migration checksum과 DB ledger를 read-only 비교한다. unknown migration은 자동 삭제·승인하지 않으며 operator는 `pindoc-admin schema doctor --json`으로 같은 진단을 재현한다.
 - `ports`는 `PINDOC_HTTP_PORT` / `PINDOC_SIDECAR_PORT` env가 설정되면 그 값으로, 아니면 5830/5832 default. `healthy=true`는 응답 process가 listening 중이라는 in-process 가정 — out-of-process 검증을 추가하려면 후속 분리 필요.
 - `container_id`는 Docker 기본 동작(HOSTNAME = 12-hex-shortened-id)을 가정한다. Kubernetes / Podman 등에서는 empty가 정상이며 caller는 `hostname`을 fallback으로 본다.
 

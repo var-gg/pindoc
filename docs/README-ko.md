@@ -25,6 +25,7 @@
 ## 에이전트 워크플로우와 MCP
 
 - [MCP Tools Spec](10-mcp-tools-spec.md) - MCP tool 계약과 구현 상태.
+- [데이터 무결성 운영](27-data-integrity-operations-ko.md) - migration drift 진단, index 복구, build provenance, fixture 격리.
 - [PINDOC.md Harness Spec](09-pindoc-md-spec.md) - workspace harness, task protocol, agent startup 규칙.
 - [Revision Shapes Spec](18-revision-shapes-spec.md) - typed artifact revision 경로.
 - [Locale Contribution Guide](CONTRIBUTING_LOCALE.md) - title-quality locale 추가 방법.

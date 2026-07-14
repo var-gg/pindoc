@@ -135,6 +135,18 @@ func TestGitHubOAuthCallbackIntegration(t *testing.T) {
 		t.Fatalf("callback redirected to %s, want authorize", loc.String())
 	}
 	loc = redirectLocation(t, httpClient, loc.String())
+	if loc.Path != "/authorize" {
+		t.Fatalf("first client authorization redirect = %s, want consent page", loc.String())
+	}
+	serverURL, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Fatalf("parse oauth server URL: %v", err)
+	}
+	cookies := jar.Cookies(serverURL)
+	consent := consentInfoFromHandler(t, mux, loc.RawQuery, cookies)
+	confirmResp := postConfirmAuthorize(t, mux, "approve", loc.RawQuery, consent.ConsentNonce, ts.URL, cookies)
+	defer confirmResp.Body.Close()
+	loc = requireAuthorizeLocation(t, confirmResp)
 	code := loc.Query().Get("code")
 	if code == "" {
 		t.Fatalf("authorize redirect missing code: %s", loc.String())
@@ -380,8 +392,8 @@ func insertGitHubInviteProject(t *testing.T, ctx context.Context, pool *db.Pool,
 	slug := "github-invite-" + suffix
 	var projectID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO projects (slug, name, organization_id, primary_language)
-		VALUES ($1, $2, (SELECT id FROM organizations WHERE slug = 'default' LIMIT 1), 'en')
+		INSERT INTO projects (slug, name, organization_id, primary_language, reader_hidden)
+		VALUES ($1, $2, (SELECT id FROM organizations WHERE slug = 'default' LIMIT 1), 'en', TRUE)
 		RETURNING id::text
 	`, slug, "GitHub Invite "+suffix).Scan(&projectID); err != nil {
 		t.Fatalf("insert invite project: %v", err)
@@ -400,8 +412,8 @@ func insertGitHubProjectWithoutOwner(t *testing.T, ctx context.Context, pool *db
 	slug := "github-first-owner-" + suffix
 	var projectID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO projects (slug, name, organization_id, primary_language)
-		VALUES ($1, $2, (SELECT id FROM organizations WHERE slug = 'default' LIMIT 1), 'en')
+		INSERT INTO projects (slug, name, organization_id, primary_language, reader_hidden)
+		VALUES ($1, $2, (SELECT id FROM organizations WHERE slug = 'default' LIMIT 1), 'en', TRUE)
 		RETURNING id::text
 	`, slug, "GitHub First Owner "+suffix).Scan(&projectID); err != nil {
 		t.Fatalf("insert first-owner project: %v", err)

@@ -186,6 +186,7 @@ func createWorkspaceDetectProject(ctx context.Context, pool *db.Pool, slug, remo
 		Name:            "Workspace Detect " + slug,
 		PrimaryLanguage: "en",
 		GitRemoteURL:    remote,
+		ReaderHidden:    true,
 	}); err != nil {
 		return err
 	}

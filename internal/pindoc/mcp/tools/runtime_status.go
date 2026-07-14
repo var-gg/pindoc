@@ -12,6 +12,7 @@ import (
 
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	"github.com/var-gg/pindoc/internal/pindoc/config"
+	"github.com/var-gg/pindoc/internal/pindoc/db"
 )
 
 type runtimeStatusInput struct {
@@ -36,6 +37,10 @@ type runtimeStatusOutput struct {
 	// binary was built outside the module (go run ./...) or with VCS
 	// stamping disabled.
 	ServerCommit string `json:"server_commit,omitempty"`
+
+	// ServerCommitSource tells operators whether the commit came from an
+	// explicit release/build ldflag or Go's local VCS build metadata.
+	ServerCommitSource string `json:"server_commit_source"`
 
 	// BuildModified is vcs.modified from the build info — true if the
 	// repo had uncommitted changes when this binary was built.
@@ -107,6 +112,12 @@ type runtimeStatusOutput struct {
 	// unreachable.
 	DBHealthy bool `json:"db_healthy"`
 
+	// SchemaHealth compares the applied migration ledger with the exact SQL
+	// embedded in this binary. Unknown applied migrations are reported but
+	// never dropped or accepted automatically.
+	SchemaHealth      *db.MigrationHealth `json:"schema_health,omitempty"`
+	SchemaHealthError string              `json:"schema_health_error,omitempty"`
+
 	// Notice nudges callers toward the most common interpretation of a
 	// toolset_version mismatch — refresh/restart the MCP session.
 	Notice string `json:"notice,omitempty"`
@@ -131,14 +142,30 @@ func RegisterRuntimeStatus(server *sdk.Server, deps Deps) {
 
 func buildRuntimeStatusOutput(ctx context.Context, p *auth.Principal, deps Deps, in runtimeStatusInput) runtimeStatusOutput {
 	commit, modified := readBuildVCS()
+	commitSource := "go_build_info"
+	if injected := usableBuildCommit(deps.BuildCommit); injected != "" {
+		commit = injected
+		commitSource = "ldflags"
+	}
+	if commit == "" {
+		commitSource = "unavailable"
+	}
 	source := ""
 	if p != nil {
 		source = p.Source
 	}
 	dbHealthy := false
+	var schemaHealth *db.MigrationHealth
+	var schemaHealthError string
 	if deps.DB != nil {
 		if err := deps.DB.Ping(ctx); err == nil {
 			dbHealthy = true
+			health, err := db.InspectMigrationHealth(ctx, deps.DB.Pool)
+			if err != nil {
+				schemaHealthError = err.Error()
+			} else {
+				schemaHealth = &health
+			}
 		}
 	}
 	hostname, _ := os.Hostname()
@@ -159,6 +186,7 @@ func buildRuntimeStatusOutput(ctx context.Context, p *auth.Principal, deps Deps,
 	out := runtimeStatusOutput{
 		Version:                    deps.Version,
 		ServerCommit:               commit,
+		ServerCommitSource:         commitSource,
 		BuildModified:              modified,
 		ToolsetVersion:             toolsetVersion,
 		ToolCount:                  len(RegisteredTools),
@@ -177,12 +205,24 @@ func buildRuntimeStatusOutput(ctx context.Context, p *auth.Principal, deps Deps,
 		Transport:                  deps.Transport,
 		GoVersion:                  runtime.Version(),
 		DBHealthy:                  dbHealthy,
+		SchemaHealth:               schemaHealth,
+		SchemaHealthError:          schemaHealthError,
 		Notice:                     "Diagnostic snapshot is read-only. toolset_version mismatch between this response and the client schema cache means the tool catalog or schema changed; use client_actions to call runtime.status, refresh ToolSearch, and restart the MCP session when needed.",
 	}
 	if requiresResync != nil && *requiresResync {
 		out.ClientActions = toolsetDriftClientActions(in.ClientToolsetHash)
 	}
 	return out
+}
+
+func usableBuildCommit(value string) string {
+	value = strings.TrimSpace(value)
+	switch strings.ToLower(value) {
+	case "", "unknown", "dev", "local-dev":
+		return ""
+	default:
+		return value
+	}
 }
 
 func normalizeRuntimeDCRMode(mode string) string {

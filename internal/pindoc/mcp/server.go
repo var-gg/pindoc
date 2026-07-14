@@ -47,12 +47,13 @@ func upsertStartupUserID(ctx context.Context, logger *slog.Logger, deps tools.De
 }
 
 type Options struct {
-	Name     string
-	Version  string
-	Logger   *slog.Logger
-	Config   *config.Config
-	DB       *db.Pool
-	Embedder embed.Provider
+	Name        string
+	Version     string
+	BuildCommit string
+	Logger      *slog.Logger
+	Config      *config.Config
+	DB          *db.Pool
+	Embedder    embed.Provider
 
 	// AgentID is the server-issued identity for this subprocess (Phase
 	// 12c). Set by the binary entrypoint at startup; empty falls back to
@@ -116,6 +117,7 @@ func NewServer(opts Options) (*Server, error) {
 		DB:                         opts.DB,
 		Logger:                     opts.Logger,
 		Version:                    opts.Version,
+		BuildCommit:                opts.BuildCommit,
 		UserLanguage:               opts.Config.UserLanguage,
 		ReceiptExemptionLimit:      opts.Config.ReceiptExemptionLimit,
 		Embedder:                   opts.Embedder,

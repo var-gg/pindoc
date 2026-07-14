@@ -119,7 +119,19 @@ func main() {
 		logger.Error("db migrate failed", "err", err)
 		os.Exit(1)
 	}
-	logger.Info("db ready", "migrations", "applied")
+	if migrationHealth, err := db.InspectMigrationHealth(ctx, pool.Pool); err != nil {
+		logger.Warn("db migration health unavailable", "err", err)
+	} else if !migrationHealth.Healthy {
+		logger.Warn("db migration drift detected",
+			"issue_codes", migrationHealth.IssueCodes(),
+			"known", migrationHealth.KnownCount,
+			"applied", migrationHealth.AppliedCount,
+			"pending", migrationHealth.PendingCount,
+			"hint", "run pindoc-admin schema doctor --json before reconciliation",
+		)
+	} else {
+		logger.Info("db ready", "migrations", "verified", "known", migrationHealth.KnownCount)
+	}
 	if normalized, err := projects.BootstrapDefaultProjectRepoFromWorkdir(ctx, pool, cfg.ProjectSlug, cfg.RepoRoot); err != nil {
 		logger.Info("default project repo bootstrap skipped", "project_slug", cfg.ProjectSlug, "err", err)
 	} else if normalized != "" {
@@ -363,33 +375,35 @@ func main() {
 		})
 
 		runHTTPDaemon(ctx, logger, httpAddr, pmcp.Options{
-			Name:      "pindoc",
-			Version:   version,
-			Logger:    logger,
-			Config:    cfg,
-			DB:        pool,
-			Embedder:  embedder,
-			AgentID:   agentID,
-			UserID:    defaultUserID,
-			Settings:  ssStore,
-			Telemetry: tele,
-			Transport: "streamable_http",
+			Name:        "pindoc",
+			Version:     version,
+			BuildCommit: commit,
+			Logger:      logger,
+			Config:      cfg,
+			DB:          pool,
+			Embedder:    embedder,
+			AgentID:     agentID,
+			UserID:      defaultUserID,
+			Settings:    ssStore,
+			Telemetry:   tele,
+			Transport:   "streamable_http",
 		}, apiHandler, oauthSvc, cfg, trustedProxy)
 		return
 	}
 
 	server, err := pmcp.NewServer(pmcp.Options{
-		Name:      "pindoc",
-		Version:   version,
-		Logger:    logger,
-		Config:    cfg,
-		DB:        pool,
-		Embedder:  embedder,
-		AgentID:   agentID,
-		UserID:    defaultUserID,
-		Settings:  ssStore,
-		Telemetry: tele,
-		Transport: "stdio",
+		Name:        "pindoc",
+		Version:     version,
+		BuildCommit: commit,
+		Logger:      logger,
+		Config:      cfg,
+		DB:          pool,
+		Embedder:    embedder,
+		AgentID:     agentID,
+		UserID:      defaultUserID,
+		Settings:    ssStore,
+		Telemetry:   tele,
+		Transport:   "stdio",
 	})
 	if err != nil {
 		logger.Error("mcp server init failed", "err", err)

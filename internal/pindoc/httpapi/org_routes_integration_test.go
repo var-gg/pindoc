@@ -52,6 +52,7 @@ func TestOrgProjectArtifactRoutesIntegration(t *testing.T) {
 		PrimaryLanguage: "en",
 		OrganizationID:  orgID,
 		OwnerUserID:     ownerID,
+		ReaderHidden:    true,
 	})
 	if err != nil {
 		_ = tx.Rollback(ctx)
@@ -189,6 +190,7 @@ func TestOrgProjectInboxRoutesShareLegacyAccessMatrixIntegration(t *testing.T) {
 		PrimaryLanguage: "en",
 		OrganizationID:  orgID,
 		OwnerUserID:     ownerID,
+		ReaderHidden:    true,
 	})
 	if err != nil {
 		_ = tx.Rollback(ctx)

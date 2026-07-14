@@ -14,9 +14,11 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -34,6 +36,7 @@ import (
 // projects sentinel error so callers can still errors.Is to the
 // specific code (ErrSlugInvalid, ErrLangInvalid, ...) when needed.
 var errProjectValidation = errors.New("project validation failed")
+var errSchemaDrift = errors.New("schema drift detected")
 
 func main() {
 	flag.Usage = func() {
@@ -43,6 +46,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "  get <key>            — print current value")
 		fmt.Fprintln(os.Stderr, "  set <key> <value>    — update a setting (hot, no restart)")
 		fmt.Fprintln(os.Stderr, "  relabel-artifacts    — batch move artifact area_slug from a TSV mapping")
+		fmt.Fprintln(os.Stderr, "  schema doctor [--json] — compare the DB migration ledger with this binary")
 		fmt.Fprintln(os.Stderr, "  project create <slug> --name \"...\" --language ko [--description \"...\"] [--color \"#...\"] [--git-remote-url \"...\"]")
 		fmt.Fprintln(os.Stderr, "                       — create a new project (no MCP session needed)")
 	}
@@ -70,6 +74,15 @@ func main() {
 		os.Exit(1)
 	}
 	defer pool.Close()
+	if args[0] == "schema" {
+		if err := runSchemaCommand(ctx, pool, args[1:], os.Stdout); err != nil {
+			if !errors.Is(err, errSchemaDrift) {
+				fmt.Fprintln(os.Stderr, "error: "+err.Error())
+			}
+			os.Exit(1)
+		}
+		return
+	}
 
 	store, err := settings.New(ctx, pool)
 	if err != nil {
@@ -142,6 +155,64 @@ func main() {
 		flag.Usage()
 		os.Exit(2)
 	}
+}
+
+func runSchemaCommand(ctx context.Context, pool *db.Pool, args []string, out io.Writer) error {
+	if len(args) == 0 || args[0] != "doctor" {
+		return fmt.Errorf("schema: expected `doctor [--json]`")
+	}
+	fs := flag.NewFlagSet("schema doctor", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	jsonOutput := fs.Bool("json", false, "emit machine-readable migration health")
+	if err := fs.Parse(args[1:]); err != nil {
+		return fmt.Errorf("schema doctor: %w", err)
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("schema doctor: unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+
+	health, err := db.InspectMigrationHealth(ctx, pool.Pool)
+	if err != nil {
+		return fmt.Errorf("schema doctor: %w", err)
+	}
+	if err := writeSchemaHealth(out, health, *jsonOutput); err != nil {
+		return err
+	}
+	if !health.Healthy {
+		return errSchemaDrift
+	}
+	return nil
+}
+
+func writeSchemaHealth(out io.Writer, health db.MigrationHealth, jsonOutput bool) error {
+	if jsonOutput {
+		encoder := json.NewEncoder(out)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(health); err != nil {
+			return fmt.Errorf("encode schema health: %w", err)
+		}
+		return nil
+	}
+
+	status := "healthy"
+	if !health.Healthy {
+		status = "drift"
+	}
+	if _, err := fmt.Fprintf(out, "schema: %s\nknown=%d applied=%d pending=%d ledger=%t checksum_column=%t\n",
+		status, health.KnownCount, health.AppliedCount, health.PendingCount,
+		health.LedgerPresent, health.ChecksumColumnPresent); err != nil {
+		return fmt.Errorf("write schema health: %w", err)
+	}
+	for _, issue := range health.Issues {
+		id := issue.MigrationID
+		if id == "" {
+			id = "-"
+		}
+		if _, err := fmt.Fprintf(out, "- %s\t%s\t%s\n", issue.Code, id, issue.Detail); err != nil {
+			return fmt.Errorf("write schema issue: %w", err)
+		}
+	}
+	return nil
 }
 
 type relabelMapping struct {

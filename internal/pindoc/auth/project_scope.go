@@ -61,6 +61,11 @@ type ProjectScope struct {
 	// V1.5 ACL (project_members table with editor / viewer rows) is a
 	// data change, not a handler edit.
 	Role string
+
+	// ReaderHidden marks integration fixtures and other operator-only projects.
+	// It is persisted on projects rather than inferred from the slug so every
+	// Reader/task-flow surface consumes one source of truth.
+	ReaderHidden bool
 }
 
 // roleActions enumerates which Role values are permitted to invoke
@@ -126,11 +131,12 @@ func ResolveProject(ctx context.Context, pool *db.Pool, p *Principal, slug strin
 	var (
 		projectID       string
 		primaryLanguage string
+		readerHidden    bool
 	)
 	err := pool.QueryRow(ctx,
-		`SELECT id::text, primary_language FROM projects WHERE slug = $1 LIMIT 1`,
+		`SELECT id::text, primary_language, reader_hidden FROM projects WHERE slug = $1 LIMIT 1`,
 		slug,
-	).Scan(&projectID, &primaryLanguage)
+	).Scan(&projectID, &primaryLanguage, &readerHidden)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("%w: %q", ErrProjectNotFound, slug)
 	}
@@ -157,6 +163,7 @@ func ResolveProject(ctx context.Context, pool *db.Pool, p *Principal, slug strin
 		ProjectSlug:   slug,
 		ProjectLocale: primaryLanguage,
 		Role:          role,
+		ReaderHidden:  readerHidden,
 	}, nil
 }
 

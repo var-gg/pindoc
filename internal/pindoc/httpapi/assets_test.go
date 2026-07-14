@@ -236,6 +236,7 @@ func newAssetHTTPFixture(t *testing.T) assetHTTPFixture {
 		Name:            "Asset HTTP " + suffix,
 		PrimaryLanguage: "en",
 		OwnerUserID:     ownerID,
+		ReaderHidden:    true,
 	})
 	if err != nil {
 		_ = tx.Rollback(ctx)

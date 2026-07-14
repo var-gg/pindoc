@@ -52,8 +52,8 @@ func TestCreateTopLevelAreaIntegration(t *testing.T) {
 	slug := fmt.Sprintf("t9-toplevel-%d", time.Now().UnixNano())
 	var projectID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO projects (organization_id, slug, name, primary_language)
-		VALUES ((SELECT id FROM organizations WHERE slug = 'default' LIMIT 1), $1, $2, 'en')
+		INSERT INTO projects (organization_id, slug, name, primary_language, reader_hidden)
+		VALUES ((SELECT id FROM organizations WHERE slug = 'default' LIMIT 1), $1, $2, 'en', TRUE)
 		RETURNING id::text
 	`, slug, "T9 "+slug).Scan(&projectID); err != nil {
 		t.Fatalf("insert project: %v", err)

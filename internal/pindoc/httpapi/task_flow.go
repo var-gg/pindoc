@@ -12,6 +12,7 @@ import (
 	"time"
 
 	pauth "github.com/var-gg/pindoc/internal/pindoc/auth"
+	"github.com/var-gg/pindoc/internal/pindoc/projects"
 )
 
 const (
@@ -321,15 +322,11 @@ func (d Deps) resolveTaskFlowHTTPProjects(ctx context.Context, principal *pauth.
 
 func (d Deps) resolveTaskFlowHTTPScope(ctx context.Context, principal *pauth.Principal, slug string, includeHidden bool) (*pauth.ProjectScope, error) {
 	slug = strings.TrimSpace(slug)
-	hidden := slug != "" && readerHiddenProjectSlug(slug)
-	if hidden && !includeHidden {
-		return nil, errTaskFlowHiddenProject
-	}
 	scope, err := pauth.ResolveProject(ctx, d.DB, principal, slug)
 	if err != nil {
 		return nil, err
 	}
-	if hidden && !includeReaderHiddenProjectsForScope(includeHidden, scope) {
+	if scope.ReaderHidden && !includeReaderHiddenProjectsForScope(includeHidden, scope) {
 		return nil, errTaskFlowHiddenProject
 	}
 	if !scope.Can("read.artifact") {
@@ -339,22 +336,19 @@ func (d Deps) resolveTaskFlowHTTPScope(ctx context.Context, principal *pauth.Pri
 }
 
 func (d Deps) visibleTaskFlowHTTPScopes(ctx context.Context, principal *pauth.Principal, includeHidden bool) ([]pauth.ProjectScope, error) {
-	rows, err := d.DB.Query(ctx, `SELECT slug FROM projects ORDER BY slug`)
+	viewerScope := viewerScopeForPrincipal(principal)
+	viewerScope.IncludeReaderHidden = includeHidden
+	rows, err := projects.ListVisible(ctx, d.DB, viewerScope)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	out := []pauth.ProjectScope{}
-	for rows.Next() {
-		var slug string
-		if err := rows.Scan(&slug); err != nil {
-			return nil, err
-		}
-		if readerHiddenProjectSlug(slug) && !includeHidden {
+	for _, row := range rows {
+		if row.ReaderHidden && !includeHidden {
 			continue
 		}
-		scope, err := d.resolveTaskFlowHTTPScope(ctx, principal, slug, includeHidden)
+		scope, err := d.resolveTaskFlowHTTPScope(ctx, principal, row.Slug, includeHidden)
 		if err == nil {
 			out = append(out, *scope)
 			continue
@@ -363,7 +357,7 @@ func (d Deps) visibleTaskFlowHTTPScopes(ctx context.Context, principal *pauth.Pr
 			return nil, err
 		}
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func normalizeTaskFlowHTTPActor(principal *pauth.Principal, actorScope, actorID string, actorIDs []string, includeUnassigned bool, requireActor bool) (taskFlowHTTPActorSelection, error) {

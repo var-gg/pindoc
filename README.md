@@ -86,11 +86,49 @@ cd pindoc
 docker compose up -d --build
 ```
 
+To make the running daemon report the exact source revision, pass the current
+commit through the Compose build argument before building:
+
+```bash
+export PINDOC_BUILD_COMMIT="$(git rev-parse HEAD)"
+docker compose up -d --build
+```
+
+PowerShell users can set the same value with
+`$env:PINDOC_BUILD_COMMIT = git rev-parse HEAD`. `make compose-up` performs
+this stamping automatically.
+
 Open the Reader:
 
 ```text
 http://localhost:5830/
 ```
+
+Check that the database ledger matches the migrations embedded in the image:
+
+```bash
+docker compose exec pindoc-server-daemon pindoc-admin schema doctor --json
+```
+
+The command is read-only and exits non-zero for unknown applied migrations,
+pending migrations, or checksum drift. It never deletes or accepts an unknown
+schema change automatically.
+
+Preview and repair semantic indexes that are unknown, stale, failed, or were
+built with a different embedding model:
+
+```bash
+docker compose exec pindoc-server-daemon pindoc-reembed -dry-run -state needs-refresh
+docker compose exec pindoc-server-daemon pindoc-reembed -state needs-refresh
+```
+
+Pindoc records the indexed revision, title/body hashes, model identity,
+attempt count, and last error in `artifact_index_state`. Embeddings are fully
+prepared before old chunks are replaced. If the provider fails, the artifact
+write can still succeed with `index_state.status="failed"` and
+`retryable=true`, while the last known-good chunks remain searchable. The
+re-embed command handles each artifact in its own transaction and exits
+non-zero if any retry still fails.
 
 On a fresh instance, `/` first asks for the owner identity (display name and
 email), then routes to the first-project wizard. To open the project wizard
@@ -235,6 +273,14 @@ On Windows hosts without a local C toolchain, run Go tests through Docker:
 ```powershell
 docker run --rm -v "${PWD}:/work" -w /work golang:1.25 go test ./...
 ```
+
+Run database integration tests against a disposable Postgres/pgvector database;
+never point `PINDOC_TEST_DATABASE_URL` at a personal or production Pindoc
+database. Test and plugin fixtures must opt into Reader isolation explicitly:
+set `projects.CreateProjectInput.ReaderHidden` to `true`, or set
+`projects.reader_hidden = TRUE` when inserting with SQL. Slug-prefix detection is
+deprecated and no longer runs at request time. Migration `0070` only performs a
+one-time backfill for fixture prefixes used by older Pindoc releases.
 
 ## Documentation
 

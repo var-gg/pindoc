@@ -125,6 +125,21 @@ func TestRuntimeStatusReportsAuthPosture(t *testing.T) {
 	}
 }
 
+func TestRuntimeStatusPrefersInjectedBuildCommit(t *testing.T) {
+	out := buildRuntimeStatusOutput(context.Background(), nil, Deps{
+		BuildCommit: "0123456789abcdef",
+	}, runtimeStatusInput{})
+	if out.ServerCommit != "0123456789abcdef" {
+		t.Fatalf("server_commit = %q, want injected commit", out.ServerCommit)
+	}
+	if out.ServerCommitSource != "ldflags" {
+		t.Fatalf("server_commit_source = %q, want ldflags", out.ServerCommitSource)
+	}
+	if got := usableBuildCommit("unknown"); got != "" {
+		t.Fatalf("usableBuildCommit(unknown) = %q, want empty", got)
+	}
+}
+
 // isDockerShortID factors the 12-hex predicate out of detectContainerID
 // for portable testing — the test cannot mock os.Hostname on Windows
 // reliably, so we exercise the predicate directly.

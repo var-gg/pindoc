@@ -67,6 +67,17 @@ func main() {
 		logger.Error("db migrate", "err", err)
 		os.Exit(1)
 	}
+	if migrationHealth, err := db.InspectMigrationHealth(ctx, pool.Pool); err != nil {
+		logger.Warn("db migration health unavailable", "err", err)
+	} else if !migrationHealth.Healthy {
+		logger.Warn("db migration drift detected",
+			"issue_codes", migrationHealth.IssueCodes(),
+			"known", migrationHealth.KnownCount,
+			"applied", migrationHealth.AppliedCount,
+			"pending", migrationHealth.PendingCount,
+			"hint", "run pindoc-admin schema doctor --json before reconciliation",
+		)
+	}
 	if normalized, err := projects.BootstrapDefaultProjectRepoFromWorkdir(ctx, pool, cfg.ProjectSlug, cfg.RepoRoot); err != nil {
 		logger.Info("default project repo bootstrap skipped", "project_slug", cfg.ProjectSlug, "err", err)
 	} else if normalized != "" {

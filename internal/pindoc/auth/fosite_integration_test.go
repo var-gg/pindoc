@@ -238,11 +238,13 @@ func TestConsentFlowIntegration(t *testing.T) {
 
 	redirectURI := "http://127.0.0.1:3846/callback"
 	svc, err := NewOAuthService(ctx, pool, OAuthConfig{
-		Issuer:         "http://127.0.0.1:5830",
-		PublicBaseURL:  "http://127.0.0.1:5830",
-		SigningKeyPath: t.TempDir() + "/oauth.pem",
-		ClientID:       "seed-consent-client-" + suffix,
-		RedirectURIs:   []string{redirectURI},
+		Issuer:             "http://127.0.0.1:5830",
+		PublicBaseURL:      "http://127.0.0.1:5830",
+		SigningKeyPath:     t.TempDir() + "/oauth.pem",
+		ClientID:           "seed-consent-client-" + suffix,
+		RedirectURIs:       []string{redirectURI},
+		GitHubClientID:     "test-github-client",
+		GitHubClientSecret: "test-github-secret",
 	})
 	if err != nil {
 		t.Fatalf("NewOAuthService: %v", err)
@@ -580,8 +582,8 @@ func insertOAuthTestProject(t *testing.T, ctx context.Context, pool *db.Pool, su
 	slug := "oauth-it-" + suffix
 	var projectID string
 	err := pool.QueryRow(ctx, `
-		INSERT INTO projects (slug, name, organization_id, primary_language)
-		VALUES ($1, $2, (SELECT id FROM organizations WHERE slug = 'default' LIMIT 1), 'en')
+		INSERT INTO projects (slug, name, organization_id, primary_language, reader_hidden)
+		VALUES ($1, $2, (SELECT id FROM organizations WHERE slug = 'default' LIMIT 1), 'en', TRUE)
 		RETURNING id::text
 	`, slug, "OAuth IT "+suffix).Scan(&projectID)
 	if err != nil {

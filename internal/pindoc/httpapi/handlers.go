@@ -190,7 +190,10 @@ func (d Deps) deriveMultiProjectCaps(r *http.Request) projects.MultiProjectCaps 
 }
 
 func (d Deps) viewerScopeForRequest(r *http.Request) projects.ViewerScope {
-	principal := d.principalForRequest(r)
+	return viewerScopeForPrincipal(d.principalForRequest(r))
+}
+
+func viewerScopeForPrincipal(principal *pauth.Principal) projects.ViewerScope {
 	if principal == nil || strings.TrimSpace(principal.UserID) == "" {
 		return projects.ViewerScope{AnonymousOnly: true}
 	}
@@ -377,7 +380,9 @@ func (d Deps) handleCurrentUser(w http.ResponseWriter, r *http.Request) {
 
 func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
 	principal := d.principalForRequest(r)
-	rows, err := projects.ListVisible(r.Context(), d.DB, d.viewerScopeForRequest(r))
+	viewerScope := d.viewerScopeForRequest(r)
+	viewerScope.IncludeReaderHidden = readerHiddenProjectQueryRequested(r)
+	rows, err := projects.ListVisible(r.Context(), d.DB, viewerScope)
 	if err != nil {
 		d.Logger.Error("project list", "err", err)
 		writeError(w, http.StatusInternalServerError, "query failed")
@@ -398,7 +403,7 @@ func (d Deps) handleProjectList(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:        row.CreatedAt,
 		}
 		p.OrgSlug = p.OrganizationSlug
-		p.ReaderHidden = readerHiddenProjectSlug(p.Slug)
+		p.ReaderHidden = row.ReaderHidden
 		scope := &pauth.ProjectScope{Role: row.Role}
 		if principal != nil && principal.IsLoopback() {
 			scope.Role = pauth.RoleOwner

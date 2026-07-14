@@ -179,6 +179,9 @@ func createHTTPSearchProject(t *testing.T, ctx context.Context, pool *db.Pool, o
 		OrganizationID:  orgID,
 		OwnerUserID:     ownerID,
 		Visibility:      visibility,
+		// This fixture exercises public Reader discovery, so it must remain
+		// visible even though most integration-only projects are hidden.
+		ReaderHidden: false,
 	})
 	if err != nil {
 		_ = tx.Rollback(ctx)

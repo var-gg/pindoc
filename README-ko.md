@@ -80,11 +80,45 @@ cd pindoc
 docker compose up -d --build
 ```
 
+실행 중인 daemon이 정확한 source revision을 보고하게 하려면 build 전에 현재
+commit을 넘깁니다.
+
+```bash
+export PINDOC_BUILD_COMMIT="$(git rev-parse HEAD)"
+docker compose up -d --build
+```
+
+PowerShell에서는 `$env:PINDOC_BUILD_COMMIT = git rev-parse HEAD`를 사용하면
+됩니다. `make compose-up`은 이 값을 자동으로 주입합니다.
+
 Reader:
 
 ```text
 http://localhost:5830/
 ```
+
+image에 포함된 migration과 DB ledger가 일치하는지 읽기 전용으로 확인합니다.
+
+```bash
+docker compose exec pindoc-server-daemon pindoc-admin schema doctor --json
+```
+
+unknown applied migration, pending migration, checksum drift가 있으면 non-zero로
+종료하며, 알 수 없는 schema 변경을 자동 삭제하거나 승인하지 않습니다.
+
+unknown/stale/failed 상태이거나 다른 embedding model로 만들어진 semantic
+index는 다음처럼 미리 보고 복구합니다.
+
+```bash
+docker compose exec pindoc-server-daemon pindoc-reembed -dry-run -state needs-refresh
+docker compose exec pindoc-server-daemon pindoc-reembed -state needs-refresh
+```
+
+`artifact_index_state`에는 indexed revision, title/body hash, model identity,
+attempt count, last error가 남습니다. 새 embedding을 모두 준비한 뒤에만 기존
+chunk를 교체하므로 provider가 실패해도 마지막 정상 chunk는 계속 검색됩니다.
+artifact write 응답의 `index_state.status="failed"`, `retryable=true`를 통해
+복구가 필요하다는 사실도 확인할 수 있습니다.
 
 빈 인스턴스에서는 `/`가 먼저 소유자 정보(표시 이름과 이메일)를 받은 뒤 첫
 프로젝트 wizard로 이동합니다. 소유자 정보 설정 후 프로젝트 wizard를 직접
@@ -190,6 +224,14 @@ Windows에서 로컬 C toolchain이 없으면 Docker로 Go test를 실행합니�
 ```powershell
 docker run --rm -v "${PWD}:/work" -w /work golang:1.25 go test ./...
 ```
+
+DB 통합 테스트는 폐기 가능한 Postgres/pgvector DB에서만 실행하고,
+`PINDOC_TEST_DATABASE_URL`을 개인 또는 운영 Pindoc DB로 지정하지 않습니다.
+테스트와 플러그인 fixture는 Reader 격리를 명시해야 합니다.
+`projects.CreateProjectInput.ReaderHidden`을 `true`로 설정하거나 SQL로 만들 때
+`projects.reader_hidden = TRUE`를 기록합니다. slug prefix 감지는 폐기되어 요청
+경로에서 더 이상 실행되지 않습니다. Migration `0070`의 기존 prefix 처리는
+이전 Pindoc release가 만든 fixture를 위한 일회성 backfill일 뿐입니다.
 
 ## 문서
 

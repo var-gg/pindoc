@@ -4,8 +4,6 @@ import (
 	"context"
 	"embed"
 	"fmt"
-	"io/fs"
-	"sort"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -23,6 +21,11 @@ var migrationsFS embed.FS
 // only the Up block is applied. The Down block is preserved in-source
 // for manual rollback via psql.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
+	manifest, err := embeddedMigrationManifest()
+	if err != nil {
+		return fmt.Errorf("build migration manifest: %w", err)
+	}
+
 	lockConn, err := pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire migration lock connection: %w", err)
@@ -37,57 +40,75 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 
 	if _, err := lockConn.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		id           TEXT PRIMARY KEY,
+		checksum     TEXT NULL,
 		applied_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 	)`); err != nil {
 		return fmt.Errorf("init schema_migrations: %w", err)
 	}
+	if _, err := lockConn.Exec(ctx, `ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS checksum TEXT NULL`); err != nil {
+		return fmt.Errorf("ensure schema_migrations checksum: %w", err)
+	}
 
-	entries, err := fs.ReadDir(migrationsFS, "migrations")
+	rows, err := lockConn.Query(ctx, `SELECT id, COALESCE(checksum, '') FROM schema_migrations`)
 	if err != nil {
-		return fmt.Errorf("list migrations: %w", err)
+		return fmt.Errorf("read schema_migrations: %w", err)
 	}
-	var files []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
-			files = append(files, e.Name())
+	applied := make(map[string]string)
+	for rows.Next() {
+		var id, checksum string
+		if err := rows.Scan(&id, &checksum); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan schema_migrations: %w", err)
 		}
+		applied[id] = strings.TrimSpace(checksum)
 	}
-	sort.Strings(files)
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate schema_migrations: %w", err)
+	}
+	rows.Close()
 
-	for _, name := range files {
-		var exists bool
-		if err := lockConn.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE id = $1)`,
-			name).Scan(&exists); err != nil {
-			return fmt.Errorf("check %s: %w", name, err)
-		}
+	for _, migration := range manifest {
+		storedChecksum, exists := applied[migration.ID]
 		if exists {
+			if storedChecksum == "" {
+				if _, err := lockConn.Exec(ctx,
+					`UPDATE schema_migrations
+					    SET checksum = $2
+					  WHERE id = $1
+					    AND (checksum IS NULL OR btrim(checksum) = '')`,
+					migration.ID, migration.Checksum); err != nil {
+					return fmt.Errorf("backfill checksum for %s: %w", migration.ID, err)
+				}
+				continue
+			}
+			if storedChecksum != migration.Checksum {
+				return fmt.Errorf("%s: %s expected %s, ledger has %s",
+					MigrationChecksumMismatchCode, migration.ID, migration.Checksum, storedChecksum)
+			}
 			continue
 		}
 
-		raw, err := migrationsFS.ReadFile("migrations/" + name)
+		raw, err := migrationsFS.ReadFile("migrations/" + migration.ID)
 		if err != nil {
-			return fmt.Errorf("read %s: %w", name, err)
+			return fmt.Errorf("read %s: %w", migration.ID, err)
 		}
 		up := extractUp(string(raw))
-		if up == "" {
-			return fmt.Errorf("%s: no +goose Up block found", name)
-		}
 
 		tx, err := lockConn.Begin(ctx)
 		if err != nil {
-			return fmt.Errorf("begin tx for %s: %w", name, err)
+			return fmt.Errorf("begin tx for %s: %w", migration.ID, err)
 		}
 		if _, err := tx.Exec(ctx, up); err != nil {
 			_ = tx.Rollback(ctx)
-			return fmt.Errorf("apply %s: %w", name, err)
+			return fmt.Errorf("apply %s: %w", migration.ID, err)
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (id) VALUES ($1)`, name); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (id, checksum) VALUES ($1, $2)`, migration.ID, migration.Checksum); err != nil {
 			_ = tx.Rollback(ctx)
-			return fmt.Errorf("record %s: %w", name, err)
+			return fmt.Errorf("record %s: %w", migration.ID, err)
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return fmt.Errorf("commit %s: %w", name, err)
+			return fmt.Errorf("commit %s: %w", migration.ID, err)
 		}
 	}
 	return nil

@@ -26,6 +26,12 @@ RUN CGO_ENABLED=1 go build \
 RUN CGO_ENABLED=1 go build \
     -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
     -o /out/pindoc-api ./cmd/pindoc-api
+RUN CGO_ENABLED=0 go build \
+    -ldflags "-s -w" \
+    -o /out/pindoc-admin ./cmd/pindoc-admin
+RUN CGO_ENABLED=1 go build \
+    -ldflags "-s -w" \
+    -o /out/pindoc-reembed ./cmd/pindoc-reembed
 
 FROM debian:bookworm-slim AS runtime
 
@@ -44,6 +50,8 @@ WORKDIR /app
 
 COPY --from=go-builder /out/pindoc-server /usr/local/bin/pindoc-server
 COPY --from=go-builder /out/pindoc-api /usr/local/bin/pindoc-api
+COPY --from=go-builder /out/pindoc-admin /usr/local/bin/pindoc-admin
+COPY --from=go-builder /out/pindoc-reembed /usr/local/bin/pindoc-reembed
 COPY --from=web-builder /src/web/dist /app/web/dist
 
 ENV PINDOC_DATABASE_URL=postgres://pindoc:pindoc_dev@db:5432/pindoc?sslmode=disable

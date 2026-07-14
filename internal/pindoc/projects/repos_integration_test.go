@@ -54,6 +54,7 @@ func TestProjectReposIntegration(t *testing.T) {
 		Name:            "Project Repo Integration",
 		PrimaryLanguage: "en",
 		GitRemoteURL:    sshRemote,
+		ReaderHidden:    true,
 	})
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
@@ -103,6 +104,7 @@ func TestUpsertProjectRepoIdempotent(t *testing.T) {
 		Slug:            "upsert-idempotent-" + suffix,
 		Name:            "Upsert Idempotent",
 		PrimaryLanguage: "en",
+		ReaderHidden:    true,
 	})
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
@@ -183,6 +185,7 @@ func TestUpsertProjectRepoPreservesMetadataOnRefresh(t *testing.T) {
 		Slug:            "upsert-preserve-" + suffix,
 		Name:            "Upsert Preserve",
 		PrimaryLanguage: "en",
+		ReaderHidden:    true,
 	})
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
@@ -262,6 +265,7 @@ func TestUpsertProjectRepoScrubsCredentials(t *testing.T) {
 		Slug:            "upsert-scrub-" + suffix,
 		Name:            "Upsert Scrub",
 		PrimaryLanguage: "en",
+		ReaderHidden:    true,
 	})
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)

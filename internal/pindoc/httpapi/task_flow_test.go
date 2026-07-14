@@ -1,12 +1,18 @@
 package httpapi
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	pauth "github.com/var-gg/pindoc/internal/pindoc/auth"
+	"github.com/var-gg/pindoc/internal/pindoc/db"
+	"github.com/var-gg/pindoc/internal/pindoc/projects"
 )
 
 func TestParseTaskFlowHTTPRequest(t *testing.T) {
@@ -60,6 +66,102 @@ func TestTaskFlowHiddenProjectIncludeRequiresOwnerScope(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTaskFlowProjectSelectionUsesReaderHiddenColumnIntegration(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PINDOC_TEST_DATABASE_URL"))
+	if dsn == "" {
+		t.Skip("set PINDOC_TEST_DATABASE_URL to run task-flow reader-hidden DB integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := db.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	if err := db.Migrate(ctx, pool.Pool); err != nil {
+		t.Fatalf("migrate db: %v", err)
+	}
+	baseDefaultCount, err := projects.CountVisible(ctx, pool, projects.ViewerScope{TrustedLocal: true})
+	if err != nil {
+		t.Fatalf("baseline default visible count: %v", err)
+	}
+	baseOperatorCount, err := projects.CountVisible(ctx, pool, projects.ViewerScope{TrustedLocal: true, IncludeReaderHidden: true})
+	if err != nil {
+		t.Fatalf("baseline operator visible count: %v", err)
+	}
+
+	suffix := fmt.Sprintf("%x", time.Now().UnixNano())
+	visibleSlug := "customer-visible-" + suffix
+	hiddenSlug := "plugin-fixture-" + suffix
+	for slug, hidden := range map[string]bool{visibleSlug: false, hiddenSlug: true} {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO projects (
+				organization_id, slug, name, primary_language, reader_hidden
+			) VALUES (
+				(SELECT id FROM organizations WHERE slug = 'default' LIMIT 1),
+				$1, $2, 'en', $3
+			)
+		`, slug, "Task flow "+slug, hidden); err != nil {
+			t.Fatalf("insert project %s: %v", slug, err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE slug = ANY($1)`, []string{visibleSlug, hiddenSlug})
+	})
+
+	principal := &pauth.Principal{Source: pauth.SourceLoopback, UserID: "task-flow-fixture-owner"}
+	deps := Deps{DB: pool}
+	if _, err := deps.resolveTaskFlowHTTPScope(ctx, principal, hiddenSlug, false); !errors.Is(err, errTaskFlowHiddenProject) {
+		t.Fatalf("hidden scope without opt-in error = %v, want errTaskFlowHiddenProject", err)
+	}
+	resolved, err := deps.resolveTaskFlowHTTPScope(ctx, principal, hiddenSlug, true)
+	if err != nil {
+		t.Fatalf("hidden scope with owner opt-in: %v", err)
+	}
+	if !resolved.ReaderHidden {
+		t.Fatalf("resolved hidden scope = %+v", resolved)
+	}
+
+	visibleOnly, err := deps.visibleTaskFlowHTTPScopes(ctx, principal, false)
+	if err != nil {
+		t.Fatalf("visible scopes: %v", err)
+	}
+	if !taskFlowScopesContain(visibleOnly, visibleSlug) || taskFlowScopesContain(visibleOnly, hiddenSlug) {
+		t.Fatalf("visible-only scopes = %+v", visibleOnly)
+	}
+	withHidden, err := deps.visibleTaskFlowHTTPScopes(ctx, principal, true)
+	if err != nil {
+		t.Fatalf("include-hidden scopes: %v", err)
+	}
+	if !taskFlowScopesContain(withHidden, hiddenSlug) {
+		t.Fatalf("include-hidden scopes missing %q: %+v", hiddenSlug, withHidden)
+	}
+
+	defaultCount, err := projects.CountVisible(ctx, pool, projects.ViewerScope{TrustedLocal: true})
+	if err != nil {
+		t.Fatalf("default visible count: %v", err)
+	}
+	operatorCount, err := projects.CountVisible(ctx, pool, projects.ViewerScope{TrustedLocal: true, IncludeReaderHidden: true})
+	if err != nil {
+		t.Fatalf("operator visible count: %v", err)
+	}
+	if defaultCount != baseDefaultCount+1 {
+		t.Fatalf("default count before=%d after=%d, want only the visible project added", baseDefaultCount, defaultCount)
+	}
+	if operatorCount != baseOperatorCount+2 {
+		t.Fatalf("operator count before=%d after=%d, want visible and hidden projects added", baseOperatorCount, operatorCount)
+	}
+}
+
+func taskFlowScopesContain(scopes []pauth.ProjectScope, slug string) bool {
+	for _, scope := range scopes {
+		if scope.ProjectSlug == slug {
+			return true
+		}
+	}
+	return false
 }
 
 func TestNormalizeTaskFlowHTTPActor(t *testing.T) {

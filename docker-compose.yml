@@ -52,6 +52,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        VERSION: ${PINDOC_BUILD_VERSION:-0.0.1-dev}
+        COMMIT: ${PINDOC_BUILD_COMMIT:-unknown}
     image: pindoc-server:local
     container_name: pindoc-server-daemon
     environment:

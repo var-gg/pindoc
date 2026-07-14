@@ -50,8 +50,8 @@ func TestAuditUserFKsSetNullIntegration(t *testing.T) {
 		t.Fatalf("insert member: %v", err)
 	}
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO projects (slug, name, organization_id, primary_language)
-		VALUES ('audit-fk-it', 'Audit FK IT', (SELECT id FROM organizations WHERE slug = 'default' LIMIT 1), 'en')
+		INSERT INTO projects (slug, name, organization_id, primary_language, reader_hidden)
+		VALUES ('audit-fk-it', 'Audit FK IT', (SELECT id FROM organizations WHERE slug = 'default' LIMIT 1), 'en', TRUE)
 		RETURNING id::text
 	`).Scan(&projectID); err != nil {
 		t.Fatalf("insert project: %v", err)

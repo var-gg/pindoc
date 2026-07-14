@@ -59,6 +59,17 @@ UI mirror. 프로젝트 스코프 = URL 접두사.
 같은 함수가 ACL 필터를 추가해 "이 caller에게 보이는 프로젝트 수" 로 의미가
 자연스럽게 확장된다.
 
+### Integration fixture 격리
+
+Reader, Task Flow, multi-project capability count는 모두
+`projects.reader_hidden`을 동일한 source of truth로 사용한다. 기본 scope는 이
+값이 `FALSE`인 프로젝트만 반환하고, owner/operator가 명시적으로 ops scope를
+요청한 경우에만 숨김 프로젝트를 포함한다. 테스트 helper와 외부 plugin은
+fixture 생성 시 `CreateProjectInput.ReaderHidden=true` 또는 동등한 SQL 값을
+반드시 기록해야 한다. slug prefix 기반 감지는 폐기됐으며 runtime fallback은
+없다. Migration `0070`에 남은 prefix 목록은 이전 release fixture를 한 번
+backfill하기 위한 호환 경계다.
+
 ## 설계 철학
 
 ### 원칙 1. Agent-only Write Surface
@@ -266,6 +277,15 @@ embedding:
 설치 시 모델 선택 화면 없음 — default (gemma) 자동. [06 Flow 0 §onboarding](06-ui-flows.md).
 
 **Silent fallback 금지** (Phase 17): `PINDOC_EMBED_PROVIDER`가 알 수 없는 값이면 기동 실패. 과거 stub으로 조용히 떨어지던 동작은 제거 — 임베딩은 product의 **필수 기능**이고 누락을 warn으로 처리하지 않는다. stub은 `PINDOC_EMBED_PROVIDER=stub`으로 명시한 unit test 환경에서만 허용. Docker Compose daemon은 host의 `PINDOC_EMBED_PROVIDER`를 전달하지 않고 `PINDOC_COMPOSE_EMBED_PROVIDER`만 읽는다. 한 번의 shell session에 남은 `PINDOC_EMBED_PROVIDER=stub`이 컨테이너에 새어 들어가 hash embedding을 만드는 사고를 막기 위한 hardening이다. 실제 stub가 켜지면 server startup log에 multi-line warning box를 남긴다. 사고 후 회복은 정상 provider로 재기동한 뒤 `go run ./cmd/pindoc-reembed`로 affected artifact를 재임베딩한다.
+
+**Index provenance / failure atomicity**: `artifact_index_state`는 artifact별
+indexed revision, title/body hash, provider/model/dimension, attempt count,
+last error를 저장한다. Embedding은 메모리에서 전부 준비한 뒤 같은 DB
+transaction 안에서 기존 `artifact_chunks`와 교체한다. Provider 호출이 실패하면
+기존 chunk는 지우지 않고 `failed` 상태만 기록하므로 검색 가능성은 유지된다.
+`artifact_index_health.effective_status`는 content hash drift를 `stale`로
+계산한다. 운영 복구는 `pindoc-reembed -state needs-refresh`를 사용하며, 이
+필터는 unknown/failed/stale와 provider model drift를 포함한다.
 
 **3. Automatic Chunking (V1 필수)**
 

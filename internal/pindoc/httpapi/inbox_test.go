@@ -69,7 +69,7 @@ func TestInboxMembershipVisibilityAndAuditIntegration(t *testing.T) {
 	victimID := insertInviteHTTPUser(t, ctx, pool, "Inbox Victim "+suffix, "inbox-victim-"+suffix+"@example.invalid")
 	projectID := insertInviteHTTPProject(t, ctx, pool, slug, ownerID)
 	insertInviteHTTPMember(t, ctx, pool, projectID, viewerID, pauth.RoleViewer)
-	areaID := selectArtifactVisibilityHTTPArea(t, ctx, pool, projectID, "misc")
+	areaID := insertInboxHTTPArea(t, ctx, pool, projectID)
 	publicID := insertInboxPendingArtifact(t, ctx, pool, projectID, areaID, "inbox-public-"+suffix, projects.VisibilityPublic, ownerID)
 	orgSlug := "inbox-org-" + suffix
 	insertInboxPendingArtifact(t, ctx, pool, projectID, areaID, orgSlug, projects.VisibilityOrg, ownerID)
@@ -168,7 +168,7 @@ func TestInboxPaginationIntegration(t *testing.T) {
 	slug := "inbox-page-" + suffix
 	ownerID := insertInviteHTTPUser(t, ctx, pool, "Inbox Page Owner "+suffix, "inbox-page-owner-"+suffix+"@example.invalid")
 	projectID := insertInviteHTTPProject(t, ctx, pool, slug, ownerID)
-	areaID := selectArtifactVisibilityHTTPArea(t, ctx, pool, projectID, "misc")
+	areaID := insertInboxHTTPArea(t, ctx, pool, projectID)
 	for i := 0; i < 250; i++ {
 		insertInboxPendingArtifact(t, ctx, pool, projectID, areaID, fmt.Sprintf("inbox-page-%03d-%s", i, suffix), projects.VisibilityPublic, ownerID)
 	}
@@ -209,13 +209,26 @@ func insertInboxPendingArtifact(t *testing.T, ctx context.Context, pool *db.Pool
 	if _, err := pool.Exec(ctx, `
 		UPDATE artifacts
 		   SET review_state = 'pending_review',
-		       status = 'draft',
+		       status = 'published',
 		       updated_at = now()
 		 WHERE id = $1::uuid
 	`, artifactID); err != nil {
 		t.Fatalf("mark pending review: %v", err)
 	}
 	return artifactID
+}
+
+func insertInboxHTTPArea(t *testing.T, ctx context.Context, pool *db.Pool, projectID string) string {
+	t.Helper()
+	var areaID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO areas (project_id, slug, name)
+		VALUES ($1::uuid, 'misc', 'Misc')
+		RETURNING id::text
+	`, projectID).Scan(&areaID); err != nil {
+		t.Fatalf("insert inbox misc area: %v", err)
+	}
+	return areaID
 }
 
 func newInboxOAuthService(t *testing.T, ctx context.Context, pool *db.Pool, suffix string) *pauth.OAuthService {

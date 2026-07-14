@@ -45,28 +45,28 @@ func TestProjectMembersIntegration(t *testing.T) {
 	`).Scan(&ownerID); err != nil {
 		t.Fatalf("insert owner user: %v", err)
 	}
-	assertDefaultBootstrapIdempotent(t, ctx, tx, ownerID)
 
 	out, err := CreateProject(ctx, tx, CreateProjectInput{
 		Slug:            "pm-integration",
 		Name:            "Project Members Integration",
 		PrimaryLanguage: "en",
-		OwnerUserID:     ownerID,
+		ReaderHidden:    true,
 	})
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
 
+	assertDefaultBootstrapIdempotent(t, ctx, tx, out.Slug, ownerID)
 	assertMemberRole(t, ctx, tx, out.ID, ownerID, ProjectRoleOwner)
 	assertInvalidRoleRejected(t, ctx, tx, out.ID, ownerID)
 	assertUserIndexUsed(t, ctx, tx, ownerID)
 	assertFKActions(t, ctx, tx, out.ID)
 }
 
-func assertDefaultBootstrapIdempotent(t *testing.T, ctx context.Context, tx pgx.Tx, userID string) {
+func assertDefaultBootstrapIdempotent(t *testing.T, ctx context.Context, tx pgx.Tx, projectSlug, userID string) {
 	t.Helper()
 	for i := 0; i < 2; i++ {
-		if err := EnsureDefaultProjectOwnerMembership(ctx, tx, "pindoc", userID); err != nil {
+		if err := EnsureDefaultProjectOwnerMembership(ctx, tx, projectSlug, userID); err != nil {
 			t.Fatalf("default owner bootstrap attempt %d: %v", i+1, err)
 		}
 	}
@@ -75,8 +75,8 @@ func assertDefaultBootstrapIdempotent(t *testing.T, ctx context.Context, tx pgx.
 		SELECT count(*)
 		  FROM project_members pm
 		  JOIN projects p ON p.id = pm.project_id
-		 WHERE p.slug = 'pindoc' AND pm.user_id = $1::uuid AND pm.role = $2
-	`, userID, ProjectRoleOwner).Scan(&n); err != nil {
+		 WHERE p.slug = $1 AND pm.user_id = $2::uuid AND pm.role = $3
+	`, projectSlug, userID, ProjectRoleOwner).Scan(&n); err != nil {
 		t.Fatalf("count default project membership: %v", err)
 	}
 	if n != 1 {

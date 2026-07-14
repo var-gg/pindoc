@@ -59,6 +59,7 @@ func TestPhaseDMembersIntegration(t *testing.T) {
 		Name:            "Phase D Integration",
 		PrimaryLanguage: "en",
 		OwnerUserID:     ownerID,
+		ReaderHidden:    true,
 	})
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)

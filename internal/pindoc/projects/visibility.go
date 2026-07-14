@@ -85,6 +85,10 @@ type ViewerScope struct {
 	// member of. May be empty (anonymous, or a logged-in user who
 	// hasn't joined any team Org yet).
 	OrgIDs []string
+	// IncludeReaderHidden allows operator surfaces to fetch fixture projects.
+	// Authorization still belongs to the caller: HTTP handlers only expose
+	// hidden rows to project owners. Normal capability counts leave this false.
+	IncludeReaderHidden bool
 }
 
 type ListRow struct {
@@ -98,6 +102,7 @@ type ListRow struct {
 	ArtifactsCount   int
 	CreatedAt        time.Time
 	Role             string
+	ReaderHidden     bool
 }
 
 // CountVisible returns the number of projects visible to the given
@@ -134,7 +139,7 @@ func ListVisible(ctx context.Context, pool *db.Pool, scopeOrUserID any) ([]ListR
 		)
 		SELECT
 			vp.id::text, vp.slug, o.slug, vp.name, vp.description, vp.color,
-			vp.primary_language, vp.created_at,
+			vp.primary_language, vp.created_at, vp.reader_hidden,
 			(SELECT count(*) FROM artifacts WHERE project_id = vp.id AND status <> 'archived'),
 			COALESCE(pm.role, '')
 		FROM visible_projects vp
@@ -155,7 +160,7 @@ func ListVisible(ctx context.Context, pool *db.Pool, scopeOrUserID any) ([]ListR
 		var orgSlug, desc, color *string
 		if err := rows.Scan(
 			&row.ID, &row.Slug, &orgSlug, &row.Name, &desc, &color,
-			&row.PrimaryLanguage, &row.CreatedAt, &row.ArtifactsCount, &row.Role,
+			&row.PrimaryLanguage, &row.CreatedAt, &row.ReaderHidden, &row.ArtifactsCount, &row.Role,
 		); err != nil {
 			return nil, err
 		}
@@ -229,15 +234,25 @@ func normalizeScope(in any) ViewerScope {
 //   - authenticated: public, org memberships, direct project memberships,
 //     and private projects only when directly joined
 func buildVisibilitySelect(scope ViewerScope, base string) (string, []any) {
+	hiddenPredicate := "reader_hidden = FALSE"
 	if scope.TrustedLocal {
-		return base, nil
+		if scope.IncludeReaderHidden {
+			return base, nil
+		}
+		return base + " WHERE " + hiddenPredicate, nil
 	}
 	if scope.AnonymousOnly {
-		return base + " WHERE visibility = $1", []any{VisibilityPublic}
+		if scope.IncludeReaderHidden {
+			return base + " WHERE visibility = $1", []any{VisibilityPublic}
+		}
+		return base + " WHERE " + hiddenPredicate + " AND visibility = $1", []any{VisibilityPublic}
 	}
 	userID := strings.TrimSpace(scope.UserID)
 	if userID == "" && len(scope.OrgIDs) == 0 {
-		return base + " WHERE visibility = $1", []any{VisibilityPublic}
+		if scope.IncludeReaderHidden {
+			return base + " WHERE visibility = $1", []any{VisibilityPublic}
+		}
+		return base + " WHERE " + hiddenPredicate + " AND visibility = $1", []any{VisibilityPublic}
 	}
 	clauses := []string{"visibility = $1"}
 	args := []any{VisibilityPublic}
@@ -265,5 +280,9 @@ func buildVisibilitySelect(scope ViewerScope, base string) (string, []any) {
 		)
 		args = append(args, VisibilityOrg, VisibilityPrivate, userID)
 	}
-	return base + " WHERE " + strings.Join(clauses, " OR "), args
+	visibilityPredicate := "(" + strings.Join(clauses, " OR ") + ")"
+	if scope.IncludeReaderHidden {
+		return base + " WHERE " + visibilityPredicate, args
+	}
+	return base + " WHERE " + hiddenPredicate + " AND " + visibilityPredicate, args
 }

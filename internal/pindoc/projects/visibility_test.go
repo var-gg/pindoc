@@ -94,8 +94,8 @@ func TestBuildVisibilitySelect(t *testing.T) {
 
 	t.Run("anonymous: public only", func(t *testing.T) {
 		q, args := buildVisibilitySelect(ViewerScope{AnonymousOnly: true}, base)
-		if !strings.Contains(q, "WHERE visibility = $1") {
-			t.Fatalf("expected anon WHERE visibility = $1, got %q", q)
+		if !strings.Contains(q, "reader_hidden = FALSE AND visibility = $1") {
+			t.Fatalf("expected anon reader-visible public filter, got %q", q)
 		}
 		if len(args) != 1 || args[0] != VisibilityPublic {
 			t.Fatalf("expected single 'public' arg, got %#v", args)
@@ -109,6 +109,7 @@ func TestBuildVisibilitySelect(t *testing.T) {
 		}
 		q, args := buildVisibilitySelect(scope, base)
 		for _, want := range []string{
+			"reader_hidden = FALSE",
 			"visibility = $1",
 			"visibility = $2",
 			"organization_id::text = ANY($3)",
@@ -129,7 +130,7 @@ func TestBuildVisibilitySelect(t *testing.T) {
 
 	t.Run("default scope: public only", func(t *testing.T) {
 		q, args := buildVisibilitySelect(ViewerScope{}, base)
-		if !strings.Contains(q, "WHERE visibility = $1") {
+		if !strings.Contains(q, "reader_hidden = FALSE AND visibility = $1") {
 			t.Fatalf("default scope should fail closed to public-only, got %q", q)
 		}
 		if len(args) != 1 || args[0] != VisibilityPublic {
@@ -137,10 +138,10 @@ func TestBuildVisibilitySelect(t *testing.T) {
 		}
 	})
 
-	t.Run("trusted_local explicit: no WHERE", func(t *testing.T) {
+	t.Run("trusted_local excludes reader-hidden by default", func(t *testing.T) {
 		q, args := buildVisibilitySelect(ViewerScope{TrustedLocal: true}, base)
-		if strings.Contains(q, "WHERE") {
-			t.Errorf("trusted_local should not add WHERE, got %q", q)
+		if !strings.Contains(q, "WHERE reader_hidden = FALSE") {
+			t.Errorf("trusted_local should hide fixture projects, got %q", q)
 		}
 		if args != nil {
 			t.Errorf("trusted_local should return nil args, got %#v", args)
@@ -153,8 +154,8 @@ func TestBuildVisibilitySelect(t *testing.T) {
 			t.Fatalf("legacy non-empty string scope = %#v, want trusted_local with user id", scope)
 		}
 		q, args := buildVisibilitySelect(scope, base)
-		if strings.Contains(q, "WHERE") {
-			t.Errorf("legacy string scope should not filter, got %q", q)
+		if !strings.Contains(q, "WHERE reader_hidden = FALSE") {
+			t.Errorf("legacy string scope should hide fixture projects, got %q", q)
 		}
 		if args != nil {
 			t.Errorf("legacy string scope should return nil args, got %#v", args)
@@ -167,11 +168,21 @@ func TestBuildVisibilitySelect(t *testing.T) {
 			t.Fatalf("empty string scope = %#v, want anonymous-only", scope)
 		}
 		q, args := buildVisibilitySelect(scope, base)
-		if !strings.Contains(q, "WHERE visibility = $1") {
+		if !strings.Contains(q, "reader_hidden = FALSE AND visibility = $1") {
 			t.Fatalf("empty string scope should be public-only, got %q", q)
 		}
 		if len(args) != 1 || args[0] != VisibilityPublic {
 			t.Fatalf("empty string args = %#v, want public-only", args)
+		}
+	})
+
+	t.Run("operator include hidden keeps visibility policy", func(t *testing.T) {
+		q, args := buildVisibilitySelect(ViewerScope{TrustedLocal: true, IncludeReaderHidden: true}, base)
+		if strings.Contains(q, "WHERE") {
+			t.Errorf("trusted operator include-hidden should see all rows, got %q", q)
+		}
+		if args != nil {
+			t.Errorf("trusted operator include-hidden args = %#v, want nil", args)
 		}
 	})
 }

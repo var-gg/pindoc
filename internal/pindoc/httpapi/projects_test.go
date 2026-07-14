@@ -90,40 +90,6 @@ func TestMapProjectCreateError(t *testing.T) {
 	}
 }
 
-func TestReaderHiddenProjectSlug(t *testing.T) {
-	cases := []struct {
-		slug string
-		want bool
-	}{
-		{"oauth-it-abc123", true},
-		{"invite-http-abc123", true},
-		{"workspace-detect-abc123", true},
-		{"vis-http-18abc7f4129be000", true},
-		{"vis-mcp-1777735890813002700", true},
-		{"artifact-audit-1777735957821357800", true},
-		{"task-flow-a-1777735961285390100", true},
-		{"task-flow-b-1777735961285390100", true},
-		{"task-queue-across-a-1777735962378049400", true},
-		{"task-queue-across-b-1777735962378049400", true},
-		{"pindoc-18abd57be67af9f8", true},
-		{"PINDOC-18ABD57BE67AF9F8", true},
-		{"OAuth-IT-ABC123", true},
-		{"pindoc", false},
-		{"pindoc-tour", false},
-		{"pindoc-18abd57be67af9f", false},
-		{"pindoc-18abd57be67af9fg", false},
-		{"pindoc-18abd57be67af9f8-extra", false},
-		{"customer-docs", false},
-	}
-	for _, c := range cases {
-		t.Run(c.slug, func(t *testing.T) {
-			if got := readerHiddenProjectSlug(c.slug); got != c.want {
-				t.Fatalf("readerHiddenProjectSlug(%q) = %v, want %v", c.slug, got, c.want)
-			}
-		})
-	}
-}
-
 func TestIncludeReaderHiddenProjects(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -167,18 +133,23 @@ func TestProjectListReaderHiddenQueryRequiresOwnerIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	defer pool.Close()
+	t.Cleanup(pool.Close)
 	if err := db.Migrate(ctx, pool.Pool); err != nil {
 		t.Fatalf("migrate db: %v", err)
 	}
 
 	suffix := fmt.Sprintf("%x", time.Now().UnixNano())
-	hiddenSlug := "oauth-it-" + suffix
+	// Deliberately avoid every historical fixture prefix. Visibility must come
+	// from projects.reader_hidden, not a slug convention.
+	hiddenSlug := "plugin-fixture-" + suffix
 	ownerEmail := "project-list-owner-" + suffix + "@example.invalid"
 	viewerEmail := "project-list-viewer-" + suffix + "@example.invalid"
 	ownerID := insertInviteHTTPUser(t, ctx, pool, "Project List Owner "+suffix, ownerEmail)
 	viewerID := insertInviteHTTPUser(t, ctx, pool, "Project List Viewer "+suffix, viewerEmail)
 	projectID := insertInviteHTTPProject(t, ctx, pool, hiddenSlug, ownerID)
+	if _, err := pool.Exec(ctx, `UPDATE projects SET reader_hidden = TRUE WHERE id = $1::uuid`, projectID); err != nil {
+		t.Fatalf("mark hidden project: %v", err)
+	}
 	insertInviteHTTPMember(t, ctx, pool, projectID, viewerID, pauth.RoleViewer)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM projects WHERE slug = $1`, hiddenSlug)
@@ -212,6 +183,14 @@ func TestProjectListReaderHiddenQueryRequiresOwnerIntegration(t *testing.T) {
 		AuthProviders:      []string{config.AuthProviderGitHub},
 		BindAddr:           "0.0.0.0:5830",
 	})
+
+	ownerDefault := doInviteRequest(t, handler, oauthSvc, ownerID, http.MethodGet, "/api/projects", "")
+	if ownerDefault.Code != http.StatusOK {
+		t.Fatalf("owner default project list status = %d, want 200; body=%s", ownerDefault.Code, ownerDefault.Body.String())
+	}
+	if projectListContainsSlug(t, ownerDefault, hiddenSlug) {
+		t.Fatalf("owner default response exposed reader-hidden project %q", hiddenSlug)
+	}
 
 	viewerOps := doInviteRequest(t, handler, oauthSvc, viewerID, http.MethodGet, "/api/projects?ops=1", "")
 	if viewerOps.Code != http.StatusOK {
@@ -292,6 +271,7 @@ func TestHandleProjectListVisibilityMatrixIntegration(t *testing.T) {
 		DB:                 pool,
 		Logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
 		DefaultProjectSlug: publicSlug,
+		DefaultUserID:      ownerID,
 		OAuth:              oauthSvc,
 		AuthProviders:      []string{config.AuthProviderGitHub},
 		BindAddr:           "0.0.0.0:5830",
@@ -400,8 +380,8 @@ func insertProjectListVisibilityProject(t *testing.T, ctx context.Context, pool 
 	t.Helper()
 	var projectID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO projects (slug, name, description, organization_id, primary_language, visibility)
-		VALUES ($1, $2, $3, (SELECT id FROM organizations WHERE slug = 'default' LIMIT 1), 'en', $4)
+		INSERT INTO projects (slug, name, description, organization_id, primary_language, visibility, reader_hidden)
+		VALUES ($1, $2, $3, (SELECT id FROM organizations WHERE slug = 'default' LIMIT 1), 'en', $4, FALSE)
 		RETURNING id::text
 	`, slug, "Project List "+slug, "private metadata "+slug, visibility).Scan(&projectID); err != nil {
 		t.Fatalf("insert visibility project %s: %v", slug, err)

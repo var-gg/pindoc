@@ -72,6 +72,10 @@ type CreateProjectInput struct {
 	OrganizationID      string // optional organizations.id; defaults to the bootstrap default Org
 	OwnerUserID         string // optional users.id; creates project_members owner row when present
 	TaxonomyProfileSlug string // optional; one of projects.TaxonomyProfiles, defaults to software-product
+	// ReaderHidden is an internal/operator fixture marker. Public REST and MCP
+	// project-create inputs intentionally do not expose it; integration harnesses
+	// and downstream plugins can set it through this domain entrypoint.
+	ReaderHidden bool
 }
 
 // CreateProjectOutput carries the post-create facts every entrypoint
@@ -209,10 +213,13 @@ func CreateProject(
 
 	var projectID string
 	err = tx.QueryRow(ctx, `
-		INSERT INTO projects (organization_id, slug, name, description, color, primary_language, visibility, taxonomy_profile_slug, taxonomy_profile_version)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO projects (
+			organization_id, slug, name, description, color, primary_language,
+			visibility, taxonomy_profile_slug, taxonomy_profile_version, reader_hidden
+		)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id::text
-	`, orgID, slug, name, descPtr, colorPtr, lang, visibility, profile.Slug, profile.Version).Scan(&projectID)
+	`, orgID, slug, name, descPtr, colorPtr, lang, visibility, profile.Slug, profile.Version, in.ReaderHidden).Scan(&projectID)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {

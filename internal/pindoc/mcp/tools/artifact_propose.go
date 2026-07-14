@@ -25,6 +25,7 @@ import (
 	"github.com/var-gg/pindoc/internal/pindoc/embed"
 	pgit "github.com/var-gg/pindoc/internal/pindoc/git"
 	"github.com/var-gg/pindoc/internal/pindoc/i18n"
+	"github.com/var-gg/pindoc/internal/pindoc/indexstate"
 	pinmodel "github.com/var-gg/pindoc/internal/pindoc/pins"
 	"github.com/var-gg/pindoc/internal/pindoc/policy"
 	"github.com/var-gg/pindoc/internal/pindoc/receipts"
@@ -531,6 +532,10 @@ type artifactProposeOutput struct {
 	// silent stub fallback. Empty when the embedder wasn't touched (e.g.
 	// pure not_ready on schema validation).
 	EmbedderUsed *EmbedderInfo `json:"embedder_used,omitempty"`
+	// IndexState proves which artifact revision/body/model the searchable
+	// chunks represent. A failed state is retryable and preserves the previous
+	// chunks instead of silently making the artifact disappear from search.
+	IndexState *indexstate.State `json:"index_state,omitempty"`
 	// ArtifactMeta echoes the resolved epistemic axes that were persisted.
 	// Populated on accepted paths so agents (and Reader) can confirm which
 	// classification actually landed — resolver defaults may override
@@ -1106,15 +1111,12 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				return nil, artifactProposeOutput{}, fmt.Errorf("area suggestion resolve event: %w", err)
 			}
 
-			// Embed title + body chunks in the same transaction so search
-			// never observes a half-indexed artifact. If the embedder fails
-			// we still keep the artifact — search becomes keyword-only for
-			// that row until re-embedding lands in Phase 3.x.
-			if deps.Embedder != nil {
-				if err := embedAndStoreChunks(ctx, tx, deps.Embedder, newID, in.Title, in.BodyMarkdown); err != nil {
-					deps.Logger.Warn("chunk/embed failed — artifact saved without vectors",
-						"artifact_id", newID, "err", err)
-				}
+			// Embeddings are fully prepared before any existing chunks are
+			// touched. Provider failure becomes an explicit retryable state;
+			// storage failure still rolls this transaction back.
+			indexState, err := refreshArtifactIndex(ctx, tx, deps, newID, 1, in.Title, in.BodyMarkdown)
+			if err != nil {
+				return nil, artifactProposeOutput{}, err
 			}
 
 			// --- relates_to: resolve targets, then insert edges ----------
@@ -1250,6 +1252,7 @@ func RegisterArtifactPropose(server *sdk.Server, deps Deps) {
 				Warnings:          sortedWarnings,
 				WarningSeverities: severities,
 				EmbedderUsed:      embedderInfo(deps),
+				IndexState:        indexState,
 				ArtifactMeta:      &metaOut,
 				ReceiptExempted:   receiptExempted,
 				ToolsetVersion:    ToolsetVersion(),
@@ -1686,15 +1689,9 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		return nil, artifactProposeOutput{}, fmt.Errorf("update head: %w", err)
 	}
 
-	// Re-chunk: drop old chunks, generate new.
-	if _, err := tx.Exec(ctx, `DELETE FROM artifact_chunks WHERE artifact_id = $1`, artifactID); err != nil {
-		return nil, artifactProposeOutput{}, fmt.Errorf("purge chunks: %w", err)
-	}
-	if deps.Embedder != nil {
-		if err := embedAndStoreChunks(ctx, tx, deps.Embedder, artifactID, in.Title, in.BodyMarkdown); err != nil {
-			deps.Logger.Warn("re-embed failed — artifact updated without vectors",
-				"artifact_id", artifactID, "err", err)
-		}
+	indexState, err := refreshArtifactIndex(ctx, tx, deps, artifactID, newRev, in.Title, in.BodyMarkdown)
+	if err != nil {
+		return nil, artifactProposeOutput{}, err
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -1855,6 +1852,7 @@ func handleUpdate(ctx context.Context, deps Deps, p *auth.Principal, scope *auth
 		WarningSeverities:               severities,
 		SuggestedActions:                suggested,
 		EmbedderUsed:                    embedderInfo(deps),
+		IndexState:                      indexState,
 		ArtifactMeta:                    updateMetaOut,
 		CanonicalRewriteWithoutEvidence: canonicalRewriteFlag,
 		AcceptanceLabelMatches:          acceptanceLabelMatches,
@@ -2534,74 +2532,6 @@ func nullIfEmpty(s string) any {
 		return nil
 	}
 	return s
-}
-
-// embedAndStoreChunks computes vectors for the title and each body chunk
-// and inserts them into artifact_chunks inside the caller's transaction.
-// All vectors pad to the DB column width (768) — see embed/vector.go for
-// the rationale.
-func embedAndStoreChunks(ctx context.Context, tx pgx.Tx, provider embed.Provider, artifactID, title, body string) error {
-	info := provider.Info()
-
-	// Title vector (always one, kind='title').
-	titleRes, err := provider.Embed(ctx, embed.Request{Texts: []string{title}, Kind: embed.KindDocument})
-	if err != nil {
-		return fmt.Errorf("embed title: %w", err)
-	}
-	if len(titleRes.Vectors) != 1 {
-		return fmt.Errorf("embed title: got %d vectors", len(titleRes.Vectors))
-	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO artifact_chunks (
-			artifact_id, kind, chunk_index, heading, span_start, span_end,
-			text, embedding, model_name, model_dim
-		) VALUES ($1, 'title', 0, NULL, 0, 0, $2, $3::vector, $4, $5)
-	`,
-		artifactID,
-		title,
-		embed.VectorString(embed.PadTo768(titleRes.Vectors[0])),
-		info.Name+":"+info.ModelID,
-		info.Dimension,
-	); err != nil {
-		return fmt.Errorf("store title chunk: %w", err)
-	}
-
-	// Body chunks (kind='body').
-	chunks := embed.ChunkBody(title, body, 600)
-	if len(chunks) == 0 {
-		return nil
-	}
-	texts := make([]string, len(chunks))
-	for i, c := range chunks {
-		texts[i] = c.Text
-	}
-	bodyRes, err := provider.Embed(ctx, embed.Request{Texts: texts, Kind: embed.KindDocument})
-	if err != nil {
-		return fmt.Errorf("embed body: %w", err)
-	}
-	if len(bodyRes.Vectors) != len(chunks) {
-		return fmt.Errorf("embed body: got %d vectors want %d", len(bodyRes.Vectors), len(chunks))
-	}
-	for i, c := range chunks {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO artifact_chunks (
-				artifact_id, kind, chunk_index, heading, span_start, span_end,
-				text, embedding, model_name, model_dim
-			) VALUES ($1, 'body', $2, $3, $4, $5, $6, $7::vector, $8, $9)
-		`,
-			artifactID,
-			c.Index,
-			nullIfEmpty(c.Heading),
-			c.SpanStart, c.SpanEnd,
-			c.Text,
-			embed.VectorString(embed.PadTo768(bodyRes.Vectors[i])),
-			info.Name+":"+info.ModelID,
-			info.Dimension,
-		); err != nil {
-			return fmt.Errorf("store body chunk %d: %w", c.Index, err)
-		}
-	}
-	return nil
 }
 
 func areaUnknownChecklist(ctx context.Context, deps Deps, scope *auth.ProjectScope, lang, areaSlug string) []string {

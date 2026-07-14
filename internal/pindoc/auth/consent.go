@@ -136,6 +136,10 @@ func (s *OAuthService) handleAuthorizeConfirm(w http.ResponseWriter, r *http.Req
 		s.provider.WriteAuthorizeError(ctx, w, ar, err)
 		return
 	}
+	if err := s.store.TouchClientLastUsed(ctx, clientID); err != nil {
+		s.provider.WriteAuthorizeError(ctx, w, ar, fosite.ErrServerError.WithDebug(err.Error()))
+		return
+	}
 	s.provider.WriteAuthorizeResponse(ctx, w, ar, resp)
 }
 
@@ -182,6 +186,12 @@ func (s *OAuthService) authorizeReplayRequest(r *http.Request, rawQuery string) 
 		return nil, err
 	}
 	replay.Header = r.Header.Clone()
+	// The confirmation request is a form POST, while the replay is a bodyless
+	// authorize GET. Carrying its entity headers makes net/http and Fosite try
+	// to parse an empty form body and reject an otherwise valid consent.
+	replay.Header.Del("Content-Type")
+	replay.Header.Del("Content-Length")
+	replay.Header.Del("Transfer-Encoding")
 	replay.RemoteAddr = r.RemoteAddr
 	replay.Host = r.Host
 	replay.TLS = r.TLS

@@ -16,6 +16,7 @@ import (
 	artifactpreflight "github.com/var-gg/pindoc/internal/pindoc/artifact/preflight"
 	"github.com/var-gg/pindoc/internal/pindoc/auth"
 	pgit "github.com/var-gg/pindoc/internal/pindoc/git"
+	"github.com/var-gg/pindoc/internal/pindoc/indexstate"
 	pinmodel "github.com/var-gg/pindoc/internal/pindoc/pins"
 )
 
@@ -154,6 +155,7 @@ type taskClaimDoneOutput struct {
 	NextTools                      []NextToolHint          `json:"next_tools,omitempty"`
 	Notice                         string                  `json:"notice,omitempty"`
 	Warnings                       []string                `json:"warnings,omitempty"`
+	IndexState                     *indexstate.State       `json:"index_state,omitempty"`
 	ToolsetVersion                 string                  `json:"toolset_version,omitempty"`
 }
 
@@ -613,6 +615,11 @@ func claimOneTaskDone(
 		}
 	}
 
+	indexState, err := refreshArtifactIndex(ctx, tx, deps, artifactID, newRev, currentTitle, revBody)
+	if err != nil {
+		return taskClaimDoneOutput{}, err
+	}
+
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO events (project_id, kind, subject_id, payload)
 		VALUES ($1, 'artifact.task_claimed_done', $2, jsonb_build_object(
@@ -675,6 +682,7 @@ func claimOneTaskDone(
 		SuggestedActions:               pinDiagnosticSuggestedActions(pinWarnings),
 		Notice:                         "Task claimed_done recorded. Run pindoc.task.done_check with mode=current_open_only for the assignee before telling the user the current assigned Task queue is complete; read historical debt fields separately.",
 		Warnings:                       outWarnings,
+		IndexState:                     indexState,
 	}, nil
 }
 

@@ -123,7 +123,15 @@ func TestDCRPruneAndCapRetryIntegration(t *testing.T) {
 	projectSlug := insertOAuthTestProject(t, ctx, pool, suffix, userID)
 	now := time.Now().UTC().Truncate(time.Second)
 
-	for i := 0; i < dcrMaxClients; i++ {
+	baseline, err := store.CountDCRClients(ctx)
+	if err != nil {
+		t.Fatalf("CountDCRClients baseline: %v", err)
+	}
+	clientsToCreate := dcrMaxClients - baseline
+	if clientsToCreate <= 0 {
+		t.Fatalf("DCR client baseline = %d, need fewer than cap %d", baseline, dcrMaxClients)
+	}
+	for i := 0; i < clientsToCreate; i++ {
 		createdAt := now
 		expiresAt := now.Add(dcrClientLifetime)
 		if i == 0 {

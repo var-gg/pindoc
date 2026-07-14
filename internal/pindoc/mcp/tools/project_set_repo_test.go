@@ -323,6 +323,7 @@ func createSetRepoProject(ctx context.Context, pool *db.Pool, slug string) error
 		Slug:            slug,
 		Name:            "Set Repo " + slug,
 		PrimaryLanguage: "en",
+		ReaderHidden:    true,
 	}); err != nil {
 		return err
 	}

@@ -26,6 +26,7 @@ original language until they become stable user-facing documentation.
 ## Agent Workflow And MCP
 
 - [MCP Tools Spec](10-mcp-tools-spec.md) - MCP tool contract and implementation status.
+- [Data Integrity Operations](27-data-integrity-operations.md) - migration drift detection, index recovery, build provenance, and fixture isolation.
 - [PINDOC.md Harness Spec](09-pindoc-md-spec.md) - workspace harness, task protocol, and agent startup rules.
 - [Revision Shapes Spec](18-revision-shapes-spec.md) - typed artifact revision paths.
 - [Locale Contribution Guide](CONTRIBUTING_LOCALE.md) - how to add a title-quality locale.
